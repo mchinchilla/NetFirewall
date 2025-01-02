@@ -18,5 +18,6 @@ public class DhcpConfig
     public IPAddress[] DnsServers { get; set; }
     public string BootFileName { get; set; }
     public string ServerName { get; set; }
+    public IPAddress ServerIp { get; set; }
     public string Description { get; set; }
 }

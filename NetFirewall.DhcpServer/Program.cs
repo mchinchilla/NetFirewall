@@ -45,6 +45,7 @@ class Program
                     services.AddTransient<IDdnsService, DdnsService>();
                     
                 } )
+                .UseSerilog()
                 .Build()
                 .RunAsync();
         }

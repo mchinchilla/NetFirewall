@@ -24,8 +24,8 @@ public class DhcpLeasesService : IDhcpLeasesService
         try
         {
             var existingLease = ( await _dbRepository.QueryAsync<DhcpLease>( [
-                new QueryField( nameof(DhcpLease.MacAddress), macAddress ),
-                new QueryField( nameof(DhcpLease.EndTime), now )
+                new QueryField( nameof( DhcpLease.MacAddress ), macAddress ),
+                new QueryField( nameof( DhcpLease.EndTime ), now )
             ] ) ).FirstOrDefault();
 
             if ( existingLease != null )
@@ -73,8 +73,8 @@ public class DhcpLeasesService : IDhcpLeasesService
             for ( var ip = start; ( await CompareIpAddressesAsync( ip, end ) ) <= 0; ip = IncrementIpAddress( ip ) )
             {
                 var leased = ( await _dbRepository.QueryAsync<DhcpLease>( [
-                    new QueryField( nameof(DhcpLease.IpAddress), ip.ToString() ),
-                    new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThanOrEqual, now )
+                    new QueryField( nameof( DhcpLease.IpAddress ), ip.ToString() ),
+                    new QueryField( nameof( DhcpLease.EndTime ), Operation.GreaterThanOrEqual, now )
                 ] ) ).Any();
 
                 if ( !leased )
@@ -141,5 +141,73 @@ public class DhcpLeasesService : IDhcpLeasesService
         }
 
         throw new OverflowException( "IP address overflow" );
+    }
+
+    public async Task<IPAddress> OfferLease( string macAddress, IPAddress rangeStart, IPAddress rangeEnd )
+    {
+        var now = DateTime.UtcNow;
+
+        for ( var ip = rangeStart; ( await CompareIpAddressesAsync( ip, rangeEnd ) ) <= 0; ip = IncrementIpAddress( ip ) )
+        {
+            var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
+                new QueryField( nameof( DhcpLease.IpAddress ), ip.ToString() ),
+                new QueryField( nameof( DhcpLease.EndTime ), Operation.GreaterThan, now )
+            ] ) ).FirstOrDefault();
+
+            if ( lease == null )
+            {
+                return ip;
+            }
+        }
+
+        return null; // No available IP found
+    }
+
+    public async Task AssignLease( string macAddress, IPAddress ipAddress, int leaseTime )
+    {
+        var now = DateTime.UtcNow;
+        var newLease = new DhcpLease
+        {
+            MacAddress = macAddress,
+            IpAddress = ipAddress,
+            StartTime = now,
+            EndTime = now.AddSeconds( leaseTime )
+        };
+
+        await _dbRepository.InsertAsync( newLease );
+    }
+
+    public async Task<bool> CanAssignIp( string macAddress, IPAddress ipAddress )
+    {
+        var now = DateTime.UtcNow;
+        var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
+            new QueryField( nameof( DhcpLease.IpAddress ), ipAddress.ToString() ),
+            new QueryField( nameof( DhcpLease.EndTime ), Operation.GreaterThan, now )
+        ] ) ).FirstOrDefault();
+
+        return lease == null || lease.MacAddress == macAddress;
+    }
+
+    public async Task ReleaseLease( string macAddress )
+    {
+        await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof( DhcpLease.MacAddress ), macAddress ) );
+    }
+
+    public async Task MarkIpAsDeclined( IPAddress ipAddress )
+    {
+        // Here you might want to add logic to mark an IP as declined or add it to some kind of blacklist
+        // For simplicity, we'll just delete any active lease for this IP
+        await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof( DhcpLease.IpAddress ), ipAddress.ToString() ) );
+    }
+
+    public async Task<IPAddress> GetAssignedIp( string macAddress )
+    {
+        var now = DateTime.UtcNow;
+        var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
+            new QueryField( nameof( DhcpLease.MacAddress ), macAddress ),
+            new QueryField( nameof( DhcpLease.EndTime ), Operation.GreaterThan, now )
+        ] ) ).FirstOrDefault();
+
+        return lease?.IpAddress;
     }
 }
