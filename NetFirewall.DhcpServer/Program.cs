@@ -22,7 +22,7 @@ class Program
             .AddJsonFile( "appsettings.json" )
             .Build();
 
-        string? connectionString = configuration.GetConnectionString( "DefaultConnection" ) ?? "Host=localhost;Username=postgres;Password=1Nframund02023!;Database=net_firewall;";
+        string? connectionString = configuration.GetConnectionString( "DefaultConnection" ) ?? "Host=localhost;Username=developer;Password=developer;Database=net_firewall;";
 
         try
         {
@@ -33,17 +33,16 @@ class Program
                     /* Other */
                     services.AddHostedService<Worker>();
                     services.AddLogging( loggingBuilder => loggingBuilder.AddSerilog( dispose: true ) );
-                    
+
                     /* Singleton */
                     services.AddSingleton( new NpgsqlConnection( connectionString ) );
                     services.AddSingleton<string>( connectionString );
-                    
+
                     /* Transient */
                     services.AddTransient<IDhcpServerService, DhcpServerService>();
                     services.AddTransient<IDhcpConfigService, DhcpConfigService>();
                     services.AddTransient<IDhcpLeasesService, DhcpLeasesService>();
                     services.AddTransient<IDdnsService, DdnsService>();
-                    
                 } )
                 .UseSerilog()
                 .Build()

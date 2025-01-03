@@ -61,13 +61,13 @@ public class DhcpServerService : IDhcpServerService
                     return await HandleInform( request, config, options );
                 default:
                     _logger.LogWarning( $"Unhandled DHCP message type: {request.MessageType}" );
-                    return new byte[0]; // or some default response
+                    return new byte[ 0 ]; // or some default response
             }
         }
         catch ( Exception ex )
         {
             _logger.LogError( $"Failed to create DHCP response: {ex.Message}" );
-            return new byte[0]; // Return an empty response or handle based on your protocol
+            return new byte[ 0 ]; // Return an empty response or handle based on your protocol
         }
     }
 
@@ -92,7 +92,7 @@ public class DhcpServerService : IDhcpServerService
     {
         var offeredIp = await _dhcpLeasesService.OfferLease( request.ClientMac, config.IpRangeStart, config.IpRangeEnd );
         options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.RequestedIPAddress, offeredIp.GetAddressBytes() ) );
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { ( byte )DhcpMessageType.Offer } ) );
+        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Offer } ) );
         options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.ServerIdentifier, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( config.ServerIp.GetHashCode() ) ) ) );
         return ConstructDhcpPacket( request, offeredIp, options );
     }
@@ -104,14 +104,14 @@ public class DhcpServerService : IDhcpServerService
         {
             await _dhcpLeasesService.AssignLease( request.ClientMac, requestedIp, config.LeaseTime );
             options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.RequestedIPAddress, requestedIp.GetAddressBytes() ) );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { ( byte )DhcpMessageType.Ack } ) );
+            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack } ) );
             options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.ServerIdentifier, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( config.ServerIp.GetHashCode() ) ) ) );
             options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.IPAddressLeaseTime, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( config.LeaseTime ) ) ) );
             return ConstructDhcpPacket( request, requestedIp, options );
         }
         else
         {
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { ( byte )DhcpMessageType.Nak } ) );
+            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) );
             return ConstructDhcpPacket( request, null, options );
         }
     }
@@ -119,18 +119,18 @@ public class DhcpServerService : IDhcpServerService
     private async Task<byte[]> HandleRelease( DhcpRequest request )
     {
         await _dhcpLeasesService.ReleaseLease( request.ClientMac );
-        return new byte[0]; // No response packet for RELEASE in RFC 2131
+        return new byte[ 0 ]; // No response packet for RELEASE in RFC 2131
     }
 
     private async Task<byte[]> HandleDecline( DhcpRequest request )
     {
         await _dhcpLeasesService.MarkIpAsDeclined( request.RequestedIp );
-        return new byte[0]; // No response packet for DECLINE in RFC 2131
+        return new byte[ 0 ]; // No response packet for DECLINE in RFC 2131
     }
 
     private async Task<byte[]> HandleInform( DhcpRequest request, DhcpConfig config, List<DhcpOption> options )
     {
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { ( byte )DhcpMessageType.Ack } ) );
+        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack } ) );
         // Add configuration options without IP allocation
         return ConstructDhcpPacket( request, request.ClientIp, options );
     }
@@ -139,6 +139,6 @@ public class DhcpServerService : IDhcpServerService
     {
         // Implementation to construct the DHCP packet according to RFC 2131
         // This would involve setting up the DHCP packet structure, including headers, options, etc.
-        return new byte[0]; // Placeholder
+        return new byte[ 0 ]; // Placeholder
     }
 }

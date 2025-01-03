@@ -16,6 +16,7 @@ public class DhcpRequest
     public IPAddress RequestedIp { get; set; }
     public IPAddress ClientIp { get; set; }
     public string Hostname { get; set; }
+
     public int LeaseTime { get; set; }
     // Add other fields as needed for BOOTP/PXE like Vendor Class Identifier, etc.
 }

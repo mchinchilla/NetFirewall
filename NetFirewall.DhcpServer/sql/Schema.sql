@@ -1,49 +1,48 @@
-﻿-- Enable the uuid-ossp extension if not already enabled
-CREATE
-EXTENSION IF NOT EXISTS "uuid-ossp";
+﻿-- enable the uuid-ossp extension if not already enabled
+create extension if not exists "uuid-ossp";
 
--- Create the dhcp_config table for server configuration
+-- create the dhcp_config table for server configuration
 drop table if exists dhcp_config cascade;
-CREATE TABLE dhcp_config
+create table dhcp_config
 (
-    id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    ip_range_start INET NOT NULL,
-    ip_range_end   INET NOT NULL,
-    subnet_mask    INET NOT NULL,
-    lease_time     INT  NOT NULL,
-    gateway        INET NOT NULL,
-    dns_servers    INET[],
-    boot_file_name TEXT,
-    server_ip      INET,
-    server_name    TEXT,
-    description    TEXT
+    id             uuid default uuid_generate_v4() primary key,
+    ip_range_start inet not null,
+    ip_range_end   inet not null,
+    subnet_mask    inet not null,
+    lease_time     int  not null,
+    gateway        inet not null,
+    dns_servers    inet[],
+    boot_file_name text,
+    server_ip      inet,
+    server_name    text,
+    description    text
 );
 
--- Create the dhcp_leases table for managing IP leases
+-- create the dhcp_leases table for managing ip leases
 drop table if exists dhcp_leases cascade;
-CREATE TABLE dhcp_leases
+create table dhcp_leases
 (
-    id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    mac_address MACADDR                  NOT NULL,
-    ip_address  INET                     NOT NULL,
-    start_time  TIMESTAMP WITH TIME ZONE NOT NULL,
-    end_time    TIMESTAMP WITH TIME ZONE NOT NULL,
-    hostname    TEXT,
-    UNIQUE (mac_address, ip_address)
+    id          uuid default uuid_generate_v4() primary key,
+    mac_address macaddr                  not null,
+    ip_address  inet                     not null,
+    start_time  timestamp with time zone not null,
+    end_time    timestamp with time zone not null,
+    hostname    text,
+    unique (mac_address, ip_address)
 );
 
--- Create the mac_reservations table for IP reservations
+-- create the mac_reservations table for ip reservations
 drop table if exists dhcp_mac_reservations cascade;
-CREATE TABLE dhcp_mac_reservations
+create table dhcp_mac_reservations
 (
-    id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    mac_address MACADDR NOT NULL,
-    reserved_ip INET    NOT NULL,
-    description TEXT,
-    UNIQUE (mac_address)
+    id          uuid default uuid_generate_v4() primary key,
+    mac_address macaddr not null,
+    reserved_ip inet    not null,
+    description text,
+    unique (mac_address)
 );
 
--- Add indexes for better performance
-CREATE INDEX idx_dhcp_leases_mac_address ON dhcp_leases (mac_address);
-CREATE INDEX idx_dhcp_leases_ip_address ON dhcp_leases (ip_address);
-CREATE INDEX idx_dhcp_mac_reservations_mac_address ON dhcp_mac_reservations (mac_address);
+-- add indexes for better performance
+create index idx_dhcp_leases_mac_address on dhcp_leases (mac_address);
+create index idx_dhcp_leases_ip_address on dhcp_leases (ip_address);
+create index idx_dhcp_mac_reservations_mac_address on dhcp_mac_reservations (mac_address);
