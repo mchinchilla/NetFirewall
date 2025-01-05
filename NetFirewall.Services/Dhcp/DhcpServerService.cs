@@ -160,7 +160,7 @@ public class DhcpServerService : IDhcpServerService
         {
             DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack })
         };
-        return ConstructDhcpPacket(request, request.ClientIp, options);
+        return ConstructDhcpPacket(request, request.RequestedIp, options);
     }
 
     private byte[] ConstructDhcpPacket( DhcpRequest request, IPAddress assignedIp, List<DhcpOption> options )
@@ -175,7 +175,7 @@ public class DhcpServerService : IDhcpServerService
             uint xid = BitConverter.ToUInt32( request.Xid, 0 ); // Transaction ID from the request
             ushort secs = 0; // Seconds elapsed since client began address acquisition or renewal process
             ushort flags = 0; // Flags (broadcast flag if set to 0x8000)
-            IPAddress ciaddr = request.ClientIp ?? IPAddress.Any; // Client IP address
+            IPAddress ciaddr = request.RequestedIp ?? IPAddress.Any; // Client IP address
             IPAddress yiaddr = assignedIp ?? IPAddress.Any; // 'Your' (client) IP address
             IPAddress siaddr = _dhcpConfig.ServerIp; // Server IP address
             IPAddress giaddr = IPAddress.Any; // Relay agent IP address

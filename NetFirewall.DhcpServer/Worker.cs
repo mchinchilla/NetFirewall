@@ -44,7 +44,7 @@ public class Worker : BackgroundService
                         
                         if ( request != null )
                         {
-                            _logger.LogInformation( $"ExecuteAsync:: Mac: {request.ClientMac}, Ip: {request.RequestedIp}, ClientIp: {request.ClientIp}, {request.Hostname}, {request.MessageType}, {request.RemoteEndPoint}" );
+                            _logger.LogInformation( $"ExecuteAsync:: Mac: {request.ClientMac}, Ip: {request.RequestedIp}, {request.Hostname}, {request.MessageType}, {request.RemoteEndPoint}" );
                             
                             var response = await dhcpServerService.CreateDhcpResponse( request );
 

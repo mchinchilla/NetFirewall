@@ -24,7 +24,6 @@ public class DhcpServerServiceTests
             IsPxeRequest = false,
             MessageType = DhcpMessageType.Discover,
             RequestedIp = IPAddress.Parse("192.168.99.100"),
-            ClientIp = IPAddress.Parse("192.168.99.101"),
             Hostname = "test-client",
             LeaseTime = 3600
         };
@@ -69,7 +68,6 @@ public class DhcpServerServiceTests
             IsPxeRequest = false,
             MessageType = DhcpMessageType.Discover,
             RequestedIp = IPAddress.Parse("192.168.99.100"),
-            ClientIp = IPAddress.Parse("192.168.99.101"),
             Hostname = "test-client",
             LeaseTime = 3600
         };
