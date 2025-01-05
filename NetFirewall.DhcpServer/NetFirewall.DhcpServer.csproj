@@ -27,4 +27,8 @@
     <ProjectReference Include="..\NetFirewall.ServiceDefaults\NetFirewall.ServiceDefaults.csproj" />
     <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="logs\" />
+  </ItemGroup>
 </Project>

@@ -9,6 +9,7 @@ namespace NetFirewall.Models.Dhcp;
 
 public class DhcpRequest
 {
+    public byte[] Xid { get; set; }
     public string ClientMac { get; set; }
     public bool IsBootp { get; set; }
     public bool IsPxeRequest { get; set; }
@@ -18,5 +19,6 @@ public class DhcpRequest
     public string Hostname { get; set; }
 
     public int LeaseTime { get; set; }
+    public IPEndPoint RemoteEndPoint { get; set; }
     // Add other fields as needed for BOOTP/PXE like Vendor Class Identifier, etc.
 }

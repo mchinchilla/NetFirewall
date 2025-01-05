@@ -16,6 +16,7 @@ public class DhcpServerService : IDhcpServerService
     private readonly IDhcpConfigService _dhcpConfigService;
     private readonly IDhcpLeasesService _dhcpLeasesService;
     private readonly ILogger _logger;
+    private DhcpConfig _dhcpConfig;
 
     public DhcpServerService( IDhcpConfigService dhcpConfigService, IDhcpLeasesService dhcpLeasesService, ILogger<DhcpServerService> logger )
     {
@@ -27,41 +28,48 @@ public class DhcpServerService : IDhcpServerService
     public async Task<byte[]> CreateDhcpResponse( DhcpRequest request )
     {
         try
-        {
+        { 
             var config = await _dhcpConfigService.GetConfigAsync();
-            var options = new List<DhcpOption>();
-
-            // Common options for all responses
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.SubnetMask, config.SubnetMask.GetAddressBytes() ) );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.Router, config.Gateway.GetAddressBytes() ) );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.DNS, config.DnsServers.SelectMany( ip => ip.GetAddressBytes() ).ToArray() ) );
-
-            if ( request.IsBootp )
+            _dhcpConfig = config;
+            
+            var now = DateTime.UtcNow;
+            List<DhcpOption> options = new List<DhcpOption>
             {
-                options = HandleBootpOptions( config, options );
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.ServerIdentifier, _dhcpConfig.ServerIp.GetAddressBytes()),
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.SubnetMask, _dhcpConfig.SubnetMask.GetAddressBytes()),
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.Router, _dhcpConfig.Gateway.GetAddressBytes()),
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.DNS, _dhcpConfig.DnsServers.SelectMany(ip => ip.GetAddressBytes()).ToArray())
+            };
+
+
+            if (request.IsBootp)
+            {
+                options.AddRange(HandleBootpOptions(_dhcpConfig));
             }
 
-            if ( request.IsPxeRequest )
+            if (request.IsPxeRequest)
             {
-                options.AddRange( GetPxeOptions() );
+                options.AddRange(GetPxeOptions());
             }
 
             // Handle DHCP message types
-            switch ( request.MessageType )
+            switch (request.MessageType)
             {
                 case DhcpMessageType.Discover:
-                    return await HandleDiscover( request, config, options );
+                    return await HandleDiscover(request, options);
                 case DhcpMessageType.Request:
-                    return await HandleRequest( request, config, options );
+                    return await HandleRequest(request, options);
                 case DhcpMessageType.Release:
-                    return await HandleRelease( request );
+                    await HandleRelease(request);
+                    return new byte[0]; // No response for RELEASE
                 case DhcpMessageType.Decline:
-                    return await HandleDecline( request );
+                    await HandleDecline(request);
+                    return new byte[0]; // No response for DECLINE
                 case DhcpMessageType.Inform:
-                    return await HandleInform( request, config, options );
+                    return HandleInform(request, options);
                 default:
-                    _logger.LogWarning( $"Unhandled DHCP message type: {request.MessageType}" );
-                    return new byte[ 0 ]; // or some default response
+                    _logger.LogWarning($"Unhandled DHCP message type: {request.MessageType}");
+                    return ConstructDhcpPacket(request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak }) });
             }
         }
         catch ( Exception ex )
@@ -71,11 +79,13 @@ public class DhcpServerService : IDhcpServerService
         }
     }
 
-    private List<DhcpOption> HandleBootpOptions( DhcpConfig config, List<DhcpOption> options )
+    private List<DhcpOption> HandleBootpOptions(DhcpConfig config)
     {
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.BootFileName, config.BootFileName ?? string.Empty ) );
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.TFTPServerName, config.ServerName ?? string.Empty ) );
-        return options;
+        return new List<DhcpOption>
+        {
+            DhcpOptionExtensions.CreateOption(DhcpOptionCode.BootFileName, config.BootFileName ?? string.Empty),
+            DhcpOptionExtensions.CreateOption(DhcpOptionCode.TFTPServerName, config.ServerName ?? string.Empty)
+        };
     }
 
     private List<DhcpOption> GetPxeOptions()
@@ -87,32 +97,48 @@ public class DhcpServerService : IDhcpServerService
             DhcpOptionExtensions.CreateOption( DhcpOptionCode.PxeDiscoveryControl, new byte[] { 0x03 } ) // PXE boot server discovery
         };
     }
-
-    private async Task<byte[]> HandleDiscover( DhcpRequest request, DhcpConfig config, List<DhcpOption> options )
+    
+    private async Task<byte[]> HandleDiscover(DhcpRequest request, List<DhcpOption> baseOptions)
     {
-        var offeredIp = await _dhcpLeasesService.OfferLease( request.ClientMac, config.IpRangeStart, config.IpRangeEnd );
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.RequestedIPAddress, offeredIp.GetAddressBytes() ) );
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Offer } ) );
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.ServerIdentifier, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( config.ServerIp.GetHashCode() ) ) ) );
-        return ConstructDhcpPacket( request, offeredIp, options );
-    }
-
-    private async Task<byte[]> HandleRequest( DhcpRequest request, DhcpConfig config, List<DhcpOption> options )
-    {
-        var requestedIp = request.RequestedIp ?? await _dhcpLeasesService.GetAssignedIp( request.ClientMac );
-        if ( await _dhcpLeasesService.CanAssignIp( request.ClientMac, requestedIp ) )
+        var offeredIp = await _dhcpLeasesService.OfferLease(request.ClientMac, _dhcpConfig.IpRangeStart, _dhcpConfig.IpRangeEnd);
+        if (offeredIp == null)
         {
-            await _dhcpLeasesService.AssignLease( request.ClientMac, requestedIp, config.LeaseTime );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.RequestedIPAddress, requestedIp.GetAddressBytes() ) );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack } ) );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.ServerIdentifier, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( config.ServerIp.GetHashCode() ) ) ) );
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.IPAddressLeaseTime, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( config.LeaseTime ) ) ) );
-            return ConstructDhcpPacket( request, requestedIp, options );
+            _logger.LogWarning($"No available IP for client {request.ClientMac}");
+            return ConstructDhcpPacket(request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak }) });
+        }
+
+        var options = new List<DhcpOption>(baseOptions)
+        {
+            DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Offer }),
+            DhcpOptionExtensions.CreateOption(DhcpOptionCode.RequestedIPAddress, offeredIp.GetAddressBytes()),
+            DhcpOptionExtensions.CreateOption(DhcpOptionCode.IPAddressLeaseTime, BitConverter.GetBytes(IPAddress.HostToNetworkOrder(_dhcpConfig.LeaseTime)))
+        };
+
+        return ConstructDhcpPacket(request, offeredIp, options);
+    }
+    
+    private async Task<byte[]> HandleRequest(DhcpRequest request, List<DhcpOption> baseOptions)
+    {
+        IPAddress requestedIp = request.RequestedIp ?? await _dhcpLeasesService.GetAssignedIp(request.ClientMac);
+
+        if (requestedIp != null && await _dhcpLeasesService.CanAssignIp(request.ClientMac, requestedIp))
+        {
+            await _dhcpLeasesService.AssignLease(request.ClientMac, requestedIp, _dhcpConfig.LeaseTime);
+
+            var options = new List<DhcpOption>(baseOptions)
+            {
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack }),
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.RequestedIPAddress, requestedIp.GetAddressBytes()),
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.ServerIdentifier, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( _dhcpConfig.ServerIp.GetHashCode() ) )),
+                DhcpOptionExtensions.CreateOption(DhcpOptionCode.IPAddressLeaseTime, BitConverter.GetBytes(IPAddress.HostToNetworkOrder(_dhcpConfig.LeaseTime)))
+            };
+
+            return ConstructDhcpPacket(request, requestedIp, options);
         }
         else
         {
-            options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) );
-            return ConstructDhcpPacket( request, null, options );
+            _logger.LogWarning($"Request for IP {requestedIp} denied for client {request.ClientMac}");
+            return ConstructDhcpPacket(request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak }) });
         }
     }
 
@@ -128,17 +154,103 @@ public class DhcpServerService : IDhcpServerService
         return new byte[ 0 ]; // No response packet for DECLINE in RFC 2131
     }
 
-    private async Task<byte[]> HandleInform( DhcpRequest request, DhcpConfig config, List<DhcpOption> options )
+    private byte[] HandleInform(DhcpRequest request, List<DhcpOption> baseOptions)
     {
-        options.Add( DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack } ) );
-        // Add configuration options without IP allocation
-        return ConstructDhcpPacket( request, request.ClientIp, options );
+        var options = new List<DhcpOption>(baseOptions)
+        {
+            DhcpOptionExtensions.CreateOption(DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack })
+        };
+        return ConstructDhcpPacket(request, request.ClientIp, options);
     }
 
     private byte[] ConstructDhcpPacket( DhcpRequest request, IPAddress assignedIp, List<DhcpOption> options )
     {
-        // Implementation to construct the DHCP packet according to RFC 2131
-        // This would involve setting up the DHCP packet structure, including headers, options, etc.
-        return new byte[ 0 ]; // Placeholder
+        try
+        {
+            // Define DHCP packet fields
+            byte op = 2; // 2 for server reply, 1 for client request
+            byte htype = 1; // Ethernet (10Mb)
+            byte hlen = 6; // Hardware address length for Ethernet
+            byte hops = 0;
+            uint xid = BitConverter.ToUInt32( request.Xid, 0 ); // Transaction ID from the request
+            ushort secs = 0; // Seconds elapsed since client began address acquisition or renewal process
+            ushort flags = 0; // Flags (broadcast flag if set to 0x8000)
+            IPAddress ciaddr = request.ClientIp ?? IPAddress.Any; // Client IP address
+            IPAddress yiaddr = assignedIp ?? IPAddress.Any; // 'Your' (client) IP address
+            IPAddress siaddr = _dhcpConfig.ServerIp; // Server IP address
+            IPAddress giaddr = IPAddress.Any; // Relay agent IP address
+
+            // Hardware address padding (16 bytes for chaddr, but only first 6 are used for MAC)
+            byte[] chaddr = new byte[ 16 ];
+            Array.Copy( MacStringToBytes( request.ClientMac ), 0, chaddr, 0, 6 );
+
+            // Server name and boot file name, both 64 bytes
+            byte[] sname = new byte[ 64 ];
+            byte[] file = new byte[ 128 ];
+            if ( request.IsBootp )
+            {
+                Encoding.ASCII.GetBytes( _dhcpConfig.ServerName ?? string.Empty ).CopyTo( sname, 0 );
+                Encoding.ASCII.GetBytes( _dhcpConfig.BootFileName ?? string.Empty ).CopyTo( file, 0 );
+            }
+
+            // Construct the options field
+            var optionsBytes = ConstructDhcpOptions( options );
+
+            // Combine all parts into the packet
+            using ( var ms = new System.IO.MemoryStream() )
+            {
+                using ( var bw = new System.IO.BinaryWriter( ms ) )
+                {
+                    bw.Write( op );
+                    bw.Write( htype );
+                    bw.Write( hlen );
+                    bw.Write( hops );
+                    bw.Write( xid );
+                    bw.Write( secs );
+                    bw.Write( flags );
+                    bw.Write( ciaddr.GetAddressBytes() );
+                    bw.Write( yiaddr.GetAddressBytes() );
+                    bw.Write( siaddr.GetAddressBytes() );
+                    bw.Write( giaddr.GetAddressBytes() );
+                    bw.Write( chaddr );
+                    bw.Write( sname );
+                    bw.Write( file );
+                    // Magic cookie - must be 99.130.83.99
+                    bw.Write( new byte[] { 99, 130, 83, 99 } );
+                    bw.Write( optionsBytes );
+                    bw.Write( (byte)DhcpOptionCode.End ); // End of options
+                }
+
+                return ms.ToArray();
+            }
+        }
+        catch ( Exception ex )
+        {
+            _logger.LogError( $"Error constructing DHCP packet: {ex.Message}" );
+            return new byte[ 0 ];
+        }
+    }
+
+    private byte[] ConstructDhcpOptions( List<DhcpOption> options )
+    {
+        using ( var ms = new System.IO.MemoryStream() )
+        {
+            using ( var bw = new System.IO.BinaryWriter( ms ) )
+            {
+                foreach ( var option in options )
+                {
+                    bw.Write( option.Code );
+                    bw.Write( (byte)option.Data.Length ); // length of the option
+                    bw.Write( option.Data );
+                }
+            }
+
+            return ms.ToArray();
+        }
+    }
+
+    private byte[] MacStringToBytes( string macAddress )
+    {
+        return macAddress.Split( ':' ).Select( b => Convert.ToByte( b, 16 ) ).ToArray();
     }
 }

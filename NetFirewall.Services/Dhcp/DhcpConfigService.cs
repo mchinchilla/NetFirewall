@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Serilog;
 
 namespace NetFirewall.Services.Dhcp;
 
@@ -20,7 +21,15 @@ public class DhcpConfigService : IDhcpConfigService
 
     public async Task<DhcpConfig> GetConfigAsync()
     {
-        // Retrieve configuration from the database
-        return ( await Task.Run( () => _connection.QueryAsync<DhcpConfig>( "SELECT * FROM dhcp_config LIMIT 1" ) ) ).FirstOrDefault() ?? new DhcpConfig();
+        DhcpConfig? config = null;
+        try
+        {
+            config = ( await Task.Run( () => _connection.ExecuteQueryAsync<DhcpConfig>("select * from dhcp_config limit 1" ) ) ).FirstOrDefault();
+        }
+        catch ( Exception ex )
+        {
+            Log.Error( $"{ex.Message}\n{ex.StackTrace}" );
+        }
+        return ( config ?? new DhcpConfig());
     }
 }

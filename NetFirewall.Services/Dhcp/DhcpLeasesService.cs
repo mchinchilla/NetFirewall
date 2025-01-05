@@ -1,6 +1,7 @@
 ﻿using Npgsql;
 using RepoDb;
 using System.Net;
+using System.Net.NetworkInformation;
 using NetFirewall.Models.Dhcp;
 using Microsoft.Extensions.Logging;
 using RepoDb.Enumerations;
@@ -20,6 +21,7 @@ public class DhcpLeasesService : IDhcpLeasesService
 
     public async Task<IPAddress> AssignOrGetLeaseAsync( string macAddress, IPAddress rangeStart, IPAddress rangeEnd, DhcpRequest request )
     {
+        _logger.LogInformation( $"Assigning or getting DHCP lease for MAC address {macAddress}, dhcp Request: {request.ClientMac}" );
         var now = DateTime.UtcNow;
         try
         {
@@ -44,7 +46,8 @@ public class DhcpLeasesService : IDhcpLeasesService
                 {
                     var newLease = new DhcpLease
                     {
-                        MacAddress = macAddress,
+                        Id = Guid.NewGuid(),
+                        MacAddress = PhysicalAddress.Parse( macAddress ),
                         IpAddress = newIp,
                         StartTime = now,
                         EndTime = now.AddSeconds( request.LeaseTime ),
@@ -72,10 +75,13 @@ public class DhcpLeasesService : IDhcpLeasesService
             var now = DateTime.UtcNow;
             for ( var ip = start; ( await CompareIpAddressesAsync( ip, end ) ) <= 0; ip = IncrementIpAddress( ip ) )
             {
-                var leased = ( await _dbRepository.QueryAsync<DhcpLease>( [
-                    new QueryField( nameof(DhcpLease.IpAddress), ip.ToString() ),
-                    new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThanOrEqual, now )
-                ] ) ).Any();
+                string reqSql = $"select * from dhcp_leases where ip_address = '{start}' and end_time > '{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}'";
+                _logger.LogDebug( $"FindAvailableIpAsync => {reqSql}" );
+                var leased = ( await _dbRepository.ExistsAsync<DhcpLease>( reqSql ) );
+                // var leased = ( await _dbRepository.QueryAsync<DhcpLease>( [
+                //     new QueryField( nameof(DhcpLease.IpAddress), ip.ToString() ),
+                //     new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThanOrEqual, now )
+                // ] ) ).Any();
 
                 if ( !leased )
                 {
@@ -149,10 +155,12 @@ public class DhcpLeasesService : IDhcpLeasesService
 
         for ( var ip = rangeStart; ( await CompareIpAddressesAsync( ip, rangeEnd ) ) <= 0; ip = IncrementIpAddress( ip ) )
         {
-            var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
-                new QueryField( nameof(DhcpLease.IpAddress), ip.ToString() ),
-                new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThan, now )
-            ] ) ).FirstOrDefault();
+            string reqSql = $"select * from dhcp_leases where ip_address = '{rangeStart}' and end_time > '{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}'";
+            var lease = ( await _dbRepository.ExecuteQueryAsync<DhcpLease>( reqSql ) ).FirstOrDefault();
+            // var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
+            //     new QueryField( nameof(DhcpLease.IpAddress), ip.ToString() ),
+            //     new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThan, now )
+            // ] ) ).FirstOrDefault();
 
             if ( lease == null )
             {
@@ -165,49 +173,100 @@ public class DhcpLeasesService : IDhcpLeasesService
 
     public async Task AssignLease( string macAddress, IPAddress ipAddress, int leaseTime )
     {
-        var now = DateTime.UtcNow;
-        var newLease = new DhcpLease
+        try
         {
-            MacAddress = macAddress,
-            IpAddress = ipAddress,
-            StartTime = now,
-            EndTime = now.AddSeconds( leaseTime )
-        };
+            var now = DateTime.UtcNow;
+            var newLease = new DhcpLease
+            {
+                Id = Guid.NewGuid(),
+                MacAddress = PhysicalAddress.Parse( macAddress ),
+                IpAddress = ipAddress,
+                StartTime = now,
+                EndTime = now.AddSeconds( leaseTime ),
+                Hostname = await GetHostnameAsync( new DhcpRequest { ClientMac = macAddress }, ipAddress )
+            };
 
-        await _dbRepository.InsertAsync( newLease );
+            var insertedRecord = await _dbRepository.InsertAsync<DhcpLease>( tableName: "dhcp_leases", entity: newLease );
+            
+            if ( insertedRecord != null )
+            {
+                _logger.LogInformation( $"Assigned lease for MAC address {macAddress} with IP {ipAddress}" );
+            }
+            else
+            {
+                _logger.LogWarning( $"Failed to assign lease for MAC address {macAddress} with IP {ipAddress}" );
+            }
+        }
+        catch ( Exception ex )
+        {
+            _logger.LogError( $"Failed to assign DHCP lease: {ex.Message}" );
+        }
     }
 
     public async Task<bool> CanAssignIp( string macAddress, IPAddress ipAddress )
     {
-        var now = DateTime.UtcNow;
-        var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
-            new QueryField( nameof(DhcpLease.IpAddress), ipAddress.ToString() ),
-            new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThan, now )
-        ] ) ).FirstOrDefault();
+        try
+        {
+            string reqSql = $"select * from dhcp_leases where ip_address = '{ipAddress}' and end_time > '{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}'";
+            _logger.LogDebug( $"CanAssignIp => {reqSql}" );
 
-        return lease == null || lease.MacAddress == macAddress;
+            var now = DateTime.UtcNow;
+            // var lease = ( await _dbRepository.QueryAsync<DhcpLease>(tableName:"dhcp_leases", [
+            //     new QueryField( nameof(DhcpLease.IpAddress), ipAddress.ToString() ),
+            //     new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThan, now )
+            // ] ) ).FirstOrDefault();
+            var lease = ( await _dbRepository.ExecuteQueryAsync<DhcpLease>( reqSql ) ).FirstOrDefault();
+            return lease == null || lease.MacAddress == PhysicalAddress.Parse( macAddress );
+        }
+        catch ( Exception ex )
+        {
+            _logger.LogError( $"Failed to check if IP can be assigned: {ex.Message}" );
+            return false;
+        }
     }
 
     public async Task ReleaseLease( string macAddress )
     {
-        await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof(DhcpLease.MacAddress), macAddress ) );
+        try
+        {
+            string reqSql = $"delete from dhcp_leases where mac_address > '{macAddress}'";
+            _logger.LogDebug( $"ReleaseLease => {reqSql}" );
+            var resp = ( await _dbRepository.ExecuteQueryAsync<DhcpLease>( reqSql ) ).ToList();
+            _logger.LogInformation( $"Deleted {resp.Count} leases for MAC address {macAddress}" );
+        }
+        catch ( Exception ex )
+        {
+            _logger.LogError( $"Failed to release DHCP lease: {ex.Message}" );
+        }
+
+        // await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof(DhcpLease.MacAddress), macAddress) );
     }
 
     public async Task MarkIpAsDeclined( IPAddress ipAddress )
     {
         // Here you might want to add logic to mark an IP as declined or add it to some kind of blacklist
         // For simplicity, we'll just delete any active lease for this IP
-        await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof(DhcpLease.IpAddress), ipAddress.ToString() ) );
+        string reqSql = $"delete from dhcp_leases where ip_address = '{ipAddress}'";
+        _logger.LogDebug( $"MarkIpAsDeclined => {reqSql}" );
+        var resp = ( await _dbRepository.ExecuteQueryAsync<DhcpLease>( reqSql ) ).ToList();
+        _logger.LogInformation( $"Deleted {resp.Count} leases for IP address {ipAddress}" );
+
+        // await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof(DhcpLease.IpAddress), ipAddress.ToString() ) );
     }
 
     public async Task<IPAddress> GetAssignedIp( string macAddress )
     {
+        string reqSql = $"select * from dhcp_leases where mac_address > '{macAddress}' and end_time > '{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}'";
+        _logger.LogDebug( $"GetAssignedIp => {reqSql}" );
         var now = DateTime.UtcNow;
-        var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
-            new QueryField( nameof(DhcpLease.MacAddress), macAddress ),
-            new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThan, now )
-        ] ) ).FirstOrDefault();
+        var lease = ( await _dbRepository.ExecuteQueryAsync<DhcpLease>( reqSql ) ).FirstOrDefault();
+        _logger.LogInformation( $"GetAssignedIp => {lease}" );
 
-        return lease?.IpAddress;
+        // var lease = ( await _dbRepository.QueryAsync<DhcpLease>( [
+        //     new QueryField( nameof(DhcpLease.MacAddress), macAddress ),
+        //     new QueryField( nameof(DhcpLease.EndTime), Operation.GreaterThan, now )
+        // ] ) ).FirstOrDefault();
+
+        return lease!.IpAddress;
     }
 }
