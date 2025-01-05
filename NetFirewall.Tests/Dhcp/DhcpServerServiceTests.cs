@@ -23,8 +23,8 @@ public class DhcpServerServiceTests
             IsBootp = false,
             IsPxeRequest = false,
             MessageType = DhcpMessageType.Discover,
-            RequestedIp = IPAddress.Parse("192.168.1.100"),
-            ClientIp = IPAddress.Parse("192.168.1.101"),
+            RequestedIp = IPAddress.Parse("192.168.99.100"),
+            ClientIp = IPAddress.Parse("192.168.99.101"),
             Hostname = "test-client",
             LeaseTime = 3600
         };
@@ -68,8 +68,8 @@ public class DhcpServerServiceTests
             IsBootp = false,
             IsPxeRequest = false,
             MessageType = DhcpMessageType.Discover,
-            RequestedIp = IPAddress.Parse("192.168.1.100"),
-            ClientIp = IPAddress.Parse("192.168.1.101"),
+            RequestedIp = IPAddress.Parse("192.168.99.100"),
+            ClientIp = IPAddress.Parse("192.168.99.101"),
             Hostname = "test-client",
             LeaseTime = 3600
         };

@@ -17,7 +17,7 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             var hostname = "test-host";
-            var ipAddress = IPAddress.Parse("192.168.1.150");
+            var ipAddress = IPAddress.Parse("192.168.99.150");
 
             _ddnsServiceMock.Setup(service => service.UpdateDnsAsync(hostname, ipAddress))
                 .Returns(Task.CompletedTask);
@@ -34,7 +34,7 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             string hostname = null;
-            var ipAddress = IPAddress.Parse("192.168.1.150");
+            var ipAddress = IPAddress.Parse("192.168.99.150");
 
             _ddnsServiceMock.Setup(service => service.UpdateDnsAsync(hostname, ipAddress))
                 .Returns(Task.CompletedTask);
@@ -68,7 +68,7 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             var hostname = string.Empty;
-            var ipAddress = IPAddress.Parse("192.168.1.150");
+            var ipAddress = IPAddress.Parse("192.168.99.150");
 
             _ddnsServiceMock.Setup(service => service.UpdateDnsAsync(hostname, ipAddress))
                 .Returns(Task.CompletedTask);

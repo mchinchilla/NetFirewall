@@ -20,7 +20,7 @@ namespace NetFirewall.Tests.Dhcp
             var expectedConfig = new DhcpConfig
             {
                 SubnetMask = IPAddress.Parse( "255.255.255.0" ),
-                Gateway = IPAddress.Parse( "192.168.1.1" ),
+                Gateway = IPAddress.Parse( "192.168.99.1" ),
                 DnsServers = new IPAddress[] { IPAddress.Parse( "8.8.8.8" ), IPAddress.Parse( "8.8.4.4" ) },
                 LeaseTime = 3600
             };
@@ -60,7 +60,7 @@ namespace NetFirewall.Tests.Dhcp
             var expectedConfig = new DhcpConfig
             {
                 SubnetMask = IPAddress.Parse("255.255.255.0"),
-                Gateway = IPAddress.Parse("192.168.1.1"),
+                Gateway = IPAddress.Parse("192.168.99.1"),
                 DnsServers = new IPAddress[] { },
                 LeaseTime = 3600
             };

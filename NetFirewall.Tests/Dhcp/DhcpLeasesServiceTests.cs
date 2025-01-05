@@ -17,9 +17,9 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             var macAddress = "00:11:22:33:44:55";
-            var rangeStart = IPAddress.Parse("192.168.1.100");
-            var rangeEnd = IPAddress.Parse("192.168.1.200");
-            var expectedIp = IPAddress.Parse("192.168.1.150");
+            var rangeStart = IPAddress.Parse("192.168.99.100");
+            var rangeEnd = IPAddress.Parse("192.168.99.200");
+            var expectedIp = IPAddress.Parse("192.168.99.150");
 
             _dhcpLeasesServiceMock.Setup(service => service.OfferLease(macAddress, rangeStart, rangeEnd))
                 .ReturnsAsync(expectedIp);
@@ -37,7 +37,7 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             var macAddress = "00:11:22:33:44:55";
-            var ipAddress = IPAddress.Parse("192.168.1.150");
+            var ipAddress = IPAddress.Parse("192.168.99.150");
             var leaseTime = 3600;
 
             _dhcpLeasesServiceMock.Setup(service => service.AssignLease(macAddress, ipAddress, leaseTime))
@@ -55,7 +55,7 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             var macAddress = "00:11:22:33:44:55";
-            var ipAddress = IPAddress.Parse("192.168.1.150");
+            var ipAddress = IPAddress.Parse("192.168.99.150");
 
             _dhcpLeasesServiceMock.Setup(service => service.CanAssignIp(macAddress, ipAddress))
                 .ReturnsAsync(true);
@@ -87,7 +87,7 @@ namespace NetFirewall.Tests.Dhcp
         public async Task MarkIpAsDeclined_ShouldCompleteSuccessfully()
         {
             // Arrange
-            var ipAddress = IPAddress.Parse("192.168.1.150");
+            var ipAddress = IPAddress.Parse("192.168.99.150");
 
             _dhcpLeasesServiceMock.Setup(service => service.MarkIpAsDeclined(ipAddress))
                 .Returns(Task.CompletedTask);
@@ -104,7 +104,7 @@ namespace NetFirewall.Tests.Dhcp
         {
             // Arrange
             var macAddress = "00:11:22:33:44:55";
-            var expectedIp = IPAddress.Parse("192.168.1.150");
+            var expectedIp = IPAddress.Parse("192.168.99.150");
 
             _dhcpLeasesServiceMock.Setup(service => service.GetAssignedIp(macAddress))
                 .ReturnsAsync(expectedIp);
