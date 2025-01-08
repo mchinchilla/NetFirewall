@@ -23,22 +23,22 @@ public class DhcpServerServiceTests
             IsBootp = false,
             IsPxeRequest = false,
             MessageType = DhcpMessageType.Discover,
-            RequestedIp = IPAddress.Parse("192.168.99.100"),
+            RequestedIp = IPAddress.Parse( "192.168.99.100" ),
             Hostname = "test-client",
             LeaseTime = 3600
         };
 
         var expectedResponse = new byte[] { 1, 2, 3, 4, 5 };
 
-        _dhcpServerServiceMock.Setup(service => service.CreateDhcpResponse(request))
-            .ReturnsAsync(expectedResponse);
+        _dhcpServerServiceMock.Setup( service => service.CreateDhcpResponse( request ) )
+            .ReturnsAsync( expectedResponse );
 
         // Act
-        var result = await _dhcpServerServiceMock.Object.CreateDhcpResponse(request);
+        var result = await _dhcpServerServiceMock.Object.CreateDhcpResponse( request );
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal(expectedResponse, result);
+        Assert.NotNull( result );
+        Assert.Equal( expectedResponse, result );
     }
 
     [Fact]
@@ -47,14 +47,14 @@ public class DhcpServerServiceTests
         // Arrange
         DhcpRequest request = null;
 
-        _dhcpServerServiceMock.Setup(service => service.CreateDhcpResponse(request))
-            .ReturnsAsync((byte[])null);
+        _dhcpServerServiceMock.Setup( service => service.CreateDhcpResponse( request ) )
+            .ReturnsAsync( (byte[])null );
 
         // Act
-        var result = await _dhcpServerServiceMock.Object.CreateDhcpResponse(request);
+        var result = await _dhcpServerServiceMock.Object.CreateDhcpResponse( request );
 
         // Assert
-        Assert.Null(result);
+        Assert.Null( result );
     }
 
     [Fact]
@@ -67,21 +67,21 @@ public class DhcpServerServiceTests
             IsBootp = false,
             IsPxeRequest = false,
             MessageType = DhcpMessageType.Discover,
-            RequestedIp = IPAddress.Parse("192.168.99.100"),
+            RequestedIp = IPAddress.Parse( "192.168.99.100" ),
             Hostname = "test-client",
             LeaseTime = 3600
         };
 
         var expectedResponse = new byte[] { };
 
-        _dhcpServerServiceMock.Setup(service => service.CreateDhcpResponse(request))
-            .ReturnsAsync(expectedResponse);
+        _dhcpServerServiceMock.Setup( service => service.CreateDhcpResponse( request ) )
+            .ReturnsAsync( expectedResponse );
 
         // Act
-        var result = await _dhcpServerServiceMock.Object.CreateDhcpResponse(request);
+        var result = await _dhcpServerServiceMock.Object.CreateDhcpResponse( request );
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Empty(result);
+        Assert.NotNull( result );
+        Assert.Empty( result );
     }
 }

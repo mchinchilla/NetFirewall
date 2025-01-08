@@ -187,7 +187,7 @@ public class DhcpLeasesService : IDhcpLeasesService
             };
 
             var insertedRecord = await _dbRepository.InsertAsync<DhcpLease>( tableName: "dhcp_leases", entity: newLease );
-            
+
             if ( insertedRecord != null )
             {
                 _logger.LogInformation( $"Assigned lease for MAC address {macAddress} with IP {ipAddress}" );
