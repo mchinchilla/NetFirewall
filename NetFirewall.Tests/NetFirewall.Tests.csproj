@@ -38,4 +38,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Dhcp\" />
+  </ItemGroup>
+
 </Project>

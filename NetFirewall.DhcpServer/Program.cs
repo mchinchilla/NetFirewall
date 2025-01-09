@@ -3,6 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
+using NetFirewall.Models.Dhcp;
 using NetFirewall.Services.Dhcp;
 using Npgsql;
 using RepoDb;
@@ -14,16 +16,14 @@ class Program
 {
     static async Task Main( string[] args )
     {
-        Log.Logger = new LoggerConfiguration()
-            .WriteTo.Console()
-            .WriteTo.File( "logs/dhcp_server.log" )
-            .MinimumLevel.Debug()
-            .CreateLogger();
-
-        var configuration = new ConfigurationBuilder()
+        IConfiguration configuration = new ConfigurationBuilder()
             .SetBasePath( Directory.GetCurrentDirectory() )
-            .AddJsonFile( "appsettings.json" )
+            .AddJsonFile( "appsettings.json", optional: false, reloadOnChange: true )
             .Build();
+
+        Log.Logger = new LoggerConfiguration()
+            .ReadFrom.Configuration( configuration )
+            .CreateLogger();
 
         GlobalConfiguration
             .Setup()
@@ -33,13 +33,17 @@ class Program
 
         try
         {
-            await Host.CreateDefaultBuilder( args )
+            var host = Host.CreateDefaultBuilder( args )
+                .ConfigureAppConfiguration( ( context, config ) => { config.AddJsonFile( "appsettings.json", optional: true, reloadOnChange: true ); } )
                 .UseSystemd()
                 .ConfigureServices( ( hostContext, services ) =>
                 {
+                    var config = hostContext.Configuration;
+
                     /* Other */
-                    services.AddHostedService<Worker>();
+                    services.Configure<DhcpConfig>( config.GetSection( "DhcpConfig" ) );
                     services.AddLogging( loggingBuilder => loggingBuilder.AddSerilog( dispose: true ) );
+                    services.AddHostedService<DhcpWorker>();
 
                     /* Singleton */
                     services.AddSingleton( new NpgsqlConnection( connectionString ) );
@@ -47,13 +51,12 @@ class Program
 
                     /* Transient */
                     services.AddTransient<IDhcpServerService, DhcpServerService>();
-                    services.AddTransient<IDhcpConfigService, DhcpConfigService>();
                     services.AddTransient<IDhcpLeasesService, DhcpLeasesService>();
-                    services.AddTransient<IDdnsService, DdnsService>();
                 } )
                 .UseSerilog()
-                .Build()
-                .RunAsync();
+                .Build();
+
+            await host.RunAsync();
         }
         catch ( Exception ex )
         {
@@ -61,7 +64,7 @@ class Program
         }
         finally
         {
-            await Log.CloseAndFlushAsync();
+            Log.CloseAndFlush();
         }
     }
 }

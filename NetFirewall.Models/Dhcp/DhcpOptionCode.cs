@@ -2,7 +2,6 @@ namespace NetFirewall.Models.Dhcp;
 
 public enum DhcpOptionCode : byte
 {
-    // Common DHCP options
     Pad = 0,
     SubnetMask = 1,
     TimeOffset = 2,
@@ -78,14 +77,43 @@ public enum DhcpOptionCode : byte
     IRCServer = 74,
     StreetTalkServer = 75,
     StreetTalkDirectoryAssistance = 76,
-
-    // PXE specific options
+    UserClass = 77,
+    DirectoryAgent = 78,
+    ServiceScope = 79,
+    RapidCommit = 80,
+    ClientFQDN = 81,
+    RelayAgentInformation = 82,
+    iSNS = 83,
+    NDSServers = 85,
+    NDSTreeName = 86,
+    NDSContext = 87,
+    BCMCSControllerDomainList = 88,
+    BCMCSControllerIPv4Address = 89,
+    Authentication = 90,
+    ClientLastTransactionTime = 91,
+    AssociatedIP = 92,
     PxeClientArchType = 93,
     PxeClientNetworkInterface = 94,
-    PxeClientSystemArch = 95,
-    PxeClientNdi = 96,
+    LDAP = 95,
     PxeDiscoveryControl = 97,
-
-    // End of options
+    UserAuth = 98,
+    GeographicLocation = 99,
+    POSIXTimeZone = 100,
+    TZDatabaseTimeZone = 101,
+    NetInfoAddress = 112,
+    NetInfoTag = 113,
+    DHCPCaptivePortal = 114,
+    AutoConfig = 116,
+    NameServiceSearch = 117,
+    SubnetSelection = 118,
+    DomainSearch = 119,
+    SIPServers = 120,
+    ClasslessStaticRoute = 121,
+    CableLabsClientConfig = 122,
+    GeoConfOption = 123,
+    VIVendorClass = 124,
+    VIVendorSpecific = 125,
+    ForcerenewNonceCapable = 145,
+    RDNSSSelection = 146,
     End = 255
 }

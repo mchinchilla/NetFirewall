@@ -1,35 +1,17 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
-using System.Text;
-using System.Threading.Tasks;
-using RepoDb.Attributes;
+﻿using System.Net;
 
 namespace NetFirewall.Models.Dhcp;
 
 public class DhcpConfig
 {
-    [Map( "id" )] 
-    public Guid Id { get; set; }
-    [Map( "ip_range_start" )] 
-    public IPAddress IpRangeStart { get; set; }
-    [Map( "ip_range_end" )] 
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public IPAddress? IpRangeStart { get; set; }
     public IPAddress IpRangeEnd { get; set; }
-    [Map( "subnet_mask" )] 
     public IPAddress SubnetMask { get; set; }
-    [Map( "lease_time" )] 
     public int LeaseTime { get; set; }
-    [Map( "gateway" )] 
     public IPAddress Gateway { get; set; }
-    [Map( "dns_servers" )] 
-    public IPAddress[] DnsServers { get; set; }
-    [Map( "boot_file_name" )] 
+    public List<IPAddress> DnsServers { get; set; }
     public string BootFileName { get; set; }
-    [Map( "server_name" )] 
     public string ServerName { get; set; }
-    [Map( "server_ip" )] 
     public IPAddress ServerIp { get; set; }
-    [Map( "description" )] 
-    public string Description { get; set; }
 }

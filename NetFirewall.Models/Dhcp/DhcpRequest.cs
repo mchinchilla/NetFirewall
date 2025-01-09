@@ -9,6 +9,7 @@ namespace NetFirewall.Models.Dhcp;
 
 public class DhcpRequest
 {
+    // Fixed Fields from DHCP Header
     public byte Op { get; set; }
     public byte HType { get; set; }
     public byte HLen { get; set; }
@@ -24,6 +25,8 @@ public class DhcpRequest
     public byte[] ChAddr { get; set; }
     public string SName { get; set; }
     public string File { get; set; }
+
+    // DHCP Options
     public DhcpMessageType MessageType { get; set; }
     public IPAddress RequestedIp { get; set; }
     public byte[] ClientIdentifier { get; set; }
@@ -31,7 +34,14 @@ public class DhcpRequest
     public byte[] ParameterRequestList { get; set; }
     public string VendorClassIdentifier { get; set; }
     public int LeaseTime { get; set; }
+
     public bool IsBootp { get; set; }
     public bool IsPxeRequest { get; set; }
     public IPEndPoint RemoteEndPoint { get; set; }
+
+    public DhcpRequest()
+    {
+        Xid = new byte[ 4 ];
+        ChAddr = new byte[ 16 ];
+    }
 }

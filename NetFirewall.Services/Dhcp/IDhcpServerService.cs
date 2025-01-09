@@ -9,5 +9,5 @@ namespace NetFirewall.Services.Dhcp;
 
 public interface IDhcpServerService
 {
-    Task<byte[]> CreateDhcpResponse( DhcpRequest request );
+    Task<byte[]> CreateDhcpResponseAsync( DhcpRequest request );
 }
