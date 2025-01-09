@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NetFirewall.AppHost\NetFirewall.AppHost.csproj" />
+    <ProjectReference Include="..\NetFirewall.DhcpServer\NetFirewall.DhcpServer.csproj" />
     <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
     <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
   </ItemGroup>
