@@ -39,10 +39,13 @@ create table dhcp_mac_reservations
     mac_address macaddr not null,
     reserved_ip inet    not null,
     description text,
-    unique (mac_address)
+    unique (mac_address, reserved_ip)
 );
 
 -- add indexes for better performance
-create index idx_dhcp_leases_mac_address on dhcp_leases (mac_address);
+-- dhcp_leases
+create unique index idx_dhcp_leases_mac_address on dhcp_leases (mac_address);
 create index idx_dhcp_leases_ip_address on dhcp_leases (ip_address);
+-- dhcp_mac_reservations
 create index idx_dhcp_mac_reservations_mac_address on dhcp_mac_reservations (mac_address);
+create index idx_dhcp_mac_reservations_reserved_ip on dhcp_mac_reservations (reserved_ip);

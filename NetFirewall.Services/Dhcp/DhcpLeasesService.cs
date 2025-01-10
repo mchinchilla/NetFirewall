@@ -26,6 +26,18 @@ public class DhcpLeasesService : IDhcpLeasesService
     {
         try
         {
+            _logger.LogInformation( $"OfferLeaseAsync :: MAC {macAddress}" );
+
+            // First, check for a reserved IP for this MAC address
+            _logger.LogInformation( $"OfferLeaseAsync :: Checking for reservation for MAC {macAddress}" );
+            // First, check for a reserved IP for this MAC address
+            IPAddress? reservedIp = await CheckForReservationAsync( macAddress );
+            if ( reservedIp != null )
+            {
+                _logger.LogInformation( $"Found reserved IP {reservedIp} for MAC {macAddress}" );
+                return reservedIp;
+            }
+
             var now = DateTime.UtcNow;
 
             for ( var ip = rangeStart; ( await CompareIpAddressesAsync( ip, rangeEnd ) ) <= 0; ip = IncrementIpAddress( ip ) )
@@ -45,50 +57,148 @@ public class DhcpLeasesService : IDhcpLeasesService
         {
             _logger.LogError( ex.Message );
         }
-        
+
         return null;
     }
 
     public async Task AssignLeaseAsync( string macAddress, IPAddress ipAddress, int leaseTime )
     {
-        var now = DateTime.UtcNow;
-        var newLease = new DhcpLease
+        try
         {
-            Id = Guid.NewGuid(),
-            MacAddress = PhysicalAddress.Parse( macAddress ),
-            IpAddress = ipAddress,
-            StartTime = now,
-            EndTime = now.AddSeconds( leaseTime )
-        };
+            _logger.LogInformation( $"AssignLeaseAsync :: Ip: {ipAddress} to MAC {macAddress}" );
 
-        await _dbRepository.InsertAsync( tableName: "dhcp_leases", newLease );
+            // First, check for a reserved IP for this MAC address
+            _logger.LogInformation( $"AssignLeaseAsync :: Checking for reservation for MAC {macAddress}" );
+            IPAddress? reservedIp = await CheckForReservationAsync( macAddress );
+
+            if ( reservedIp != null )
+            {
+                if ( Equals( ipAddress, reservedIp ) )
+                {
+                    _logger.LogInformation( $"AssignLeaseAsync :: IP {ipAddress} is reserved for MAC {macAddress}, update the lease" );
+                    ipAddress = reservedIp;
+                }
+                else
+                {
+                    _logger.LogWarning( $"Attempt to assign {ipAddress} to MAC {macAddress} but it has a reservation for {reservedIp}. Using reserved IP." );
+                    ipAddress = reservedIp;
+                }
+            }
+
+            _logger.LogInformation( $"AssignLeaseAsync :: Checking if lease exists for MAC {macAddress}" );
+            string query = $"select count(id) from dhcp_leases where mac_address = '{macAddress}';";
+            var leaseExists = await _dbRepository.ExecuteScalarAsync<int>( query ) > 0 ? true : false;
+            _logger.LogInformation( $"AssignLeaseAsync :: Lease exists?: {leaseExists}" );
+
+            var now = DateTime.UtcNow;
+            if ( leaseExists )
+            {
+                _logger.LogInformation( $"AssignLeaseAsync :: Updating lease for MAC {macAddress}" );
+                var newLease = new DhcpLease
+                {
+                    MacAddress = PhysicalAddress.Parse( macAddress ),
+                    IpAddress = ipAddress,
+                    StartTime = now,
+                    EndTime = now.AddSeconds( leaseTime )
+                };
+
+                await _dbRepository.UpdateAsync( tableName: "dhcp_leases", newLease, new [] { new QueryField( "mac_address", Operation.Equal, PhysicalAddress.Parse( macAddress ) ) } );
+            }
+            else
+            {
+                _logger.LogInformation( $"AssignLeaseAsync :: Inserting new lease for MAC {macAddress}({ipAddress})" );
+                var newLease = new DhcpLease
+                {
+                    Id = Guid.NewGuid(),
+                    MacAddress = PhysicalAddress.Parse( macAddress ),
+                    IpAddress = ipAddress,
+                    StartTime = now,
+                    EndTime = now.AddSeconds( leaseTime )
+                };
+
+                await _dbRepository.InsertAsync( tableName: "dhcp_leases", newLease );
+            }
+        }
+        catch ( Exception ex )
+        {
+            _logger.LogError( ex.Message );
+        }
     }
 
     public async Task<bool> CanAssignIpAsync( string macAddress, IPAddress ipAddress )
     {
-        var now = DateTime.UtcNow;
-        var ipStr = ipAddress.ToString();
-
-        var query = $@"select id from dhcp_leases where ip_address = '{ipStr}' and end_time > '{now:yyyy-MM-dd HH:mm:ss}';";
-        _logger.LogDebug( $"CanAssignIpAsync :: {query}" );
-
-        var result = await _dbRepository.ExecuteQueryAsync<DhcpLease>( query );
-        if ( !result.Any() )
+        try
         {
-            return true; // No active lease on this IP
+            _logger.LogInformation( $"AssignLeaseAsync :: Ip: {ipAddress} to MAC {macAddress}" );
+
+            // First, check for a reserved IP for this MAC address
+            _logger.LogInformation( $"AssignLeaseAsync :: Checking for reservation for MAC {macAddress}" );
+            IPAddress? reservedIp = await CheckForReservationAsync( macAddress );
+
+            if ( reservedIp != null )
+            {
+                if ( Equals( ipAddress, reservedIp ) )
+                {
+                    _logger.LogInformation( $"AssignLeaseAsync :: IP {ipAddress} is reserved for MAC {macAddress}, update the lease" );
+                    ipAddress = reservedIp;
+                }
+                else
+                {
+                    _logger.LogWarning( $"Attempt to assign {ipAddress} to MAC {macAddress} but it has a reservation for {reservedIp}. Using reserved IP." );
+                    ipAddress = reservedIp;
+                }
+            }
+
+            var now = DateTime.UtcNow;
+            var ipStr = ipAddress.ToString();
+
+            var query = $@"select id from dhcp_leases where ip_address = '{ipStr}' and end_time > '{now:yyyy-MM-dd HH:mm:ss}';";
+            _logger.LogDebug( $"CanAssignIpAsync :: {query}" );
+
+            var result = await _dbRepository.ExecuteQueryAsync<DhcpLease>( query );
+            if ( !result.Any() )
+            {
+                return true; // No active lease on this IP
+            }
+
+            // Check if the lease on this IP is for the same MAC address
+            var leaseQuery = $@"select mac_address from dhcp_leases where ip_address = '{ipStr}' and end_time > '{now:yyyy-MM-dd HH:mm:ss}';";
+            _logger.LogDebug( $"CanAssignIpAsync :: leaseQuery => {leaseQuery}" );
+
+            var leaseResult = await _dbRepository.ExecuteQueryAsync<DhcpLease>( leaseQuery );
+            return leaseResult.Any() && leaseResult.First().MacAddress == PhysicalAddress.Parse( macAddress );
         }
-
-        // Check if the lease on this IP is for the same MAC address
-        var leaseQuery = $@"select mac_address from dhcp_leases where ip_address = '{ipStr}' and end_time > '{now:yyyy-MM-dd HH:mm:ss}';";
-        _logger.LogDebug( $"CanAssignIpAsync :: leaseQuery => {leaseQuery}"  );
-
-        var leaseResult = await _dbRepository.ExecuteQueryAsync<DhcpLease>( leaseQuery );
-        return leaseResult.Any() && leaseResult.First().MacAddress == PhysicalAddress.Parse( macAddress );
+        catch ( Exception ex )
+        {
+            _logger.LogError( ex.Message );
+            return false;
+        }
     }
 
     public async Task ReleaseLeaseAsync( string macAddress )
     {
         await _dbRepository.DeleteAsync<DhcpLease>( new QueryField( nameof(DhcpLease.MacAddress), macAddress ) );
+    }
+
+    public async Task<IPAddress?> CheckForReservationAsync( string macAddress )
+    {
+        try
+        {
+            var query = $@"select * from dhcp_mac_reservations where mac_address = '{macAddress}';";
+
+            DhcpMacReservation? result = ( await _dbRepository.ExecuteQueryAsync<DhcpMacReservation>( query ) ).FirstOrDefault();
+            if ( result != null )
+            {
+                return result.ReservedIp;
+            }
+
+            return null;
+        }
+        catch ( Exception ex )
+        {
+            _logger.LogError( ex.Message );
+            return null;
+        }
     }
 
     public async Task MarkIpAsDeclinedAsync( IPAddress ipAddress )

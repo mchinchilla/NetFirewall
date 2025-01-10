@@ -131,13 +131,13 @@ public class DhcpWorker : BackgroundService
         }
     }
 
-    private DhcpRequest ParseDhcpRequest( byte[] buffer )
+    private DhcpRequest ParseDhcpRequest(byte[] buffer)
     {
         try
         {
-            if ( buffer.Length < 236 ) // DHCP packet minimum length
+            if (buffer.Length < 236) // Minimum DHCP packet length
             {
-                _logger.LogWarning( "Received DHCP packet is too short to contain valid data." );
+                _logger.LogWarning("Received DHCP packet is too short to contain valid data.");
                 return null;
             }
 
@@ -147,89 +147,93 @@ public class DhcpWorker : BackgroundService
                 HType = buffer[1],
                 HLen = buffer[2],
                 Hops = buffer[3],
-                Xid = new byte[ 4 ],
-                Secs = BitConverter.ToUInt16( buffer, 8 ),
-                Flags = BitConverter.ToUInt16( buffer, 10 ),
-                CiAddr = new IPAddress( buffer.Skip( 12 ).Take( 4 ).ToArray() ),
-                YiAddr = new IPAddress( buffer.Skip( 16 ).Take( 4 ).ToArray() ),
-                SiAddr = new IPAddress( buffer.Skip( 20 ).Take( 4 ).ToArray() ),
-                GiAddr = new IPAddress( buffer.Skip( 24 ).Take( 4 ).ToArray() ),
-                ChAddr = new byte[ 16 ]
+                Xid = new byte[4],
+                Secs = BitConverter.ToUInt16(buffer, 8),
+                Flags = BitConverter.ToUInt16(buffer, 10),
+                CiAddr = ReadIpAddress(buffer, 12),
+                YiAddr = ReadIpAddress(buffer, 16),
+                SiAddr = ReadIpAddress(buffer, 20),
+                GiAddr = ReadIpAddress(buffer, 24),
+                ChAddr = new byte[16]
             };
 
-            Array.Copy( buffer, 4, request.Xid, 0, 4 );
-            Array.Copy( buffer, 28, request.ChAddr, 0, 16 );
-            request.ClientMac = BitConverter.ToString( buffer, 28, 6 ).Replace( "-", ":" );
-            request.SName = Encoding.ASCII.GetString( buffer, 44, 64 ).TrimEnd( '\0' );
-            request.File = Encoding.ASCII.GetString( buffer, 108, 128 ).TrimEnd( '\0' );
-            
-            _logger.LogDebug( $"MacAddress: {request.ClientMac}, Host: {request.Hostname}, reqIp: {request.RequestedIp}" );
+            Array.Copy(buffer, 4, request.Xid, 0, 4);
+            Array.Copy(buffer, 28, request.ChAddr, 0, 16);
+            request.ClientMac = BitConverter.ToString(buffer, 28, 6).Replace("-", ":");
+            request.SName = ReadPaddedString(buffer, 44, 64);
+            request.File = ReadPaddedString(buffer, 108, 128);
 
             // Check for magic cookie
-            if ( buffer[236] != 99 || buffer[237] != 130 || buffer[238] != 83 || buffer[239] != 99 )
+            if (buffer[236] != 99 || buffer[237] != 130 || buffer[238] != 83 || buffer[239] != 99)
             {
-                _logger.LogWarning( "Invalid DHCP magic cookie in the packet." );
+                _logger.LogWarning("Invalid DHCP magic cookie in the packet.");
                 return null;
             }
 
-            _logger.LogInformation( $"Parsing DHCP packet with XID: {BitConverter.ToString( request.Xid )}" );
+            _logger.LogInformation($"Parsing DHCP packet with XID: {BitConverter.ToString(request.Xid)}");
 
             // Parse options
-            for ( int i = 240; i < buffer.Length; i++ )
+            for (int i = 240; i < buffer.Length; i++)
             {
                 byte optionCode = buffer[i];
-                if ( optionCode == (byte)DhcpOptionCode.End )
+                if (optionCode == (byte)DhcpOptionCode.End)
                 {
-                    _logger.LogDebug( "End of DHCP options reached." );
+                    _logger.LogDebug("End of DHCP options reached.");
                     break;
                 }
-                else if ( optionCode == (byte)DhcpOptionCode.Pad )
+                else if (optionCode == (byte)DhcpOptionCode.Pad)
                 {
-                    _logger.LogDebug( "Encountered DHCP option padding." );
+                    _logger.LogDebug("Encountered DHCP option padding.");
                     continue;
                 }
 
-                int optionLength = buffer[++i];
-                if ( i + optionLength >= buffer.Length )
+                if (i + 1 >= buffer.Length)
                 {
-                    _logger.LogWarning( "DHCP packet option data overflow." );
+                    _logger.LogWarning("Buffer too short to read option length.");
                     break;
                 }
 
-                byte[] optionData = new byte[ optionLength ];
-                Array.Copy( buffer, i + 1, optionData, 0, optionLength );
+                int optionLength = buffer[++i];
+                if (i + 1 + optionLength > buffer.Length)
+                {
+                    _logger.LogWarning("Buffer too short to read option data.");
+                    break;
+                }
 
-                _logger.LogDebug( $"Parsing DHCP option {optionCode} with length {optionLength}" );
-                
-                switch ( (DhcpOptionCode)optionCode )
+                byte[] optionData = new byte[optionLength];
+                Array.Copy(buffer, i + 1, optionData, 0, optionLength);
+
+                _logger.LogDebug($"Parsing DHCP option {optionCode} with length {optionLength}");
+
+                switch ((DhcpOptionCode)optionCode)
                 {
                     case DhcpOptionCode.MessageType:
                         request.MessageType = (DhcpMessageType)optionData[0];
-                        _logger.LogInformation( $"DHCP Message Type: {request.MessageType}" );
+                        _logger.LogInformation($"DHCP Message Type: {request.MessageType}");
                         break;
                     case DhcpOptionCode.RequestedIPAddress:
-                        request.RequestedIp = new IPAddress( optionData );
-                        _logger.LogInformation( $"Requested IP: {request.RequestedIp}" );
+                        request.RequestedIp = new IPAddress(optionData);
+                        _logger.LogInformation($"Requested IP: {request.RequestedIp}");
                         break;
                     case DhcpOptionCode.ClientIdentifier:
                         request.ClientIdentifier = optionData;
-                        _logger.LogDebug( $"Client Identifier: {BitConverter.ToString( optionData )}" );
+                        _logger.LogDebug($"Client Identifier: {BitConverter.ToString(optionData)}");
                         break;
                     case DhcpOptionCode.HostName:
-                        request.Hostname = Encoding.ASCII.GetString( optionData );
-                        _logger.LogInformation( $"Client Hostname: {request.Hostname}" );
+                        request.Hostname = Encoding.ASCII.GetString(optionData);
+                        _logger.LogInformation($"Client Hostname: {request.Hostname}");
                         break;
                     case DhcpOptionCode.ParameterRequestList:
                         request.ParameterRequestList = optionData;
-                        _logger.LogDebug( $"Parameter Request List: {string.Join( ", ", optionData )}" );
+                        _logger.LogDebug($"Parameter Request List: {string.Join(", ", optionData)}");
                         break;
                     case DhcpOptionCode.VendorClassIdentifier:
-                        request.VendorClassIdentifier = Encoding.ASCII.GetString( optionData );
-                        _logger.LogInformation( $"Vendor Class Identifier: {request.VendorClassIdentifier}" );
+                        request.VendorClassIdentifier = Encoding.ASCII.GetString(optionData);
+                        _logger.LogInformation($"Vendor Class Identifier: {request.VendorClassIdentifier}");
                         break;
                     case DhcpOptionCode.IPAddressLeaseTime:
-                        request.LeaseTime = BitConverter.ToInt32( optionData, 0 );
-                        _logger.LogInformation( $"Requested Lease Time: {request.LeaseTime} seconds" );
+                        request.LeaseTime = BitConverter.ToInt32(optionData, 0);
+                        _logger.LogInformation($"Requested Lease Time: {request.LeaseTime} seconds");
                         break;
                     // Add more cases for other options as needed
                 }
@@ -239,21 +243,41 @@ public class DhcpWorker : BackgroundService
 
             // Determine if it's a BOOTP request
             request.IsBootp = request.Op == 1;
-            _logger.LogInformation( $"BOOTP request: {request.IsBootp}" );
+            _logger.LogInformation($"BOOTP request: {request.IsBootp}");
 
             // Check for PXE request
-            request.IsPxeRequest = CheckForPxeRequest( buffer );
-            _logger.LogInformation( $"PXE request: {request.IsPxeRequest}" );
+            request.IsPxeRequest = CheckForPxeRequest(buffer);
+            _logger.LogInformation($"PXE request: {request.IsPxeRequest}");
 
             return request;
         }
-        catch ( Exception ex )
+        catch (Exception ex)
         {
-            _logger.LogError( $"Error parsing DHCP request: {ex.Message}" );
+            _logger.LogError($"Error parsing DHCP request: {ex.Message}");
             return null;
         }
     }
 
+    private IPAddress ReadIpAddress(byte[] buffer, int offset)
+    {
+        if (buffer.Length < offset + 4)
+        {
+            _logger.LogWarning($"Buffer too short to read IP address at offset {offset}");
+            return IPAddress.Any;
+        }
+        return new IPAddress(buffer.Skip(offset).Take(4).ToArray());
+    }
+
+    private string ReadPaddedString(byte[] buffer, int offset, int length)
+    {
+        if (buffer.Length < offset + length)
+        {
+            _logger.LogWarning($"Buffer too short to read string at offset {offset} with length {length}");
+            return string.Empty;
+        }
+        return Encoding.ASCII.GetString(buffer, offset, length).TrimEnd('\0');
+    }
+    
     private bool CheckForPxeRequest( byte[] buffer )
     {
         for ( int i = 240; i < buffer.Length; i++ )
