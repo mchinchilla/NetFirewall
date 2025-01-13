@@ -231,7 +231,7 @@ public class DhcpLeasesService : IDhcpLeasesService
         throw new OverflowException( "IP address overflow" );
     }
 
-    private async Task<int> CompareIpAddressesAsync( IPAddress? ip1, IPAddress ip2 )
+    private async Task<int> CompareIpAddressesAsync( IPAddress ip1, IPAddress ip2 )
     {
         byte[] bytes1 = ip1.GetAddressBytes();
         byte[] bytes2 = ip2.GetAddressBytes();
