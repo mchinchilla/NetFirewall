@@ -56,4 +56,3 @@ Broadcast vs. Unicast: Early messages are broadcast, but after an IP is assigned
 Relay Agents: In networks with multiple subnets, DHCP relay agents can be used to forward requests between subnets.
 
 This interaction ensures that clients can dynamically acquire network configurations in a standardized manner, enhancing network manageability and client mobility.
->
