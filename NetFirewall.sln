@@ -18,6 +18,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetFirewall.Services", "Net
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetFirewall.Models", "NetFirewall.Models\NetFirewall.Models.csproj", "{0EA0CAD8-E77A-4DFF-B8D3-69DC0CA0E186}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetFirewall.WanMonitor", "NetFirewall.WanMonitor\NetFirewall.WanMonitor.csproj", "{D6210B46-EEF6-40FE-911A-1E13AFCCAEDC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{7AAAE18F-8533-4C4D-A528-39E1A324EBDF}"
+	ProjectSection(SolutionItems) = preProject
+		compose.yaml = compose.yaml
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -56,6 +63,10 @@ Global
 		{0EA0CAD8-E77A-4DFF-B8D3-69DC0CA0E186}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0EA0CAD8-E77A-4DFF-B8D3-69DC0CA0E186}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0EA0CAD8-E77A-4DFF-B8D3-69DC0CA0E186}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D6210B46-EEF6-40FE-911A-1E13AFCCAEDC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D6210B46-EEF6-40FE-911A-1E13AFCCAEDC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D6210B46-EEF6-40FE-911A-1E13AFCCAEDC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D6210B46-EEF6-40FE-911A-1E13AFCCAEDC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

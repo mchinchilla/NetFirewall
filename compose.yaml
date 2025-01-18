@@ -1,0 +1,6 @@
+﻿services:
+  netfirewall.wanmonitor:
+    image: netfirewall.wanmonitor
+    build:
+      context: .
+      dockerfile: NetFirewall.WanMonitor/Dockerfile
