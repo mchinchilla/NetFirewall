@@ -34,7 +34,7 @@ internal class Program
                 loggerConfiguration.MinimumLevel.Override( "Microsoft", LogEventLevel.Information );
                 loggerConfiguration.Enrich.FromLogContext();
                 loggerConfiguration.WriteTo.Console();
-                loggerConfiguration.WriteTo.File( "logs/wan_monitor.log", rollingInterval: RollingInterval.Day );
+                loggerConfiguration.WriteTo.File( "logs/wan_monitor_.log", rollingInterval: RollingInterval.Day );
             })
             .UseSystemd()
             .Build();
