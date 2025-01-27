@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using NetFirewall.Models;
 
 namespace NetFirewall.WanMonitor;
 
@@ -13,35 +14,75 @@ public class WanMonitorService : BackgroundService
 {
     private readonly ILogger<WanMonitorService> _logger;
     private readonly IConfiguration _configuration;
-    private readonly string? _currentInterface;
-    private readonly string? _currentGateway;
-    private readonly string[]? _currentIPs;
-    private readonly string? _primaryInterface;
-    private readonly string? _secondaryInterface;
+    private readonly List<NetworkInterfaceConfig>? _networkInterfaceConfig;
+    private readonly NetworkInterfaceConfig _primaryInterface;
+    private readonly NetworkInterfaceConfig _secondaryInterface; 
+    private readonly int _checkInterval;
+    private readonly string? _primaryInterfaceName;
+    private readonly string? _secondaryInterfaceName;
     private readonly string? _primaryGateway;
     private readonly string? _secondaryGateway;
-    private readonly string[]? _primaryIPs;
-    private readonly string[]? _secondaryIPs;
+    private readonly List<string>? _primaryIPs;
+    private readonly List<string>? _secondaryIPs;
+
+    private string? _currentInterface;
+    private string? _currentGateway;
+    private List<string>? _currentIPs;
+    private bool _isFailoverActive = false;
+    
 
 
     public WanMonitorService( ILogger<WanMonitorService> logger, IConfiguration configuration )
     {
         _logger = logger;
         _configuration = configuration;
-        
-        _currentInterface = _configuration[ "Network:PrimaryInterface" ];
-        _currentGateway = _configuration[ "Network:PrimaryGateway" ] ?? "";
-        
-        _primaryGateway = _configuration[ "Network:PrimaryGateway" ] ?? "";
-        
-        _currentIPs = _configuration.GetSection( "Network:PrimaryIPs" ).Get<string[]>() ?? [ "8.8.8.8", "1.1.1.1" ];
-        _primaryIPs = _configuration.GetSection( "Network:PrimaryIPs" ).Get<string[]>() ?? [ "8.8.8.8", "1.1.1.1" ];
-        _secondaryIPs = _configuration.GetSection( "Network:SecondaryIPs" ).Get<string[]>() ?? [ "8.8.8.8", "1.1.1.1" ];
+
+        try
+        {
+            _checkInterval = _configuration.GetValue<int?>( "AppConfig:CheckInterval" ) ?? 30;
+            _networkInterfaceConfig = _configuration.GetSection( "Network" ).Get<List<NetworkInterfaceConfig>>();
+            if ( _networkInterfaceConfig == null || _networkInterfaceConfig.Count == 0 )
+            {
+                throw new Exception( $"There is no network configuration." );
+            }
+
+            _primaryInterface = _networkInterfaceConfig.FirstOrDefault( x => x.IsPrimary ) ?? throw new Exception( $"Primary interface is not configured." );
+            _primaryInterfaceName = _networkInterfaceConfig.FirstOrDefault( x => x.IsPrimary )?.InterfaceName;
+            _primaryGateway = _networkInterfaceConfig.FirstOrDefault( x => x.IsPrimary )?.InterfaceGateway;
+            _primaryIPs = _networkInterfaceConfig.FirstOrDefault( x => x.IsPrimary )?.MonitorIPs;
+
+            _secondaryInterface = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary ) ?? throw new Exception( $"Secondary interface is not configured." );
+            _secondaryInterfaceName = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary )?.InterfaceName;
+            _secondaryGateway = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary )?.InterfaceGateway;
+            _secondaryIPs = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary )?.MonitorIPs;
+        }
+        catch ( Exception exc )
+        {
+            _logger.LogError( $"{exc.Message}" );
+            throw new Exception( $"{exc.Message}" );
+        }
     }
 
     protected override async Task ExecuteAsync( CancellationToken stoppingToken )
     {
         _logger.LogInformation( "WAN Monitor Worker Service started." );
+        _logger.LogInformation( $"".PadRight( 40, '=' ) );
+        _logger.LogInformation( $"Primary Interface: {_primaryInterfaceName}" );
+        _logger.LogInformation( $"Primary Gateway: {_primaryGateway}" );
+        _logger.LogInformation( $"Primary IPs: {string.Join( ", ", _primaryIPs )}" );
+
+        _logger.LogInformation( $"".PadRight( 40, '-' ) );
+
+        _logger.LogInformation( $"Secondary Interface: {_secondaryInterfaceName}" );
+        _logger.LogInformation( $"Secondary Gateway: {_secondaryGateway}" );
+        _logger.LogInformation( $"Secondary IPs: {string.Join( ", ", _secondaryIPs )}" );
+
+        _logger.LogInformation( $"".PadRight( 40, '-' ) );
+
+        _logger.LogInformation( $"Check Interval: {_checkInterval} secs" );
+
+        _logger.LogInformation( $"".PadRight( 40, '=' ) );
+
 
         // Notify systemd that the service is ready
         if ( System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform( System.Runtime.InteropServices.OSPlatform.Linux ) )
@@ -54,13 +95,15 @@ public class WanMonitorService : BackgroundService
         {
             new NetworkInterfaceConfig
             {
-                InterfaceName = "ens192", // Primary interface
-                MonitorIPs = _primaryIPs
+                InterfaceName = _primaryInterfaceName, // Primary interface
+                MonitorIPs = _primaryIPs,
+                InterfaceGateway = _primaryGateway,
             },
             new NetworkInterfaceConfig
             {
-                InterfaceName = "ens224", // Backup interface
-                MonitorIPs = _secondaryIPs
+                InterfaceName = _secondaryInterfaceName, // Backup interface
+                MonitorIPs = _secondaryIPs,
+                InterfaceGateway = _secondaryGateway,
             }
         };
 
@@ -68,16 +111,16 @@ public class WanMonitorService : BackgroundService
         string[] failoverCommands =
         {
             "echo 'Switching to backup interface'",
-            $"ip route replace default via {_secondaryGateway} dev ens224", // Example: change the ip route
-            $"/usr/sbin/nft -f /root/working-nftables.conf" // Example: Enable backup interface
+            $"ip route replace default via {_secondaryGateway} dev {_secondaryInterfaceName}",
+            $"/usr/sbin/nft -f /root/working-nftables.conf"
         };
 
         // Bash commands to execute when primary interface is back online
         string[] primaryCommands =
         {
             "echo 'Switching to primary interface'",
-            $"ip route replace default via {_primaryGateway} dev ens192", // Example: change the ip route
-            $"/usr/sbin/nft -f /etc/nftables.conf" // Example: Enable primary interface
+            $"ip route replace default via {_primaryGateway} dev {_primaryInterfaceName}",
+            $"/usr/sbin/nft -f /etc/nftables.conf"
         };
 
         while ( !stoppingToken.IsCancellationRequested )
@@ -85,35 +128,30 @@ public class WanMonitorService : BackgroundService
             try
             {
                 await MonitorInterfacesAsync( interfaces, failoverCommands, primaryCommands, stoppingToken );
-
-                // Notify systemd watchdog (if enabled)
-                if ( System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform( System.Runtime.InteropServices.OSPlatform.Linux ) )
-                {
-                    // Systemd.Notify.Watchdog();
-                    _logger.LogInformation( "Notified systemd watchdog." );
-                }
             }
             catch ( Exception ex )
             {
                 _logger.LogError( ex, "An error occurred while monitoring interfaces." );
             }
-
-            await Task.Delay( 5000, stoppingToken ); // Wait for 5 seconds before the next check
+            finally
+            {
+                _logger.LogInformation( $"Monitoring completed ... wait {_checkInterval} secs" );
+                await Task.Delay( ( _checkInterval * 1000 ), stoppingToken );
+            }
         }
     }
 
     private async Task MonitorInterfacesAsync( List<NetworkInterfaceConfig> interfaces, string[] failoverCommands, string[] primaryCommands, CancellationToken stoppingToken )
     {
         int currentInterfaceIndex = 0;
-        bool isFailoverActive = false; // Track if failover is active
 
         var currentInterface = interfaces[ currentInterfaceIndex ];
         bool allIPsFailed = true;
 
-        _logger.LogInformation( "Monitoring interface: {Interface}", currentInterface.InterfaceName );
+        _logger.LogInformation( $"Monitoring interface: {currentInterface.InterfaceName}, FailoverActive: {_isFailoverActive}" );
 
         // Ping all IPs concurrently using Task.WhenAll
-        var pingTasks = currentInterface.MonitorIPs
+        var pingTasks = currentInterface.MonitorIPs!
             .Select( ip => PingThroughInterfaceAsync( ip, currentInterface.InterfaceName, stoppingToken ) )
             .ToArray();
 
@@ -123,33 +161,33 @@ public class WanMonitorService : BackgroundService
         {
             if ( pingResults[ i ] )
             {
-                _logger.LogInformation( "Ping to {IP} succeeded.", currentInterface.MonitorIPs[ i ] );
+                _logger.LogInformation( $"Ping to {currentInterface.MonitorIPs![ i ]} succeeded." );
                 allIPsFailed = false;
             }
             else
             {
-                _logger.LogWarning( "Ping to {IP} failed.", currentInterface.MonitorIPs[ i ] );
+                _logger.LogWarning( $"Ping to {currentInterface.MonitorIPs![ i ]} failed." );
             }
         }
 
         if ( allIPsFailed )
         {
-            if ( !isFailoverActive )
+            if ( !_isFailoverActive )
             {
-                _logger.LogError( "All IPs failed on interface {Interface}. Executing failover commands...", currentInterface.InterfaceName );
+                _logger.LogWarning( "All IPs failed on interface {Interface}. Executing failover commands...", currentInterface.InterfaceName );
                 await ExecuteBashCommandsAsync( failoverCommands, stoppingToken );
 
                 // Switch to the next interface
                 currentInterfaceIndex = ( currentInterfaceIndex + 1 ) % interfaces.Count;
                 _logger.LogInformation( "Switched to interface: {Interface}", interfaces[ currentInterfaceIndex ].InterfaceName );
-                isFailoverActive = true; // Mark failover as active
+                _isFailoverActive = true;
             }
         }
-        else if ( isFailoverActive )
+        else if ( _isFailoverActive )
         {
             // Check if the primary interface is back online
-            var primaryInterface = interfaces[ 0 ]; // Assuming the first interface is primary
-            var primaryPingTasks = primaryInterface.MonitorIPs
+            var primaryInterface = _primaryInterface;
+            var primaryPingTasks = primaryInterface.MonitorIPs!
                 .Select( ip => PingThroughInterfaceAsync( ip, primaryInterface.InterfaceName, stoppingToken ) )
                 .ToArray();
 
@@ -161,14 +199,14 @@ public class WanMonitorService : BackgroundService
                 await ExecuteBashCommandsAsync( primaryCommands, stoppingToken );
 
                 // Switch back to the primary interface
-                currentInterfaceIndex = 0;
+                currentInterfaceIndex = _networkInterfaceConfig!.IndexOf( _primaryInterface );
                 _logger.LogInformation( "Switched back to primary interface: {Interface}", primaryInterface.InterfaceName );
-                isFailoverActive = false; // Mark failover as inactive
+                _isFailoverActive = false; // Mark failover as inactive
             }
         }
     }
 
-    private async Task<bool> PingThroughInterfaceAsync( string ipAddress, string interfaceName, CancellationToken stoppingToken )
+    private async Task<bool> PingThroughInterfaceAsync( string ipAddress, string? interfaceName, CancellationToken stoppingToken )
     {
         Process process = null;
         try
