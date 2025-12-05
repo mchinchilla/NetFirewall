@@ -94,21 +94,22 @@ This interaction ensures that clients can dynamically acquire network configurat
 4. Run the following command:
    dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/wanmonitor
 5. Create a service file in /etc/systemd/system/netfirewall-wanmonitor.service with the following content:
-    [Unit]
-    Description=NetFirewall WAN Monitor Service
-    After=network.target
-    
-    [Service]
-    ExecStart=/usr/bin/nice -n -20 /opt/netfirewall/wanmonitor/NetFirewall.WanMonitor
-    Restart=always
-    RestartSec=10
-    SyslogIdentifier=wanmonitor
-    KillSignal=SIGINT
-    Environment=ASPNETCORE_ENVIRONMENT=Production
-    Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
-    
-    [Install]
-    WantedBy=multi-user.target
+[Unit]
+Description=NetFirewall WAN Monitor Service
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/netfirewall/wanmonitor
+ExecStart=/usr/bin/nice -n -20 /opt/netfirewall/wanmonitor/NetFirewall.WanMonitor
+Restart=always
+RestartSec=10
+SyslogIdentifier=wanmonitor
+KillSignal=SIGINT
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+
+[Install]
+WantedBy=multi-user.target
 6. Change the appsettings.json file to match your network configuration 
    
 7. Run the following commands:
