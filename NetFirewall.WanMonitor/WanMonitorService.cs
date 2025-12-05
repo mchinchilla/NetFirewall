@@ -24,6 +24,8 @@ public class WanMonitorService : BackgroundService
     private readonly string? _secondaryGateway;
     private readonly List<string>? _primaryIPs;
     private readonly List<string>? _secondaryIPs;
+    private readonly List<string>? _extraPrimaryCommands;
+    private readonly List<string>? _extraSecondaryCommands;
 
     private string? _currentInterface;
     private string? _currentGateway;
@@ -55,6 +57,10 @@ public class WanMonitorService : BackgroundService
             _secondaryInterfaceName = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary )?.InterfaceName;
             _secondaryGateway = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary )?.InterfaceGateway;
             _secondaryIPs = _networkInterfaceConfig.FirstOrDefault( x => !x.IsPrimary )?.MonitorIPs;
+
+            var bashCommandsConfig = _configuration.GetSection( "BashCommands" ).Get<BashCommandsConfig>();
+            _extraPrimaryCommands = bashCommandsConfig?.ExtraPrimaryCommands ?? new List<string>();
+            _extraSecondaryCommands = bashCommandsConfig?.ExtraSecondaryCommands ?? new List<string>();
         }
         catch ( Exception exc )
         {
@@ -108,20 +114,32 @@ public class WanMonitorService : BackgroundService
         };
 
         // Bash commands to execute when failover occurs
-        string[] failoverCommands =
+        var failoverCommandsList = new List<string>
         {
             "echo 'Switching to backup interface'",
-            $"ip route replace default via {_secondaryGateway} dev {_secondaryInterfaceName}",
-            $"/usr/sbin/nft -f /root/working-nftables.conf"
+            $"ip route replace default via {_secondaryGateway} dev {_secondaryInterfaceName}"
         };
+        if ( _extraSecondaryCommands != null && _extraSecondaryCommands.Count > 0 )
+        {
+            failoverCommandsList.AddRange( _extraSecondaryCommands );
+        }
+        string[] failoverCommands = failoverCommandsList.ToArray();
 
         // Bash commands to execute when primary interface is back online
-        string[] primaryCommands =
+        var primaryCommandsList = new List<string>
         {
             "echo 'Switching to primary interface'",
-            $"ip route replace default via {_primaryGateway} dev {_primaryInterfaceName}",
-            $"/usr/sbin/nft -f /etc/nftables.conf"
+            $"ip route replace default via {_primaryGateway} dev {_primaryInterfaceName}"
         };
+        if ( _extraPrimaryCommands != null && _extraPrimaryCommands.Count > 0 )
+        {
+            primaryCommandsList.AddRange( _extraPrimaryCommands );
+        }
+        string[] primaryCommands = primaryCommandsList.ToArray();
+
+        _logger.LogInformation( "Executing primary commands on service startup..." );
+        await ExecuteBashCommandsAsync( primaryCommands, stoppingToken );
+        _logger.LogInformation( "Primary commands executed successfully." );
 
         while ( !stoppingToken.IsCancellationRequested )
         {
