@@ -61,6 +61,18 @@ public class WanMonitorService : BackgroundService
             var bashCommandsConfig = _configuration.GetSection( "BashCommands" ).Get<BashCommandsConfig>();
             _extraPrimaryCommands = bashCommandsConfig?.ExtraPrimaryCommands ?? new List<string>();
             _extraSecondaryCommands = bashCommandsConfig?.ExtraSecondaryCommands ?? new List<string>();
+            
+            foreach ( var command in bashCommandsConfig.ExtraPrimaryCommands )
+            {
+                _logger.LogInformation( $"Extra Primary Command: {command}" );
+            }
+
+            foreach ( var VARIABLE in bashCommandsConfig.ExtraSecondaryCommands )
+            {
+                _logger.LogInformation( $"Extra Secondary Command: {VARIABLE}" );
+            }
+            
+            _logger.LogInformation( "WAN Monitor Worker Service configuration loaded successfully." );
         }
         catch ( Exception exc )
         {
@@ -117,7 +129,7 @@ public class WanMonitorService : BackgroundService
         var failoverCommandsList = new List<string>
         {
             "echo 'Switching to backup interface'",
-            $"ip route replace default via {_secondaryGateway} dev {_secondaryInterfaceName}"
+            $"echo 'ip route replace default via {_secondaryGateway} dev {_secondaryInterfaceName}'"
         };
         if ( _extraSecondaryCommands != null && _extraSecondaryCommands.Count > 0 )
         {
@@ -129,7 +141,7 @@ public class WanMonitorService : BackgroundService
         var primaryCommandsList = new List<string>
         {
             "echo 'Switching to primary interface'",
-            $"ip route replace default via {_primaryGateway} dev {_primaryInterfaceName}"
+            $"echo 'ip route replace default via {_primaryGateway} dev {_primaryInterfaceName}'"
         };
         if ( _extraPrimaryCommands != null && _extraPrimaryCommands.Count > 0 )
         {
@@ -269,6 +281,7 @@ public class WanMonitorService : BackgroundService
     {
         foreach ( var command in commands )
         {
+            _logger.LogInformation(  $"Executing command: {command}" );
             Process process = null;
             try
             {
@@ -282,7 +295,8 @@ public class WanMonitorService : BackgroundService
 
                 process.Start();
                 await process.WaitForExitAsync( stoppingToken ); // Wait asynchronously for the process to exit
-
+                
+                _logger.LogInformation( $"Ready to execute the command: {command}" );
                 string output = await process.StandardOutput.ReadToEndAsync();
                 _logger.LogInformation( "Executed command: {Command}. Output: {Output}", command, output );
             }
