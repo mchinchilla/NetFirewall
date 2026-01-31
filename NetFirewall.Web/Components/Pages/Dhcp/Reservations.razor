@@ -23,6 +23,65 @@
         </button>
     </div>
 
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+            <div class="flex items-center gap-2 text-red-700 dark:text-red-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>@_errorMessage</span>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_successMessage))
+    {
+        <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+            <div class="flex items-center gap-2 text-green-700 dark:text-green-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <span>@_successMessage</span>
+            </div>
+        </div>
+    }
+
+    <!-- Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="stat-card">
+            <p class="stat-label">Total Reservations</p>
+            <p class="stat-value">@_reservations.Count</p>
+        </div>
+        <div class="stat-card">
+            <p class="stat-label">In Use</p>
+            <p class="stat-value text-green-600">@_reservations.Count(r => IsReservationActive(r))</p>
+        </div>
+        <div class="stat-card">
+            <p class="stat-label">Available</p>
+            <p class="stat-value text-blue-600">@_reservations.Count(r => !IsReservationActive(r))</p>
+        </div>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+        <div class="card-body py-3">
+            <div class="flex items-center gap-4">
+                <div class="flex-1">
+                    <input type="text" class="form-input" placeholder="Search by MAC, IP, or description..." @bind="_searchTerm" @bind:event="oninput" />
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600 dark:text-gray-400">Show:</label>
+                    <select class="form-select w-auto" @bind="_filterStatus">
+                        <option value="all">All Reservations</option>
+                        <option value="active">In Use Only</option>
+                        <option value="reserved">Available Only</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Reservations Table -->
     <div class="card">
         <div class="overflow-x-auto">
@@ -37,7 +96,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var res in _reservations)
+                    @foreach (var res in FilteredReservations)
                     {
                         var isActive = IsReservationActive(res);
                         <tr>
@@ -70,6 +129,32 @@
                             </td>
                         </tr>
                     }
+                    @if (!FilteredReservations.Any())
+                    {
+                        <tr>
+                            <td colspan="5" class="text-center py-8 text-gray-500 dark:text-gray-400">
+                                @if (_reservations.Any())
+                                {
+                                    <span>No reservations found matching your criteria.</span>
+                                }
+                                else
+                                {
+                                    <div class="py-4">
+                                        <svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                        </svg>
+                                        <p class="mb-3">No reservations configured yet.</p>
+                                        <button class="btn-primary" @onclick="ShowAddModal">
+                                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                            </svg>
+                                            Add First Reservation
+                                        </button>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
                 </tbody>
             </table>
         </div>
@@ -86,22 +171,70 @@
                 </h3>
             </div>
             <div class="px-6 py-5 space-y-5">
+                @if (!string.IsNullOrEmpty(_modalError))
+                {
+                    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                        <p class="text-sm text-red-700 dark:text-red-300">@_modalError</p>
+                    </div>
+                }
                 <div>
-                    <label class="form-label">MAC Address</label>
-                    <input type="text" class="form-input font-mono" @bind="_editMac" placeholder="AA:BB:CC:DD:EE:FF" />
+                    <label class="form-label">MAC Address <span class="text-red-500">*</span></label>
+                    <input type="text" class="form-input font-mono @(_macError ? "border-red-500" : "")" @bind="_editMac" placeholder="AA:BB:CC:DD:EE:FF" />
+                    @if (_macError)
+                    {
+                        <p class="text-xs text-red-500 mt-1">Please enter a valid MAC address (e.g., AA:BB:CC:DD:EE:FF)</p>
+                    }
                 </div>
                 <div>
-                    <label class="form-label">IP Address</label>
-                    <input type="text" class="form-input font-mono" @bind="_editIp" placeholder="192.168.99.10" />
+                    <label class="form-label">IP Address <span class="text-red-500">*</span></label>
+                    <input type="text" class="form-input font-mono @(_ipError ? "border-red-500" : "")" @bind="_editIp" placeholder="192.168.99.10" />
+                    @if (_ipError)
+                    {
+                        <p class="text-xs text-red-500 mt-1">Please enter a valid IP address (e.g., 192.168.1.10)</p>
+                    }
                 </div>
                 <div>
                     <label class="form-label">Description (optional)</label>
-                    <input type="text" class="form-input" @bind="_editDescription" placeholder="Web Server" />
+                    <input type="text" class="form-input" @bind="_editDescription" placeholder="Web Server, Printer, etc." />
                 </div>
             </div>
             <div class="px-6 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 flex justify-end gap-3">
-                <button class="btn-secondary" @onclick="() => _showAddModal = false">Cancel</button>
-                <button class="btn-primary" @onclick="SaveReservation">Save</button>
+                <button class="btn-secondary" @onclick="CloseModal">Cancel</button>
+                <button class="btn-primary" @onclick="SaveReservation" disabled="@_saving">
+                    @if (_saving)
+                    {
+                        <svg class="animate-spin w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>Save</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* Confirm Delete Modal *@
+@if (_showDeleteModal)
+{
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 dark:border-gray-700">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">Confirm Delete</h3>
+            </div>
+            <div class="px-6 py-5">
+                <p class="text-gray-600 dark:text-gray-400">
+                    Are you sure you want to delete the reservation for <span class="font-mono font-medium text-gray-900 dark:text-white">@_deleteReservation?.ReservedIp</span>?
+                </p>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 flex justify-end gap-3">
+                <button class="btn-secondary" @onclick="() => _showDeleteModal = false">Cancel</button>
+                <button class="btn-danger" @onclick="ConfirmDelete">Delete</button>
             </div>
         </div>
     </div>
@@ -109,8 +242,12 @@
 
 @code {
     private bool _showAddModal = false;
+    private bool _showDeleteModal = false;
     private IReadOnlyList<DhcpMacReservation> _reservations = [];
     private IReadOnlyList<DhcpLease> _activeLeases = [];
+
+    private string _searchTerm = "";
+    private string _filterStatus = "all";
 
     // Form fields for add/edit
     private string _editMac = "";
@@ -118,20 +255,50 @@
     private string _editDescription = "";
     private Guid? _editId = null;
 
+    // Validation
+    private bool _macError = false;
+    private bool _ipError = false;
+    private string? _modalError = null;
+    private bool _saving = false;
+
+    // Delete confirmation
+    private DhcpMacReservation? _deleteReservation = null;
+
+    // Messages
+    private string? _errorMessage = null;
+    private string? _successMessage = null;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadReservationsAsync();
     }
 
+    private IEnumerable<DhcpMacReservation> FilteredReservations => _reservations
+        .Where(r => _filterStatus == "all" ||
+                    (_filterStatus == "active" && IsReservationActive(r)) ||
+                    (_filterStatus == "reserved" && !IsReservationActive(r)))
+        .Where(r => string.IsNullOrEmpty(_searchTerm) ||
+                    FormatMac(r.MacAddress).Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    r.ReservedIp.ToString().Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    (r.Description?.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ?? false))
+        .OrderBy(r => r.ReservedIp.ToString());
+
     private async Task LoadReservationsAsync()
     {
-        var reservationsTask = DhcpService.GetReservationsAsync();
-        var leasesTask = DhcpService.GetActiveLeasesAsync();
+        try
+        {
+            var reservationsTask = DhcpService.GetReservationsAsync();
+            var leasesTask = DhcpService.GetActiveLeasesAsync();
 
-        await Task.WhenAll(reservationsTask, leasesTask);
+            await Task.WhenAll(reservationsTask, leasesTask);
 
-        _reservations = await reservationsTask;
-        _activeLeases = await leasesTask;
+            _reservations = await reservationsTask;
+            _activeLeases = await leasesTask;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error loading reservations: {ex.Message}";
+        }
     }
 
     private bool IsReservationActive(DhcpMacReservation reservation)
@@ -147,7 +314,11 @@
         _editMac = "";
         _editIp = "";
         _editDescription = "";
+        _macError = false;
+        _ipError = false;
+        _modalError = null;
         _showAddModal = true;
+        ClearMessages();
     }
 
     private void ShowEditModal(DhcpMacReservation reservation)
@@ -156,42 +327,119 @@
         _editMac = FormatMac(reservation.MacAddress);
         _editIp = reservation.ReservedIp.ToString();
         _editDescription = reservation.Description ?? "";
+        _macError = false;
+        _ipError = false;
+        _modalError = null;
         _showAddModal = true;
+        ClearMessages();
+    }
+
+    private void CloseModal()
+    {
+        _showAddModal = false;
+        _macError = false;
+        _ipError = false;
+        _modalError = null;
     }
 
     private async Task SaveReservation()
     {
-        var mac = PhysicalAddress.Parse(_editMac.Replace(":", "-"));
-        var ip = IPAddress.Parse(_editIp);
+        _macError = false;
+        _ipError = false;
+        _modalError = null;
 
-        if (_editId.HasValue)
+        // Validate MAC address
+        PhysicalAddress? mac = null;
+        try
         {
-            await DhcpService.UpdateReservationAsync(new DhcpMacReservation
-            {
-                Id = _editId.Value,
-                MacAddress = mac,
-                ReservedIp = ip,
-                Description = string.IsNullOrEmpty(_editDescription) ? null : _editDescription
-            });
+            mac = PhysicalAddress.Parse(_editMac.Replace(":", "-").Replace(".", "-"));
         }
-        else
+        catch
         {
-            await DhcpService.CreateReservationAsync(new DhcpMacReservation
-            {
-                MacAddress = mac,
-                ReservedIp = ip,
-                Description = string.IsNullOrEmpty(_editDescription) ? null : _editDescription
-            });
+            _macError = true;
         }
 
-        _showAddModal = false;
-        await LoadReservationsAsync();
+        // Validate IP address
+        IPAddress? ip = null;
+        if (!IPAddress.TryParse(_editIp, out ip))
+        {
+            _ipError = true;
+        }
+
+        if (_macError || _ipError)
+        {
+            return;
+        }
+
+        _saving = true;
+
+        try
+        {
+            if (_editId.HasValue)
+            {
+                await DhcpService.UpdateReservationAsync(new DhcpMacReservation
+                {
+                    Id = _editId.Value,
+                    MacAddress = mac!,
+                    ReservedIp = ip!,
+                    Description = string.IsNullOrEmpty(_editDescription) ? null : _editDescription
+                });
+                _successMessage = "Reservation updated successfully";
+            }
+            else
+            {
+                await DhcpService.CreateReservationAsync(new DhcpMacReservation
+                {
+                    MacAddress = mac!,
+                    ReservedIp = ip!,
+                    Description = string.IsNullOrEmpty(_editDescription) ? null : _editDescription
+                });
+                _successMessage = $"Reservation created for {_editIp}";
+            }
+
+            _showAddModal = false;
+            await LoadReservationsAsync();
+        }
+        catch (Exception ex)
+        {
+            _modalError = $"Error saving reservation: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 
-    private async Task DeleteReservation(DhcpMacReservation reservation)
+    private void DeleteReservation(DhcpMacReservation reservation)
     {
-        await DhcpService.DeleteReservationAsync(reservation.Id);
-        await LoadReservationsAsync();
+        _deleteReservation = reservation;
+        _showDeleteModal = true;
+        ClearMessages();
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (_deleteReservation == null) return;
+
+        try
+        {
+            await DhcpService.DeleteReservationAsync(_deleteReservation.Id);
+            _successMessage = $"Reservation for {_deleteReservation.ReservedIp} deleted successfully";
+            _showDeleteModal = false;
+            _deleteReservation = null;
+            await LoadReservationsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error deleting reservation: {ex.Message}";
+            _showDeleteModal = false;
+        }
+    }
+
+    private void ClearMessages()
+    {
+        _errorMessage = null;
+        _successMessage = null;
     }
 
     private static string FormatMac(PhysicalAddress mac)
