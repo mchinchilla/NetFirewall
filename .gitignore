@@ -369,3 +369,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Tailwind CSS standalone binary (install globally)
+**/tools/tailwindcss
