@@ -1,46 +1,53 @@
 @inherits LayoutComponentBase
+@inject IJSRuntime JS
 
-<div class="flex h-screen bg-gray-100 dark:bg-gray-900">
+<div class="flex h-screen main-surface">
+    <!-- Mobile overlay -->
+    @if (_sidebarOpen)
+    {
+        <div class="fixed inset-0 bg-black/50 z-40 lg:hidden" @onclick="ToggleSidebar"></div>
+    }
+
     <!-- Sidebar -->
-    <NavMenu />
+    <NavMenu IsOpen="_sidebarOpen" OnClose="ToggleSidebar" />
 
     <!-- Main content area -->
-    <div class="flex-1 flex flex-col overflow-hidden">
-        <!-- Top header -->
-        <header class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-            <div class="flex items-center justify-between px-6 py-4">
-                <div class="flex items-center gap-4">
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <!-- Top header with glass effect -->
+        <header class="bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl shadow-sm border-b border-gray-200/50 dark:border-gray-700/50">
+            <div class="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
+                <div class="flex items-center gap-3 sm:gap-4">
                     <button @onclick="ToggleSidebar" class="btn-icon lg:hidden">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
                         </svg>
                     </button>
-                    <h1 class="text-xl font-semibold text-gray-900 dark:text-white">
+                    <h1 class="text-lg sm:text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent truncate">
                         @PageTitle
                     </h1>
                 </div>
 
-                <div class="flex items-center gap-4">
-                    <!-- System status indicator -->
-                    <div class="flex items-center gap-2">
-                        <span class="relative flex h-3 w-3">
+                <div class="flex items-center gap-2 sm:gap-5">
+                    <!-- System status indicator - hide text on mobile -->
+                    <div class="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-full bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800">
+                        <span class="relative flex h-2.5 w-2.5">
                             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
                         </span>
-                        <span class="text-sm text-gray-600 dark:text-gray-400">System Online</span>
+                        <span class="text-xs font-medium text-green-700 dark:text-green-300 hidden sm:inline">Online</span>
                     </div>
 
                     <!-- Dark mode toggle -->
-                    <button @onclick="ToggleDarkMode" class="btn-icon" title="Toggle dark mode">
+                    <button @onclick="ToggleDarkMode" class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center" title="Toggle dark mode">
                         @if (_darkMode)
                         {
-                            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
                             </svg>
                         }
                         else
                         {
-                            <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                             </svg>
                         }
@@ -50,15 +57,18 @@
         </header>
 
         <!-- Page content -->
-        <main class="flex-1 overflow-y-auto p-6">
+        <main class="flex-1 overflow-y-auto p-4 sm:p-6">
             @Body
         </main>
 
-        <!-- Footer -->
-        <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-3">
-            <div class="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-                <span>NetFirewall v1.0</span>
-                <span>Built with .NET 10.0 and Blazor</span>
+        <!-- Footer with glass effect - simplified on mobile -->
+        <footer class="bg-white/60 dark:bg-gray-800/60 backdrop-blur-lg border-t border-gray-200/50 dark:border-gray-700/50 px-4 py-2 sm:px-6 sm:py-3">
+            <div class="flex items-center justify-between text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                <span class="font-medium">NetFirewall v1.0</span>
+                <span class="hidden sm:flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-primary-500"></span>
+                    Built with .NET 10.0 and Blazor
+                </span>
             </div>
         </footer>
     </div>
@@ -71,9 +81,18 @@
     [CascadingParameter]
     private string? PageTitle { get; set; }
 
-    private void ToggleDarkMode()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _darkMode = !_darkMode;
+        if (firstRender)
+        {
+            _darkMode = await JS.InvokeAsync<bool>("themeManager.isDark");
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleDarkMode()
+    {
+        _darkMode = await JS.InvokeAsync<bool>("themeManager.toggle");
     }
 
     private void ToggleSidebar()

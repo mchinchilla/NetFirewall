@@ -408,22 +408,43 @@ public sealed class SystemMonitorService : ISystemMonitorService
             if (iface.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up)
                 continue;
 
-            var stats = iface.GetIPStatistics();
-            metrics.Add(new NetworkMetrics
+            try
             {
-                InterfaceName = iface.Name,
-                BytesReceived = stats.BytesReceived,
-                BytesSent = stats.BytesSent,
-                PacketsReceived = stats.UnicastPacketsReceived,
-                PacketsSent = stats.UnicastPacketsSent,
-                ErrorsReceived = stats.IncomingPacketsWithErrors,
-                ErrorsSent = stats.OutgoingPacketsWithErrors,
-                DropsReceived = stats.IncomingPacketsDiscarded,
-                DropsSent = stats.OutgoingPacketsDiscarded
-            });
+                var stats = iface.GetIPStatistics();
+
+                // Some properties throw PlatformNotSupportedException on macOS/BSD
+                metrics.Add(new NetworkMetrics
+                {
+                    InterfaceName = iface.Name,
+                    BytesReceived = stats.BytesReceived,
+                    BytesSent = stats.BytesSent,
+                    PacketsReceived = stats.UnicastPacketsReceived,
+                    PacketsSent = stats.UnicastPacketsSent,
+                    ErrorsReceived = SafeGetStat(() => stats.IncomingPacketsWithErrors),
+                    ErrorsSent = SafeGetStat(() => stats.OutgoingPacketsWithErrors),
+                    DropsReceived = SafeGetStat(() => stats.IncomingPacketsDiscarded),
+                    DropsSent = SafeGetStat(() => stats.OutgoingPacketsDiscarded)
+                });
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // Skip interfaces that don't support statistics on this platform
+            }
         }
 
         return metrics;
+    }
+
+    private static long SafeGetStat(Func<long> getter)
+    {
+        try
+        {
+            return getter();
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return 0;
+        }
     }
 
     #endregion

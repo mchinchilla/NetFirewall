@@ -10,7 +10,7 @@
     <!-- Page Header -->
     <div class="flex items-center justify-between">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Network Interfaces</h1>
+            <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">Network Interfaces</h1>
             <p class="text-gray-600 dark:text-gray-400 mt-1">Manage network interfaces and their configuration</p>
         </div>
         <button @onclick="ShowAddModal" class="btn-primary">
@@ -33,33 +33,33 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         @foreach (var iface in _interfaces)
         {
-            <div class="card">
+            <div class="card group hover:shadow-xl transition-all duration-300">
                 <div class="card-body">
                     <div class="flex items-start justify-between mb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 bg-@GetTypeColor(iface.Type)-100 dark:bg-@GetTypeColor(iface.Type)-900 rounded-lg flex items-center justify-center">
+                        <div class="flex items-center gap-4">
+                            <div class="w-14 h-14 @GetTypeGradient(iface.Type) rounded-2xl flex items-center justify-center shadow-lg @GetTypeShadow(iface.Type) group-hover:scale-110 transition-transform duration-300">
                                 @if (iface.Type == "WAN")
                                 {
-                                    <svg class="w-6 h-6 text-@GetTypeColor(iface.Type)-600 dark:text-@GetTypeColor(iface.Type)-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                 }
                                 else if (iface.Type == "LAN")
                                 {
-                                    <svg class="w-6 h-6 text-@GetTypeColor(iface.Type)-600 dark:text-@GetTypeColor(iface.Type)-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                                     </svg>
                                 }
                                 else
                                 {
-                                    <svg class="w-6 h-6 text-@GetTypeColor(iface.Type)-600 dark:text-@GetTypeColor(iface.Type)-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                     </svg>
                                 }
                             </div>
                             <div>
-                                <h3 class="font-semibold text-gray-900 dark:text-white">@iface.Name</h3>
-                                <span class="badge-@(iface.Type == "WAN" ? "info" : iface.Type == "LAN" ? "success" : "warning")">@iface.Type</span>
+                                <h3 class="font-bold text-gray-900 dark:text-white text-lg">@iface.Name</h3>
+                                <span class="@GetTypeBadge(iface.Type)">@iface.Type</span>
                             </div>
                         </div>
                         <button class="toggle @(iface.Enabled ? "toggle-enabled" : "toggle-disabled")" @onclick="async () => await ToggleInterface(iface)">
@@ -67,37 +67,37 @@
                         </button>
                     </div>
 
-                    <div class="space-y-3 text-sm">
-                        <div class="flex justify-between">
+                    <div class="space-y-3 text-sm bg-gray-50/50 dark:bg-gray-800/50 rounded-xl p-4">
+                        <div class="flex justify-between items-center">
                             <span class="text-gray-500 dark:text-gray-400">Role</span>
-                            <span class="text-gray-900 dark:text-white">@iface.Role</span>
+                            <span class="font-medium text-gray-900 dark:text-white">@iface.Role</span>
                         </div>
-                        <div class="flex justify-between">
+                        <div class="flex justify-between items-center">
                             <span class="text-gray-500 dark:text-gray-400">IP Address</span>
-                            <span class="font-mono text-gray-900 dark:text-white">@(iface.IpAddress?.ToString() ?? "-")</span>
+                            <span class="font-mono font-medium text-gray-900 dark:text-white">@(iface.IpAddress?.ToString() ?? "-")</span>
                         </div>
-                        <div class="flex justify-between">
+                        <div class="flex justify-between items-center">
                             <span class="text-gray-500 dark:text-gray-400">Subnet</span>
                             <span class="font-mono text-gray-900 dark:text-white">@(iface.SubnetMask?.ToString() ?? "-")</span>
                         </div>
                         @if (iface.Gateway != null)
                         {
-                            <div class="flex justify-between">
+                            <div class="flex justify-between items-center">
                                 <span class="text-gray-500 dark:text-gray-400">Gateway</span>
                                 <span class="font-mono text-gray-900 dark:text-white">@iface.Gateway.ToString()</span>
                             </div>
                         }
                     </div>
 
-                    <div class="flex gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                        <button class="btn-secondary flex-1 text-sm py-1.5">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="flex gap-3 mt-4 pt-4 border-t border-gray-200/50 dark:border-gray-700/50">
+                        <button class="btn-secondary flex-1 text-sm py-2">
+                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                             </svg>
                             Edit
                         </button>
-                        <button class="btn-danger flex-1 text-sm py-1.5" @onclick="() => DeleteInterface(iface)">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <button class="btn-danger flex-1 text-sm py-2" @onclick="() => DeleteInterface(iface)">
+                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
                             Delete
@@ -147,11 +147,27 @@
         await LoadInterfacesAsync();
     }
 
-    private string GetTypeColor(string type) => type switch
+    private string GetTypeGradient(string type) => type switch
     {
-        "WAN" => "blue",
-        "LAN" => "green",
-        "VPN" => "purple",
-        _ => "gray"
+        "WAN" => "bg-gradient-to-br from-blue-400 to-blue-600",
+        "LAN" => "bg-gradient-to-br from-emerald-400 to-emerald-600",
+        "VPN" => "bg-gradient-to-br from-violet-400 to-purple-600",
+        _ => "bg-gradient-to-br from-gray-400 to-gray-500"
+    };
+
+    private string GetTypeShadow(string type) => type switch
+    {
+        "WAN" => "shadow-blue-500/25",
+        "LAN" => "shadow-emerald-500/25",
+        "VPN" => "shadow-violet-500/25",
+        _ => "shadow-gray-500/25"
+    };
+
+    private string GetTypeBadge(string type) => type switch
+    {
+        "WAN" => "badge-info",
+        "LAN" => "badge-success",
+        "VPN" => "badge-warning",
+        _ => "badge-info"
     };
 }

@@ -7,6 +7,30 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
     <link rel="stylesheet" href="css/app.css" />
     <HeadOutlet />
+    <script>
+        // Theme management - default is light
+        window.themeManager = {
+            init: function() {
+                const stored = localStorage.getItem('theme');
+                if (stored === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    return true;
+                }
+                document.documentElement.classList.remove('dark');
+                return false;
+            },
+            toggle: function() {
+                const isDark = document.documentElement.classList.toggle('dark');
+                localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                return isDark;
+            },
+            isDark: function() {
+                return document.documentElement.classList.contains('dark');
+            }
+        };
+        // Initialize theme immediately to prevent flash
+        window.themeManager.init();
+    </script>
 </head>
 <body class="h-full">
     <Routes />

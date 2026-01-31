@@ -12,7 +12,7 @@
     <!-- Page Header -->
     <div class="flex items-center justify-between">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">MAC Reservations</h1>
+            <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">MAC Reservations</h1>
             <p class="text-gray-600 dark:text-gray-400 mt-1">Reserve IP addresses for specific MAC addresses</p>
         </div>
         <button @onclick="ShowAddModal" class="btn-primary">
@@ -78,14 +78,14 @@
 
 @if (_showAddModal)
 {
-    <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-750">
+                <h3 class="text-lg font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">
                     @(_editId.HasValue ? "Edit Reservation" : "Add Reservation")
                 </h3>
             </div>
-            <div class="px-6 py-4 space-y-4">
+            <div class="px-6 py-5 space-y-5">
                 <div>
                     <label class="form-label">MAC Address</label>
                     <input type="text" class="form-input font-mono" @bind="_editMac" placeholder="AA:BB:CC:DD:EE:FF" />
@@ -99,7 +99,7 @@
                     <input type="text" class="form-input" @bind="_editDescription" placeholder="Web Server" />
                 </div>
             </div>
-            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+            <div class="px-6 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 flex justify-end gap-3">
                 <button class="btn-secondary" @onclick="() => _showAddModal = false">Cancel</button>
                 <button class="btn-primary" @onclick="SaveReservation">Save</button>
             </div>
