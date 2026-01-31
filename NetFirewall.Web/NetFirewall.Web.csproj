@@ -10,6 +10,20 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NetFirewall.ServiceDefaults\NetFirewall.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
+    <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
   </ItemGroup>
+
+  <!-- Tailwind CSS Build -->
+  <Target Name="TailwindBuild" BeforeTargets="Build">
+    <Message Importance="high" Text="Building Tailwind CSS..." />
+    <Exec Command="./tools/tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css --minify" WorkingDirectory="$(ProjectDir)" Condition="'$(Configuration)' == 'Release'" />
+    <Exec Command="./tools/tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css" WorkingDirectory="$(ProjectDir)" Condition="'$(Configuration)' != 'Release'" />
+  </Target>
+
+  <!-- Watch Tailwind CSS during development -->
+  <Target Name="TailwindWatch" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+    <Message Importance="high" Text="Tailwind CSS compiled. For watch mode, run: ./tools/tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css --watch" />
+  </Target>
 
 </Project>

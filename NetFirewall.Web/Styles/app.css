@@ -1,0 +1,363 @@
+@import "tailwindcss";
+
+/* Custom theme configuration for NetFirewall */
+@theme {
+  /* Primary color - Blue for tech/networking feel */
+  --color-primary-50: oklch(97% 0.01 250);
+  --color-primary-100: oklch(93% 0.03 250);
+  --color-primary-200: oklch(86% 0.06 250);
+  --color-primary-300: oklch(76% 0.12 250);
+  --color-primary-400: oklch(64% 0.18 250);
+  --color-primary-500: oklch(55% 0.22 250);
+  --color-primary-600: oklch(48% 0.22 250);
+  --color-primary-700: oklch(42% 0.19 250);
+  --color-primary-800: oklch(36% 0.15 250);
+  --color-primary-900: oklch(30% 0.12 250);
+  --color-primary-950: oklch(22% 0.08 250);
+
+  /* Sidebar background */
+  --color-sidebar: oklch(20% 0.02 250);
+  --color-sidebar-hover: oklch(25% 0.03 250);
+}
+
+/* Base styles */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-gray-100);
+    color: var(--color-gray-900);
+  }
+}
+
+/* Component styles - using regular CSS selectors for full control */
+@layer components {
+  /* Card component */
+  .card {
+    background-color: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    border: 1px solid var(--color-gray-200);
+  }
+
+  .card-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--color-gray-200);
+  }
+
+  .card-body {
+    padding: 1.5rem;
+  }
+
+  /* Button component */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    transition-property: color, background-color, border-color;
+    transition-duration: 150ms;
+  }
+
+  .btn:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-primary-500);
+  }
+
+  .btn-primary {
+    background-color: var(--color-primary-600);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--color-primary-700);
+  }
+
+  .btn-secondary {
+    background-color: var(--color-gray-200);
+    color: var(--color-gray-900);
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--color-gray-300);
+  }
+
+  .btn-danger {
+    background-color: var(--color-red-600);
+    color: white;
+  }
+
+  .btn-danger:hover {
+    background-color: var(--color-red-700);
+  }
+
+  .btn-success {
+    background-color: var(--color-green-600);
+    color: white;
+  }
+
+  .btn-success:hover {
+    background-color: var(--color-green-700);
+  }
+
+  .btn-icon {
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    transition-property: background-color;
+    transition-duration: 150ms;
+  }
+
+  .btn-icon:hover {
+    background-color: var(--color-gray-100);
+  }
+
+  /* Form components */
+  .form-input {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    border: 1px solid var(--color-gray-300);
+    border-radius: 0.5rem;
+    background-color: white;
+    color: var(--color-gray-900);
+  }
+
+  .form-input::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  .form-input:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-primary-500);
+    border-color: transparent;
+  }
+
+  .form-select {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 2.5rem 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    border: 1px solid var(--color-gray-300);
+    border-radius: 0.5rem;
+    background-color: white;
+    color: var(--color-gray-900);
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-gray-700);
+    margin-bottom: 0.25rem;
+  }
+
+  .form-checkbox {
+    height: 1rem;
+    width: 1rem;
+    color: var(--color-primary-600);
+    border-color: var(--color-gray-300);
+    border-radius: 0.25rem;
+  }
+
+  /* Table component */
+  .table {
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .table thead {
+    background-color: var(--color-gray-50);
+  }
+
+  .table th {
+    padding: 0.75rem 1.5rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .table tbody {
+    background-color: white;
+  }
+
+  .table td {
+    padding: 1rem 1.5rem;
+    white-space: nowrap;
+    font-size: 0.875rem;
+    color: var(--color-gray-900);
+    border-bottom: 1px solid var(--color-gray-200);
+  }
+
+  .table tbody tr:hover {
+    background-color: var(--color-gray-50);
+  }
+
+  /* Badge component */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.625rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .badge-success {
+    background-color: var(--color-green-100);
+    color: var(--color-green-800);
+  }
+
+  .badge-danger {
+    background-color: var(--color-red-100);
+    color: var(--color-red-800);
+  }
+
+  .badge-warning {
+    background-color: var(--color-yellow-100);
+    color: var(--color-yellow-800);
+  }
+
+  .badge-info {
+    background-color: var(--color-blue-100);
+    color: var(--color-blue-800);
+  }
+
+  /* Navigation items */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    color: var(--color-gray-300);
+    border-radius: 0.5rem;
+    transition-property: background-color, color;
+    transition-duration: 150ms;
+    text-decoration: none;
+  }
+
+  .nav-item:hover {
+    background-color: var(--color-sidebar-hover);
+    color: white;
+  }
+
+  .nav-item.active,
+  .nav-item-active {
+    background-color: var(--color-primary-600);
+    color: white;
+  }
+
+  .nav-section-title {
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Stat card */
+  .stat-card {
+    background-color: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    border: 1px solid var(--color-gray-200);
+    padding: 1.5rem;
+  }
+
+  .stat-value {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: var(--color-gray-900);
+  }
+
+  .stat-label {
+    font-size: 0.875rem;
+    color: var(--color-gray-500);
+    margin-top: 0.25rem;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    display: inline-flex;
+    height: 1.5rem;
+    width: 2.75rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    transition-property: background-color;
+    transition-duration: 200ms;
+    transition-timing-function: ease-in-out;
+  }
+
+  .toggle:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-primary-500);
+  }
+
+  .toggle-enabled {
+    background-color: var(--color-primary-600);
+  }
+
+  .toggle-disabled {
+    background-color: var(--color-gray-200);
+  }
+
+  .toggle-knob {
+    pointer-events: none;
+    display: inline-block;
+    height: 1.25rem;
+    width: 1.25rem;
+    transform: translateX(0);
+    border-radius: 9999px;
+    background-color: white;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    transition-property: transform;
+    transition-duration: 200ms;
+    transition-timing-function: ease-in-out;
+  }
+}
+
+/* Blazor-specific styles */
+#blazor-error-ui {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background-color: var(--color-yellow-100);
+  border-top: 1px solid var(--color-yellow-400);
+  color: var(--color-yellow-800);
+  padding: 1rem;
+}
+
+#blazor-error-ui .dismiss {
+  cursor: pointer;
+  margin-left: 1rem;
+  color: var(--color-yellow-600);
+}
+
+#blazor-error-ui .dismiss:hover {
+  color: var(--color-yellow-800);
+}

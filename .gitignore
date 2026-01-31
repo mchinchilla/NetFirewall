@@ -38,6 +38,7 @@ bld/
 .vscode/
 .idea/
 .fleet/
+.claude/
 
 # Ignore .bak Files
 *.bak

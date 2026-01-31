@@ -1,0 +1,314 @@
+@page "/system/monitor"
+@rendermode InteractiveServer
+@using NetFirewall.Services.Monitoring
+@inject ISystemMonitorService SystemMonitor
+@implements IDisposable
+
+<PageTitle>System Monitor - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">System Monitor</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">Real-time system resource monitoring</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-500">Auto-refresh: @(_autoRefresh ? "On" : "Off")</span>
+            <button class="toggle @(_autoRefresh ? "toggle-enabled" : "toggle-disabled")" @onclick="ToggleAutoRefresh">
+                <span class="toggle-knob @(_autoRefresh ? "translate-x-5" : "translate-x-0")"></span>
+            </button>
+        </div>
+    </div>
+
+    @if (_snapshot != null)
+    {
+        <!-- System Info -->
+        <div class="card bg-gradient-to-r from-primary-500 to-primary-600 text-white">
+            <div class="card-body">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div>
+                        <p class="text-primary-100 text-sm">Hostname</p>
+                        <p class="font-semibold">@_snapshot.System.Hostname</p>
+                    </div>
+                    <div>
+                        <p class="text-primary-100 text-sm">Kernel</p>
+                        <p class="font-semibold font-mono text-sm">@(_snapshot.System.KernelVersion ?? "-")</p>
+                    </div>
+                    <div>
+                        <p class="text-primary-100 text-sm">Uptime</p>
+                        <p class="font-semibold">@FormatUptime(_snapshot.System.Uptime)</p>
+                    </div>
+                    <div>
+                        <p class="text-primary-100 text-sm">Load Average</p>
+                        <p class="font-semibold">
+                            @_snapshot.System.LoadAverage1Min.ToString("F2") /
+                            @_snapshot.System.LoadAverage5Min.ToString("F2") /
+                            @_snapshot.System.LoadAverage15Min.ToString("F2")
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CPU & Memory -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- CPU -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">CPU Usage</h2>
+                </div>
+                <div class="card-body">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="text-4xl font-bold text-primary-600">@_snapshot.Cpu.UsagePercent.ToString("F1")%</div>
+                        <div class="text-sm text-gray-500">@_snapshot.Cpu.CoreCount cores</div>
+                    </div>
+                    <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-4">
+                        <div class="h-full transition-all duration-500"
+                             style="width: @(_snapshot.Cpu.UsagePercent)%; background: linear-gradient(90deg, #10B981, #F59E0B, #EF4444); background-size: 300% 100%; background-position: @(100 - _snapshot.Cpu.UsagePercent)% 0;">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-4 gap-4 text-sm">
+                        <div>
+                            <p class="text-gray-500">User</p>
+                            <p class="font-medium">@_snapshot.Cpu.UserPercent.ToString("F1")%</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500">System</p>
+                            <p class="font-medium">@_snapshot.Cpu.SystemPercent.ToString("F1")%</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500">I/O Wait</p>
+                            <p class="font-medium">@_snapshot.Cpu.IoWaitPercent.ToString("F1")%</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500">Idle</p>
+                            <p class="font-medium">@_snapshot.Cpu.IdlePercent.ToString("F1")%</p>
+                        </div>
+                    </div>
+                    @if (_snapshot.Cpu.PerCoreUsage.Count > 0)
+                    {
+                        <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <p class="text-sm text-gray-500 mb-2">Per-Core Usage</p>
+                            <div class="grid grid-cols-4 gap-2">
+                                @for (int i = 0; i < _snapshot.Cpu.PerCoreUsage.Count; i++)
+                                {
+                                    var usage = _snapshot.Cpu.PerCoreUsage[i];
+                                    <div class="text-center">
+                                        <div class="h-12 bg-gray-200 dark:bg-gray-700 rounded relative overflow-hidden">
+                                            <div class="absolute bottom-0 w-full bg-primary-500 transition-all duration-500"
+                                                 style="height: @(usage)%"></div>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-1">@i</p>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Memory -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Memory Usage</h2>
+                </div>
+                <div class="card-body">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="text-4xl font-bold text-primary-600">@_snapshot.Memory.UsagePercent.ToString("F1")%</div>
+                        <div class="text-sm text-gray-500">@_snapshot.Memory.TotalFormatted total</div>
+                    </div>
+                    <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-4">
+                        <div class="h-full bg-primary-500 transition-all duration-500"
+                             style="width: @(_snapshot.Memory.UsagePercent)%"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                            <p class="text-gray-500">Used</p>
+                            <p class="font-medium">@_snapshot.Memory.UsedFormatted</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500">Available</p>
+                            <p class="font-medium">@_snapshot.Memory.AvailableFormatted</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500">Cached</p>
+                            <p class="font-medium">@FormatBytes(_snapshot.Memory.CachedBytes)</p>
+                        </div>
+                    </div>
+                    @if (_snapshot.Memory.SwapTotalBytes > 0)
+                    {
+                        <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <div class="flex items-center justify-between mb-2">
+                                <p class="text-sm text-gray-500">Swap</p>
+                                <p class="text-sm">@_snapshot.Memory.SwapUsagePercent.ToString("F1")%</p>
+                            </div>
+                            <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div class="h-full bg-yellow-500 transition-all duration-500"
+                                     style="width: @(_snapshot.Memory.SwapUsagePercent)%"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                @FormatBytes(_snapshot.Memory.SwapUsedBytes) / @FormatBytes(_snapshot.Memory.SwapTotalBytes)
+                            </p>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Disks -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Disk Usage</h2>
+            </div>
+            <div class="card-body">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    @foreach (var disk in _snapshot.Disks)
+                    {
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="flex items-center justify-between mb-2">
+                                <p class="font-medium text-gray-900 dark:text-white truncate" title="@disk.MountPoint">@disk.MountPoint</p>
+                                <p class="text-sm text-gray-500">@disk.UsagePercent.ToString("F1")%</p>
+                            </div>
+                            <div class="h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden mb-2">
+                                <div class="h-full transition-all duration-500 @(disk.UsagePercent > 90 ? "bg-red-500" : disk.UsagePercent > 75 ? "bg-yellow-500" : "bg-green-500")"
+                                     style="width: @(disk.UsagePercent)%"></div>
+                            </div>
+                            <div class="flex justify-between text-xs text-gray-500">
+                                <span>@disk.UsedFormatted used</span>
+                                <span>@disk.FreeFormatted free</span>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1 truncate" title="@disk.Device">@disk.Device (@disk.FileSystem)</p>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Network -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Network Interfaces</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Interface</th>
+                            <th>Received</th>
+                            <th>Sent</th>
+                            <th>RX Rate</th>
+                            <th>TX Rate</th>
+                            <th>Errors</th>
+                            <th>Drops</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var net in _snapshot.Network.Where(n => !n.InterfaceName.StartsWith("lo")))
+                        {
+                            <tr>
+                                <td class="font-mono">@net.InterfaceName</td>
+                                <td>@net.BytesReceivedFormatted</td>
+                                <td>@net.BytesSentFormatted</td>
+                                <td class="text-green-600">@FormatRate(net.BytesReceivedPerSecond)</td>
+                                <td class="text-blue-600">@FormatRate(net.BytesSentPerSecond)</td>
+                                <td class="@(net.ErrorsReceived + net.ErrorsSent > 0 ? "text-red-500" : "")">
+                                    @(net.ErrorsReceived + net.ErrorsSent)
+                                </td>
+                                <td class="@(net.DropsReceived + net.DropsSent > 0 ? "text-yellow-500" : "")">
+                                    @(net.DropsReceived + net.DropsSent)
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <p class="text-xs text-gray-500 text-right">Last updated: @_snapshot.Timestamp.ToLocalTime().ToString("HH:mm:ss")</p>
+    }
+    else
+    {
+        <div class="flex items-center justify-center py-12">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        </div>
+    }
+</div>
+
+@code {
+    private SystemMetricsSnapshot? _snapshot;
+    private bool _autoRefresh = true;
+    private Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMetricsAsync();
+        StartAutoRefresh();
+    }
+
+    private async Task LoadMetricsAsync()
+    {
+        _snapshot = await SystemMonitor.GetSnapshotAsync();
+    }
+
+    private void StartAutoRefresh()
+    {
+        _timer = new Timer(async _ =>
+        {
+            if (_autoRefresh)
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadMetricsAsync();
+                    StateHasChanged();
+                });
+            }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private void ToggleAutoRefresh()
+    {
+        _autoRefresh = !_autoRefresh;
+    }
+
+    private static string FormatUptime(TimeSpan uptime)
+    {
+        if (uptime.TotalDays >= 1)
+            return $"{(int)uptime.TotalDays}d {uptime.Hours}h {uptime.Minutes}m";
+        if (uptime.TotalHours >= 1)
+            return $"{(int)uptime.TotalHours}h {uptime.Minutes}m";
+        return $"{uptime.Minutes}m {uptime.Seconds}s";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+
+    private static string FormatRate(double bytesPerSecond)
+    {
+        if (bytesPerSecond < 1) return "-";
+        string[] sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
+        int order = 0;
+        double size = bytesPerSecond;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+    }
+}

@@ -1,0 +1,212 @@
+@page "/dhcp/config"
+@rendermode InteractiveServer
+
+<PageTitle>DHCP Configuration - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">DHCP Server Configuration</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">Configure DHCP server settings and IP pool</p>
+        </div>
+        <div class="flex gap-3">
+            <button class="btn-secondary" @onclick="ResetForm">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Reset
+            </button>
+            <button class="btn-primary" @onclick="SaveConfig">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                Save Changes
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- IP Pool Configuration -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">IP Pool Configuration</h2>
+            </div>
+            <div class="card-body space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="form-label">Pool Start</label>
+                        <input type="text" class="form-input font-mono" @bind="_config.IpRangeStart" placeholder="192.168.99.100" />
+                    </div>
+                    <div>
+                        <label class="form-label">Pool End</label>
+                        <input type="text" class="form-input font-mono" @bind="_config.IpRangeEnd" placeholder="192.168.99.199" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="form-label">Subnet Mask</label>
+                    <input type="text" class="form-input font-mono" @bind="_config.SubnetMask" placeholder="255.255.255.0" />
+                </div>
+
+                <div>
+                    <label class="form-label">Default Gateway</label>
+                    <input type="text" class="form-input font-mono" @bind="_config.Gateway" placeholder="192.168.99.1" />
+                </div>
+
+                <div>
+                    <label class="form-label">Lease Time (seconds)</label>
+                    <input type="number" class="form-input" @bind="_config.LeaseTime" />
+                    <p class="text-xs text-gray-500 mt-1">Default: 86400 (24 hours)</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- DNS Configuration -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">DNS Configuration</h2>
+            </div>
+            <div class="card-body space-y-4">
+                <div>
+                    <label class="form-label">Primary DNS Server</label>
+                    <input type="text" class="form-input font-mono" @bind="_config.DnsServer1" placeholder="1.1.1.1" />
+                </div>
+
+                <div>
+                    <label class="form-label">Secondary DNS Server</label>
+                    <input type="text" class="form-input font-mono" @bind="_config.DnsServer2" placeholder="8.8.8.8" />
+                </div>
+
+                <div>
+                    <label class="form-label">Domain Name (optional)</label>
+                    <input type="text" class="form-input" @bind="_config.DomainName" placeholder="local.lan" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Server Settings -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Server Settings</h2>
+            </div>
+            <div class="card-body space-y-4">
+                <div>
+                    <label class="form-label">Server IP Address</label>
+                    <input type="text" class="form-input font-mono" @bind="_config.ServerIp" placeholder="192.168.99.1" />
+                </div>
+
+                <div>
+                    <label class="form-label">Server Name</label>
+                    <input type="text" class="form-input" @bind="_config.ServerName" placeholder="netfirewall" />
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <input type="checkbox" class="form-checkbox" id="enableServer" @bind="_config.Enabled" />
+                    <label for="enableServer" class="text-sm text-gray-700 dark:text-gray-300">Enable DHCP Server</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- PXE Boot Configuration -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">PXE Boot Configuration</h2>
+            </div>
+            <div class="card-body space-y-4">
+                <div class="flex items-center gap-3 mb-4">
+                    <input type="checkbox" class="form-checkbox" id="enablePxe" @bind="_config.PxeEnabled" />
+                    <label for="enablePxe" class="text-sm text-gray-700 dark:text-gray-300">Enable PXE Boot Support</label>
+                </div>
+
+                <div class="@(_config.PxeEnabled ? "" : "opacity-50 pointer-events-none")">
+                    <div class="mb-4">
+                        <label class="form-label">TFTP Server</label>
+                        <input type="text" class="form-input font-mono" @bind="_config.TftpServer" placeholder="192.168.99.1" />
+                    </div>
+
+                    <div>
+                        <label class="form-label">Boot File Name</label>
+                        <input type="text" class="form-input" @bind="_config.BootFileName" placeholder="pxelinux.0" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server Status -->
+    <div class="card bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
+        <div class="card-body">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+                        <svg class="w-5 h-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-green-900 dark:text-green-200">DHCP Server Status</h3>
+                        <p class="text-sm text-green-700 dark:text-green-300">Server is running on interface ens256 (192.168.99.1)</p>
+                    </div>
+                </div>
+                <button class="btn-secondary">
+                    Restart Server
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private DhcpConfigModel _config = new();
+
+    protected override void OnInitialized()
+    {
+        // Load config (mock data)
+        _config = new DhcpConfigModel
+        {
+            IpRangeStart = "192.168.99.100",
+            IpRangeEnd = "192.168.99.199",
+            SubnetMask = "255.255.255.0",
+            Gateway = "192.168.99.1",
+            LeaseTime = 86400,
+            DnsServer1 = "1.1.1.1",
+            DnsServer2 = "8.8.8.8",
+            DomainName = "",
+            ServerIp = "192.168.99.1",
+            ServerName = "netfirewall",
+            Enabled = true,
+            PxeEnabled = false,
+            TftpServer = "",
+            BootFileName = ""
+        };
+    }
+
+    private void SaveConfig()
+    {
+        // TODO: Save to database
+    }
+
+    private void ResetForm()
+    {
+        OnInitialized();
+    }
+
+    private class DhcpConfigModel
+    {
+        public string IpRangeStart { get; set; } = "";
+        public string IpRangeEnd { get; set; } = "";
+        public string SubnetMask { get; set; } = "";
+        public string Gateway { get; set; } = "";
+        public int LeaseTime { get; set; }
+        public string DnsServer1 { get; set; } = "";
+        public string DnsServer2 { get; set; } = "";
+        public string DomainName { get; set; } = "";
+        public string ServerIp { get; set; } = "";
+        public string ServerName { get; set; } = "";
+        public bool Enabled { get; set; }
+        public bool PxeEnabled { get; set; }
+        public string TftpServer { get; set; } = "";
+        public string BootFileName { get; set; } = "";
+    }
+}

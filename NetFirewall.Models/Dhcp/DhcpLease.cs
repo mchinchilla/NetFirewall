@@ -26,6 +26,6 @@ public class DhcpLease
     public DateTime StartTime { get; set; }
     [Map( "end_time" )] 
     public DateTime EndTime { get; set; }
-    [Map( "hostname" )] 
-    public string Hostname { get; set; }
+    [Map( "hostname" )]
+    public string? Hostname { get; set; }
 }

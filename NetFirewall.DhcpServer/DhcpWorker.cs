@@ -1,300 +1,374 @@
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Channels;
 using NetFirewall.Models.Dhcp;
 using NetFirewall.Services.Dhcp;
-using System.Threading.Tasks.Dataflow;
 
 namespace NetFirewall.DhcpServer;
 
-public class DhcpWorker : BackgroundService
+/// <summary>
+/// High-performance DHCP worker using channels and ArrayPool for zero-allocation packet processing.
+/// </summary>
+public sealed class DhcpWorker : BackgroundService
 {
+    private const int MaxDhcpPacketSize = 576; // RFC 2131 minimum
+    private const int MinDhcpPacketSize = 236; // Minimum valid DHCP packet
+    private const int MagicCookieOffset = 236;
+    private const int OptionsOffset = 240;
+
     private readonly ILogger<DhcpWorker> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly UdpClient _udpClient;
-    private readonly BufferBlock<byte[]> _receiveBuffer;
+    private readonly Channel<DhcpPacketContext> _packetChannel;
+    private readonly ArrayPool<byte> _bufferPool;
 
-    public DhcpWorker( ILogger<DhcpWorker> logger, IServiceScopeFactory scopeFactory )
+    // Pre-allocated for MAC address formatting
+    private static readonly char[] HexChars = "0123456789ABCDEF".ToCharArray();
+
+    public DhcpWorker(ILogger<DhcpWorker> logger, IServiceScopeFactory scopeFactory)
     {
         _logger = logger;
         _scopeFactory = scopeFactory;
-        _udpClient = new UdpClient( 67 );
-        _receiveBuffer = new BufferBlock<byte[]>();
+        _bufferPool = ArrayPool<byte>.Shared;
+
+        _udpClient = new UdpClient(67)
+        {
+            EnableBroadcast = true
+        };
+
+        // Bounded channel prevents memory growth under load
+        _packetChannel = Channel.CreateBounded<DhcpPacketContext>(new BoundedChannelOptions(100)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = true
+        });
     }
 
-    protected override async Task ExecuteAsync( CancellationToken stoppingToken )
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation( "DHCP Server is running." );
+        _logger.LogInformation("DHCP Server starting on port 67");
 
-        var receiveTask = ReceivePacketsAsync( stoppingToken );
-        var processTask = ProcessPacketsAsync( stoppingToken );
-
-        await Task.WhenAll( receiveTask, processTask );
+        // Run receive and process concurrently
+        await Task.WhenAll(
+            ReceivePacketsAsync(stoppingToken),
+            ProcessPacketsAsync(stoppingToken)
+        ).ConfigureAwait(false);
     }
 
-    private async Task ReceivePacketsAsync( CancellationToken stoppingToken )
+    private async Task ReceivePacketsAsync(CancellationToken stoppingToken)
     {
+        var writer = _packetChannel.Writer;
+
         try
         {
-            while ( !stoppingToken.IsCancellationRequested )
+            while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    var receiveResult = await _udpClient.ReceiveAsync( stoppingToken );
+                    var result = await _udpClient.ReceiveAsync(stoppingToken).ConfigureAwait(false);
 
-                    _logger.LogInformation( $"Received DHCP packet from {receiveResult.RemoteEndPoint}, {receiveResult.Buffer.Length} bytes" );
-
-                    // Log packet size for monitoring
-                    _logger.LogDebug( $"Packet size: {receiveResult.Buffer.Length} bytes" );
-
-                    // Attempt to parse the DHCP message type for further logging
-                    if ( receiveResult.Buffer.Length > 240 ) // Ensuring there's enough data for the message type
+                    if (result.Buffer.Length < MinDhcpPacketSize)
                     {
-                        var messageType = (DhcpMessageType)receiveResult.Buffer[240];
-                        _logger.LogInformation( $"Received DHCP message type: {messageType}" );
-                    }
-                    else
-                    {
-                        _logger.LogWarning( "Received packet too short to determine message type." );
+                        _logger.LogDebug("Packet too short: {Length} bytes", result.Buffer.Length);
+                        continue;
                     }
 
-                    await _receiveBuffer.SendAsync( receiveResult.Buffer );
+                    // Rent buffer from pool and copy data
+                    var rentedBuffer = _bufferPool.Rent(result.Buffer.Length);
+                    result.Buffer.AsSpan().CopyTo(rentedBuffer);
+
+                    var context = new DhcpPacketContext(
+                        rentedBuffer,
+                        result.Buffer.Length,
+                        result.RemoteEndPoint,
+                        _bufferPool
+                    );
+
+                    // Try to write to channel, drop if full
+                    if (!writer.TryWrite(context))
+                    {
+                        _logger.LogWarning("Packet channel full, dropping packet");
+                        context.Dispose();
+                    }
                 }
-                catch ( OperationCanceledException )
+                catch (OperationCanceledException)
                 {
-                    _logger.LogInformation( "DHCP packet receiving stopped due to cancellation request." );
                     break;
                 }
-                catch ( SocketException ex ) when ( ex.SocketErrorCode == SocketError.ConnectionReset )
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
                 {
-                    _logger.LogWarning( $"Connection reset during receive operation: {ex.Message}" );
-                    // Optionally, you might want to delay before continuing if this error occurs frequently
-                    await Task.Delay( 500, stoppingToken ); // Example delay
+                    // ICMP port unreachable - ignore
+                    await Task.Delay(100, stoppingToken).ConfigureAwait(false);
                 }
-                catch ( SocketException ex )
+                catch (SocketException ex)
                 {
-                    _logger.LogError( $"Socket error occurred while receiving packet: {ex.Message}, ErrorCode: {ex.SocketErrorCode}" );
-                }
-                catch ( Exception ex )
-                {
-                    _logger.LogError( $"Unexpected error in packet receiving: {ex.Message}" );
+                    _logger.LogError(ex, "Socket error: {ErrorCode}", ex.SocketErrorCode);
                 }
             }
-        }
-        catch ( Exception ex )
-        {
-            _logger.LogCritical( $"Critical error in packet receiving loop: {ex.Message}" );
         }
         finally
         {
-            _logger.LogInformation( "Exiting DHCP packet receiving loop." );
+            writer.Complete();
+            _logger.LogInformation("DHCP packet receiver stopped");
         }
     }
 
-    private async Task ProcessPacketsAsync( CancellationToken stoppingToken )
+    private async Task ProcessPacketsAsync(CancellationToken stoppingToken)
     {
-        while ( !stoppingToken.IsCancellationRequested || await _receiveBuffer.OutputAvailableAsync( stoppingToken ) )
+        var reader = _packetChannel.Reader;
+
+        await foreach (var context in reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
         {
             try
             {
-                var buffer = await _receiveBuffer.ReceiveAsync( stoppingToken );
-                using ( var scope = _scopeFactory.CreateScope() )
-                {
-                    var dhcpService = scope.ServiceProvider.GetRequiredService<IDhcpServerService>();
-                    var request = ParseDhcpRequest( buffer );
-                    if ( request != null )
-                    {
-                        var response = await dhcpService.CreateDhcpResponseAsync( request );
-                        if ( response != null && response.Length > 0 )
-                        {
-                            IPEndPoint remoteEndPoint = request.RemoteEndPoint;
-                            if(request.RemoteEndPoint == null)
-                            {
-                                _logger.LogDebug( "RemoteEndPoint is null" );
-                                remoteEndPoint = new IPEndPoint( IPAddress.Broadcast, 68 );
-                            }
-                            await _udpClient.SendAsync( response, response.Length, remoteEndPoint );
-                            _logger.LogInformation( $"Sent DHCP response to {remoteEndPoint}" );
-                        }
-                    }
-                }
+                await ProcessSinglePacketAsync(context, stoppingToken).ConfigureAwait(false);
             }
-            catch ( OperationCanceledException )
+            catch (Exception ex)
             {
-                _logger.LogInformation( "DHCP packet processing stopped." );
+                _logger.LogError(ex, "Error processing DHCP packet");
+            }
+            finally
+            {
+                context.Dispose();
+            }
+        }
+
+        _logger.LogInformation("DHCP packet processor stopped");
+    }
+
+    private async Task ProcessSinglePacketAsync(DhcpPacketContext context, CancellationToken stoppingToken)
+    {
+        var buffer = context.Buffer.AsSpan(0, context.Length);
+
+        // Parse request using Span to avoid allocations
+        if (!TryParseDhcpRequest(buffer, context.RemoteEndPoint, out var request))
+        {
+            return;
+        }
+
+        // Create scoped service for database operations
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var dhcpService = scope.ServiceProvider.GetRequiredService<IDhcpServerService>();
+
+        var response = await dhcpService.CreateDhcpResponseAsync(request).ConfigureAwait(false);
+
+        if (response.Length > 0)
+        {
+            var destination = DetermineDestinationEndPoint(request, context.RemoteEndPoint);
+            await _udpClient.SendAsync(response, destination, stoppingToken).ConfigureAwait(false);
+
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug("Sent {MessageType} to {Destination}", request.MessageType, destination);
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static IPEndPoint DetermineDestinationEndPoint(DhcpRequest request, IPEndPoint originalEndPoint)
+    {
+        // RFC 2131: Broadcast if flag set or client has no IP
+        bool broadcastFlagSet = (request.Flags & 0x8000) != 0;
+
+        if (broadcastFlagSet || request.CiAddr == null || request.CiAddr.Equals(IPAddress.Any))
+        {
+            return new IPEndPoint(IPAddress.Broadcast, 68);
+        }
+
+        return new IPEndPoint(request.CiAddr, 68);
+    }
+
+    private bool TryParseDhcpRequest(ReadOnlySpan<byte> buffer, IPEndPoint remoteEndPoint, out DhcpRequest request)
+    {
+        request = default!;
+
+        if (buffer.Length < MinDhcpPacketSize)
+        {
+            return false;
+        }
+
+        // Validate magic cookie
+        if (buffer[236] != 99 || buffer[237] != 130 || buffer[238] != 83 || buffer[239] != 99)
+        {
+            _logger.LogDebug("Invalid DHCP magic cookie");
+            return false;
+        }
+
+        request = new DhcpRequest
+        {
+            Op = buffer[0],
+            HType = buffer[1],
+            HLen = buffer[2],
+            Hops = buffer[3],
+            Xid = buffer.Slice(4, 4).ToArray(),
+            Secs = (ushort)((buffer[8] << 8) | buffer[9]),
+            Flags = (ushort)((buffer[10] << 8) | buffer[11]),
+            CiAddr = new IPAddress(buffer.Slice(12, 4)),
+            YiAddr = new IPAddress(buffer.Slice(16, 4)),
+            SiAddr = new IPAddress(buffer.Slice(20, 4)),
+            GiAddr = new IPAddress(buffer.Slice(24, 4)),
+            ChAddr = buffer.Slice(28, 16).ToArray(),
+            RemoteEndPoint = remoteEndPoint
+        };
+
+        // Format MAC address without allocations using stackalloc
+        request.ClientMac = FormatMacAddress(buffer.Slice(28, 6));
+
+        // Parse server name and boot file only if non-empty (avoid string allocations)
+        var snameSpan = buffer.Slice(44, 64);
+        if (snameSpan[0] != 0)
+        {
+            request.SName = ReadNullTerminatedString(snameSpan);
+        }
+
+        var fileSpan = buffer.Slice(108, 128);
+        if (fileSpan[0] != 0)
+        {
+            request.File = ReadNullTerminatedString(fileSpan);
+        }
+
+        // Parse options
+        ParseDhcpOptions(buffer.Slice(OptionsOffset), request);
+
+        request.IsBootp = request.Op == 1;
+        request.IsPxeRequest = request.VendorClassIdentifier?.Contains("PXEClient") == true;
+
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("Parsed {MessageType} from {Mac}", request.MessageType, request.ClientMac);
+        }
+
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string FormatMacAddress(ReadOnlySpan<byte> bytes)
+    {
+        // Pre-sized string builder equivalent using stackalloc
+        Span<char> chars = stackalloc char[17]; // XX:XX:XX:XX:XX:XX
+
+        for (int i = 0; i < 6; i++)
+        {
+            int offset = i * 3;
+            chars[offset] = HexChars[(bytes[i] >> 4) & 0xF];
+            chars[offset + 1] = HexChars[bytes[i] & 0xF];
+            if (i < 5) chars[offset + 2] = ':';
+        }
+
+        return new string(chars);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string ReadNullTerminatedString(ReadOnlySpan<byte> span)
+    {
+        int nullIndex = span.IndexOf((byte)0);
+        if (nullIndex == 0) return string.Empty;
+        if (nullIndex < 0) nullIndex = span.Length;
+
+        return Encoding.ASCII.GetString(span.Slice(0, nullIndex));
+    }
+
+    private void ParseDhcpOptions(ReadOnlySpan<byte> optionsSpan, DhcpRequest request)
+    {
+        int i = 0;
+
+        while (i < optionsSpan.Length)
+        {
+            byte optionCode = optionsSpan[i++];
+
+            if (optionCode == (byte)DhcpOptionCode.End)
                 break;
-            }
-            catch ( Exception ex )
-            {
-                _logger.LogError( $"Error processing DHCP packet: {ex.Message}" );
-            }
+
+            if (optionCode == (byte)DhcpOptionCode.Pad)
+                continue;
+
+            if (i >= optionsSpan.Length)
+                break;
+
+            int optionLength = optionsSpan[i++];
+
+            if (i + optionLength > optionsSpan.Length)
+                break;
+
+            var optionData = optionsSpan.Slice(i, optionLength);
+            i += optionLength;
+
+            ParseSingleOption((DhcpOptionCode)optionCode, optionData, request);
         }
     }
 
-    private DhcpRequest ParseDhcpRequest(byte[] buffer)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ParseSingleOption(DhcpOptionCode code, ReadOnlySpan<byte> data, DhcpRequest request)
     {
-        try
+        switch (code)
         {
-            if (buffer.Length < 236) // Minimum DHCP packet length
-            {
-                _logger.LogWarning("Received DHCP packet is too short to contain valid data.");
-                return null;
-            }
+            case DhcpOptionCode.MessageType when data.Length > 0:
+                request.MessageType = (DhcpMessageType)data[0];
+                break;
 
-            var request = new DhcpRequest
-            {
-                Op = buffer[0],
-                HType = buffer[1],
-                HLen = buffer[2],
-                Hops = buffer[3],
-                Xid = new byte[4],
-                Secs = BitConverter.ToUInt16(buffer, 8),
-                Flags = BitConverter.ToUInt16(buffer, 10),
-                CiAddr = ReadIpAddress(buffer, 12),
-                YiAddr = ReadIpAddress(buffer, 16),
-                SiAddr = ReadIpAddress(buffer, 20),
-                GiAddr = ReadIpAddress(buffer, 24),
-                ChAddr = new byte[16]
-            };
+            case DhcpOptionCode.RequestedIPAddress when data.Length >= 4:
+                request.RequestedIp = new IPAddress(data.Slice(0, 4));
+                break;
 
-            Array.Copy(buffer, 4, request.Xid, 0, 4);
-            Array.Copy(buffer, 28, request.ChAddr, 0, 16);
-            request.ClientMac = BitConverter.ToString(buffer, 28, 6).Replace("-", ":");
-            request.SName = ReadPaddedString(buffer, 44, 64);
-            request.File = ReadPaddedString(buffer, 108, 128);
+            case DhcpOptionCode.ClientIdentifier:
+                request.ClientIdentifier = data.ToArray();
+                break;
 
-            // Check for magic cookie
-            if (buffer[236] != 99 || buffer[237] != 130 || buffer[238] != 83 || buffer[239] != 99)
-            {
-                _logger.LogWarning("Invalid DHCP magic cookie in the packet.");
-                return null;
-            }
+            case DhcpOptionCode.HostName when data.Length > 0:
+                request.Hostname = Encoding.ASCII.GetString(data);
+                break;
 
-            _logger.LogInformation($"Parsing DHCP packet with XID: {BitConverter.ToString(request.Xid)}");
+            case DhcpOptionCode.ParameterRequestList:
+                request.ParameterRequestList = data.ToArray();
+                break;
 
-            // Parse options
-            for (int i = 240; i < buffer.Length; i++)
-            {
-                byte optionCode = buffer[i];
-                if (optionCode == (byte)DhcpOptionCode.End)
-                {
-                    _logger.LogDebug("End of DHCP options reached.");
-                    break;
-                }
-                else if (optionCode == (byte)DhcpOptionCode.Pad)
-                {
-                    _logger.LogDebug("Encountered DHCP option padding.");
-                    continue;
-                }
+            case DhcpOptionCode.VendorClassIdentifier when data.Length > 0:
+                request.VendorClassIdentifier = Encoding.ASCII.GetString(data);
+                break;
 
-                if (i + 1 >= buffer.Length)
-                {
-                    _logger.LogWarning("Buffer too short to read option length.");
-                    break;
-                }
-
-                int optionLength = buffer[++i];
-                if (i + 1 + optionLength > buffer.Length)
-                {
-                    _logger.LogWarning("Buffer too short to read option data.");
-                    break;
-                }
-
-                byte[] optionData = new byte[optionLength];
-                Array.Copy(buffer, i + 1, optionData, 0, optionLength);
-
-                _logger.LogDebug($"Parsing DHCP option {optionCode} with length {optionLength}");
-
-                switch ((DhcpOptionCode)optionCode)
-                {
-                    case DhcpOptionCode.MessageType:
-                        request.MessageType = (DhcpMessageType)optionData[0];
-                        _logger.LogInformation($"DHCP Message Type: {request.MessageType}");
-                        break;
-                    case DhcpOptionCode.RequestedIPAddress:
-                        request.RequestedIp = new IPAddress(optionData);
-                        _logger.LogInformation($"Requested IP: {request.RequestedIp}");
-                        break;
-                    case DhcpOptionCode.ClientIdentifier:
-                        request.ClientIdentifier = optionData;
-                        _logger.LogDebug($"Client Identifier: {BitConverter.ToString(optionData)}");
-                        break;
-                    case DhcpOptionCode.HostName:
-                        request.Hostname = Encoding.ASCII.GetString(optionData);
-                        _logger.LogInformation($"Client Hostname: {request.Hostname}");
-                        break;
-                    case DhcpOptionCode.ParameterRequestList:
-                        request.ParameterRequestList = optionData;
-                        _logger.LogDebug($"Parameter Request List: {string.Join(", ", optionData)}");
-                        break;
-                    case DhcpOptionCode.VendorClassIdentifier:
-                        request.VendorClassIdentifier = Encoding.ASCII.GetString(optionData);
-                        _logger.LogInformation($"Vendor Class Identifier: {request.VendorClassIdentifier}");
-                        break;
-                    case DhcpOptionCode.IPAddressLeaseTime:
-                        request.LeaseTime = BitConverter.ToInt32(optionData, 0);
-                        _logger.LogInformation($"Requested Lease Time: {request.LeaseTime} seconds");
-                        break;
-                    // Add more cases for other options as needed
-                }
-
-                i += optionLength; // Move past the data we just processed
-            }
-
-            // Determine if it's a BOOTP request
-            request.IsBootp = request.Op == 1;
-            _logger.LogInformation($"BOOTP request: {request.IsBootp}");
-
-            // Check for PXE request
-            request.IsPxeRequest = CheckForPxeRequest(buffer);
-            _logger.LogInformation($"PXE request: {request.IsPxeRequest}");
-
-            return request;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Error parsing DHCP request: {ex.Message}");
-            return null;
+            case DhcpOptionCode.IPAddressLeaseTime when data.Length >= 4:
+                request.LeaseTime = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(data));
+                break;
         }
     }
 
-    private IPAddress ReadIpAddress(byte[] buffer, int offset)
+    public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (buffer.Length < offset + 4)
-        {
-            _logger.LogWarning($"Buffer too short to read IP address at offset {offset}");
-            return IPAddress.Any;
-        }
-        return new IPAddress(buffer.Skip(offset).Take(4).ToArray());
+        _logger.LogInformation("DHCP Server stopping");
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private string ReadPaddedString(byte[] buffer, int offset, int length)
+    public override void Dispose()
     {
-        if (buffer.Length < offset + length)
-        {
-            _logger.LogWarning($"Buffer too short to read string at offset {offset} with length {length}");
-            return string.Empty;
-        }
-        return Encoding.ASCII.GetString(buffer, offset, length).TrimEnd('\0');
+        _udpClient.Dispose();
+        base.Dispose();
     }
-    
-    private bool CheckForPxeRequest( byte[] buffer )
-    {
-        for ( int i = 240; i < buffer.Length; i++ )
-        {
-            byte optionCode = buffer[i];
-            if ( optionCode == (byte)DhcpOptionCode.VendorClassIdentifier )
-            {
-                int optionLength = buffer[++i];
-                string vendorClass = Encoding.ASCII.GetString( buffer, i + 1, optionLength );
-                if ( vendorClass.Contains( "PXEClient" ) )
-                {
-                    return true;
-                }
-            }
-            else if ( optionCode == (byte)DhcpOptionCode.End ) break;
-        }
+}
 
-        return false;
+/// <summary>
+/// Pooled packet context to avoid allocations.
+/// </summary>
+internal readonly struct DhcpPacketContext : IDisposable
+{
+    public byte[] Buffer { get; }
+    public int Length { get; }
+    public IPEndPoint RemoteEndPoint { get; }
+    private readonly ArrayPool<byte> _pool;
+
+    public DhcpPacketContext(byte[] buffer, int length, IPEndPoint remoteEndPoint, ArrayPool<byte> pool)
+    {
+        Buffer = buffer;
+        Length = length;
+        RemoteEndPoint = remoteEndPoint;
+        _pool = pool;
+    }
+
+    public void Dispose()
+    {
+        _pool.Return(Buffer);
     }
 }

@@ -18,6 +18,9 @@ public class DhcpMacReservation
     [Map( "mac_address" )]
     [NpgsqlDbType( NpgsqlDbType.MacAddr )]
     public PhysicalAddress MacAddress { get; set; }
-    [Map( "ip_address" )] 
+    [Map( "ip_address" )]
     public IPAddress ReservedIp { get; set; }
+
+    [Map( "description" )]
+    public string? Description { get; set; }
 }

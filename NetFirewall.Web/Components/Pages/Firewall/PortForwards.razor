@@ -1,0 +1,174 @@
+@page "/firewall/port-forwards"
+@rendermode InteractiveServer
+
+<PageTitle>Port Forwards - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Port Forwards</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">Manage DNAT port forwarding rules</p>
+        </div>
+        <button @onclick="ShowAddModal" class="btn-primary">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Port Forward
+        </button>
+    </div>
+
+    <!-- Port Forwards Table -->
+    <div class="card">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Protocol</th>
+                        <th>Interface</th>
+                        <th>External Port</th>
+                        <th>Internal IP</th>
+                        <th>Internal Port</th>
+                        <th>Source Filter</th>
+                        <th class="w-24">Enabled</th>
+                        <th class="w-24">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var pf in _portForwards.OrderBy(p => p.Priority))
+                    {
+                        <tr>
+                            <td>
+                                <span class="font-medium text-gray-900 dark:text-white">@pf.Description</span>
+                            </td>
+                            <td>
+                                <span class="badge @GetProtocolBadgeClass(pf.Protocol)">@pf.Protocol.ToUpper()</span>
+                            </td>
+                            <td class="text-sm">@(pf.InterfaceName ?? "Any")</td>
+                            <td class="font-mono text-sm">
+                                @if (pf.ExternalPortEnd.HasValue)
+                                {
+                                    @($"{pf.ExternalPortStart}-{pf.ExternalPortEnd}")
+                                }
+                                else
+                                {
+                                    @pf.ExternalPortStart
+                                }
+                            </td>
+                            <td class="font-mono text-sm">@pf.InternalIp</td>
+                            <td class="font-mono text-sm">@pf.InternalPort</td>
+                            <td class="text-sm">@(pf.SourceAddresses?.FirstOrDefault() ?? "Any")</td>
+                            <td>
+                                <button class="toggle @(pf.Enabled ? "toggle-enabled" : "toggle-disabled")" @onclick="() => TogglePortForward(pf)">
+                                    <span class="toggle-knob @(pf.Enabled ? "translate-x-5" : "translate-x-0")"></span>
+                                </button>
+                            </td>
+                            <td>
+                                <div class="flex items-center gap-2">
+                                    <button class="btn-icon text-blue-400 hover:text-blue-600" title="Edit">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                    </button>
+                                    <button class="btn-icon text-red-400 hover:text-red-600" title="Delete">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Quick Add Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="card hover:border-primary-300 dark:hover:border-primary-700 cursor-pointer transition-colors" @onclick='() => QuickAdd("SSH")'>
+            <div class="card-body text-center">
+                <div class="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center mx-auto mb-3">
+                    <svg class="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                </div>
+                <h3 class="font-medium text-gray-900 dark:text-white">SSH Forward</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Port 22 TCP</p>
+            </div>
+        </div>
+
+        <div class="card hover:border-primary-300 dark:hover:border-primary-700 cursor-pointer transition-colors" @onclick='() => QuickAdd("HTTP")'>
+            <div class="card-body text-center">
+                <div class="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center mx-auto mb-3">
+                    <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                    </svg>
+                </div>
+                <h3 class="font-medium text-gray-900 dark:text-white">HTTP/HTTPS Forward</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Ports 80, 443 TCP</p>
+            </div>
+        </div>
+
+        <div class="card hover:border-primary-300 dark:hover:border-primary-700 cursor-pointer transition-colors" @onclick='() => QuickAdd("RDP")'>
+            <div class="card-body text-center">
+                <div class="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center mx-auto mb-3">
+                    <svg class="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                </div>
+                <h3 class="font-medium text-gray-900 dark:text-white">RDP Forward</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Port 3389 TCP</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    // TODO: Implement add/edit modal
+    private void ShowAddModal() { }
+
+    private List<PortForwardModel> _portForwards = new()
+    {
+        new() { Description = "Web Server", Protocol = "tcp", InterfaceName = "ens192", ExternalPortStart = 80, InternalIp = "192.168.99.10", InternalPort = 80, Priority = 100, Enabled = true },
+        new() { Description = "Web Server HTTPS", Protocol = "tcp", InterfaceName = "ens192", ExternalPortStart = 443, InternalIp = "192.168.99.10", InternalPort = 443, Priority = 100, Enabled = true },
+        new() { Description = "SSH Server", Protocol = "tcp", InterfaceName = "ens192", ExternalPortStart = 2222, InternalIp = "192.168.99.5", InternalPort = 22, Priority = 100, Enabled = true },
+        new() { Description = "Game Server", Protocol = "udp", InterfaceName = "ens192", ExternalPortStart = 27015, ExternalPortEnd = 27020, InternalIp = "192.168.99.20", InternalPort = 27015, Priority = 100, Enabled = true },
+        new() { Description = "Plex Media Server", Protocol = "tcp", InterfaceName = null, ExternalPortStart = 32400, InternalIp = "192.168.99.15", InternalPort = 32400, Priority = 100, Enabled = false }
+    };
+
+    private void TogglePortForward(PortForwardModel pf)
+    {
+        pf.Enabled = !pf.Enabled;
+    }
+
+    private void QuickAdd(string type)
+    {
+        // TODO: Open modal with pre-filled values based on type
+        ShowAddModal();
+    }
+
+    private string GetProtocolBadgeClass(string protocol) => protocol.ToLower() switch
+    {
+        "tcp" => "badge-info",
+        "udp" => "badge-warning",
+        "tcp/udp" => "badge-success",
+        _ => "badge-info"
+    };
+
+    private class PortForwardModel
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Description { get; set; } = "";
+        public string Protocol { get; set; } = "tcp";
+        public string? InterfaceName { get; set; }
+        public string[]? SourceAddresses { get; set; }
+        public int ExternalPortStart { get; set; }
+        public int? ExternalPortEnd { get; set; }
+        public string InternalIp { get; set; } = "";
+        public int InternalPort { get; set; }
+        public int Priority { get; set; }
+        public bool Enabled { get; set; }
+    }
+}

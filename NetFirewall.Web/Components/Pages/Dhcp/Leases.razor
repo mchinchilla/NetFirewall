@@ -1,0 +1,194 @@
+@page "/dhcp/leases"
+@rendermode InteractiveServer
+@using System.Net.NetworkInformation
+@using NetFirewall.Models.Dhcp
+@using NetFirewall.Services.Dhcp
+@inject IDhcpAdminService DhcpService
+
+<PageTitle>DHCP Leases - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">DHCP Leases</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">View active and expired DHCP leases</p>
+        </div>
+        <div class="flex gap-3">
+            <button class="btn-secondary" @onclick="RefreshLeases">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div class="stat-card">
+            <p class="stat-label">Active Leases</p>
+            <p class="stat-value text-green-600">@_stats.ActiveLeases</p>
+        </div>
+        <div class="stat-card">
+            <p class="stat-label">Total Pool Size</p>
+            <p class="stat-value">@_stats.TotalPoolSize</p>
+        </div>
+        <div class="stat-card">
+            <p class="stat-label">Available IPs</p>
+            <p class="stat-value">@_stats.AvailableIps</p>
+        </div>
+        <div class="stat-card">
+            <p class="stat-label">Reservations</p>
+            <p class="stat-value">@_stats.TotalReservations</p>
+        </div>
+    </div>
+
+    <!-- Filter -->
+    <div class="card">
+        <div class="card-body py-3">
+            <div class="flex items-center gap-4">
+                <div class="flex-1">
+                    <input type="text" class="form-input" placeholder="Search by MAC, IP, or hostname..." @bind="_searchTerm" @bind:event="oninput" />
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600 dark:text-gray-400">Show:</label>
+                    <select class="form-select w-auto" @bind="_filterStatus">
+                        <option value="all">All Leases</option>
+                        <option value="active">Active Only</option>
+                        <option value="expired">Expired Only</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leases Table -->
+    <div class="card">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>MAC Address</th>
+                        <th>IP Address</th>
+                        <th>Hostname</th>
+                        <th>Lease Start</th>
+                        <th>Lease End</th>
+                        <th>Time Remaining</th>
+                        <th>Status</th>
+                        <th class="w-24">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var lease in FilteredLeases)
+                    {
+                        var isActive = IsActive(lease);
+                        <tr>
+                            <td class="font-mono text-sm">@FormatMac(lease.MacAddress)</td>
+                            <td class="font-mono text-sm">@lease.IpAddress</td>
+                            <td>@(lease.Hostname ?? "-")</td>
+                            <td class="text-sm">@lease.StartTime.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td class="text-sm">@lease.EndTime.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td class="text-sm">
+                                @if (isActive)
+                                {
+                                    var remaining = lease.EndTime - DateTime.UtcNow;
+                                    @($"{(int)remaining.TotalHours}h {remaining.Minutes}m")
+                                }
+                                else
+                                {
+                                    <span class="text-gray-400">-</span>
+                                }
+                            </td>
+                            <td>
+                                @if (isActive)
+                                {
+                                    var remaining = lease.EndTime - DateTime.UtcNow;
+                                    if (remaining.TotalHours < 1)
+                                    {
+                                        <span class="badge-warning">Expiring</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge-success">Active</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="badge-danger">Expired</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="flex items-center gap-2">
+                                    <button class="btn-icon text-blue-400 hover:text-blue-600" title="Make Reservation">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                        </svg>
+                                    </button>
+                                    <button class="btn-icon text-red-400 hover:text-red-600" title="Release Lease" @onclick="() => ReleaseLease(lease)">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _searchTerm = "";
+    private string _filterStatus = "all";
+    private IReadOnlyList<DhcpLease> _leases = [];
+    private DhcpStats _stats = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLeasesAsync();
+    }
+
+    private IEnumerable<DhcpLease> FilteredLeases => _leases
+        .Where(l => _filterStatus == "all" ||
+                    (_filterStatus == "active" && IsActive(l)) ||
+                    (_filterStatus == "expired" && !IsActive(l)))
+        .Where(l => string.IsNullOrEmpty(_searchTerm) ||
+                    l.MacAddress.ToString().Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    l.IpAddress.ToString().Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    (l.Hostname?.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ?? false))
+        .OrderByDescending(l => IsActive(l))
+        .ThenByDescending(l => l.StartTime);
+
+    private static bool IsActive(DhcpLease lease) => lease.EndTime > DateTime.UtcNow;
+
+    private async Task LoadLeasesAsync()
+    {
+        var leasesTask = DhcpService.GetAllLeasesAsync(includeExpired: true);
+        var statsTask = DhcpService.GetStatsAsync();
+
+        await Task.WhenAll(leasesTask, statsTask);
+
+        _leases = await leasesTask;
+        _stats = await statsTask;
+    }
+
+    private async Task RefreshLeases()
+    {
+        await LoadLeasesAsync();
+    }
+
+    private async Task ReleaseLease(DhcpLease lease)
+    {
+        await DhcpService.ReleaseLeaseAsync(lease.Id);
+        await LoadLeasesAsync();
+    }
+
+    private static string FormatMac(PhysicalAddress mac)
+    {
+        var bytes = mac.GetAddressBytes();
+        return string.Join(":", bytes.Select(b => b.ToString("X2")));
+    }
+}

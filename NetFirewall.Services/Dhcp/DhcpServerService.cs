@@ -1,274 +1,619 @@
-﻿using System.Net;
+using System.Buffers;
+using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetFirewall.Models.Dhcp;
 
 namespace NetFirewall.Services.Dhcp;
 
-public class DhcpServerService : IDhcpServerService
+/// <summary>
+/// High-performance DHCP server service with multi-subnet support and failover.
+/// </summary>
+public sealed class DhcpServerService : IDhcpServerService
 {
     private readonly IDhcpLeasesService _dhcpLeasesService;
+    private readonly IDhcpSubnetService _dhcpSubnetService;
+    private readonly IFailoverService? _failoverService;
     private readonly ILogger<DhcpServerService> _logger;
-    private readonly DhcpConfig _dhcpConfig;
+    private readonly DhcpConfig _fallbackConfig;
 
-    public DhcpServerService( IDhcpLeasesService dhcpLeasesService, ILogger<DhcpServerService> logger, IOptions<DhcpConfig> dhcpConfig )
+    // Pre-allocated response types
+    private static readonly byte[] OfferMessageType = [(byte)DhcpMessageType.Offer];
+    private static readonly byte[] AckMessageType = [(byte)DhcpMessageType.Ack];
+    private static readonly byte[] NakMessageType = [(byte)DhcpMessageType.Nak];
+
+    // Magic cookie bytes
+    private static readonly byte[] MagicCookie = [99, 130, 83, 99];
+
+    // PXE options (pre-computed)
+    private static readonly byte[] PxeArchTypeLegacy = [0x00, 0x00]; // BIOS x86
+    private static readonly byte[] PxeArchTypeUefi64 = [0x00, 0x07]; // UEFI x64
+    private static readonly byte[] PxeNetInterface = [0x01]; // Ethernet
+    private static readonly byte[] PxeDiscoveryControl = [0x03];
+
+    // Buffer pool for packet construction
+    private readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
+
+    public DhcpServerService(
+        IDhcpLeasesService dhcpLeasesService,
+        IDhcpSubnetService dhcpSubnetService,
+        ILogger<DhcpServerService> logger,
+        IOptions<DhcpConfig> dhcpConfig,
+        IFailoverService? failoverService = null)
     {
         _dhcpLeasesService = dhcpLeasesService;
+        _dhcpSubnetService = dhcpSubnetService;
+        _failoverService = failoverService;
         _logger = logger;
-        _dhcpConfig = new DhcpConfig
+
+        // Fallback config if no subnets are defined
+        var config = dhcpConfig.Value;
+        if (config.ServerIp == null || config.IpRangeStart == null)
         {
-            IpRangeStart = IPAddress.Parse( "192.168.99.100" ),
-            IpRangeEnd = IPAddress.Parse( "192.168.99.199" ),
-            ServerIp = IPAddress.Parse( "192.168.99.1" ),
-            SubnetMask = IPAddress.Parse( "255.255.255.0" ),
-            Gateway = IPAddress.Parse( "192.168.99.1" ),
-            DnsServers = new List<IPAddress> {
-                IPAddress.Parse( "1.1.1.1" ),
-                IPAddress.Parse( "8.8.8.8" )
-            },
-            LeaseTime = 86400
-        };
+            _fallbackConfig = CreateDefaultConfig();
+        }
+        else
+        {
+            _fallbackConfig = config;
+        }
     }
 
-    public async Task<byte[]> CreateDhcpResponseAsync( DhcpRequest request )
+    private static DhcpConfig CreateDefaultConfig() => new()
+    {
+        IpRangeStart = IPAddress.Parse("192.168.99.100"),
+        IpRangeEnd = IPAddress.Parse("192.168.99.199"),
+        ServerIp = IPAddress.Parse("192.168.99.1"),
+        SubnetMask = IPAddress.Parse("255.255.255.0"),
+        Gateway = IPAddress.Parse("192.168.99.1"),
+        DnsServers = [IPAddress.Parse("1.1.1.1"), IPAddress.Parse("8.8.8.8")],
+        LeaseTime = 86400
+    };
+
+    public async Task<byte[]> CreateDhcpResponseAsync(DhcpRequest request)
     {
         try
         {
-            var options = new List<DhcpOption>
+            // Find the appropriate subnet for this request
+            var subnet = await _dhcpSubnetService.FindSubnetForRequestAsync(request).ConfigureAwait(false);
+
+            // Match client class for conditional options
+            var clientClass = await _dhcpSubnetService.MatchClientClassAsync(request).ConfigureAwait(false);
+
+            return request.MessageType switch
             {
-                DhcpOptionExtensions.CreateOption( DhcpOptionCode.ServerIdentifier, _dhcpConfig.ServerIp.GetAddressBytes() ),
-                DhcpOptionExtensions.CreateOption( DhcpOptionCode.SubnetMask, _dhcpConfig.SubnetMask.GetAddressBytes() ),
-                DhcpOptionExtensions.CreateOption( DhcpOptionCode.Router, _dhcpConfig.Gateway.GetAddressBytes() ),
-                DhcpOptionExtensions.CreateOption( DhcpOptionCode.DNS, _dhcpConfig.DnsServers.SelectMany( ip => ip.GetAddressBytes() ).ToArray() )
+                DhcpMessageType.Discover => await HandleDiscoverAsync(request, subnet, clientClass).ConfigureAwait(false),
+                DhcpMessageType.Request => await HandleRequestAsync(request, subnet, clientClass).ConfigureAwait(false),
+                DhcpMessageType.Release => await HandleReleaseAsync(request).ConfigureAwait(false),
+                DhcpMessageType.Decline => await HandleDeclineAsync(request).ConfigureAwait(false),
+                DhcpMessageType.Inform => HandleInform(request, subnet, clientClass),
+                _ => CreateNakResponse(request, subnet)
             };
-
-            if ( request.IsBootp )
-            {
-                options.AddRange( HandleBootpOptions( _dhcpConfig ) );
-            }
-
-            if ( request.IsPxeRequest )
-            {
-                options.AddRange( GetPxeOptions() );
-            }
-
-            switch ( request.MessageType )
-            {
-                case DhcpMessageType.Discover:
-                    return await HandleDiscoverAsync( request, options );
-                case DhcpMessageType.Request:
-                    return await HandleRequestAsync( request, options );
-                case DhcpMessageType.Release:
-                    await HandleReleaseAsync( request );
-                    return Array.Empty<byte>(); // No response for RELEASE
-                case DhcpMessageType.Decline:
-                    await HandleDeclineAsync( request );
-                    return Array.Empty<byte>(); // No response for DECLINE
-                case DhcpMessageType.Inform:
-                    return HandleInform( request, options );
-                default:
-                    _logger.LogWarning( $"Unhandled DHCP message type: {request.MessageType}" );
-                    return ConstructDhcpPacket( request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) } );
-            }
         }
-        catch ( Exception ex )
+        catch (Exception ex)
         {
-            _logger.LogError( $"Failed to create DHCP response: {ex.Message}" );
-            return ConstructDhcpPacket( request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) } );
+            _logger.LogError(ex, "Error creating DHCP response for {Mac}", request.ClientMac);
+            return CreateNakResponse(request, null);
         }
     }
 
-    private async Task<byte[]> HandleDiscoverAsync( DhcpRequest request, List<DhcpOption> baseOptions )
+    private async Task<byte[]> HandleDiscoverAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
-        try
+        // Check failover - should we handle this request?
+        if (_failoverService != null && _failoverService.IsEnabled)
         {
-            var offeredIp = await _dhcpLeasesService.OfferLeaseAsync( request.ClientMac, _dhcpConfig.IpRangeStart, _dhcpConfig.IpRangeEnd );
-            if ( offeredIp == null )
+            if (!_failoverService.CanServe)
             {
-                _logger.LogWarning( $"No available IP for client {request.ClientMac}" );
-                return ConstructDhcpPacket( request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) } );
+                _logger.LogDebug("Failover state prevents serving DISCOVER from {Mac}", request.ClientMac);
+                return []; // Don't respond, let peer handle it
             }
 
-            var options = new List<DhcpOption>( baseOptions )
+            if (!_failoverService.ShouldHandleRequest(request.ClientMac, request.RequestedIp))
             {
-                DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Offer } ),
-                DhcpOptionExtensions.CreateOption( DhcpOptionCode.IPAddressLeaseTime, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( _dhcpConfig.LeaseTime ) ) )
-            };
-            
-            return ConstructDhcpPacket( request, offeredIp, options );
+                _logger.LogDebug("Load balancing: peer should handle DISCOVER from {Mac}", request.ClientMac);
+                return []; // Let peer handle based on load balancing
+            }
         }
-        catch ( Exception ex )
+
+        IPAddress? offeredIp;
+        DhcpPool? pool = null;
+
+        if (subnet != null)
         {
-            _logger.LogError( $"Failed to handle DISCOVER: {ex.Message}" );
-            return ConstructDhcpPacket( request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) } );
+            // Multi-subnet mode: find IP in subnet's pools
+            (offeredIp, pool) = await _dhcpSubnetService.FindAvailableIpInSubnetAsync(
+                subnet, request.ClientMac, request).ConfigureAwait(false);
         }
+        else
+        {
+            // Fallback mode: use legacy service
+            offeredIp = await _dhcpLeasesService.OfferLeaseAsync(
+                request.ClientMac,
+                _fallbackConfig.IpRangeStart,
+                _fallbackConfig.IpRangeEnd!
+            ).ConfigureAwait(false);
+        }
+
+        if (offeredIp == null)
+        {
+            _logger.LogWarning("No IP available for {Mac} in subnet {Subnet}",
+                request.ClientMac, subnet?.Name ?? "default");
+            return CreateNakResponse(request, subnet);
+        }
+
+        _logger.LogInformation("Offering {Ip} to {Mac} from {Subnet}/{Pool}",
+            offeredIp, request.ClientMac, subnet?.Name ?? "default", pool?.Name ?? "default");
+
+        return ConstructDhcpPacket(request, offeredIp, DhcpMessageType.Offer, subnet, clientClass);
     }
 
-    private async Task<byte[]> HandleRequestAsync( DhcpRequest request, List<DhcpOption> baseOptions )
+    private async Task<byte[]> HandleRequestAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
-        try
+        // Check failover - should we handle this request?
+        if (_failoverService != null && _failoverService.IsEnabled)
         {
-            var requestedIp = request.RequestedIp ?? await _dhcpLeasesService.GetAssignedIpAsync( request.ClientMac );
-
-            if ( requestedIp != null && await _dhcpLeasesService.CanAssignIpAsync( request.ClientMac, requestedIp ) )
+            if (!_failoverService.CanServe)
             {
-                await _dhcpLeasesService.AssignLeaseAsync( request.ClientMac, requestedIp, _dhcpConfig.LeaseTime );
+                _logger.LogDebug("Failover state prevents serving REQUEST from {Mac}", request.ClientMac);
+                return []; // Don't respond
+            }
 
-                var options = new List<DhcpOption>( baseOptions )
+            if (!_failoverService.ShouldHandleRequest(request.ClientMac, request.RequestedIp))
+            {
+                _logger.LogDebug("Load balancing: peer should handle REQUEST from {Mac}", request.ClientMac);
+                return []; // Let peer handle
+            }
+        }
+
+        var requestedIp = request.RequestedIp
+            ?? await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
+
+        if (requestedIp != null && await _dhcpLeasesService.CanAssignIpAsync(request.ClientMac, requestedIp).ConfigureAwait(false))
+        {
+            var leaseTime = subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
+
+            await _dhcpLeasesService.AssignLeaseAsync(
+                request.ClientMac,
+                requestedIp,
+                leaseTime
+            ).ConfigureAwait(false);
+
+            _logger.LogInformation("Assigned {Ip} to {Mac} for {LeaseTime}s",
+                requestedIp, request.ClientMac, leaseTime);
+
+            // Notify failover peer of binding update
+            if (_failoverService != null && _failoverService.IsEnabled)
+            {
+                var update = new FailoverBindingUpdate
                 {
-                    DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack } ),
-                    DhcpOptionExtensions.CreateOption( DhcpOptionCode.IPAddressLeaseTime, BitConverter.GetBytes( IPAddress.HostToNetworkOrder( _dhcpConfig.LeaseTime ) ) )
+                    IpAddress = requestedIp,
+                    MacAddress = request.ClientMac,
+                    StartTime = DateTime.UtcNow,
+                    EndTime = DateTime.UtcNow.AddSeconds(leaseTime),
+                    BindingState = FailoverBindingState.Active,
+                    ClientHostname = request.Hostname
                 };
 
-                return ConstructDhcpPacket( request, requestedIp, options );
+                // Fire and forget - don't block response to client
+                _ = _failoverService.SendBindingUpdateAsync(update);
             }
-            else
-            {
-                _logger.LogWarning( $"Request for IP {requestedIp} denied for client {request.ClientMac}" );
-                return ConstructDhcpPacket( request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) } );
-            }
+
+            return ConstructDhcpPacket(request, requestedIp, DhcpMessageType.Ack, subnet, clientClass);
         }
-        catch ( Exception ex )
+
+        _logger.LogWarning("Request denied for {Mac}, IP: {Ip}", request.ClientMac, requestedIp);
+        return CreateNakResponse(request, subnet);
+    }
+
+    private async Task<byte[]> HandleReleaseAsync(DhcpRequest request)
+    {
+        // Get the lease before releasing to notify failover peer
+        var assignedIp = await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
+
+        await _dhcpLeasesService.ReleaseLeaseAsync(request.ClientMac).ConfigureAwait(false);
+
+        // Notify failover peer of release
+        if (_failoverService != null && _failoverService.IsEnabled && assignedIp != null)
         {
-            _logger.LogError( $"Failed to handle REQUEST: {ex.Message}" );
-            return ConstructDhcpPacket( request, IPAddress.Any, new List<DhcpOption> { DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Nak } ) } );
+            _ = _failoverService.SendBindingReleaseAsync(assignedIp, request.ClientMac);
         }
-    }
 
-    private async Task HandleReleaseAsync( DhcpRequest request )
-    {
-        await _dhcpLeasesService.ReleaseLeaseAsync( request.ClientMac );
-    }
-
-    private async Task HandleDeclineAsync( DhcpRequest request )
-    {
-        await _dhcpLeasesService.MarkIpAsDeclinedAsync( request.RequestedIp );
-    }
-
-    private byte[] HandleInform( DhcpRequest request, List<DhcpOption> baseOptions )
-    {
-        var options = new List<DhcpOption>( baseOptions )
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            DhcpOptionExtensions.CreateOption( DhcpOptionCode.MessageType, new byte[] { (byte)DhcpMessageType.Ack } )
-        };
-        return ConstructDhcpPacket( request, request.RequestedIp, options );
+            _logger.LogDebug("Released lease for {Mac}", request.ClientMac);
+        }
+        return [];
     }
 
-    private List<DhcpOption> HandleBootpOptions( DhcpConfig config )
+    private async Task<byte[]> HandleDeclineAsync(DhcpRequest request)
     {
-        return new List<DhcpOption>
+        if (request.RequestedIp != null)
         {
-            DhcpOptionExtensions.CreateOption( DhcpOptionCode.BootFileName, config.BootFileName ?? string.Empty ),
-            DhcpOptionExtensions.CreateOption( DhcpOptionCode.TFTPServerName, config.ServerName ?? string.Empty )
-        };
+            await _dhcpLeasesService.MarkIpAsDeclinedAsync(request.RequestedIp).ConfigureAwait(false);
+            _logger.LogWarning("IP {Ip} declined by {Mac}", request.RequestedIp, request.ClientMac);
+        }
+        return [];
     }
 
-    private List<DhcpOption> GetPxeOptions()
+    private byte[] HandleInform(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
-        return new List<DhcpOption>
-        {
-            DhcpOptionExtensions.CreateOption( DhcpOptionCode.PxeClientArchType, new byte[] { 0x00, 0x07 } ), // x86_64 as an example
-            DhcpOptionExtensions.CreateOption( DhcpOptionCode.PxeClientNetworkInterface, new byte[] { 0x01 } ), // Ethernet
-            DhcpOptionExtensions.CreateOption( DhcpOptionCode.PxeDiscoveryControl, new byte[] { 0x03 } ) // PXE boot server discovery
-        };
+        var clientIp = request.RequestedIp ?? request.CiAddr ?? IPAddress.Any;
+        return ConstructDhcpPacket(request, clientIp, DhcpMessageType.Ack, subnet, clientClass, includeLeaseTime: false);
     }
 
-    private byte[] ConstructDhcpPacket( DhcpRequest request, IPAddress assignedIp, List<DhcpOption> options )
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private byte[] CreateNakResponse(DhcpRequest request, DhcpSubnet? subnet)
     {
-         _logger.LogDebug( $"Constructing DHCP packet for {request.ClientMac}" );
+        return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Nak, subnet, null, includeLeaseTime: false);
+    }
+
+    private byte[] ConstructDhcpPacket(
+        DhcpRequest request,
+        IPAddress assignedIp,
+        DhcpMessageType messageType,
+        DhcpSubnet? subnet,
+        DhcpClass? clientClass,
+        bool includeLeaseTime = true)
+    {
+        // Get effective configuration from subnet or fallback
+        var serverIp = subnet?.Router ?? _fallbackConfig.ServerIp!;
+        var subnetMask = subnet?.SubnetMask ?? _fallbackConfig.SubnetMask!;
+        var router = subnet?.Router ?? _fallbackConfig.Gateway!;
+        var dnsServers = subnet?.DnsServers ?? _fallbackConfig.DnsServers.ToArray();
+        var leaseTime = subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
+        var domainName = subnet?.DomainName;
+        var ntpServers = subnet?.NtpServers;
+        var winsServers = subnet?.WinsServers;
+        var bootFilename = GetBootFilename(request, subnet, clientClass);
+        var tftpServer = clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
+
+        // Rent buffer from pool (max DHCP packet is ~576 bytes, allocate 1024 for safety)
+        var buffer = _bufferPool.Rent(1024);
+
         try
         {
-            // Define DHCP packet fields
-            byte op = 2; // 2 for server reply, 1 for client request
-            byte htype = 1; // Ethernet (10Mb)
-            byte hlen = 6; // Hardware address length for Ethernet
-            byte hops = 0;
-            uint xid = BitConverter.ToUInt32( request.Xid, 0 ); // Transaction ID from the request
-            ushort secs = 0; // Seconds elapsed since client began address acquisition or renewal process
-            ushort flags = 0; // Flags (broadcast flag if set to 0x8000)
-            IPAddress ciaddr = request.RequestedIp ?? IPAddress.Any; // Client IP address
-            IPAddress yiaddr = assignedIp ?? IPAddress.Any; // 'Your' (client) IP address
-            IPAddress siaddr = _dhcpConfig.ServerIp; // Server IP address
-            IPAddress giaddr = IPAddress.Any; // Relay agent IP address
+            int offset = 0;
 
-            // Hardware address padding (16 bytes for chaddr, but only first 6 are used for MAC)
-            byte[] chaddr = new byte[ 16 ];
-            Array.Copy( MacStringToBytes( request.ClientMac ), 0, chaddr, 0, 6 );
+            // Fixed header (236 bytes)
+            buffer[offset++] = 2; // op = BOOTREPLY
+            buffer[offset++] = 1; // htype = Ethernet
+            buffer[offset++] = 6; // hlen = 6 bytes MAC
+            buffer[offset++] = 0; // hops
 
-            // Server name and boot file name, both 64 bytes
-            byte[] sname = new byte[ 64 ];
-            byte[] file = new byte[ 128 ];
-            if ( request.IsBootp )
+            // XID (4 bytes)
+            request.Xid.CopyTo(buffer, offset);
+            offset += 4;
+
+            // Secs (2 bytes)
+            buffer[offset++] = 0;
+            buffer[offset++] = 0;
+
+            // Flags (2 bytes) - preserve client flags
+            buffer[offset++] = (byte)(request.Flags >> 8);
+            buffer[offset++] = (byte)(request.Flags & 0xFF);
+
+            // ciaddr (4 bytes)
+            var ciaddr = request.CiAddr ?? IPAddress.Any;
+            ciaddr.GetAddressBytes().CopyTo(buffer, offset);
+            offset += 4;
+
+            // yiaddr (4 bytes)
+            assignedIp.GetAddressBytes().CopyTo(buffer, offset);
+            offset += 4;
+
+            // siaddr (4 bytes) - TFTP server
+            var siaddr = tftpServer != null && IPAddress.TryParse(tftpServer, out var tftpIp)
+                ? tftpIp
+                : serverIp;
+            siaddr.GetAddressBytes().CopyTo(buffer, offset);
+            offset += 4;
+
+            // giaddr (4 bytes)
+            var giaddr = request.GiAddr ?? IPAddress.Any;
+            giaddr.GetAddressBytes().CopyTo(buffer, offset);
+            offset += 4;
+
+            // chaddr (16 bytes)
+            ParseMacToBytes(request.ClientMac, buffer.AsSpan(offset, 6));
+            offset += 16;
+
+            // sname (64 bytes)
+            if (!string.IsNullOrEmpty(tftpServer))
             {
-                Encoding.ASCII.GetBytes( _dhcpConfig.ServerName ?? string.Empty ).CopyTo( sname, 0 );
-                Encoding.ASCII.GetBytes( _dhcpConfig.BootFileName ?? string.Empty ).CopyTo( file, 0 );
+                var tftpBytes = Encoding.ASCII.GetBytes(tftpServer);
+                var copyLen = Math.Min(tftpBytes.Length, 63);
+                tftpBytes.AsSpan(0, copyLen).CopyTo(buffer.AsSpan(offset));
             }
+            offset += 64;
 
-            // Construct the options field
-            var optionsBytes = ConstructDhcpOptions( options );
-
-            // Combine all parts into the packet
-            using ( var ms = new System.IO.MemoryStream() )
+            // file (128 bytes)
+            if (!string.IsNullOrEmpty(bootFilename))
             {
-                using ( var bw = new System.IO.BinaryWriter( ms ) )
-                {
-                    bw.Write( op );
-                    bw.Write( htype );
-                    bw.Write( hlen );
-                    bw.Write( hops );
-                    bw.Write( xid );
-                    bw.Write( secs );
-                    bw.Write( flags );
-                    bw.Write( ciaddr.GetAddressBytes() );
-                    bw.Write( yiaddr.GetAddressBytes() );
-                    bw.Write( siaddr.GetAddressBytes() );
-                    bw.Write( giaddr.GetAddressBytes() );
-                    bw.Write( chaddr );
-                    bw.Write( sname );
-                    bw.Write( file );
-                    // Magic cookie - must be 99.130.83.99
-                    bw.Write( new byte[] { 99, 130, 83, 99 } );
-                    bw.Write( optionsBytes );
-                    bw.Write( (byte)DhcpOptionCode.End ); // End of options
-                }
-
-                return ms.ToArray();
+                var bootBytes = Encoding.ASCII.GetBytes(bootFilename);
+                var copyLen = Math.Min(bootBytes.Length, 127);
+                bootBytes.AsSpan(0, copyLen).CopyTo(buffer.AsSpan(offset));
             }
-        }
-        catch ( Exception ex )
-        {
-            _logger.LogError( $"Error constructing DHCP packet: {ex.Message}" );
-            return [ ];
+            offset += 128;
+
+            // Magic cookie
+            MagicCookie.CopyTo(buffer, offset);
+            offset += 4;
+
+            // DHCP Options
+            offset = WriteOptions(buffer, offset, messageType, request, subnet, clientClass,
+                serverIp, subnetMask, router, dnsServers, leaseTime,
+                domainName, ntpServers, winsServers, bootFilename, includeLeaseTime);
+
+            // End option
+            buffer[offset++] = (byte)DhcpOptionCode.End;
+
+            // Copy to correctly-sized array
+            var result = new byte[offset];
+            Buffer.BlockCopy(buffer, 0, result, 0, offset);
+            return result;
         }
         finally
         {
-            _logger.LogDebug( $"Constructed DHCP packet for {request.ClientMac}" );
+            _bufferPool.Return(buffer);
         }
     }
-    
-    private byte[] ConstructDhcpOptions( List<DhcpOption> options )
+
+    private static string? GetBootFilename(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
-        using ( var ms = new System.IO.MemoryStream() )
+        // Priority: class override > PXE detection > subnet config
+        if (clientClass?.BootFilename != null)
         {
-            using ( var bw = new System.IO.BinaryWriter( ms ) )
+            return clientClass.BootFilename;
+        }
+
+        if (request.IsPxeRequest && subnet != null)
+        {
+            // Detect UEFI vs Legacy BIOS from vendor class
+            var isUefi = request.VendorClassIdentifier?.Contains("00007") == true ||
+                         request.VendorClassIdentifier?.Contains("00009") == true ||
+                         request.VendorClassIdentifier?.Contains("Arch:00007") == true;
+
+            if (isUefi && !string.IsNullOrEmpty(subnet.BootFilenameUefi))
             {
-                foreach ( var option in options )
-                {
-                    bw.Write( option.Code );
-                    bw.Write( (byte)option.Data.Length ); // length of the option
-                    bw.Write( option.Data );
-                }
+                return subnet.BootFilenameUefi;
+            }
+        }
+
+        return subnet?.BootFilename ?? request.File;
+    }
+
+    private int WriteOptions(
+        byte[] buffer, int offset,
+        DhcpMessageType messageType,
+        DhcpRequest request,
+        DhcpSubnet? subnet,
+        DhcpClass? clientClass,
+        IPAddress serverIp,
+        IPAddress subnetMask,
+        IPAddress router,
+        IPAddress[]? dnsServers,
+        int leaseTime,
+        string? domainName,
+        IPAddress[]? ntpServers,
+        IPAddress[]? winsServers,
+        string? bootFilename,
+        bool includeLeaseTime)
+    {
+        // Message Type (required)
+        offset = WriteOption(buffer, offset, DhcpOptionCode.MessageType,
+            messageType switch
+            {
+                DhcpMessageType.Offer => OfferMessageType,
+                DhcpMessageType.Ack => AckMessageType,
+                _ => NakMessageType
+            });
+
+        // For NAK, only include message type and server identifier
+        if (messageType == DhcpMessageType.Nak)
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.ServerIdentifier, serverIp.GetAddressBytes());
+            return offset;
+        }
+
+        // Server Identifier
+        offset = WriteOption(buffer, offset, DhcpOptionCode.ServerIdentifier, serverIp.GetAddressBytes());
+
+        // Subnet Mask
+        offset = WriteOption(buffer, offset, DhcpOptionCode.SubnetMask, subnetMask.GetAddressBytes());
+
+        // Router/Gateway
+        offset = WriteOption(buffer, offset, DhcpOptionCode.Router, router.GetAddressBytes());
+
+        // Broadcast Address (calculate from network + inverted mask)
+        if (subnet?.Broadcast != null)
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.BroadcastAddress, subnet.Broadcast.GetAddressBytes());
+        }
+
+        // DNS Servers
+        if (dnsServers is { Length: > 0 })
+        {
+            var dnsBytes = new byte[dnsServers.Length * 4];
+            for (int i = 0; i < dnsServers.Length; i++)
+            {
+                dnsServers[i].GetAddressBytes().CopyTo(dnsBytes, i * 4);
+            }
+            offset = WriteOption(buffer, offset, DhcpOptionCode.DNS, dnsBytes);
+        }
+
+        // Domain Name (Option 15)
+        if (!string.IsNullOrEmpty(domainName))
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.DomainName, Encoding.ASCII.GetBytes(domainName));
+        }
+
+        // Hostname (Option 12) - Echo back client's hostname if provided
+        if (!string.IsNullOrEmpty(request.Hostname))
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.HostName, Encoding.ASCII.GetBytes(request.Hostname));
+        }
+
+        // Domain Search List (Option 119) - RFC 1035 encoded
+        if (!string.IsNullOrEmpty(subnet?.DomainSearchList))
+        {
+            var domainSearchBytes = DhcpOptionExtensions.EncodeDomainSearchList(subnet.DomainSearchList);
+            if (domainSearchBytes.Length > 0)
+            {
+                offset = WriteOption(buffer, offset, DhcpOptionCode.DomainSearch, domainSearchBytes);
+            }
+        }
+
+        // Classless Static Routes (Option 121) - RFC 3442 encoded
+        if (!string.IsNullOrEmpty(subnet?.StaticRoutesJson))
+        {
+            var routesBytes = DhcpOptionExtensions.EncodeClasslessStaticRoutes(subnet.StaticRoutesJson);
+            if (routesBytes.Length > 0)
+            {
+                offset = WriteOption(buffer, offset, DhcpOptionCode.ClasslessStaticRoute, routesBytes);
+            }
+        }
+
+        // Time Offset (Option 2) - Seconds offset from UTC
+        if (subnet?.TimeOffset.HasValue == true)
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.TimeOffset,
+                GetNetworkOrderInt32Bytes(subnet.TimeOffset.Value));
+        }
+
+        // POSIX Timezone (Option 100)
+        if (!string.IsNullOrEmpty(subnet?.PosixTimezone))
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.POSIXTimeZone,
+                Encoding.ASCII.GetBytes(subnet.PosixTimezone));
+        }
+
+        // NTP Servers
+        if (ntpServers is { Length: > 0 })
+        {
+            var ntpBytes = new byte[ntpServers.Length * 4];
+            for (int i = 0; i < ntpServers.Length; i++)
+            {
+                ntpServers[i].GetAddressBytes().CopyTo(ntpBytes, i * 4);
+            }
+            offset = WriteOption(buffer, offset, DhcpOptionCode.NTPServers, ntpBytes);
+        }
+
+        // WINS/NetBIOS Servers
+        if (winsServers is { Length: > 0 })
+        {
+            var winsBytes = new byte[winsServers.Length * 4];
+            for (int i = 0; i < winsServers.Length; i++)
+            {
+                winsServers[i].GetAddressBytes().CopyTo(winsBytes, i * 4);
+            }
+            offset = WriteOption(buffer, offset, DhcpOptionCode.NetBIOSOverTCPIPNameServer, winsBytes);
+            // Set NetBIOS node type to hybrid (0x08)
+            offset = WriteOption(buffer, offset, DhcpOptionCode.NetBIOSOverTCPIPNodeType, [0x08]);
+        }
+
+        // Interface MTU
+        if (subnet?.InterfaceMtu.HasValue == true)
+        {
+            var mtuBytes = new byte[2];
+            mtuBytes[0] = (byte)(subnet.InterfaceMtu.Value >> 8);
+            mtuBytes[1] = (byte)(subnet.InterfaceMtu.Value & 0xFF);
+            offset = WriteOption(buffer, offset, DhcpOptionCode.InterfaceMTU, mtuBytes);
+        }
+
+        // Lease timing options
+        if (includeLeaseTime)
+        {
+            offset = WriteOption(buffer, offset, DhcpOptionCode.IPAddressLeaseTime,
+                GetNetworkOrderInt32Bytes(leaseTime));
+            offset = WriteOption(buffer, offset, DhcpOptionCode.RenewalTimeValue,
+                GetNetworkOrderInt32Bytes(leaseTime / 2));
+            offset = WriteOption(buffer, offset, DhcpOptionCode.RebindingTimeValue,
+                GetNetworkOrderInt32Bytes((leaseTime * 7) / 8));
+        }
+
+        // PXE/BOOTP options
+        if (request.IsPxeRequest || request.IsBootp)
+        {
+            if (!string.IsNullOrEmpty(bootFilename))
+            {
+                offset = WriteOption(buffer, offset, DhcpOptionCode.BootFileName,
+                    Encoding.ASCII.GetBytes(bootFilename));
             }
 
-            return ms.ToArray();
+            var tftpServer = clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
+            if (!string.IsNullOrEmpty(tftpServer))
+            {
+                offset = WriteOption(buffer, offset, DhcpOptionCode.TFTPServerName,
+                    Encoding.ASCII.GetBytes(tftpServer));
+            }
+
+            if (request.IsPxeRequest)
+            {
+                // Detect architecture and send appropriate PXE options
+                var isUefi = request.VendorClassIdentifier?.Contains("00007") == true ||
+                             request.VendorClassIdentifier?.Contains("Arch:00007") == true;
+
+                offset = WriteOption(buffer, offset, DhcpOptionCode.PxeClientArchType,
+                    isUefi ? PxeArchTypeUefi64 : PxeArchTypeLegacy);
+                offset = WriteOption(buffer, offset, DhcpOptionCode.PxeClientNetworkInterface, PxeNetInterface);
+                offset = WriteOption(buffer, offset, DhcpOptionCode.PxeDiscoveryControl, PxeDiscoveryControl);
+            }
+        }
+
+        return offset;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int WriteOption(byte[] buffer, int offset, DhcpOptionCode code, ReadOnlySpan<byte> data)
+    {
+        buffer[offset++] = (byte)code;
+        buffer[offset++] = (byte)data.Length;
+        data.CopyTo(buffer.AsSpan(offset));
+        return offset + data.Length;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static byte[] GetNetworkOrderInt32Bytes(int value)
+    {
+        var networkOrder = IPAddress.HostToNetworkOrder(value);
+        return
+        [
+            (byte)(networkOrder >> 24),
+            (byte)(networkOrder >> 16),
+            (byte)(networkOrder >> 8),
+            (byte)networkOrder
+        ];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ParseMacToBytes(string macAddress, Span<byte> destination)
+    {
+        int byteIndex = 0;
+        int charIndex = 0;
+
+        while (byteIndex < 6 && charIndex < macAddress.Length)
+        {
+            byte high = ParseHexChar(macAddress[charIndex++]);
+            byte low = ParseHexChar(macAddress[charIndex++]);
+            destination[byteIndex++] = (byte)((high << 4) | low);
+
+            if (charIndex < macAddress.Length && macAddress[charIndex] == ':')
+            {
+                charIndex++;
+            }
         }
     }
 
-    private byte[] MacStringToBytes( string macAddress )
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static byte ParseHexChar(char c)
     {
-        return macAddress.Split( ':' ).Select( b => Convert.ToByte( b, 16 ) ).ToArray();
+        return c switch
+        {
+            >= '0' and <= '9' => (byte)(c - '0'),
+            >= 'A' and <= 'F' => (byte)(c - 'A' + 10),
+            >= 'a' and <= 'f' => (byte)(c - 'a' + 10),
+            _ => 0
+        };
     }
-    
 }

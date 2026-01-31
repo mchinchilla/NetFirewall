@@ -1,0 +1,202 @@
+@page "/dhcp/reservations"
+@rendermode InteractiveServer
+@using System.Net
+@using System.Net.NetworkInformation
+@using NetFirewall.Models.Dhcp
+@using NetFirewall.Services.Dhcp
+@inject IDhcpAdminService DhcpService
+
+<PageTitle>DHCP Reservations - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">MAC Reservations</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">Reserve IP addresses for specific MAC addresses</p>
+        </div>
+        <button @onclick="ShowAddModal" class="btn-primary">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Reservation
+        </button>
+    </div>
+
+    <!-- Reservations Table -->
+    <div class="card">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>MAC Address</th>
+                        <th>Reserved IP</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th class="w-24">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var res in _reservations)
+                    {
+                        var isActive = IsReservationActive(res);
+                        <tr>
+                            <td class="font-mono text-sm">@FormatMac(res.MacAddress)</td>
+                            <td class="font-mono text-sm">@res.ReservedIp</td>
+                            <td>@(res.Description ?? "-")</td>
+                            <td>
+                                @if (isActive)
+                                {
+                                    <span class="badge-success">In Use</span>
+                                }
+                                else
+                                {
+                                    <span class="badge-info">Reserved</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="flex items-center gap-2">
+                                    <button class="btn-icon text-blue-400 hover:text-blue-600" title="Edit" @onclick="() => ShowEditModal(res)">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                    </button>
+                                    <button class="btn-icon text-red-400 hover:text-red-600" title="Delete" @onclick="() => DeleteReservation(res)">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@if (_showAddModal)
+{
+    <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                    @(_editId.HasValue ? "Edit Reservation" : "Add Reservation")
+                </h3>
+            </div>
+            <div class="px-6 py-4 space-y-4">
+                <div>
+                    <label class="form-label">MAC Address</label>
+                    <input type="text" class="form-input font-mono" @bind="_editMac" placeholder="AA:BB:CC:DD:EE:FF" />
+                </div>
+                <div>
+                    <label class="form-label">IP Address</label>
+                    <input type="text" class="form-input font-mono" @bind="_editIp" placeholder="192.168.99.10" />
+                </div>
+                <div>
+                    <label class="form-label">Description (optional)</label>
+                    <input type="text" class="form-input" @bind="_editDescription" placeholder="Web Server" />
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                <button class="btn-secondary" @onclick="() => _showAddModal = false">Cancel</button>
+                <button class="btn-primary" @onclick="SaveReservation">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _showAddModal = false;
+    private IReadOnlyList<DhcpMacReservation> _reservations = [];
+    private IReadOnlyList<DhcpLease> _activeLeases = [];
+
+    // Form fields for add/edit
+    private string _editMac = "";
+    private string _editIp = "";
+    private string _editDescription = "";
+    private Guid? _editId = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadReservationsAsync();
+    }
+
+    private async Task LoadReservationsAsync()
+    {
+        var reservationsTask = DhcpService.GetReservationsAsync();
+        var leasesTask = DhcpService.GetActiveLeasesAsync();
+
+        await Task.WhenAll(reservationsTask, leasesTask);
+
+        _reservations = await reservationsTask;
+        _activeLeases = await leasesTask;
+    }
+
+    private bool IsReservationActive(DhcpMacReservation reservation)
+    {
+        return _activeLeases.Any(l =>
+            l.MacAddress.Equals(reservation.MacAddress) &&
+            l.IpAddress.Equals(reservation.ReservedIp));
+    }
+
+    private void ShowAddModal()
+    {
+        _editId = null;
+        _editMac = "";
+        _editIp = "";
+        _editDescription = "";
+        _showAddModal = true;
+    }
+
+    private void ShowEditModal(DhcpMacReservation reservation)
+    {
+        _editId = reservation.Id;
+        _editMac = FormatMac(reservation.MacAddress);
+        _editIp = reservation.ReservedIp.ToString();
+        _editDescription = reservation.Description ?? "";
+        _showAddModal = true;
+    }
+
+    private async Task SaveReservation()
+    {
+        var mac = PhysicalAddress.Parse(_editMac.Replace(":", "-"));
+        var ip = IPAddress.Parse(_editIp);
+
+        if (_editId.HasValue)
+        {
+            await DhcpService.UpdateReservationAsync(new DhcpMacReservation
+            {
+                Id = _editId.Value,
+                MacAddress = mac,
+                ReservedIp = ip,
+                Description = string.IsNullOrEmpty(_editDescription) ? null : _editDescription
+            });
+        }
+        else
+        {
+            await DhcpService.CreateReservationAsync(new DhcpMacReservation
+            {
+                MacAddress = mac,
+                ReservedIp = ip,
+                Description = string.IsNullOrEmpty(_editDescription) ? null : _editDescription
+            });
+        }
+
+        _showAddModal = false;
+        await LoadReservationsAsync();
+    }
+
+    private async Task DeleteReservation(DhcpMacReservation reservation)
+    {
+        await DhcpService.DeleteReservationAsync(reservation.Id);
+        await LoadReservationsAsync();
+    }
+
+    private static string FormatMac(PhysicalAddress mac)
+    {
+        var bytes = mac.GetAddressBytes();
+        return string.Join(":", bytes.Select(b => b.ToString("X2")));
+    }
+}

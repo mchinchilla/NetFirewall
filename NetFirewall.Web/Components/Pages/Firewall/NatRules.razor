@@ -1,0 +1,144 @@
+@page "/firewall/nat-rules"
+@rendermode InteractiveServer
+
+<PageTitle>NAT Rules - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">NAT Rules</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">Manage SNAT and Masquerade rules for outbound traffic</p>
+        </div>
+        <button @onclick="ShowAddModal" class="btn-primary">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add NAT Rule
+        </button>
+    </div>
+
+    <!-- NAT Rules Table -->
+    <div class="card">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Type</th>
+                        <th>Source Network</th>
+                        <th>Output Interface</th>
+                        <th>SNAT Address</th>
+                        <th class="w-24">Enabled</th>
+                        <th class="w-24">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var rule in _natRules.OrderBy(r => r.Priority))
+                    {
+                        <tr>
+                            <td>
+                                <span class="font-medium text-gray-900 dark:text-white">@rule.Description</span>
+                            </td>
+                            <td>
+                                <span class="badge @(rule.Type == "masquerade" ? "badge-success" : "badge-info")">
+                                    @rule.Type.ToUpper()
+                                </span>
+                            </td>
+                            <td class="font-mono text-sm">@rule.SourceNetwork</td>
+                            <td class="text-sm">@rule.OutputInterfaceName</td>
+                            <td class="font-mono text-sm">@(rule.SnatAddress ?? "-")</td>
+                            <td>
+                                <button class="toggle @(rule.Enabled ? "toggle-enabled" : "toggle-disabled")" @onclick="() => ToggleRule(rule)">
+                                    <span class="toggle-knob @(rule.Enabled ? "translate-x-5" : "translate-x-0")"></span>
+                                </button>
+                            </td>
+                            <td>
+                                <div class="flex items-center gap-2">
+                                    <button class="btn-icon text-blue-400 hover:text-blue-600" title="Edit">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                    </button>
+                                    <button class="btn-icon text-red-400 hover:text-red-600" title="Delete">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- NAT Type Explanation -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="card">
+            <div class="card-body">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-gray-900 dark:text-white">Masquerade</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Automatically uses the outgoing interface's IP address. Ideal for dynamic IP connections (DHCP WAN).
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-gray-900 dark:text-white">SNAT (Source NAT)</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Uses a specific IP address for source translation. Required for static IP addresses and multi-WAN setups.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    // TODO: Implement add/edit modal
+    private void ShowAddModal() { }
+
+    private List<NatRuleModel> _natRules = new()
+    {
+        new() { Description = "Masquerade LAN to ens192", Type = "masquerade", SourceNetwork = "192.168.99.0/24", OutputInterfaceName = "ens192", Priority = 100, Enabled = true },
+        new() { Description = "Masquerade LAN to ens224", Type = "masquerade", SourceNetwork = "192.168.99.0/24", OutputInterfaceName = "ens224", Priority = 100, Enabled = true },
+        new() { Description = "Masquerade VPN to WAN", Type = "masquerade", SourceNetwork = "10.100.0.0/24", OutputInterfaceName = "ens192", Priority = 100, Enabled = true }
+    };
+
+    private void ToggleRule(NatRuleModel rule)
+    {
+        rule.Enabled = !rule.Enabled;
+    }
+
+    private class NatRuleModel
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Type { get; set; } = "masquerade";
+        public string Description { get; set; } = "";
+        public string SourceNetwork { get; set; } = "";
+        public string OutputInterfaceName { get; set; } = "";
+        public string? SnatAddress { get; set; }
+        public int Priority { get; set; }
+        public bool Enabled { get; set; }
+    }
+}

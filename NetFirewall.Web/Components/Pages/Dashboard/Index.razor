@@ -1,0 +1,214 @@
+@page "/"
+@rendermode InteractiveServer
+@using NetFirewall.Models.Firewall
+@using NetFirewall.Services.Firewall
+@inject IFirewallService FirewallService
+
+<PageTitle>Dashboard - NetFirewall</PageTitle>
+
+<div class="space-y-6">
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Active Interfaces -->
+        <div class="stat-card">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="stat-label">Active Interfaces</p>
+                    <p class="stat-value">@_stats.ActiveInterfaces</p>
+                </div>
+                <div class="w-12 h-12 bg-primary-100 dark:bg-primary-900 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- Firewall Rules -->
+        <div class="stat-card">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="stat-label">Filter Rules</p>
+                    <p class="stat-value">@_stats.EnabledFilterRules</p>
+                </div>
+                <div class="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- DHCP Leases -->
+        <div class="stat-card">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="stat-label">Active Leases</p>
+                    <p class="stat-value">-</p>
+                </div>
+                <div class="w-12 h-12 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- Port Forwards -->
+        <div class="stat-card">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="stat-label">Port Forwards</p>
+                    <p class="stat-value">@_stats.EnabledPortForwards</p>
+                </div>
+                <div class="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interface Status & Recent Activity -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Interface Status -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Interface Status</h2>
+            </div>
+            <div class="card-body">
+                <div class="space-y-4">
+                    @foreach (var iface in _interfaces)
+                    {
+                        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-@(iface.Enabled ? "green" : "gray")-100 dark:bg-@(iface.Enabled ? "green" : "gray")-900 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-@(iface.Enabled ? "green" : "gray")-600 dark:text-@(iface.Enabled ? "green" : "gray")-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p class="font-medium text-gray-900 dark:text-white">@iface.Name</p>
+                                    <p class="text-sm text-gray-500 dark:text-gray-400">@iface.Type - @iface.Role</p>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="@(iface.Enabled ? "badge-success" : "badge-danger")">
+                                    @(iface.Enabled ? "Online" : "Offline")
+                                </span>
+                                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">@(iface.IpAddress?.ToString() ?? "-")</p>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- WAN Status -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">WAN Status</h2>
+            </div>
+            <div class="card-body">
+                <div class="space-y-4">
+                    <!-- Primary WAN -->
+                    <div class="p-4 border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-medium text-green-800 dark:text-green-200">Primary WAN (ens192)</span>
+                            <span class="badge-success">Active</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p class="text-gray-500 dark:text-gray-400">Gateway</p>
+                                <p class="text-gray-900 dark:text-white">10.0.0.254</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 dark:text-gray-400">Latency</p>
+                                <p class="text-gray-900 dark:text-white">12ms</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Secondary WAN -->
+                    <div class="p-4 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-medium text-gray-800 dark:text-gray-200">Secondary WAN (ens224)</span>
+                            <span class="badge-info">Standby</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p class="text-gray-500 dark:text-gray-400">Gateway</p>
+                                <p class="text-gray-900 dark:text-white">10.0.1.254</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 dark:text-gray-400">Latency</p>
+                                <p class="text-gray-900 dark:text-white">18ms</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent DHCP Leases -->
+    <div class="card">
+        <div class="card-header flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent DHCP Leases</h2>
+            <a href="/dhcp/leases" class="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400">View all</a>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>MAC Address</th>
+                        <th>IP Address</th>
+                        <th>Hostname</th>
+                        <th>Lease Expires</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="font-mono">00:1A:2B:3C:4D:5E</td>
+                        <td>192.168.99.101</td>
+                        <td>workstation-01</td>
+                        <td>23:45:12</td>
+                        <td><span class="badge-success">Active</span></td>
+                    </tr>
+                    <tr>
+                        <td class="font-mono">AA:BB:CC:DD:EE:FF</td>
+                        <td>192.168.99.102</td>
+                        <td>laptop-john</td>
+                        <td>22:30:45</td>
+                        <td><span class="badge-success">Active</span></td>
+                    </tr>
+                    <tr>
+                        <td class="font-mono">11:22:33:44:55:66</td>
+                        <td>192.168.99.103</td>
+                        <td>printer-office</td>
+                        <td>21:15:00</td>
+                        <td><span class="badge-warning">Expiring</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    private FirewallStats _stats = new();
+    private IReadOnlyList<FwInterface> _interfaces = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var statsTask = FirewallService.GetStatsAsync();
+        var interfacesTask = FirewallService.GetInterfacesAsync();
+
+        await Task.WhenAll(statsTask, interfacesTask);
+
+        _stats = await statsTask;
+        _interfaces = await interfacesTask;
+    }
+}

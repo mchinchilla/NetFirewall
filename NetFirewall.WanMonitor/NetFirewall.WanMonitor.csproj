@@ -6,6 +6,13 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <UserSecretsId>dotnet-NetFirewall.WanMonitor-17886bbc-6527-4b3b-93a7-dabc31b1c7a0</UserSecretsId>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+
+        <!-- AOT Compilation for fast startup and lower memory -->
+        <PublishAot>true</PublishAot>
+        <OptimizationPreference>Speed</OptimizationPreference>
+        <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <StackTraceSupport>false</StackTraceSupport>
     </PropertyGroup>
 
     <ItemGroup>
