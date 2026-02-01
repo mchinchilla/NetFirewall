@@ -25,8 +25,9 @@ builder.Services.Configure<NftApplyOptions>(builder.Configuration.GetSection("Nf
 builder.Services.AddScoped<IFirewallService, FirewallService>();
 builder.Services.AddScoped<INftApplyService, NftApplyService>();
 
-// Add DHCP Admin services
+// Add DHCP services
 builder.Services.AddScoped<IDhcpAdminService, DhcpAdminService>();
+builder.Services.AddScoped<IDhcpLeasesService, DhcpLeasesService>();
 
 // Add System Monitor service (singleton for state tracking)
 builder.Services.AddSingleton<ISystemMonitorService, SystemMonitorService>();

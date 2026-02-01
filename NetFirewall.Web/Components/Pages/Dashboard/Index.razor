@@ -1,8 +1,13 @@
 @page "/"
 @rendermode InteractiveServer
 @using NetFirewall.Models.Firewall
+@using NetFirewall.Models.Dhcp
 @using NetFirewall.Services.Firewall
+@using NetFirewall.Services.Dhcp
+@using System.Timers
 @inject IFirewallService FirewallService
+@inject IDhcpLeasesService DhcpLeasesService
+@implements IDisposable
 
 <PageTitle>Dashboard - NetFirewall</PageTitle>
 
@@ -44,7 +49,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="stat-label">Active Leases</p>
-                    <p class="stat-value">-</p>
+                    <p class="stat-value">@_leases.Count</p>
                 </div>
                 <div class="w-14 h-14 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/25 group-hover:scale-110 transition-transform duration-300">
                     <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,7 +66,7 @@
                     <p class="stat-label">Port Forwards</p>
                     <p class="stat-value">@_stats.EnabledPortForwards</p>
                 </div>
-                <div class="w-14 h-14 bg-gradient-to-br from-violet-400 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 group-hover:scale-110 transition-transform duration-300">
+                <div class="w-14 h-14 bg-gradient-to-br from-blue-400 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25 group-hover:scale-110 transition-transform duration-300">
                     <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                     </svg>
@@ -70,7 +75,7 @@
         </div>
     </div>
 
-    <!-- Interface Status & Recent Activity -->
+    <!-- Interface Status & WAN Status -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Interface Status -->
         <div class="card">
@@ -78,30 +83,42 @@
                 <h2 class="text-lg font-semibold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">Interface Status</h2>
             </div>
             <div class="card-body">
-                <div class="space-y-3">
-                    @foreach (var iface in _interfaces)
-                    {
-                        <div class="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100/50 dark:from-gray-800 dark:to-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-md transition-all duration-300">
-                            <div class="flex items-center gap-4">
-                                <div class="w-11 h-11 @(iface.Enabled ? "bg-gradient-to-br from-emerald-400 to-emerald-600" : "bg-gradient-to-br from-gray-400 to-gray-500") rounded-xl flex items-center justify-center shadow-md">
-                                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
-                                    </svg>
+                @if (_interfaces.Count == 0)
+                {
+                    <div class="text-center py-8 text-gray-500 dark:text-gray-400">
+                        <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                        </svg>
+                        <p>No interfaces configured</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="space-y-3">
+                        @foreach (var iface in _interfaces)
+                        {
+                            <div class="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100/50 dark:from-gray-800 dark:to-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-md transition-all duration-300">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-11 h-11 @(iface.Enabled ? "bg-gradient-to-br from-emerald-400 to-emerald-600" : "bg-gradient-to-br from-gray-400 to-gray-500") rounded-xl flex items-center justify-center shadow-md">
+                                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p class="font-semibold text-gray-900 dark:text-white">@iface.Name</p>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400">@iface.Type - @iface.Role</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p class="font-semibold text-gray-900 dark:text-white">@iface.Name</p>
-                                    <p class="text-sm text-gray-500 dark:text-gray-400">@iface.Type - @iface.Role</p>
+                                <div class="text-right">
+                                    <span class="@(iface.Enabled ? "badge-success" : "badge-danger")">
+                                        @(iface.Enabled ? "Online" : "Offline")
+                                    </span>
+                                    <p class="text-sm font-mono text-gray-500 dark:text-gray-400 mt-1">@(iface.IpAddress?.ToString() ?? "-")</p>
                                 </div>
                             </div>
-                            <div class="text-right">
-                                <span class="@(iface.Enabled ? "badge-success" : "badge-danger")">
-                                    @(iface.Enabled ? "Online" : "Offline")
-                                </span>
-                                <p class="text-sm font-mono text-gray-500 dark:text-gray-400 mt-1">@(iface.IpAddress?.ToString() ?? "-")</p>
-                            </div>
-                        </div>
-                    }
-                </div>
+                        }
+                    </div>
+                }
             </div>
         </div>
 
@@ -111,57 +128,53 @@
                 <h2 class="text-lg font-semibold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">WAN Status</h2>
             </div>
             <div class="card-body">
-                <div class="space-y-4">
-                    <!-- Primary WAN -->
-                    <div class="p-5 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 rounded-xl border border-emerald-200/50 dark:border-emerald-800/50 shadow-sm">
-                        <div class="flex items-center justify-between mb-3">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-md shadow-emerald-500/20">
-                                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
-                                    </svg>
-                                </div>
-                                <span class="font-semibold text-emerald-800 dark:text-emerald-200">Primary WAN (ens192)</span>
-                            </div>
-                            <span class="badge-success">Active</span>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4 text-sm pl-13">
-                            <div class="bg-white/60 dark:bg-gray-800/40 p-3 rounded-lg">
-                                <p class="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Gateway</p>
-                                <p class="font-mono font-medium text-gray-900 dark:text-white">10.0.0.254</p>
-                            </div>
-                            <div class="bg-white/60 dark:bg-gray-800/40 p-3 rounded-lg">
-                                <p class="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Latency</p>
-                                <p class="font-medium text-emerald-600 dark:text-emerald-400">12ms</p>
-                            </div>
-                        </div>
+                @if (_wanInterfaces.Count == 0)
+                {
+                    <div class="text-center py-8 text-gray-500 dark:text-gray-400">
+                        <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p>No WAN interfaces configured</p>
                     </div>
+                }
+                else
+                {
+                    <div class="space-y-4">
+                        @foreach (var wan in _wanInterfaces)
+                        {
+                            var isPrimary = wan.Role?.Contains("primary", StringComparison.OrdinalIgnoreCase) ?? false;
+                            var isActive = wan.Enabled;
 
-                    <!-- Secondary WAN -->
-                    <div class="p-5 bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800/50 dark:to-slate-800/30 rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-sm">
-                        <div class="flex items-center justify-between mb-3">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 bg-gradient-to-br from-slate-400 to-slate-500 rounded-xl flex items-center justify-center shadow-md shadow-slate-500/20">
-                                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
-                                    </svg>
+                            <div class="p-5 @(isActive ? "bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/10 border-emerald-200/50 dark:border-emerald-800/50" : "bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800/50 dark:to-slate-800/30 border-gray-200/50 dark:border-gray-700/50") rounded-xl border shadow-sm">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 @(isActive ? "bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-emerald-500/20" : "bg-gradient-to-br from-slate-400 to-slate-500 shadow-slate-500/20") rounded-xl flex items-center justify-center shadow-md">
+                                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
+                                            </svg>
+                                        </div>
+                                        <span class="font-semibold @(isActive ? "text-emerald-800 dark:text-emerald-200" : "text-gray-800 dark:text-gray-200")">
+                                            @(isPrimary ? "Primary" : "Secondary") WAN (@wan.Name)
+                                        </span>
+                                    </div>
+                                    <span class="@(isActive ? "badge-success" : "badge-info")">
+                                        @(isActive ? "Active" : "Standby")
+                                    </span>
                                 </div>
-                                <span class="font-semibold text-gray-800 dark:text-gray-200">Secondary WAN (ens224)</span>
+                                <div class="grid grid-cols-2 gap-4 text-sm">
+                                    <div class="bg-white/60 dark:bg-gray-800/40 p-3 rounded-lg">
+                                        <p class="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Gateway</p>
+                                        <p class="font-mono font-medium text-gray-900 dark:text-white">@(wan.Gateway?.ToString() ?? "-")</p>
+                                    </div>
+                                    <div class="bg-white/60 dark:bg-gray-800/40 p-3 rounded-lg">
+                                        <p class="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">IP Address</p>
+                                        <p class="font-mono font-medium @(isActive ? "text-emerald-600 dark:text-emerald-400" : "text-gray-600 dark:text-gray-400")">@(wan.IpAddress?.ToString() ?? "-")</p>
+                                    </div>
+                                </div>
                             </div>
-                            <span class="badge-info">Standby</span>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4 text-sm pl-13">
-                            <div class="bg-white/60 dark:bg-gray-800/40 p-3 rounded-lg">
-                                <p class="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Gateway</p>
-                                <p class="font-mono font-medium text-gray-900 dark:text-white">10.0.1.254</p>
-                            </div>
-                            <div class="bg-white/60 dark:bg-gray-800/40 p-3 rounded-lg">
-                                <p class="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Latency</p>
-                                <p class="font-medium text-gray-600 dark:text-gray-400">18ms</p>
-                            </div>
-                        </div>
+                        }
                     </div>
-                </div>
+                }
             </div>
         </div>
     </div>
@@ -169,7 +182,13 @@
     <!-- Recent DHCP Leases -->
     <div class="card">
         <div class="card-header flex items-center justify-between">
-            <h2 class="text-lg font-semibold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">Recent DHCP Leases</h2>
+            <div class="flex items-center gap-3">
+                <h2 class="text-lg font-semibold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">Recent DHCP Leases</h2>
+                @if (_isRefreshing)
+                {
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+                }
+            </div>
             <a href="/dhcp/leases" class="text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 flex items-center gap-1 group">
                 View all
                 <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -178,40 +197,68 @@
             </a>
         </div>
         <div class="overflow-x-auto">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>MAC Address</th>
-                        <th>IP Address</th>
-                        <th>Hostname</th>
-                        <th>Lease Expires</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                        <td class="font-mono text-sm">00:1A:2B:3C:4D:5E</td>
-                        <td class="font-mono text-sm">192.168.99.101</td>
-                        <td class="font-medium">workstation-01</td>
-                        <td class="text-gray-600 dark:text-gray-400">23:45:12</td>
-                        <td><span class="badge-success">Active</span></td>
-                    </tr>
-                    <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                        <td class="font-mono text-sm">AA:BB:CC:DD:EE:FF</td>
-                        <td class="font-mono text-sm">192.168.99.102</td>
-                        <td class="font-medium">laptop-john</td>
-                        <td class="text-gray-600 dark:text-gray-400">22:30:45</td>
-                        <td><span class="badge-success">Active</span></td>
-                    </tr>
-                    <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                        <td class="font-mono text-sm">11:22:33:44:55:66</td>
-                        <td class="font-mono text-sm">192.168.99.103</td>
-                        <td class="font-medium">printer-office</td>
-                        <td class="text-gray-600 dark:text-gray-400">21:15:00</td>
-                        <td><span class="badge-warning">Expiring</span></td>
-                    </tr>
-                </tbody>
-            </table>
+            @if (_leases.Count == 0)
+            {
+                <div class="text-center py-12 text-gray-500 dark:text-gray-400">
+                    <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <p class="text-lg font-medium">No active DHCP leases</p>
+                    <p class="text-sm mt-1">Leases will appear here when devices connect to the network</p>
+                </div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>MAC Address</th>
+                            <th>IP Address</th>
+                            <th>Hostname</th>
+                            <th>Lease Expires</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var lease in _leases.Take(10))
+                        {
+                            var timeRemaining = lease.EndTime - DateTime.UtcNow;
+                            var isExpiring = timeRemaining.TotalMinutes < 30;
+                            var isExpired = timeRemaining.TotalSeconds <= 0;
+
+                            <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                                <td class="font-mono text-sm">@FormatMacAddress(lease.MacAddress)</td>
+                                <td class="font-mono text-sm">@lease.IpAddress</td>
+                                <td class="font-medium">@(string.IsNullOrEmpty(lease.Hostname) ? "-" : lease.Hostname)</td>
+                                <td class="text-gray-600 dark:text-gray-400">
+                                    @if (isExpired)
+                                    {
+                                        <span class="text-red-500">Expired</span>
+                                    }
+                                    else
+                                    {
+                                        @FormatTimeRemaining(timeRemaining)
+                                    }
+                                </td>
+                                <td>
+                                    @if (isExpired)
+                                    {
+                                        <span class="badge-danger">Expired</span>
+                                    }
+                                    else if (isExpiring)
+                                    {
+                                        <span class="badge-warning">Expiring</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge-success">Active</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
         </div>
     </div>
 </div>
@@ -219,15 +266,74 @@
 @code {
     private FirewallStats _stats = new();
     private IReadOnlyList<FwInterface> _interfaces = [];
+    private IReadOnlyList<FwInterface> _wanInterfaces = [];
+    private IReadOnlyList<DhcpLease> _leases = [];
+    private bool _isRefreshing;
+    private Timer? _refreshTimer;
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadDataAsync();
+
+        // Set up auto-refresh every 30 seconds
+        _refreshTimer = new Timer(30000);
+        _refreshTimer.Elapsed += async (sender, e) => await RefreshDataAsync();
+        _refreshTimer.AutoReset = true;
+        _refreshTimer.Start();
+    }
+
+    private async Task LoadDataAsync()
+    {
         var statsTask = FirewallService.GetStatsAsync();
         var interfacesTask = FirewallService.GetInterfacesAsync();
+        var leasesTask = DhcpLeasesService.GetAllActiveLeasesAsync();
 
-        await Task.WhenAll(statsTask, interfacesTask);
+        await Task.WhenAll(statsTask, interfacesTask, leasesTask);
 
         _stats = await statsTask;
         _interfaces = await interfacesTask;
+        _leases = (await leasesTask).OrderByDescending(l => l.StartTime).ToList();
+        _wanInterfaces = _interfaces.Where(i => i.Type == "WAN").OrderBy(i => i.Role).ToList();
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        try
+        {
+            _isRefreshing = true;
+            await InvokeAsync(StateHasChanged);
+
+            await LoadDataAsync();
+
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            _isRefreshing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string FormatMacAddress(System.Net.NetworkInformation.PhysicalAddress mac)
+    {
+        var bytes = mac.GetAddressBytes();
+        return string.Join(":", bytes.Select(b => b.ToString("X2")));
+    }
+
+    private static string FormatTimeRemaining(TimeSpan time)
+    {
+        if (time.TotalDays >= 1)
+            return $"{(int)time.TotalDays}d {time.Hours}h";
+        if (time.TotalHours >= 1)
+            return $"{(int)time.TotalHours}h {time.Minutes}m";
+        if (time.TotalMinutes >= 1)
+            return $"{(int)time.TotalMinutes}m {time.Seconds}s";
+        return $"{(int)time.TotalSeconds}s";
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Stop();
+        _refreshTimer?.Dispose();
     }
 }
