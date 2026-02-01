@@ -521,3 +521,33 @@ select 'input',
        20
 from fw_interfaces fi
 where fi.role = 'local_network';
+
+-- ============================================================================
+-- NETWORK INTERFACE EXTENSIONS
+-- ============================================================================
+
+-- Extend fw_interfaces with additional configuration fields
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS dns_servers inet[];
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS mtu int;
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS vlan_id int;
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS vlan_parent varchar(50);
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS addressing_mode varchar(20) DEFAULT 'static';
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS metric int;
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS mac_address varchar(17);
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS description text;
+ALTER TABLE fw_interfaces ADD COLUMN IF NOT EXISTS auto_start boolean DEFAULT true;
+
+-- Static routes table for interface-specific routing
+CREATE TABLE IF NOT EXISTS fw_static_routes (
+    id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+    interface_id uuid REFERENCES fw_interfaces(id) ON DELETE CASCADE,
+    destination cidr NOT NULL,
+    gateway inet,
+    metric int DEFAULT 100,
+    description varchar(255),
+    enabled boolean DEFAULT true,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_static_routes_iface ON fw_static_routes(interface_id);
+CREATE INDEX IF NOT EXISTS idx_static_routes_enabled ON fw_static_routes(enabled);

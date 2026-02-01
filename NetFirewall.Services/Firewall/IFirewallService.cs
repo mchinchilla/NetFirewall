@@ -10,9 +10,17 @@ public interface IFirewallService
     // Interface operations
     Task<IReadOnlyList<FwInterface>> GetInterfacesAsync(CancellationToken ct = default);
     Task<FwInterface?> GetInterfaceByIdAsync(Guid id, CancellationToken ct = default);
+    Task<FwInterface?> GetInterfaceByNameAsync(string name, CancellationToken ct = default);
     Task<FwInterface> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default);
     Task<FwInterface> UpdateInterfaceAsync(FwInterface iface, CancellationToken ct = default);
     Task<bool> DeleteInterfaceAsync(Guid id, CancellationToken ct = default);
+
+    // Static route operations
+    Task<IReadOnlyList<FwStaticRoute>> GetStaticRoutesAsync(Guid? interfaceId = null, CancellationToken ct = default);
+    Task<FwStaticRoute?> GetStaticRouteByIdAsync(Guid id, CancellationToken ct = default);
+    Task<FwStaticRoute> CreateStaticRouteAsync(FwStaticRoute route, CancellationToken ct = default);
+    Task<FwStaticRoute> UpdateStaticRouteAsync(FwStaticRoute route, CancellationToken ct = default);
+    Task<bool> DeleteStaticRouteAsync(Guid id, CancellationToken ct = default);
 
     // Filter rule operations
     Task<IReadOnlyList<FwFilterRule>> GetFilterRulesAsync(string? chain = null, CancellationToken ct = default);

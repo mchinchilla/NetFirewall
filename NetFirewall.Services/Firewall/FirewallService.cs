@@ -44,6 +44,18 @@ public sealed class FirewallService : IFirewallService
         return results.FirstOrDefault();
     }
 
+    public async Task<FwInterface?> GetInterfaceByNameAsync(string name, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "SELECT * FROM fw_interfaces WHERE name = @name";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("name", name);
+
+        var results = await ReadInterfacesAsync(cmd, ct);
+        return results.FirstOrDefault();
+    }
+
     public async Task<FwInterface> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -53,8 +65,12 @@ public sealed class FirewallService : IFirewallService
         iface.UpdatedAt = DateTime.UtcNow;
 
         const string sql = @"
-            INSERT INTO fw_interfaces (id, name, type, role, ip_address, subnet_mask, gateway, enabled, created_at, updated_at)
-            VALUES (@id, @name, @type, @role, @ip, @subnet, @gateway, @enabled, @created, @updated)";
+            INSERT INTO fw_interfaces (id, name, type, role, ip_address, subnet_mask, gateway,
+                dns_servers, mtu, vlan_id, vlan_parent, addressing_mode, metric, mac_address,
+                description, auto_start, enabled, created_at, updated_at)
+            VALUES (@id, @name, @type, @role, @ip, @subnet, @gateway,
+                @dns, @mtu, @vlanId, @vlanParent, @addrMode, @metric, @mac,
+                @desc, @autoStart, @enabled, @created, @updated)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddInterfaceParams(cmd, iface);
@@ -78,7 +94,10 @@ public sealed class FirewallService : IFirewallService
         const string sql = @"
             UPDATE fw_interfaces
             SET name = @name, type = @type, role = @role, ip_address = @ip,
-                subnet_mask = @subnet, gateway = @gateway, enabled = @enabled, updated_at = @updated
+                subnet_mask = @subnet, gateway = @gateway, dns_servers = @dns,
+                mtu = @mtu, vlan_id = @vlanId, vlan_parent = @vlanParent,
+                addressing_mode = @addrMode, metric = @metric, mac_address = @mac,
+                description = @desc, auto_start = @autoStart, enabled = @enabled, updated_at = @updated
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -123,6 +142,15 @@ public sealed class FirewallService : IFirewallService
         cmd.Parameters.AddWithValue("ip", iface.IpAddress ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("subnet", iface.SubnetMask ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("gateway", iface.Gateway ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("dns", iface.DnsServers ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("mtu", iface.Mtu ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("vlanId", iface.VlanId ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("vlanParent", iface.VlanParent ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("addrMode", iface.AddressingMode);
+        cmd.Parameters.AddWithValue("metric", iface.Metric ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("mac", iface.MacAddress ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("desc", iface.Description ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("autoStart", iface.AutoStart);
         cmd.Parameters.AddWithValue("enabled", iface.Enabled);
         cmd.Parameters.AddWithValue("created", iface.CreatedAt);
         cmd.Parameters.AddWithValue("updated", iface.UpdatedAt);
@@ -135,7 +163,7 @@ public sealed class FirewallService : IFirewallService
 
         while (await reader.ReadAsync(ct))
         {
-            list.Add(new FwInterface
+            var iface = new FwInterface
             {
                 Id = reader.GetGuid(reader.GetOrdinal("id")),
                 Name = reader.GetString(reader.GetOrdinal("name")),
@@ -147,6 +175,204 @@ public sealed class FirewallService : IFirewallService
                 Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at")),
                 UpdatedAt = reader.GetDateTime(reader.GetOrdinal("updated_at"))
+            };
+
+            // Read new fields with column existence check
+            try
+            {
+                var dnsOrdinal = reader.GetOrdinal("dns_servers");
+                iface.DnsServers = reader.IsDBNull(dnsOrdinal) ? null : reader.GetFieldValue<System.Net.IPAddress[]>(dnsOrdinal);
+            }
+            catch (IndexOutOfRangeException) { /* Column not yet added */ }
+
+            try
+            {
+                var mtuOrdinal = reader.GetOrdinal("mtu");
+                iface.Mtu = reader.IsDBNull(mtuOrdinal) ? null : reader.GetInt32(mtuOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var vlanIdOrdinal = reader.GetOrdinal("vlan_id");
+                iface.VlanId = reader.IsDBNull(vlanIdOrdinal) ? null : reader.GetInt32(vlanIdOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var vlanParentOrdinal = reader.GetOrdinal("vlan_parent");
+                iface.VlanParent = reader.IsDBNull(vlanParentOrdinal) ? null : reader.GetString(vlanParentOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var addrModeOrdinal = reader.GetOrdinal("addressing_mode");
+                iface.AddressingMode = reader.IsDBNull(addrModeOrdinal) ? "static" : reader.GetString(addrModeOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var metricOrdinal = reader.GetOrdinal("metric");
+                iface.Metric = reader.IsDBNull(metricOrdinal) ? null : reader.GetInt32(metricOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var macOrdinal = reader.GetOrdinal("mac_address");
+                iface.MacAddress = reader.IsDBNull(macOrdinal) ? null : reader.GetString(macOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var descOrdinal = reader.GetOrdinal("description");
+                iface.Description = reader.IsDBNull(descOrdinal) ? null : reader.GetString(descOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            try
+            {
+                var autoStartOrdinal = reader.GetOrdinal("auto_start");
+                iface.AutoStart = reader.IsDBNull(autoStartOrdinal) || reader.GetBoolean(autoStartOrdinal);
+            }
+            catch (IndexOutOfRangeException) { }
+
+            list.Add(iface);
+        }
+
+        return list;
+    }
+
+    #endregion
+
+    #region Static Route Operations
+
+    public async Task<IReadOnlyList<FwStaticRoute>> GetStaticRoutesAsync(Guid? interfaceId = null, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        var sql = "SELECT * FROM fw_static_routes";
+        if (interfaceId.HasValue) sql += " WHERE interface_id = @ifaceId";
+        sql += " ORDER BY metric, created_at";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        if (interfaceId.HasValue) cmd.Parameters.AddWithValue("ifaceId", interfaceId.Value);
+
+        return await ReadStaticRoutesAsync(cmd, ct);
+    }
+
+    public async Task<FwStaticRoute?> GetStaticRouteByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "SELECT * FROM fw_static_routes WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        var results = await ReadStaticRoutesAsync(cmd, ct);
+        return results.FirstOrDefault();
+    }
+
+    public async Task<FwStaticRoute> CreateStaticRouteAsync(FwStaticRoute route, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        route.Id = Guid.NewGuid();
+        route.CreatedAt = DateTime.UtcNow;
+
+        const string sql = @"
+            INSERT INTO fw_static_routes (id, interface_id, destination, gateway, metric, description, enabled, created_at)
+            VALUES (@id, @ifaceId, @dest::cidr, @gateway, @metric, @desc, @enabled, @created)";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        AddStaticRouteParams(cmd, route);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        await LogAuditAsync("fw_static_routes", route.Id, "INSERT", null, route, null, ct);
+
+        _logger.LogInformation("Created static route {Dest} via {Gateway}", route.Destination, route.Gateway);
+        return route;
+    }
+
+    public async Task<FwStaticRoute> UpdateStaticRouteAsync(FwStaticRoute route, CancellationToken ct = default)
+    {
+        var existing = await GetStaticRouteByIdAsync(route.Id, ct);
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        const string sql = @"
+            UPDATE fw_static_routes
+            SET interface_id = @ifaceId, destination = @dest::cidr, gateway = @gateway,
+                metric = @metric, description = @desc, enabled = @enabled
+            WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        AddStaticRouteParams(cmd, route);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        await LogAuditAsync("fw_static_routes", route.Id, "UPDATE", existing, route, null, ct);
+
+        _logger.LogInformation("Updated static route {Dest}", route.Destination);
+        return route;
+    }
+
+    public async Task<bool> DeleteStaticRouteAsync(Guid id, CancellationToken ct = default)
+    {
+        var existing = await GetStaticRouteByIdAsync(id, ct);
+        if (existing == null) return false;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "DELETE FROM fw_static_routes WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        var rows = await cmd.ExecuteNonQueryAsync(ct);
+
+        if (rows > 0)
+        {
+            await LogAuditAsync("fw_static_routes", id, "DELETE", existing, null, null, ct);
+            _logger.LogInformation("Deleted static route {Dest}", existing.Destination);
+        }
+
+        return rows > 0;
+    }
+
+    private static void AddStaticRouteParams(NpgsqlCommand cmd, FwStaticRoute route)
+    {
+        cmd.Parameters.AddWithValue("id", route.Id);
+        cmd.Parameters.AddWithValue("ifaceId", route.InterfaceId);
+        cmd.Parameters.AddWithValue("dest", route.Destination);
+        cmd.Parameters.AddWithValue("gateway", route.Gateway ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("metric", route.Metric);
+        cmd.Parameters.AddWithValue("desc", route.Description ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("enabled", route.Enabled);
+        cmd.Parameters.AddWithValue("created", route.CreatedAt);
+    }
+
+    private static async Task<IReadOnlyList<FwStaticRoute>> ReadStaticRoutesAsync(NpgsqlCommand cmd, CancellationToken ct)
+    {
+        var list = new List<FwStaticRoute>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new FwStaticRoute
+            {
+                Id = reader.GetGuid(reader.GetOrdinal("id")),
+                InterfaceId = reader.GetGuid(reader.GetOrdinal("interface_id")),
+                Destination = reader.GetString(reader.GetOrdinal("destination")),
+                Gateway = reader.IsDBNull(reader.GetOrdinal("gateway")) ? null : reader.GetFieldValue<System.Net.IPAddress>(reader.GetOrdinal("gateway")),
+                Metric = reader.GetInt32(reader.GetOrdinal("metric")),
+                Description = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString(reader.GetOrdinal("description")),
+                Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
+                CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
             });
         }
 

@@ -1,0 +1,841 @@
+@using System.Net
+@using NetFirewall.Models.Firewall
+@using NetFirewall.Models.System
+@using NetFirewall.Services.Firewall
+@using NetFirewall.Services.Network
+@inject IFirewallService FirewallService
+@inject ILinuxDistroService DistroService
+@inject INetworkConfigService NetworkConfigService
+@inject ILogger<InterfaceWizard> Logger
+
+<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden">
+        <!-- Header -->
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">Configure Network Interface</h2>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Step @(_currentStep + 1) of @_steps.Length: @_steps[_currentStep]</p>
+                </div>
+                <button @onclick="Close" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="flex gap-2 mt-4">
+                @for (var i = 0; i < _steps.Length; i++)
+                {
+                    var stepIndex = i;
+                    <div class="flex-1 h-2 rounded-full @(i <= _currentStep ? "bg-primary-500" : "bg-gray-200 dark:bg-gray-700") transition-colors"></div>
+                }
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div class="p-6 overflow-y-auto" style="max-height: calc(90vh - 200px);">
+            @if (_loading)
+            {
+                <div class="flex items-center justify-center py-12">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                    <span class="ml-3 text-gray-600 dark:text-gray-400">@_loadingMessage</span>
+                </div>
+            }
+            else
+            {
+                @switch (_currentStep)
+                {
+                    case 0:
+                        @RenderDetectionStep()
+                        break;
+                    case 1:
+                        @RenderTypeStep()
+                        break;
+                    case 2:
+                        @RenderNetworkStep()
+                        break;
+                    case 3:
+                        @RenderAdvancedStep()
+                        break;
+                    case 4:
+                        @RenderReviewStep()
+                        break;
+                }
+            }
+        </div>
+
+        <!-- Footer -->
+        <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-between">
+            <button @onclick="PreviousStep" disabled="@(_currentStep == 0 || _loading)"
+                    class="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+                Previous
+            </button>
+
+            <div class="flex gap-3">
+                <button @onclick="Close" class="btn-secondary">Cancel</button>
+
+                @if (_currentStep < _steps.Length - 1)
+                {
+                    <button @onclick="NextStep" disabled="@(!CanProceed() || _loading)"
+                            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+                        Next
+                        <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </button>
+                }
+                else
+                {
+                    <button @onclick="SaveAndApply" disabled="@_loading"
+                            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg>
+                        @(_applyImmediately ? "Save & Apply" : "Save Only")
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<FwInterface> OnSaved { get; set; }
+    [Parameter] public FwInterface? EditInterface { get; set; }
+
+    private readonly string[] _steps = ["Detection", "Type & Role", "Network Config", "Advanced Options", "Review & Apply"];
+    private int _currentStep = 0;
+    private bool _loading = true;
+    private string _loadingMessage = "Detecting system...";
+
+    // Step 1: Detection
+    private LinuxDistroInfo _distroInfo = new();
+    private List<InterfaceSuggestion> _discoveredInterfaces = new();
+    private InterfaceSuggestion? _selectedSuggestion;
+
+    // Step 2: Type & Role
+    private string _interfaceType = "LAN";
+    private string _interfaceRole = "local_network";
+
+    // Step 3: Network Config
+    private string _addressingMode = "static";
+    private string _ipAddress = "";
+    private string _subnetMask = "255.255.255.0";
+    private string _gateway = "";
+    private string _dns1 = "";
+    private string _dns2 = "";
+
+    // Step 4: Advanced
+    private string _mtu = "1500";
+    private bool _useVlan = false;
+    private string _vlanId = "";
+    private string _vlanParent = "";
+    private string _metric = "";
+    private bool _autoStart = true;
+    private string _description = "";
+    private List<FwStaticRoute> _staticRoutes = new();
+
+    // Step 5: Review
+    private bool _applyImmediately = true;
+    private string _configPreview = "";
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DetectSystemAsync();
+
+        if (EditInterface != null)
+        {
+            LoadExistingInterface(EditInterface);
+            _currentStep = 1; // Skip detection for edit mode
+        }
+    }
+
+    private async Task DetectSystemAsync()
+    {
+        _loading = true;
+        _loadingMessage = "Detecting Linux distribution...";
+        StateHasChanged();
+
+        try
+        {
+            _distroInfo = await DistroService.DetectDistributionAsync();
+
+            _loadingMessage = "Discovering network interfaces...";
+            StateHasChanged();
+
+            _discoveredInterfaces = (await DistroService.DiscoverInterfacesAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to detect system");
+            _errorMessage = $"Detection failed: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void LoadExistingInterface(FwInterface iface)
+    {
+        _interfaceType = iface.Type;
+        _interfaceRole = iface.Role ?? "";
+        _addressingMode = iface.AddressingMode;
+        _ipAddress = iface.IpAddress?.ToString() ?? "";
+        _subnetMask = iface.SubnetMask?.ToString() ?? "255.255.255.0";
+        _gateway = iface.Gateway?.ToString() ?? "";
+
+        if (iface.DnsServers is { Length: > 0 })
+        {
+            _dns1 = iface.DnsServers[0].ToString();
+            if (iface.DnsServers.Length > 1)
+                _dns2 = iface.DnsServers[1].ToString();
+        }
+
+        _mtu = iface.Mtu?.ToString() ?? "1500";
+        _useVlan = iface.VlanId.HasValue;
+        _vlanId = iface.VlanId?.ToString() ?? "";
+        _vlanParent = iface.VlanParent ?? "";
+        _metric = iface.Metric?.ToString() ?? "";
+        _autoStart = iface.AutoStart;
+        _description = iface.Description ?? "";
+
+        _selectedSuggestion = new InterfaceSuggestion { Name = iface.Name };
+    }
+
+    private void SelectInterface(InterfaceSuggestion suggestion)
+    {
+        _selectedSuggestion = suggestion;
+        _interfaceType = suggestion.SuggestedType;
+        _interfaceRole = suggestion.SuggestedRole;
+
+        // Pre-fill network config from current settings
+        if (suggestion.CurrentIp != null)
+            _ipAddress = suggestion.CurrentIp.ToString();
+        if (suggestion.CurrentSubnet != null)
+        {
+            var parts = suggestion.CurrentSubnet.Split('/');
+            if (parts.Length == 2 && int.TryParse(parts[1], out var prefix))
+                _subnetMask = CidrToSubnetMask(prefix);
+        }
+        if (suggestion.CurrentGateway != null)
+            _gateway = suggestion.CurrentGateway.ToString();
+        if (suggestion.Mtu.HasValue)
+            _mtu = suggestion.Mtu.Value.ToString();
+    }
+
+    private RenderFragment RenderDetectionStep() => __builder =>
+    {
+        <div class="space-y-6">
+            <!-- Distribution Info -->
+            <div class="bg-gray-50 dark:bg-gray-900 rounded-xl p-4">
+                <h3 class="font-semibold text-gray-900 dark:text-white mb-3">Detected System</h3>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">Distribution:</span>
+                        <span class="ml-2 font-medium text-gray-900 dark:text-white">@_distroInfo.Name @_distroInfo.Version</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">Config Method:</span>
+                        <span class="ml-2 font-medium text-gray-900 dark:text-white">@GetConfigMethodName(_distroInfo.ConfigMethod)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Discovered Interfaces -->
+            <div>
+                <h3 class="font-semibold text-gray-900 dark:text-white mb-3">Available Interfaces</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    @foreach (var iface in _discoveredInterfaces)
+                    {
+                        var isSelected = _selectedSuggestion?.Name == iface.Name;
+                        <div @onclick="() => SelectInterface(iface)"
+                             class="cursor-pointer border-2 rounded-xl p-4 transition-all @(isSelected ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20" : "border-gray-200 dark:border-gray-700 hover:border-primary-300")">
+                            <div class="flex items-start justify-between">
+                                <div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-mono font-semibold text-gray-900 dark:text-white">@iface.Name</span>
+                                        <span class="w-2 h-2 rounded-full @(iface.IsUp ? "bg-green-500" : "bg-gray-400")"></span>
+                                    </div>
+                                    <span class="text-xs text-gray-500 dark:text-gray-400">@(iface.MacAddress ?? "unknown")</span>
+                                </div>
+                                <span class="badge-info text-xs">@iface.SuggestedType (@iface.Confidence%)</span>
+                            </div>
+                            <div class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                                @if (iface.CurrentIp != null)
+                                {
+                                    <div>IP: @iface.CurrentSubnet</div>
+                                }
+                                @if (iface.CurrentGateway != null)
+                                {
+                                    <div>Gateway: @iface.CurrentGateway</div>
+                                }
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">@iface.Reason</div>
+                        </div>
+                    }
+                </div>
+
+                @if (_discoveredInterfaces.Count == 0)
+                {
+                    <div class="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No network interfaces detected
+                    </div>
+                }
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderTypeStep() => __builder =>
+    {
+        <div class="space-y-6">
+            <!-- Interface Name -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Interface Name</label>
+                <div class="font-mono text-lg font-semibold text-gray-900 dark:text-white">@(_selectedSuggestion?.Name ?? "Unknown")</div>
+            </div>
+
+            <!-- Type Selection -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Interface Type</label>
+                <div class="grid grid-cols-3 gap-4">
+                    @foreach (var type in new[] { ("WAN", "globe", "Internet/External Network"), ("LAN", "building", "Local Internal Network"), ("VPN", "lock", "Encrypted Tunnel") })
+                    {
+                        var isSelected = _interfaceType == type.Item1;
+                        <div @onclick="() => SelectType(type.Item1)"
+                             class="cursor-pointer border-2 rounded-xl p-4 text-center transition-all @(isSelected ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20" : "border-gray-200 dark:border-gray-700 hover:border-primary-300")">
+                            <div class="w-12 h-12 mx-auto rounded-xl bg-gradient-to-br @GetTypeGradient(type.Item1) flex items-center justify-center mb-2">
+                                @RenderTypeIcon(type.Item1)
+                            </div>
+                            <div class="font-semibold text-gray-900 dark:text-white">@type.Item1</div>
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">@type.Item3</div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Role Selection -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Role</label>
+                <select @bind="_interfaceRole" class="input-field w-full">
+                    @foreach (var role in GetRolesForType(_interfaceType))
+                    {
+                        <option value="@role.Value">@role.Label</option>
+                    }
+                </select>
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderNetworkStep() => __builder =>
+    {
+        <div class="space-y-6">
+            <!-- Addressing Mode -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Addressing Mode</label>
+                <div class="flex gap-4">
+                    @foreach (var mode in new[] { ("static", "Static IP"), ("dhcp", "DHCP"), ("disabled", "Disabled") })
+                    {
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="addrMode" value="@mode.Item1" checked="@(_addressingMode == mode.Item1)"
+                                   @onchange="() => _addressingMode = mode.Item1"
+                                   class="w-4 h-4 text-primary-600"/>
+                            <span class="text-gray-700 dark:text-gray-300">@mode.Item2</span>
+                        </label>
+                    }
+                </div>
+            </div>
+
+            @if (_addressingMode == "static")
+            {
+                <!-- IP Configuration -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">IP Address *</label>
+                        <input type="text" @bind="_ipAddress" placeholder="192.168.1.1" class="input-field w-full font-mono"/>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Subnet Mask</label>
+                        <select @bind="_subnetMask" class="input-field w-full font-mono">
+                            <option value="255.255.255.0">/24 (255.255.255.0)</option>
+                            <option value="255.255.255.128">/25 (255.255.255.128)</option>
+                            <option value="255.255.255.192">/26 (255.255.255.192)</option>
+                            <option value="255.255.254.0">/23 (255.255.254.0)</option>
+                            <option value="255.255.252.0">/22 (255.255.252.0)</option>
+                            <option value="255.255.0.0">/16 (255.255.0.0)</option>
+                            <option value="255.0.0.0">/8 (255.0.0.0)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Gateway @(_interfaceType == "WAN" ? "*" : "")
+                        </label>
+                        <input type="text" @bind="_gateway" placeholder="192.168.1.254" class="input-field w-full font-mono"/>
+                    </div>
+                    <div></div>
+                </div>
+
+                <!-- DNS -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">DNS Servers</label>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="text" @bind="_dns1" placeholder="Primary DNS (8.8.8.8)" class="input-field w-full font-mono"/>
+                        <input type="text" @bind="_dns2" placeholder="Secondary DNS (8.8.4.4)" class="input-field w-full font-mono"/>
+                    </div>
+                </div>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderAdvancedStep() => __builder =>
+    {
+        <div class="space-y-6">
+            <!-- MTU -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">MTU</label>
+                <div class="flex gap-4">
+                    <input type="text" @bind="_mtu" class="input-field w-32 font-mono"/>
+                    <div class="flex gap-2">
+                        <button type="button" @onclick='() => _mtu = "1500"' class="btn-secondary text-xs py-1 px-2">1500 (default)</button>
+                        <button type="button" @onclick='() => _mtu = "9000"' class="btn-secondary text-xs py-1 px-2">9000 (jumbo)</button>
+                        <button type="button" @onclick='() => _mtu = "1420"' class="btn-secondary text-xs py-1 px-2">1420 (WireGuard)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VLAN -->
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer mb-3">
+                    <input type="checkbox" @bind="_useVlan" class="w-4 h-4 text-primary-600 rounded"/>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Configure as VLAN interface</span>
+                </label>
+                @if (_useVlan)
+                {
+                    <div class="grid grid-cols-2 gap-4 ml-6">
+                        <div>
+                            <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">VLAN ID</label>
+                            <input type="text" @bind="_vlanId" placeholder="100" class="input-field w-full font-mono"/>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Parent Interface</label>
+                            <input type="text" @bind="_vlanParent" placeholder="eth0" class="input-field w-full font-mono"/>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Metric -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Route Metric (optional)</label>
+                <input type="text" @bind="_metric" placeholder="100" class="input-field w-32 font-mono"/>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Lower values have higher priority</p>
+            </div>
+
+            <!-- Auto Start -->
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" @bind="_autoStart" class="w-4 h-4 text-primary-600 rounded"/>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Start interface automatically on boot</span>
+                </label>
+            </div>
+
+            <!-- Description -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                <input type="text" @bind="_description" placeholder="Primary Internet connection" class="input-field w-full"/>
+            </div>
+
+            <!-- Static Routes -->
+            <div>
+                <div class="flex items-center justify-between mb-3">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Static Routes</label>
+                    <button type="button" @onclick="AddStaticRoute" class="text-primary-600 hover:text-primary-700 text-sm font-medium">
+                        + Add Route
+                    </button>
+                </div>
+                @if (_staticRoutes.Count > 0)
+                {
+                    <div class="space-y-2">
+                        @for (var i = 0; i < _staticRoutes.Count; i++)
+                        {
+                            var index = i;
+                            var route = _staticRoutes[i];
+                            <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
+                                <input type="text" @bind="route.Destination" placeholder="10.0.0.0/8" class="input-field flex-1 font-mono text-sm"/>
+                                <span class="text-gray-500">via</span>
+                                <input type="text" value="@(route.Gateway?.ToString() ?? "")"
+                                       @onchange="e => SetRouteGateway(index, e.Value?.ToString())"
+                                       placeholder="192.168.1.1" class="input-field w-36 font-mono text-sm"/>
+                                <input type="number" @bind="route.Metric" class="input-field w-20 text-sm" placeholder="100"/>
+                                <button type="button" @onclick="() => _staticRoutes.RemoveAt(index)"
+                                        class="text-red-500 hover:text-red-700 p-1">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderReviewStep() => __builder =>
+    {
+        <div class="space-y-6">
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-700 dark:text-red-300">
+                    @_errorMessage
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_successMessage))
+            {
+                <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 text-green-700 dark:text-green-300">
+                    @_successMessage
+                </div>
+            }
+
+            <!-- Summary -->
+            <div class="bg-gray-50 dark:bg-gray-900 rounded-xl p-4">
+                <h3 class="font-semibold text-gray-900 dark:text-white mb-4">Configuration Summary</h3>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">Interface:</span>
+                        <span class="ml-2 font-mono font-medium text-gray-900 dark:text-white">@(_selectedSuggestion?.Name)</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">Type:</span>
+                        <span class="ml-2 font-medium text-gray-900 dark:text-white">@_interfaceType</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">Role:</span>
+                        <span class="ml-2 font-medium text-gray-900 dark:text-white">@_interfaceRole</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">Addressing:</span>
+                        <span class="ml-2 font-medium text-gray-900 dark:text-white">@_addressingMode</span>
+                    </div>
+                    @if (_addressingMode == "static")
+                    {
+                        <div>
+                            <span class="text-gray-500 dark:text-gray-400">IP:</span>
+                            <span class="ml-2 font-mono text-gray-900 dark:text-white">@_ipAddress/@SubnetMaskToCidr(_subnetMask)</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_gateway))
+                        {
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-400">Gateway:</span>
+                                <span class="ml-2 font-mono text-gray-900 dark:text-white">@_gateway</span>
+                            </div>
+                        }
+                    }
+                    <div>
+                        <span class="text-gray-500 dark:text-gray-400">MTU:</span>
+                        <span class="ml-2 font-mono text-gray-900 dark:text-white">@_mtu</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Config Preview -->
+            <div>
+                <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Configuration File Preview</h3>
+                <pre class="bg-gray-900 text-gray-100 rounded-lg p-4 text-sm font-mono overflow-x-auto whitespace-pre-wrap">@_configPreview</pre>
+            </div>
+
+            <!-- Apply Options -->
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" @bind="_applyImmediately" class="w-4 h-4 text-primary-600 rounded"/>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Apply configuration immediately</span>
+                </label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
+                    If unchecked, the configuration will only be saved to the database
+                </p>
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderTypeIcon(string type) => __builder =>
+    {
+        @if (type == "WAN")
+        {
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        }
+        else if (type == "LAN")
+        {
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+            </svg>
+        }
+        else
+        {
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+        }
+    };
+
+    private void SelectType(string type)
+    {
+        _interfaceType = type;
+        var roles = GetRolesForType(type);
+        _interfaceRole = roles.First().Value;
+    }
+
+    private IEnumerable<(string Value, string Label)> GetRolesForType(string type)
+    {
+        return type switch
+        {
+            "WAN" => new[] { ("primary_wan", "Primary WAN"), ("secondary_wan", "Secondary WAN"), ("backup_wan", "Backup WAN") },
+            "LAN" => new[] { ("local_network", "Local Network"), ("dmz", "DMZ"), ("guest", "Guest Network"), ("management", "Management") },
+            "VPN" => new[] { ("wireguard_tunnel", "WireGuard"), ("openvpn_tunnel", "OpenVPN"), ("ipsec_tunnel", "IPsec") },
+            _ => new[] { ("unknown", "Unknown") }
+        };
+    }
+
+    private string GetTypeGradient(string type) => type switch
+    {
+        "WAN" => "from-blue-400 to-blue-600",
+        "LAN" => "from-emerald-400 to-emerald-600",
+        "VPN" => "from-purple-400 to-purple-600",
+        _ => "from-gray-400 to-gray-500"
+    };
+
+    private string GetConfigMethodName(NetworkConfigMethod method) => method switch
+    {
+        NetworkConfigMethod.Netplan => "Netplan (Ubuntu)",
+        NetworkConfigMethod.Interfaces => "/etc/network/interfaces (Debian)",
+        _ => "Unknown"
+    };
+
+    private void AddStaticRoute()
+    {
+        _staticRoutes.Add(new FwStaticRoute { Enabled = true, Metric = 100 });
+    }
+
+    private void SetRouteGateway(int index, string? value)
+    {
+        if (index < _staticRoutes.Count && IPAddress.TryParse(value, out var ip))
+        {
+            _staticRoutes[index].Gateway = ip;
+        }
+    }
+
+    private bool CanProceed()
+    {
+        return _currentStep switch
+        {
+            0 => _selectedSuggestion != null,
+            1 => !string.IsNullOrEmpty(_interfaceType) && !string.IsNullOrEmpty(_interfaceRole),
+            2 => _addressingMode != "static" || (!string.IsNullOrEmpty(_ipAddress) && IPAddress.TryParse(_ipAddress, out _)),
+            3 => true,
+            4 => true,
+            _ => true
+        };
+    }
+
+    private async Task NextStep()
+    {
+        if (_currentStep < _steps.Length - 1)
+        {
+            _currentStep++;
+
+            if (_currentStep == 4)
+            {
+                await GeneratePreview();
+            }
+        }
+    }
+
+    private void PreviousStep()
+    {
+        if (_currentStep > 0)
+            _currentStep--;
+    }
+
+    private async Task GeneratePreview()
+    {
+        _loading = true;
+        _loadingMessage = "Generating configuration...";
+        StateHasChanged();
+
+        try
+        {
+            var iface = BuildInterface();
+            _configPreview = await NetworkConfigService.GenerateConfigAsync(iface, _staticRoutes);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to generate config: {ex.Message}";
+            _configPreview = "Error generating preview";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private FwInterface BuildInterface()
+    {
+        var iface = EditInterface ?? new FwInterface();
+
+        iface.Name = _selectedSuggestion?.Name ?? "";
+        iface.Type = _interfaceType;
+        iface.Role = _interfaceRole;
+        iface.AddressingMode = _addressingMode;
+        iface.AutoStart = _autoStart;
+        iface.Description = string.IsNullOrEmpty(_description) ? null : _description;
+        iface.Enabled = true;
+
+        if (int.TryParse(_mtu, out var mtu))
+            iface.Mtu = mtu;
+
+        if (int.TryParse(_metric, out var metric))
+            iface.Metric = metric;
+
+        if (_useVlan && int.TryParse(_vlanId, out var vlanId))
+        {
+            iface.VlanId = vlanId;
+            iface.VlanParent = _vlanParent;
+        }
+
+        if (_addressingMode == "static")
+        {
+            if (IPAddress.TryParse(_ipAddress, out var ip))
+                iface.IpAddress = ip;
+            if (IPAddress.TryParse(_subnetMask, out var subnet))
+                iface.SubnetMask = subnet;
+            if (IPAddress.TryParse(_gateway, out var gw))
+                iface.Gateway = gw;
+
+            var dnsServers = new List<IPAddress>();
+            if (IPAddress.TryParse(_dns1, out var dns1))
+                dnsServers.Add(dns1);
+            if (IPAddress.TryParse(_dns2, out var dns2))
+                dnsServers.Add(dns2);
+            if (dnsServers.Count > 0)
+                iface.DnsServers = dnsServers.ToArray();
+        }
+
+        return iface;
+    }
+
+    private async Task SaveAndApply()
+    {
+        _loading = true;
+        _loadingMessage = "Saving configuration...";
+        _errorMessage = null;
+        _successMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var iface = BuildInterface();
+
+            // Save to database
+            if (EditInterface != null)
+            {
+                iface = await FirewallService.UpdateInterfaceAsync(iface);
+            }
+            else
+            {
+                iface = await FirewallService.CreateInterfaceAsync(iface);
+            }
+
+            // Save static routes
+            foreach (var route in _staticRoutes.Where(r => !string.IsNullOrEmpty(r.Destination)))
+            {
+                route.InterfaceId = iface.Id;
+                if (route.Id == Guid.Empty)
+                    await FirewallService.CreateStaticRouteAsync(route);
+                else
+                    await FirewallService.UpdateStaticRouteAsync(route);
+            }
+
+            // Apply if requested
+            if (_applyImmediately)
+            {
+                _loadingMessage = "Applying network configuration...";
+                StateHasChanged();
+
+                var result = await NetworkConfigService.ApplyConfigAsync(iface, _staticRoutes);
+                if (!result.Success)
+                {
+                    _errorMessage = $"Configuration saved but failed to apply: {result.Message}";
+                    if (!string.IsNullOrEmpty(result.ErrorOutput))
+                        _errorMessage += $"\n{result.ErrorOutput}";
+                    return;
+                }
+            }
+
+            _successMessage = _applyImmediately
+                ? "Configuration saved and applied successfully!"
+                : "Configuration saved successfully!";
+
+            await OnSaved.InvokeAsync(iface);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save interface configuration");
+            _errorMessage = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Close()
+    {
+        await OnClose.InvokeAsync();
+    }
+
+    private static int SubnetMaskToCidr(string mask)
+    {
+        if (!IPAddress.TryParse(mask, out var ip))
+            return 24;
+
+        var bytes = ip.GetAddressBytes();
+        int cidr = 0;
+        foreach (var b in bytes)
+        {
+            var val = b;
+            while (val > 0)
+            {
+                cidr += val & 1;
+                val >>= 1;
+            }
+        }
+        return cidr;
+    }
+
+    private static string CidrToSubnetMask(int prefix)
+    {
+        if (prefix < 0 || prefix > 32) return "255.255.255.0";
+
+        uint mask = prefix == 0 ? 0 : uint.MaxValue << (32 - prefix);
+        var bytes = new byte[4];
+        bytes[0] = (byte)(mask >> 24);
+        bytes[1] = (byte)(mask >> 16);
+        bytes[2] = (byte)(mask >> 8);
+        bytes[3] = (byte)mask;
+
+        return new IPAddress(bytes).ToString();
+    }
+}

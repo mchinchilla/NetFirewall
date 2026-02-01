@@ -26,6 +26,33 @@ public class FwInterface
     [Map("gateway")]
     public IPAddress? Gateway { get; set; }
 
+    [Map("dns_servers")]
+    public IPAddress[]? DnsServers { get; set; }
+
+    [Map("mtu")]
+    public int? Mtu { get; set; }
+
+    [Map("vlan_id")]
+    public int? VlanId { get; set; }
+
+    [Map("vlan_parent")]
+    public string? VlanParent { get; set; }
+
+    [Map("addressing_mode")]
+    public string AddressingMode { get; set; } = "static"; // static, dhcp, disabled
+
+    [Map("metric")]
+    public int? Metric { get; set; }
+
+    [Map("mac_address")]
+    public string? MacAddress { get; set; }
+
+    [Map("description")]
+    public string? Description { get; set; }
+
+    [Map("auto_start")]
+    public bool AutoStart { get; set; } = true;
+
     [Map("enabled")]
     public bool Enabled { get; set; } = true;
 
