@@ -14,6 +14,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 {
     private readonly ILogger<DhcpSubnetService> _logger;
     private readonly NpgsqlDataSource _dataSource;
+    private readonly LeaseCache? _leaseCache;
 
     // Cache subnets for fast lookup (refreshed periodically)
     private readonly ConcurrentDictionary<Guid, DhcpSubnet> _subnetCache = new();
@@ -25,10 +26,14 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(5);
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
 
-    public DhcpSubnetService(NpgsqlDataSource dataSource, ILogger<DhcpSubnetService> logger)
+    public DhcpSubnetService(
+        NpgsqlDataSource dataSource,
+        ILogger<DhcpSubnetService> logger,
+        LeaseCache? leaseCache = null)
     {
         _dataSource = dataSource;
         _logger = logger;
+        _leaseCache = leaseCache;
     }
 
     #region Subnet Selection
@@ -339,14 +344,19 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 _logger.LogDebug("[SQL] FindAvailableIpInPool: Query returned IP {Ip}", ip);
 
                 // Check against exclusions
-                if (!IsIpExcluded(ip, exclusionRanges))
+                if (IsIpExcluded(ip, exclusionRanges))
                 {
-                    _logger.LogDebug("[POOL] Found available IP {Ip} in pool '{PoolName}'", ip, pool.Name);
-                    return ip;
+                    _logger.LogDebug("[POOL] IP {Ip} is excluded, continuing search", ip);
+                }
+                // Check if IP was recently declined (ARP conflict)
+                else if (_leaseCache?.IsIpDeclined(ip) == true)
+                {
+                    _logger.LogDebug("[POOL] IP {Ip} is declined (ARP conflict), continuing search", ip);
                 }
                 else
                 {
-                    _logger.LogDebug("[POOL] IP {Ip} is excluded, continuing search", ip);
+                    _logger.LogDebug("[POOL] Found available IP {Ip} in pool '{PoolName}'", ip, pool.Name);
+                    return ip;
                 }
             }
             else
@@ -379,24 +389,37 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         while (CompareIp(current, end) <= 0)
         {
-            if (!IsIpExcluded(current, exclusions))
+            // Skip excluded IPs
+            if (IsIpExcluded(current, exclusions))
             {
-                // Check if IP is available
-                const string checkSql = @"
-                    SELECT 1 FROM dhcp_leases WHERE ip_address = @ip AND end_time > @now
-                    UNION ALL
-                    SELECT 1 FROM dhcp_mac_reservations WHERE reserved_ip = @ip
-                    LIMIT 1";
+                current = IncrementIp(current);
+                if (current == null) break;
+                continue;
+            }
 
-                await using var cmd = new NpgsqlCommand(checkSql, connection);
-                cmd.Parameters.AddWithValue("ip", current);
-                cmd.Parameters.AddWithValue("now", now);
+            // Skip declined IPs (ARP conflict)
+            if (_leaseCache?.IsIpDeclined(current) == true)
+            {
+                current = IncrementIp(current);
+                if (current == null) break;
+                continue;
+            }
 
-                var exists = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-                if (exists == null)
-                {
-                    return current;
-                }
+            // Check if IP is available in DB
+            const string checkSql = @"
+                SELECT 1 FROM dhcp_leases WHERE ip_address = @ip AND end_time > @now
+                UNION ALL
+                SELECT 1 FROM dhcp_mac_reservations WHERE reserved_ip = @ip
+                LIMIT 1";
+
+            await using var cmd = new NpgsqlCommand(checkSql, connection);
+            cmd.Parameters.AddWithValue("ip", current);
+            cmd.Parameters.AddWithValue("now", now);
+
+            var exists = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (exists == null)
+            {
+                return current;
             }
 
             current = IncrementIp(current);

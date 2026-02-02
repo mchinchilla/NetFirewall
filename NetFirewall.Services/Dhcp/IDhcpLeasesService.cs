@@ -38,6 +38,13 @@ public interface IDhcpLeasesService
         CancellationToken cancellationToken = default);
 
     Task MarkIpAsDeclinedAsync(IPAddress ipAddress);
+
+    /// <summary>
+    /// Check if an IP is in the declined state (ARP conflict detected).
+    /// Declined IPs are temporarily excluded from allocation.
+    /// </summary>
+    bool IsIpDeclined(IPAddress ipAddress);
+
     Task<IPAddress?> GetAssignedIpAsync(string macAddress);
 
     /// <summary>

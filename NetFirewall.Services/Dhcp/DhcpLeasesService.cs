@@ -45,6 +45,14 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
     /// </summary>
     public LeaseCacheStats? GetCacheStats() => _leaseCache?.GetStats();
 
+    /// <summary>
+    /// Check if an IP is in the declined state (ARP conflict detected).
+    /// </summary>
+    public bool IsIpDeclined(IPAddress ipAddress)
+    {
+        return _leaseCache?.IsIpDeclined(ipAddress) ?? false;
+    }
+
     public async Task<IPAddress?> OfferLeaseAsync(string macAddress, IPAddress? rangeStart, IPAddress rangeEnd)
     {
         _logger.LogDebug("[LEASE] OfferLeaseAsync called for MAC: {Mac}, Range: {Start}-{End}",
@@ -314,24 +322,39 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
     public async Task<bool> CanAssignIpAsync(string macAddress, IPAddress ipAddress)
     {
-        // FAST PATH: Check cache first (O(1))
-        if (_leaseCache != null)
-        {
-            return _leaseCache.CanMacUseIp(macAddress, ipAddress);
-        }
-
-        // SLOW PATH: Database check
+        // ALWAYS check MAC reservation first - this takes priority over leases
+        // The reservation check is fast (single row lookup) and critical for correctness
         await using var connection = await _dataSource.OpenConnectionAsync().ConfigureAwait(false);
 
         try
         {
-            // Check reservation first
+            // Check if this MAC has a reservation
             var reservedIp = await GetReservationInternalAsync(connection, macAddress, null).ConfigureAwait(false);
             if (reservedIp != null)
             {
-                return reservedIp.Equals(ipAddress);
+                // MAC has a reservation - only allow if requesting that specific IP
+                var canAssign = reservedIp.Equals(ipAddress);
+                _logger.LogDebug("[CAN_ASSIGN] MAC {Mac} has reservation for {ReservedIp}, requested {RequestedIp}, allowed={Allowed}",
+                    macAddress, reservedIp, ipAddress, canAssign);
+                return canAssign;
             }
 
+            // Check if this IP is reserved for a DIFFERENT MAC
+            var ipReservationOwner = await GetReservationOwnerAsync(connection, ipAddress).ConfigureAwait(false);
+            if (ipReservationOwner != null && !ipReservationOwner.Equals(macAddress, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("[CAN_ASSIGN] IP {Ip} is reserved for {Owner}, not {Mac}",
+                    ipAddress, ipReservationOwner, macAddress);
+                return false;
+            }
+
+            // FAST PATH: Check cache for lease conflicts
+            if (_leaseCache != null)
+            {
+                return _leaseCache.CanMacUseIp(macAddress, ipAddress);
+            }
+
+            // SLOW PATH: Database check for lease conflicts
             var parsedMac = ParseMacAddress(macAddress);
             var now = DateTime.UtcNow;
 
@@ -359,6 +382,20 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             _logger.LogError(ex, "Error checking if {Ip} can be assigned to {Mac}", ipAddress, macAddress);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Get the MAC address that has a reservation for the specified IP.
+    /// </summary>
+    private async Task<string?> GetReservationOwnerAsync(NpgsqlConnection connection, IPAddress ipAddress)
+    {
+        const string sql = "SELECT mac_address::text FROM dhcp_mac_reservations WHERE reserved_ip = @ip LIMIT 1";
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("ip", ipAddress);
+
+        var result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+        return result as string;
     }
 
     public async Task ReleaseLeaseAsync(string macAddress)
@@ -443,12 +480,16 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
     public async Task MarkIpAsDeclinedAsync(IPAddress ipAddress)
     {
-        // IMPORTANT: Clear the cache FIRST to prevent race conditions where
-        // FindAvailableIp returns this IP but CanAssignIp still sees old cache entry
+        // IMPORTANT: Mark IP as declined FIRST to prevent race conditions
+        // The IP will be excluded from allocation for 1 hour (configurable in LeaseCache)
         if (_leaseCache != null)
         {
+            // Mark as declined (excludes from allocation)
+            _leaseCache.MarkIpAsDeclined(ipAddress);
+
+            // Also release any existing lease for this IP
             await _leaseCache.ReleaseLeaseByIpAsync(ipAddress).ConfigureAwait(false);
-            _logger.LogDebug("Removed {Ip} from lease cache (declined)", ipAddress);
+            _logger.LogDebug("Removed {Ip} from lease cache and marked as declined", ipAddress);
         }
 
         await using var connection = await _dataSource.OpenConnectionAsync().ConfigureAwait(false);
@@ -461,10 +502,7 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
             await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
 
-            if (_logger.IsEnabled(LogLevel.Debug))
-            {
-                _logger.LogDebug("Marked {Ip} as declined", ipAddress);
-            }
+            _logger.LogInformation("IP {Ip} marked as declined - excluded from allocation for 1 hour", ipAddress);
         }
         catch (Exception ex)
         {

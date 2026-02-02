@@ -23,6 +23,10 @@ public sealed class LeaseCache : IDisposable
     private readonly ConcurrentDictionary<string, LeaseEntry> _byMac = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<IPAddress, LeaseEntry> _byIp = new();
 
+    // Declined IPs - temporarily excluded from allocation (TTL: 1 hour by default)
+    private readonly ConcurrentDictionary<IPAddress, DateTime> _declinedIps = new();
+    private readonly TimeSpan _declinedIpTtl = TimeSpan.FromHours(1);
+
     // Write-through queue for async database persistence
     private readonly Channel<LeaseWriteOperation> _writeQueue;
     private readonly Task _writerTask;
@@ -181,6 +185,44 @@ public sealed class LeaseCache : IDisposable
     }
 
     /// <summary>
+    /// Check if IP was recently declined (has ARP conflict).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool IsIpDeclined(IPAddress ipAddress)
+    {
+        if (_declinedIps.TryGetValue(ipAddress, out var expiresAt))
+        {
+            if (DateTime.UtcNow < expiresAt)
+            {
+                return true;
+            }
+            // Expired, remove it
+            _declinedIps.TryRemove(ipAddress, out _);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Mark an IP as declined (ARP conflict detected by client).
+    /// The IP will be excluded from allocation for the TTL period.
+    /// </summary>
+    public void MarkIpAsDeclined(IPAddress ipAddress)
+    {
+        var expiresAt = DateTime.UtcNow.Add(_declinedIpTtl);
+        _declinedIps[ipAddress] = expiresAt;
+        _logger.LogWarning("[CACHE] IP {Ip} marked as declined until {ExpiresAt}", ipAddress, expiresAt);
+    }
+
+    /// <summary>
+    /// Check if an IP is available (not leased AND not declined).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool IsIpAvailable(IPAddress ipAddress)
+    {
+        return !IsIpLeased(ipAddress) && !IsIpDeclined(ipAddress);
+    }
+
+    /// <summary>
     /// Check if MAC can use the specified IP.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -204,7 +246,7 @@ public sealed class LeaseCache : IDisposable
     }
 
     /// <summary>
-    /// Find first available IP in range.
+    /// Find first available IP in range (not leased, not declined, not excluded).
     /// </summary>
     public IPAddress? FindAvailableIp(IPAddress rangeStart, IPAddress rangeEnd, HashSet<IPAddress>? exclusions = null)
     {
@@ -218,7 +260,8 @@ public sealed class LeaseCache : IDisposable
         {
             var ip = new IPAddress(current);
 
-            if (exclusions?.Contains(ip) != true && !IsIpLeased(ip))
+            // Check: not excluded, not leased, not declined
+            if (exclusions?.Contains(ip) != true && IsIpAvailable(ip))
             {
                 return ip;
             }
@@ -513,8 +556,10 @@ public sealed class LeaseCache : IDisposable
     private void CleanupExpiredLeases(object? state)
     {
         var now = DateTime.UtcNow;
-        var expiredCount = 0;
+        var expiredLeaseCount = 0;
+        var expiredDeclinedCount = 0;
 
+        // Cleanup expired leases
         foreach (var kvp in _byMac)
         {
             if (kvp.Value.EndTime <= now)
@@ -522,14 +567,27 @@ public sealed class LeaseCache : IDisposable
                 if (_byMac.TryRemove(kvp.Key, out var entry))
                 {
                     _byIp.TryRemove(entry.IpAddress, out _);
-                    expiredCount++;
+                    expiredLeaseCount++;
                 }
             }
         }
 
-        if (expiredCount > 0 && _logger.IsEnabled(LogLevel.Debug))
+        // Cleanup expired declined IPs
+        foreach (var kvp in _declinedIps)
         {
-            _logger.LogDebug("Cleaned up {Count} expired leases from cache", expiredCount);
+            if (kvp.Value <= now)
+            {
+                if (_declinedIps.TryRemove(kvp.Key, out _))
+                {
+                    expiredDeclinedCount++;
+                }
+            }
+        }
+
+        if ((expiredLeaseCount > 0 || expiredDeclinedCount > 0) && _logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("Cleaned up {LeaseCount} expired leases and {DeclinedCount} expired declined IPs from cache",
+                expiredLeaseCount, expiredDeclinedCount);
         }
     }
 
