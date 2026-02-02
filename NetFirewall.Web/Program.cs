@@ -51,6 +51,7 @@ builder.Services.AddScoped<INetworkConfigService>(sp =>
 // Add DHCP services
 builder.Services.AddScoped<IDhcpAdminService, DhcpAdminService>();
 builder.Services.AddScoped<IDhcpLeasesService, DhcpLeasesService>();
+builder.Services.AddSingleton<IDhcpSubnetService, DhcpSubnetService>();
 
 // Add Setup Wizard service
 builder.Services.AddScoped<ISetupWizardService, SetupWizardService>();
