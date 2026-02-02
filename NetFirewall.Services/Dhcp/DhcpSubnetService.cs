@@ -453,7 +453,9 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         string macAddress,
         CancellationToken cancellationToken)
     {
-        const string sql = "SELECT reserved_ip FROM dhcp_mac_reservations WHERE UPPER(mac_address) = UPPER(@mac) LIMIT 1";
+        // PostgreSQL macaddr type comparison is case-insensitive
+        // Cast input to macaddr for proper comparison
+        const string sql = "SELECT reserved_ip FROM dhcp_mac_reservations WHERE mac_address = @mac::macaddr LIMIT 1";
 
         _logger.LogDebug("[SUBNET] Checking MAC reservation for {Mac}", macAddress);
 

@@ -425,11 +425,13 @@ public sealed class DhcpServerService : IDhcpServerService
             giaddr.GetAddressBytes().CopyTo(buffer, offset);
             offset += 4;
 
-            // chaddr (16 bytes)
+            // chaddr (16 bytes) - clear all 16 bytes first, then write MAC
+            buffer.AsSpan(offset, 16).Clear();
             ParseMacToBytes(request.ClientMac, buffer.AsSpan(offset, 6));
             offset += 16;
 
-            // sname (64 bytes)
+            // sname (64 bytes) - MUST clear entire field (ArrayPool doesn't guarantee zeroed memory)
+            buffer.AsSpan(offset, 64).Clear();
             if (!string.IsNullOrEmpty(tftpServer))
             {
                 var tftpBytes = Encoding.ASCII.GetBytes(tftpServer);
@@ -438,7 +440,8 @@ public sealed class DhcpServerService : IDhcpServerService
             }
             offset += 64;
 
-            // file (128 bytes)
+            // file (128 bytes) - MUST clear entire field (ArrayPool doesn't guarantee zeroed memory)
+            buffer.AsSpan(offset, 128).Clear();
             if (!string.IsNullOrEmpty(bootFilename))
             {
                 var bootBytes = Encoding.ASCII.GetBytes(bootFilename);
