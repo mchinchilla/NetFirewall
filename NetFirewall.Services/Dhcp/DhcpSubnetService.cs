@@ -37,16 +37,23 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         DhcpRequest request,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug(
+            "[SUBNET] FindSubnetForRequest: MAC={Mac}, CiAddr={CiAddr}, GiAddr={GiAddr}, RequestedIp={RequestedIp}",
+            request.ClientMac, request.CiAddr, request.GiAddr, request.RequestedIp);
+
         await EnsureCacheLoadedAsync(cancellationToken).ConfigureAwait(false);
+
+        _logger.LogDebug("[SUBNET] Cache has {Count} subnets available", _subnetCache.Count);
 
         // Priority 1: Use giaddr (relay agent) if present and not 0.0.0.0
         if (request.GiAddr != null && !request.GiAddr.Equals(IPAddress.Any))
         {
+            _logger.LogDebug("[SUBNET] Checking GiAddr {GiAddr} for subnet match", request.GiAddr);
             var subnet = FindSubnetContainingIp(request.GiAddr);
             if (subnet != null)
             {
-                _logger.LogDebug("Found subnet {SubnetName} via relay agent {GiAddr}",
-                    subnet.Name, request.GiAddr);
+                _logger.LogDebug("[SUBNET] Found subnet '{SubnetName}' ({Network}) via relay agent {GiAddr}",
+                    subnet.Name, subnet.Network, request.GiAddr);
                 return subnet;
             }
         }
@@ -54,11 +61,12 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         // Priority 2: Use ciaddr if client already has an IP
         if (request.CiAddr != null && !request.CiAddr.Equals(IPAddress.Any))
         {
+            _logger.LogDebug("[SUBNET] Checking CiAddr {CiAddr} for subnet match", request.CiAddr);
             var subnet = FindSubnetContainingIp(request.CiAddr);
             if (subnet != null)
             {
-                _logger.LogDebug("Found subnet {SubnetName} via client IP {CiAddr}",
-                    subnet.Name, request.CiAddr);
+                _logger.LogDebug("[SUBNET] Found subnet '{SubnetName}' ({Network}) via client IP {CiAddr}",
+                    subnet.Name, subnet.Network, request.CiAddr);
                 return subnet;
             }
         }
@@ -66,16 +74,18 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         // Priority 3: Use requested IP if specified
         if (request.RequestedIp != null && !request.RequestedIp.Equals(IPAddress.Any))
         {
+            _logger.LogDebug("[SUBNET] Checking RequestedIp {RequestedIp} for subnet match", request.RequestedIp);
             var subnet = FindSubnetContainingIp(request.RequestedIp);
             if (subnet != null)
             {
-                _logger.LogDebug("Found subnet {SubnetName} via requested IP {RequestedIp}",
-                    subnet.Name, request.RequestedIp);
+                _logger.LogDebug("[SUBNET] Found subnet '{SubnetName}' ({Network}) via requested IP {RequestedIp}",
+                    subnet.Name, subnet.Network, request.RequestedIp);
                 return subnet;
             }
         }
 
         // Priority 4: Return first enabled subnet (for direct connections without relay)
+        _logger.LogDebug("[SUBNET] No specific subnet match, looking for default subnet");
         var firstSubnet = _subnetCache.Values
             .Where(s => s.Enabled)
             .OrderBy(s => s.Name)
@@ -83,7 +93,15 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         if (firstSubnet != null)
         {
-            _logger.LogDebug("Using default subnet {SubnetName}", firstSubnet.Name);
+            _logger.LogDebug("[SUBNET] Using default subnet '{SubnetName}' ({Network})",
+                firstSubnet.Name, firstSubnet.Network);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "[SUBNET] NO SUBNET FOUND for {Mac}! Cache has {Count} subnets. " +
+                "Check that dhcp_subnets table has enabled subnets matching the network.",
+                request.ClientMac, _subnetCache.Count);
         }
 
         return firstSubnet;
@@ -158,12 +176,27 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         DhcpRequest request,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("[SUBNET] FindAvailableIpInSubnet: Subnet='{SubnetName}', MAC={Mac}",
+            subnet.Name, macAddress);
+
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
         // Get pools for this subnet
         if (!_poolCache.TryGetValue(subnet.Id, out var pools))
         {
+            _logger.LogDebug("[SUBNET] Pools not in cache, loading from DB for subnet {SubnetId}", subnet.Id);
             pools = await LoadPoolsForSubnetAsync(connection, subnet.Id, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogDebug("[SUBNET] Subnet '{SubnetName}' has {PoolCount} pools", subnet.Name, pools.Count);
+
+        if (pools.Count == 0)
+        {
+            _logger.LogWarning(
+                "[SUBNET] No pools configured for subnet '{SubnetName}' ({SubnetId}). " +
+                "Add pools to dhcp_pools table.",
+                subnet.Name, subnet.Id);
+            return (null, null);
         }
 
         // Filter pools by enabled and client eligibility
@@ -172,14 +205,22 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             .OrderBy(p => p.Priority)
             .ToList();
 
+        _logger.LogDebug("[SUBNET] {EligibleCount} eligible pools (enabled) in subnet '{SubnetName}'",
+            eligiblePools.Count, subnet.Name);
+
         // Check client class for pool restrictions
         var clientClass = await MatchClientClassAsync(request, cancellationToken).ConfigureAwait(false);
 
         foreach (var pool in eligiblePools)
         {
+            _logger.LogDebug("[SUBNET] Checking pool '{PoolName}' ({Start}-{End}) for {Mac}",
+                pool.Name, pool.RangeStart, pool.RangeEnd, macAddress);
+
             // Check if pool allows this client
             if (!IsClientAllowedInPool(pool, request, clientClass))
             {
+                _logger.LogDebug("[SUBNET] Client {Mac} not allowed in pool '{PoolName}'",
+                    macAddress, pool.Name);
                 continue;
             }
 
@@ -189,10 +230,20 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
             if (ip != null)
             {
+                _logger.LogDebug("[SUBNET] Found available IP {Ip} in pool '{PoolName}' for {Mac}",
+                    ip, pool.Name, macAddress);
                 return (ip, pool);
+            }
+            else
+            {
+                _logger.LogDebug("[SUBNET] No available IP in pool '{PoolName}' for {Mac}",
+                    pool.Name, macAddress);
             }
         }
 
+        _logger.LogWarning(
+            "[SUBNET] No available IP found in any pool for subnet '{SubnetName}', MAC={Mac}",
+            subnet.Name, macAddress);
         return (null, null);
     }
 
@@ -229,11 +280,16 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     {
         var now = DateTime.UtcNow;
 
+        _logger.LogDebug("[POOL] FindAvailableIpInPool: Pool='{PoolName}', Range={Start}-{End}, MAC={Mac}",
+            pool.Name, pool.RangeStart, pool.RangeEnd, macAddress);
+
         // Get exclusions for this subnet
         if (!_exclusionCache.TryGetValue(subnet.Id, out var exclusions))
         {
             exclusions = new List<DhcpExclusion>();
         }
+
+        _logger.LogDebug("[POOL] {ExclusionCount} exclusions for subnet {SubnetId}", exclusions.Count, subnet.Id);
 
         // Build exclusion check
         var exclusionRanges = exclusions
@@ -263,6 +319,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             ORDER BY ip
             LIMIT 1";
 
+        _logger.LogTrace("[SQL] FindAvailableIpInPool: Range={Start}-{End}", pool.RangeStart, pool.RangeEnd);
+
         try
         {
             await using var cmd = new NpgsqlCommand(sql, connection);
@@ -273,19 +331,33 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (result is IPAddress ip)
             {
+                _logger.LogDebug("[SQL] FindAvailableIpInPool: Query returned IP {Ip}", ip);
+
                 // Check against exclusions
                 if (!IsIpExcluded(ip, exclusionRanges))
                 {
+                    _logger.LogDebug("[POOL] Found available IP {Ip} in pool '{PoolName}'", ip, pool.Name);
                     return ip;
                 }
+                else
+                {
+                    _logger.LogDebug("[POOL] IP {Ip} is excluded, continuing search", ip);
+                }
+            }
+            else
+            {
+                _logger.LogDebug("[SQL] FindAvailableIpInPool: No IP returned from query");
             }
         }
         catch (PostgresException ex)
         {
-            _logger.LogWarning(ex, "Error finding available IP in pool {PoolId}, falling back to iteration", pool.Id);
+            _logger.LogWarning(ex,
+                "[POOL] Error finding available IP in pool '{PoolName}' ({PoolId}): {Message}. Falling back to iteration.",
+                pool.Name, pool.Id, ex.Message);
         }
 
         // Fallback: iterate through range
+        _logger.LogDebug("[POOL] Using fallback iteration for pool '{PoolName}'", pool.Name);
         return await FindAvailableIpFallbackAsync(
             connection, pool, exclusionRanges, now, cancellationToken).ConfigureAwait(false);
     }
@@ -416,9 +488,11 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     {
         if (DateTime.UtcNow - _lastCacheRefresh < _cacheExpiry && _subnetCache.Count > 0)
         {
+            _logger.LogTrace("[SUBNET] Cache valid, {Count} subnets loaded", _subnetCache.Count);
             return;
         }
 
+        _logger.LogDebug("[SUBNET] Cache expired or empty, refreshing...");
         await _cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -439,17 +513,21 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
     private async Task RefreshCacheAsync(CancellationToken cancellationToken)
     {
+        _logger.LogDebug("[SUBNET] Refreshing cache from database...");
+
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
         // Load subnets
         const string subnetSql = @"
-            SELECT id, name, network, subnet_mask, router, broadcast, domain_name,
+            SELECT id, name, network::text, subnet_mask, router, broadcast, domain_name,
                    dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time,
                    interface_mtu, tftp_server, boot_filename, boot_filename_uefi,
                    interface_name, enabled, created_at, updated_at
             FROM dhcp_subnets
             WHERE enabled = true
             ORDER BY name";
+
+        _logger.LogTrace("[SQL] Loading subnets: {Sql}", subnetSql);
 
         await using (var cmd = new NpgsqlCommand(subnetSql, connection))
         await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
@@ -459,7 +537,13 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             {
                 var subnet = ReadSubnetFromReader(reader);
                 _subnetCache[subnet.Id] = subnet;
+                _logger.LogDebug("[SUBNET] Loaded subnet: {Name} ({Network})", subnet.Name, subnet.Network);
             }
+        }
+
+        if (_subnetCache.Count == 0)
+        {
+            _logger.LogWarning("[SUBNET] No subnets found in database! Check dhcp_subnets table.");
         }
 
         // Load pools for each subnet
@@ -467,6 +551,19 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         {
             var pools = await LoadPoolsForSubnetAsync(connection, subnetId, cancellationToken).ConfigureAwait(false);
             _poolCache[subnetId] = pools;
+
+            if (pools.Count == 0)
+            {
+                _logger.LogWarning("[SUBNET] No pools found for subnet {SubnetId}. Check dhcp_pools table.", subnetId);
+            }
+            else
+            {
+                foreach (var pool in pools)
+                {
+                    _logger.LogDebug("[SUBNET] Loaded pool: {Name} ({Start}-{End}) for subnet {SubnetId}",
+                        pool.Name, pool.RangeStart, pool.RangeEnd, subnetId);
+                }
+            }
         }
 
         // Load exclusions
@@ -474,12 +571,19 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         {
             var exclusions = await LoadExclusionsForSubnetAsync(connection, subnetId, cancellationToken).ConfigureAwait(false);
             _exclusionCache[subnetId] = exclusions;
+
+            if (exclusions.Count > 0)
+            {
+                _logger.LogDebug("[SUBNET] Loaded {Count} exclusions for subnet {SubnetId}",
+                    exclusions.Count, subnetId);
+            }
         }
 
         // Load classes
         await LoadClassesAsync(connection, cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("DHCP cache refreshed: {SubnetCount} subnets, {PoolCount} pools, {ClassCount} classes",
+        _logger.LogInformation(
+            "[SUBNET] Cache refreshed: {SubnetCount} subnets, {PoolCount} pools, {ClassCount} classes",
             _subnetCache.Count,
             _poolCache.Values.Sum(p => p.Count),
             _classCache.Count);

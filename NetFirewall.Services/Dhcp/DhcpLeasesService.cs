@@ -47,13 +47,20 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
     public async Task<IPAddress?> OfferLeaseAsync(string macAddress, IPAddress? rangeStart, IPAddress rangeEnd)
     {
+        _logger.LogDebug("[LEASE] OfferLeaseAsync called for MAC: {Mac}, Range: {Start}-{End}",
+            macAddress, rangeStart, rangeEnd);
+
         // FAST PATH: Check cache first (O(1) lookup)
         if (_leaseCache != null)
         {
+            _logger.LogDebug("[LEASE] Checking cache for MAC: {Mac}", macAddress);
+
             // Check for existing lease in cache
             var cachedLease = _leaseCache.GetByMac(macAddress);
             if (cachedLease != null)
             {
+                _logger.LogDebug("[LEASE] Cache HIT - Found existing lease: {Ip} for {Mac}",
+                    cachedLease.IpAddress, macAddress);
                 return cachedLease.IpAddress;
             }
 
@@ -61,36 +68,46 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             var availableIp = _leaseCache.FindAvailableIp(rangeStart!, rangeEnd);
             if (availableIp != null)
             {
+                _logger.LogDebug("[LEASE] Cache HIT - Found available IP: {Ip} for {Mac}",
+                    availableIp, macAddress);
                 return availableIp;
             }
 
+            _logger.LogDebug("[LEASE] Cache MISS - No IP found in cache for {Mac}, falling back to DB", macAddress);
             // Cache miss for available IP - fall through to DB
             // This should be rare after warmup
         }
 
         // SLOW PATH: Database lookup (fallback)
+        _logger.LogDebug("[LEASE] Using database path for {Mac}", macAddress);
         await using var connection = await _dataSource.OpenConnectionAsync().ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync().ConfigureAwait(false);
 
         try
         {
             // First check for MAC reservation (single query)
+            _logger.LogDebug("[LEASE] Checking MAC reservation for {Mac}", macAddress);
             var reservedIp = await GetReservationInternalAsync(connection, macAddress, transaction).ConfigureAwait(false);
             if (reservedIp != null)
             {
+                _logger.LogDebug("[LEASE] Found reservation: {Ip} for {Mac}", reservedIp, macAddress);
                 await transaction.CommitAsync().ConfigureAwait(false);
                 return reservedIp;
             }
 
             // Check for existing lease for this MAC
+            _logger.LogDebug("[LEASE] Checking existing lease for {Mac}", macAddress);
             var existingIp = await GetExistingLeaseIpAsync(connection, macAddress, transaction).ConfigureAwait(false);
             if (existingIp != null)
             {
+                _logger.LogDebug("[LEASE] Found existing lease: {Ip} for {Mac}", existingIp, macAddress);
                 await transaction.CommitAsync().ConfigureAwait(false);
                 return existingIp;
             }
 
             // Find first available IP using optimized SQL
+            _logger.LogDebug("[LEASE] Finding available IP in range {Start}-{End} for {Mac}",
+                rangeStart, rangeEnd, macAddress);
             var availableIp = await FindAvailableIpAsync(
                 connection,
                 rangeStart!.ToString(),
@@ -98,13 +115,23 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
                 transaction
             ).ConfigureAwait(false);
 
+            if (availableIp != null)
+            {
+                _logger.LogDebug("[LEASE] Found available IP: {Ip} for {Mac}", availableIp, macAddress);
+            }
+            else
+            {
+                _logger.LogWarning("[LEASE] No available IP found in range {Start}-{End} for {Mac}",
+                    rangeStart, rangeEnd, macAddress);
+            }
+
             await transaction.CommitAsync().ConfigureAwait(false);
             return availableIp;
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync().ConfigureAwait(false);
-            _logger.LogError(ex, "Error offering lease for MAC {Mac}", macAddress);
+            _logger.LogError(ex, "[LEASE] Error offering lease for MAC {Mac}: {Message}", macAddress, ex.Message);
             return null;
         }
     }
@@ -124,11 +151,23 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             WHERE mac_address = @mac AND end_time > @now
             LIMIT 1";
 
+        _logger.LogTrace("[SQL] GetExistingLease: {Sql} | @mac={Mac}, @now={Now}", sql, macAddress, now);
+
         await using var cmd = new NpgsqlCommand(sql, connection, transaction);
         cmd.Parameters.AddWithValue("mac", parsedMac);
         cmd.Parameters.AddWithValue("now", now);
 
         var result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+
+        if (result != null)
+        {
+            _logger.LogDebug("[SQL] GetExistingLease: Found {Ip} for {Mac}", result, macAddress);
+        }
+        else
+        {
+            _logger.LogDebug("[SQL] GetExistingLease: No active lease for {Mac}", macAddress);
+        }
+
         return result as IPAddress;
     }
 
@@ -157,6 +196,8 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             LIMIT 1
             FOR UPDATE SKIP LOCKED";
 
+        _logger.LogTrace("[SQL] FindAvailableIp: Range {Start}-{End}", rangeStart, rangeEnd);
+
         try
         {
             await using var cmd = new NpgsqlCommand(sql, connection, transaction);
@@ -165,10 +206,21 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
 
             var result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+
+            if (result != null)
+            {
+                _logger.LogDebug("[SQL] FindAvailableIp: Found {Ip} in range {Start}-{End}", result, rangeStart, rangeEnd);
+            }
+            else
+            {
+                _logger.LogWarning("[SQL] FindAvailableIp: No IP available in range {Start}-{End}", rangeStart, rangeEnd);
+            }
+
             return result as IPAddress;
         }
-        catch (PostgresException)
+        catch (PostgresException ex)
         {
+            _logger.LogWarning("[SQL] FindAvailableIp: generate_series failed ({Message}), using fallback", ex.Message);
             // Fallback to simpler iteration if generate_series fails
             return await FindAvailableIpFallbackAsync(connection, rangeStart, rangeEnd, transaction).ConfigureAwait(false);
         }
@@ -363,15 +415,28 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             var parsedMac = ParseMacAddress(macAddress);
 
             const string sql = "SELECT reserved_ip FROM dhcp_mac_reservations WHERE mac_address = @mac LIMIT 1";
+
+            _logger.LogTrace("[SQL] GetReservation: {Sql} | @mac={Mac}", sql, macAddress);
+
             await using var cmd = new NpgsqlCommand(sql, connection, transaction);
             cmd.Parameters.AddWithValue("mac", parsedMac);
 
             var result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+
+            if (result != null)
+            {
+                _logger.LogDebug("[SQL] GetReservation: Found {Ip} for {Mac}", result, macAddress);
+            }
+            else
+            {
+                _logger.LogDebug("[SQL] GetReservation: No reservation for {Mac}", macAddress);
+            }
+
             return result as IPAddress;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error checking reservation for {Mac}", macAddress);
+            _logger.LogError(ex, "[SQL] GetReservation ERROR for {Mac}: {Message}", macAddress, ex.Message);
             return null;
         }
     }

@@ -75,13 +75,39 @@ public sealed class DhcpServerService : IDhcpServerService
     {
         try
         {
+            _logger.LogDebug("[SERVICE] Processing {MessageType} from {Mac}",
+                request.MessageType, request.ClientMac);
+
             // Find the appropriate subnet for this request
             var subnet = await _dhcpSubnetService.FindSubnetForRequestAsync(request).ConfigureAwait(false);
+
+            if (subnet != null)
+            {
+                _logger.LogDebug(
+                    "[SERVICE] Found subnet: {SubnetName} ({Network}) for {Mac}",
+                    subnet.Name, subnet.Network, request.ClientMac);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[SERVICE] No subnet found for {Mac} - will use fallback config. " +
+                    "CiAddr={CiAddr}, GiAddr={GiAddr}, RequestedIp={RequestedIp}",
+                    request.ClientMac,
+                    request.CiAddr,
+                    request.GiAddr,
+                    request.RequestedIp);
+            }
 
             // Match client class for conditional options
             var clientClass = await _dhcpSubnetService.MatchClientClassAsync(request).ConfigureAwait(false);
 
-            return request.MessageType switch
+            if (clientClass != null)
+            {
+                _logger.LogDebug("[SERVICE] Matched client class: {ClassName} for {Mac}",
+                    clientClass.Name, request.ClientMac);
+            }
+
+            var response = request.MessageType switch
             {
                 DhcpMessageType.Discover => await HandleDiscoverAsync(request, subnet, clientClass).ConfigureAwait(false),
                 DhcpMessageType.Request => await HandleRequestAsync(request, subnet, clientClass).ConfigureAwait(false),
@@ -90,28 +116,41 @@ public sealed class DhcpServerService : IDhcpServerService
                 DhcpMessageType.Inform => HandleInform(request, subnet, clientClass),
                 _ => CreateNakResponse(request, subnet)
             };
+
+            if (response.Length == 0)
+            {
+                _logger.LogWarning(
+                    "[SERVICE] Empty response generated for {MessageType} from {Mac}",
+                    request.MessageType, request.ClientMac);
+            }
+
+            return response;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating DHCP response for {Mac}", request.ClientMac);
+            _logger.LogError(ex, "[SERVICE] Error creating DHCP response for {Mac}: {Message}",
+                request.ClientMac, ex.Message);
             return CreateNakResponse(request, null);
         }
     }
 
     private async Task<byte[]> HandleDiscoverAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
+        _logger.LogDebug("[DISCOVER] Processing DISCOVER from {Mac}, Hostname: {Hostname}",
+            request.ClientMac, request.Hostname ?? "(none)");
+
         // Check failover - should we handle this request?
         if (_failoverService != null && _failoverService.IsEnabled)
         {
             if (!_failoverService.CanServe)
             {
-                _logger.LogDebug("Failover state prevents serving DISCOVER from {Mac}", request.ClientMac);
+                _logger.LogDebug("[DISCOVER] Failover state prevents serving DISCOVER from {Mac}", request.ClientMac);
                 return []; // Don't respond, let peer handle it
             }
 
             if (!_failoverService.ShouldHandleRequest(request.ClientMac, request.RequestedIp))
             {
-                _logger.LogDebug("Load balancing: peer should handle DISCOVER from {Mac}", request.ClientMac);
+                _logger.LogDebug("[DISCOVER] Load balancing: peer should handle DISCOVER from {Mac}", request.ClientMac);
                 return []; // Let peer handle based on load balancing
             }
         }
@@ -121,88 +160,160 @@ public sealed class DhcpServerService : IDhcpServerService
 
         if (subnet != null)
         {
+            _logger.LogDebug("[DISCOVER] Using subnet '{SubnetName}' for {Mac}",
+                subnet.Name, request.ClientMac);
+
             // Multi-subnet mode: find IP in subnet's pools
             (offeredIp, pool) = await _dhcpSubnetService.FindAvailableIpInSubnetAsync(
                 subnet, request.ClientMac, request).ConfigureAwait(false);
+
+            if (offeredIp != null)
+            {
+                _logger.LogDebug("[DISCOVER] Found IP {Ip} in pool '{PoolName}' for {Mac}",
+                    offeredIp, pool?.Name ?? "unknown", request.ClientMac);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[DISCOVER] No IP available in subnet '{SubnetName}' pools for {Mac}. " +
+                    "Check pool configuration and exclusions.",
+                    subnet.Name, request.ClientMac);
+            }
         }
         else
         {
             // Fallback mode: use legacy service
+            _logger.LogDebug(
+                "[DISCOVER] No subnet found, using fallback config. Range: {Start} - {End}",
+                _fallbackConfig.IpRangeStart, _fallbackConfig.IpRangeEnd);
+
             offeredIp = await _dhcpLeasesService.OfferLeaseAsync(
                 request.ClientMac,
                 _fallbackConfig.IpRangeStart,
                 _fallbackConfig.IpRangeEnd!
             ).ConfigureAwait(false);
+
+            if (offeredIp != null)
+            {
+                _logger.LogDebug("[DISCOVER] Fallback offered IP {Ip} to {Mac}",
+                    offeredIp, request.ClientMac);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[DISCOVER] Fallback mode: No IP available in range {Start}-{End} for {Mac}",
+                    _fallbackConfig.IpRangeStart, _fallbackConfig.IpRangeEnd, request.ClientMac);
+            }
         }
 
         if (offeredIp == null)
         {
-            _logger.LogWarning("No IP available for {Mac} in subnet {Subnet}",
-                request.ClientMac, subnet?.Name ?? "default");
+            _logger.LogWarning(
+                "[DISCOVER] FAILED - No IP available for {Mac} in subnet '{Subnet}'. Sending NAK.",
+                request.ClientMac, subnet?.Name ?? "fallback");
             return CreateNakResponse(request, subnet);
         }
 
-        _logger.LogInformation("Offering {Ip} to {Mac} from {Subnet}/{Pool}",
-            offeredIp, request.ClientMac, subnet?.Name ?? "default", pool?.Name ?? "default");
+        _logger.LogInformation(
+            "[DISCOVER] SUCCESS - Offering {Ip} to {Mac} (Hostname: {Hostname}) from {Subnet}/{Pool}",
+            offeredIp, request.ClientMac, request.Hostname ?? "(none)",
+            subnet?.Name ?? "fallback", pool?.Name ?? "default");
 
         return ConstructDhcpPacket(request, offeredIp, DhcpMessageType.Offer, subnet, clientClass);
     }
 
     private async Task<byte[]> HandleRequestAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
+        _logger.LogDebug("[REQUEST] Processing REQUEST from {Mac}, RequestedIP: {RequestedIp}",
+            request.ClientMac, request.RequestedIp);
+
         // Check failover - should we handle this request?
         if (_failoverService != null && _failoverService.IsEnabled)
         {
             if (!_failoverService.CanServe)
             {
-                _logger.LogDebug("Failover state prevents serving REQUEST from {Mac}", request.ClientMac);
+                _logger.LogDebug("[REQUEST] Failover state prevents serving REQUEST from {Mac}", request.ClientMac);
                 return []; // Don't respond
             }
 
             if (!_failoverService.ShouldHandleRequest(request.ClientMac, request.RequestedIp))
             {
-                _logger.LogDebug("Load balancing: peer should handle REQUEST from {Mac}", request.ClientMac);
+                _logger.LogDebug("[REQUEST] Load balancing: peer should handle REQUEST from {Mac}", request.ClientMac);
                 return []; // Let peer handle
             }
         }
 
-        var requestedIp = request.RequestedIp
-            ?? await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
+        var requestedIp = request.RequestedIp;
 
-        if (requestedIp != null && await _dhcpLeasesService.CanAssignIpAsync(request.ClientMac, requestedIp).ConfigureAwait(false))
+        if (requestedIp == null)
         {
-            var leaseTime = subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
+            _logger.LogDebug("[REQUEST] No RequestedIP in request, looking up existing lease for {Mac}",
+                request.ClientMac);
+            requestedIp = await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
 
-            await _dhcpLeasesService.AssignLeaseAsync(
-                request.ClientMac,
-                requestedIp,
-                leaseTime
-            ).ConfigureAwait(false);
-
-            _logger.LogInformation("Assigned {Ip} to {Mac} for {LeaseTime}s",
-                requestedIp, request.ClientMac, leaseTime);
-
-            // Notify failover peer of binding update
-            if (_failoverService != null && _failoverService.IsEnabled)
+            if (requestedIp != null)
             {
-                var update = new FailoverBindingUpdate
-                {
-                    IpAddress = requestedIp,
-                    MacAddress = request.ClientMac,
-                    StartTime = DateTime.UtcNow,
-                    EndTime = DateTime.UtcNow.AddSeconds(leaseTime),
-                    BindingState = FailoverBindingState.Active,
-                    ClientHostname = request.Hostname
-                };
-
-                // Fire and forget - don't block response to client
-                _ = _failoverService.SendBindingUpdateAsync(update);
+                _logger.LogDebug("[REQUEST] Found existing lease: {Ip} for {Mac}", requestedIp, request.ClientMac);
             }
-
-            return ConstructDhcpPacket(request, requestedIp, DhcpMessageType.Ack, subnet, clientClass);
+            else
+            {
+                _logger.LogWarning("[REQUEST] No existing lease found for {Mac}", request.ClientMac);
+            }
         }
 
-        _logger.LogWarning("Request denied for {Mac}, IP: {Ip}", request.ClientMac, requestedIp);
+        if (requestedIp != null)
+        {
+            _logger.LogDebug("[REQUEST] Checking if {Ip} can be assigned to {Mac}",
+                requestedIp, request.ClientMac);
+
+            var canAssign = await _dhcpLeasesService.CanAssignIpAsync(request.ClientMac, requestedIp).ConfigureAwait(false);
+
+            if (canAssign)
+            {
+                var leaseTime = subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
+
+                _logger.LogDebug("[REQUEST] Assigning lease: {Ip} to {Mac} for {LeaseTime}s",
+                    requestedIp, request.ClientMac, leaseTime);
+
+                await _dhcpLeasesService.AssignLeaseAsync(
+                    request.ClientMac,
+                    requestedIp,
+                    leaseTime
+                ).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "[REQUEST] SUCCESS - Assigned {Ip} to {Mac} (Hostname: {Hostname}) for {LeaseTime}s",
+                    requestedIp, request.ClientMac, request.Hostname ?? "(none)", leaseTime);
+
+                // Notify failover peer of binding update
+                if (_failoverService != null && _failoverService.IsEnabled)
+                {
+                    var update = new FailoverBindingUpdate
+                    {
+                        IpAddress = requestedIp,
+                        MacAddress = request.ClientMac,
+                        StartTime = DateTime.UtcNow,
+                        EndTime = DateTime.UtcNow.AddSeconds(leaseTime),
+                        BindingState = FailoverBindingState.Active,
+                        ClientHostname = request.Hostname
+                    };
+
+                    // Fire and forget - don't block response to client
+                    _ = _failoverService.SendBindingUpdateAsync(update);
+                }
+
+                return ConstructDhcpPacket(request, requestedIp, DhcpMessageType.Ack, subnet, clientClass);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[REQUEST] DENIED - Cannot assign {Ip} to {Mac}. IP may be in use by another client or reserved.",
+                    requestedIp, request.ClientMac);
+            }
+        }
+
+        _logger.LogWarning("[REQUEST] FAILED - Sending NAK to {Mac} for IP: {Ip}",
+            request.ClientMac, requestedIp);
         return CreateNakResponse(request, subnet);
     }
 

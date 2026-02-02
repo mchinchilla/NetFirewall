@@ -7,11 +7,9 @@
     <UserSecretsId>dotnet-NetFirewall.DhcpServer-a61ada6a-0716-4218-a319-5762480650b9</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
 
-    <!-- AOT Compilation for fast startup and lower memory -->
-    <!-- Note: RepoDb may have AOT compatibility issues - test before production -->
-    <PublishAot Condition="'$(Configuration)' == 'Release'">true</PublishAot>
-    <OptimizationPreference>Speed</OptimizationPreference>
-    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <!-- AOT disabled: RepoDb and System.Net.IPAddress are not AOT compatible -->
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +22,7 @@
     <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Spectre.Console" Version="0.54.0" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
   </ItemGroup>
 
