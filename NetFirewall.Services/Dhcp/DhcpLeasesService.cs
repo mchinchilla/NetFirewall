@@ -443,6 +443,14 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
     public async Task MarkIpAsDeclinedAsync(IPAddress ipAddress)
     {
+        // IMPORTANT: Clear the cache FIRST to prevent race conditions where
+        // FindAvailableIp returns this IP but CanAssignIp still sees old cache entry
+        if (_leaseCache != null)
+        {
+            await _leaseCache.ReleaseLeaseByIpAsync(ipAddress).ConfigureAwait(false);
+            _logger.LogDebug("Removed {Ip} from lease cache (declined)", ipAddress);
+        }
+
         await using var connection = await _dataSource.OpenConnectionAsync().ConfigureAwait(false);
 
         try

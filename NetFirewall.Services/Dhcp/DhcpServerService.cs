@@ -690,13 +690,14 @@ public sealed class DhcpServerService : IDhcpServerService
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static byte[] GetNetworkOrderInt32Bytes(int value)
     {
-        var networkOrder = IPAddress.HostToNetworkOrder(value);
+        // Convert to network byte order (big-endian) by extracting bytes from MSB to LSB
+        // DO NOT use IPAddress.HostToNetworkOrder here - manual extraction is clearer and correct
         return
         [
-            (byte)(networkOrder >> 24),
-            (byte)(networkOrder >> 16),
-            (byte)(networkOrder >> 8),
-            (byte)networkOrder
+            (byte)((value >> 24) & 0xFF),
+            (byte)((value >> 16) & 0xFF),
+            (byte)((value >> 8) & 0xFF),
+            (byte)(value & 0xFF)
         ];
     }
 
