@@ -1,0 +1,732 @@
+@page "/setup"
+@page "/setup/wizard"
+@rendermode InteractiveServer
+@using System.Net
+@using System.Text.Json
+@using NetFirewall.Models.Setup
+@using NetFirewall.Services.Setup
+@inject ISetupWizardService WizardService
+@inject NavigationManager Navigation
+
+<PageTitle>Setup Wizard - NetFirewall</PageTitle>
+
+<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-8">
+    <div class="max-w-4xl mx-auto px-4">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-white mb-2">NetFirewall Setup Wizard</h1>
+            <p class="text-slate-400">Configure your firewall and DHCP server step by step</p>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="flex justify-between mb-8">
+            @for (int i = 1; i <= 4; i++)
+            {
+                var step = i;
+                var isActive = _currentStep == step;
+                var isCompleted = _currentStep > step;
+                var stepName = step switch
+                {
+                    1 => "Network Interfaces",
+                    2 => "LAN & DHCP",
+                    3 => "Firewall Rules",
+                    4 => "Review & Apply",
+                    _ => ""
+                };
+
+                <div class="flex-1 @(step < 4 ? "pr-4" : "")">
+                    <div class="flex items-center">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300
+                            @(isCompleted ? "bg-green-500 text-white" : isActive ? "bg-blue-500 text-white" : "bg-slate-700 text-slate-400")">
+                            @if (isCompleted)
+                            {
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                            }
+                            else
+                            {
+                                @step
+                            }
+                        </div>
+                        @if (step < 4)
+                        {
+                            <div class="flex-1 h-1 mx-2 rounded @(isCompleted ? "bg-green-500" : "bg-slate-700")"></div>
+                        }
+                    </div>
+                    <p class="text-xs mt-2 @(isActive ? "text-white font-medium" : "text-slate-500")">@stepName</p>
+                </div>
+            }
+        </div>
+
+        <!-- Error/Success Messages -->
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-6">
+                <p class="text-red-300">@_errorMessage</p>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(_successMessage))
+        {
+            <div class="bg-green-500/20 border border-green-500/50 rounded-lg p-4 mb-6">
+                <p class="text-green-300">@_successMessage</p>
+            </div>
+        }
+
+        <!-- Step Content -->
+        <div class="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6 mb-6">
+            @switch (_currentStep)
+            {
+                case 1:
+                    @Step1Interfaces
+                    break;
+                case 2:
+                    @Step2LanDhcp
+                    break;
+                case 3:
+                    @Step3Firewall
+                    break;
+                case 4:
+                    @Step4Review
+                    break;
+            }
+        </div>
+
+        <!-- Navigation Buttons -->
+        <div class="flex justify-between">
+            <button class="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled="@(_currentStep == 1 || _isProcessing)"
+                    @onclick="PreviousStep">
+                <span class="flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Previous
+                </span>
+            </button>
+
+            @if (_currentStep < 4)
+            {
+                <button class="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled="@_isProcessing"
+                        @onclick="NextStep">
+                    <span class="flex items-center gap-2">
+                        Next
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </span>
+                </button>
+            }
+            else
+            {
+                <button class="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled="@_isProcessing"
+                        @onclick="ApplyConfiguration">
+                    <span class="flex items-center gap-2">
+                        @if (_isProcessing)
+                        {
+                            <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Applying...</span>
+                        }
+                        else
+                        {
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span>Apply Configuration</span>
+                        }
+                    </span>
+                </button>
+            }
+        </div>
+
+        <!-- Skip link for development -->
+        <div class="text-center mt-8">
+            <button class="text-slate-500 hover:text-slate-400 text-sm underline" @onclick="SkipWizard">
+                Skip setup (for development)
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int _currentStep = 1;
+    private bool _isProcessing;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private SetupWizardState _wizardState = new();
+    private List<DetectedNetworkInterface> _detectedInterfaces = new();
+
+    // Step 1 data
+    private List<WizardInterfaceConfig> _interfaceConfigs = new();
+
+    // Step 2 data
+    private List<WizardLanConfig> _lanConfigs = new();
+
+    // Step 3 data
+    private WizardFirewallConfig _firewallConfig = new();
+
+    // Step 4 data
+    private WizardServicesConfig _servicesConfig = new();
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Check if wizard already completed
+        if (await WizardService.IsWizardCompletedAsync())
+        {
+            Navigation.NavigateTo("/");
+            return;
+        }
+
+        _wizardState = await WizardService.GetOrCreateWizardStateAsync();
+        _currentStep = _wizardState.CurrentStep;
+
+        // Load any saved configurations
+        LoadSavedConfigurations();
+
+        // Detect interfaces for step 1
+        await DetectInterfaces();
+    }
+
+    private void LoadSavedConfigurations()
+    {
+        if (!string.IsNullOrEmpty(_wizardState.InterfacesConfigJson))
+        {
+            _interfaceConfigs = JsonSerializer.Deserialize<List<WizardInterfaceConfig>>(_wizardState.InterfacesConfigJson, JsonOptions) ?? new();
+        }
+
+        if (!string.IsNullOrEmpty(_wizardState.LanConfigJson))
+        {
+            _lanConfigs = JsonSerializer.Deserialize<List<WizardLanConfig>>(_wizardState.LanConfigJson, JsonOptions) ?? new();
+        }
+
+        if (!string.IsNullOrEmpty(_wizardState.FirewallConfigJson))
+        {
+            _firewallConfig = JsonSerializer.Deserialize<WizardFirewallConfig>(_wizardState.FirewallConfigJson, JsonOptions) ?? new();
+        }
+
+        if (!string.IsNullOrEmpty(_wizardState.ServicesConfigJson))
+        {
+            _servicesConfig = JsonSerializer.Deserialize<WizardServicesConfig>(_wizardState.ServicesConfigJson, JsonOptions) ?? new();
+        }
+    }
+
+    private async Task DetectInterfaces()
+    {
+        _detectedInterfaces = (await WizardService.DetectNetworkInterfacesAsync()).ToList();
+
+        // Initialize interface configs if empty
+        if (_interfaceConfigs.Count == 0)
+        {
+            _interfaceConfigs = _detectedInterfaces.Select(d => new WizardInterfaceConfig
+            {
+                Name = d.Name,
+                Role = d.SuggestedRole,
+                IpAddress = d.CurrentIpAddress,
+                SubnetMask = d.CurrentSubnetMask,
+                Gateway = d.CurrentGateway,
+                UseDhcp = d.SuggestedRole.StartsWith("wan")
+            }).ToList();
+        }
+    }
+
+    private async Task NextStep()
+    {
+        _errorMessage = null;
+        _successMessage = null;
+
+        // Validate current step
+        if (!ValidateCurrentStep())
+            return;
+
+        // Save current step data
+        await SaveCurrentStepData();
+
+        _currentStep++;
+        _wizardState.CurrentStep = _currentStep;
+        await WizardService.UpdateWizardStateAsync(_wizardState);
+
+        // Prepare next step data
+        PrepareNextStep();
+    }
+
+    private void PreviousStep()
+    {
+        _errorMessage = null;
+        _successMessage = null;
+
+        if (_currentStep > 1)
+        {
+            _currentStep--;
+            _wizardState.CurrentStep = _currentStep;
+            _ = WizardService.UpdateWizardStateAsync(_wizardState);
+        }
+    }
+
+    private bool ValidateCurrentStep()
+    {
+        switch (_currentStep)
+        {
+            case 1:
+                // Must have at least one WAN and one LAN
+                var hasWan = _interfaceConfigs.Any(i => i.Role is "wan_primary" or "wan_secondary");
+                var hasLan = _interfaceConfigs.Any(i => i.Role == "lan");
+
+                if (!hasWan)
+                {
+                    _errorMessage = "Please configure at least one WAN interface";
+                    return false;
+                }
+                if (!hasLan)
+                {
+                    _errorMessage = "Please configure at least one LAN interface";
+                    return false;
+                }
+                return true;
+
+            case 2:
+                // Validate LAN configs
+                foreach (var lan in _lanConfigs.Where(l => l.EnableDhcp))
+                {
+                    if (string.IsNullOrEmpty(lan.ServerIp) || string.IsNullOrEmpty(lan.DhcpRangeStart) || string.IsNullOrEmpty(lan.DhcpRangeEnd))
+                    {
+                        _errorMessage = $"Please complete DHCP configuration for {lan.InterfaceName}";
+                        return false;
+                    }
+                }
+                return true;
+
+            case 3:
+                return true;
+
+            default:
+                return true;
+        }
+    }
+
+    private async Task SaveCurrentStepData()
+    {
+        switch (_currentStep)
+        {
+            case 1:
+                _wizardState.InterfacesConfigJson = JsonSerializer.Serialize(_interfaceConfigs, JsonOptions);
+                break;
+            case 2:
+                _wizardState.LanConfigJson = JsonSerializer.Serialize(_lanConfigs, JsonOptions);
+                break;
+            case 3:
+                _wizardState.FirewallConfigJson = JsonSerializer.Serialize(_firewallConfig, JsonOptions);
+                break;
+            case 4:
+                _wizardState.ServicesConfigJson = JsonSerializer.Serialize(_servicesConfig, JsonOptions);
+                break;
+        }
+
+        await WizardService.UpdateWizardStateAsync(_wizardState);
+    }
+
+    private void PrepareNextStep()
+    {
+        switch (_currentStep)
+        {
+            case 2:
+                // Prepare LAN configs from Step 1
+                var lanInterfaces = _interfaceConfigs.Where(i => i.Role == "lan").ToList();
+
+                if (_lanConfigs.Count == 0)
+                {
+                    _lanConfigs = lanInterfaces.Select(lan =>
+                    {
+                        var serverIp = lan.IpAddress ?? "192.168.1.1";
+                        var parts = serverIp.Split('.');
+                        var rangeStart = $"{parts[0]}.{parts[1]}.{parts[2]}.100";
+                        var rangeEnd = $"{parts[0]}.{parts[1]}.{parts[2]}.254";
+                        var network = $"{parts[0]}.{parts[1]}.{parts[2]}.0/24";
+
+                        return new WizardLanConfig
+                        {
+                            InterfaceName = lan.Name,
+                            ServerIp = serverIp,
+                            SubnetMask = lan.SubnetMask ?? "255.255.255.0",
+                            NetworkCidr = network,
+                            EnableDhcp = true,
+                            DhcpRangeStart = rangeStart,
+                            DhcpRangeEnd = rangeEnd,
+                            DomainName = "local",
+                            LeaseTime = 86400
+                        };
+                    }).ToList();
+                }
+                break;
+        }
+    }
+
+    private async Task ApplyConfiguration()
+    {
+        _isProcessing = true;
+        _errorMessage = null;
+        _successMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // Save step 4 data
+            await SaveCurrentStepData();
+
+            // Apply all configurations
+            await WizardService.ApplyInterfaceConfigAsync(_interfaceConfigs);
+            await WizardService.ApplyLanConfigAsync(_lanConfigs);
+            await WizardService.ApplyFirewallConfigAsync(_firewallConfig, _interfaceConfigs);
+            await WizardService.ApplyServicesConfigAsync(_servicesConfig);
+
+            // Mark wizard as completed
+            await WizardService.CompleteWizardAsync();
+
+            _successMessage = "Configuration applied successfully! Redirecting...";
+            StateHasChanged();
+
+            await Task.Delay(2000);
+            Navigation.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error applying configuration: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private async Task SkipWizard()
+    {
+        await WizardService.CompleteWizardAsync();
+        Navigation.NavigateTo("/");
+    }
+
+    // ========================================
+    // STEP 1: Network Interfaces
+    // ========================================
+    private RenderFragment Step1Interfaces => @<div>
+        <h2 class="text-xl font-semibold text-white mb-4">Step 1: Network Interfaces</h2>
+        <p class="text-slate-400 mb-6">Configure your network interfaces. Assign roles to define how each interface will be used.</p>
+
+        <div class="space-y-4">
+            @foreach (var iface in _interfaceConfigs)
+            {
+                var detected = _detectedInterfaces.FirstOrDefault(d => d.Name == iface.Name);
+                <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="font-medium text-white">@iface.Name</h3>
+                            <p class="text-sm text-slate-400">@(detected?.Description ?? "Network Interface")</p>
+                            @if (detected != null)
+                            {
+                                <p class="text-xs text-slate-500 font-mono mt-1">
+                                    MAC: @detected.MacAddress |
+                                    Status: <span class="@(detected.HasCarrier ? "text-green-400" : "text-red-400")">@(detected.HasCarrier ? "Connected" : "Disconnected")</span>
+                                    @if (detected.SpeedMbps > 0)
+                                    {
+                                        <span>| @detected.SpeedMbps Mbps</span>
+                                    }
+                                </p>
+                            }
+                        </div>
+                        <select class="bg-slate-800 border border-slate-600 text-white rounded-lg px-3 py-2"
+                                @bind="iface.Role">
+                            <option value="disabled">Disabled</option>
+                            <option value="wan_primary">WAN (Primary)</option>
+                            <option value="wan_secondary">WAN (Secondary)</option>
+                            <option value="lan">LAN</option>
+                            <option value="vpn">VPN</option>
+                        </select>
+                    </div>
+
+                    @if (iface.Role != "disabled")
+                    {
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-700">
+                            @if (iface.Role is "wan_primary" or "wan_secondary")
+                            {
+                                <label class="flex items-center gap-2 text-slate-300">
+                                    <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="iface.UseDhcp" />
+                                    <span>Use DHCP</span>
+                                </label>
+                            }
+
+                            @if (!iface.UseDhcp || iface.Role == "lan")
+                            {
+                                <div>
+                                    <label class="text-xs text-slate-400">IP Address</label>
+                                    <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-2 py-1 text-sm font-mono"
+                                           @bind="iface.IpAddress" placeholder="192.168.1.1" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-slate-400">Subnet Mask</label>
+                                    <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-2 py-1 text-sm font-mono"
+                                           @bind="iface.SubnetMask" placeholder="255.255.255.0" />
+                                </div>
+                                @if (iface.Role is "wan_primary" or "wan_secondary")
+                                {
+                                    <div>
+                                        <label class="text-xs text-slate-400">Gateway</label>
+                                        <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-2 py-1 text-sm font-mono"
+                                               @bind="iface.Gateway" placeholder="192.168.1.254" />
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>;
+
+    // ========================================
+    // STEP 2: LAN & DHCP Configuration
+    // ========================================
+    private RenderFragment Step2LanDhcp => @<div>
+        <h2 class="text-xl font-semibold text-white mb-4">Step 2: LAN & DHCP Configuration</h2>
+        <p class="text-slate-400 mb-6">Configure DHCP settings for your LAN interfaces.</p>
+
+        <div class="space-y-6">
+            @foreach (var lan in _lanConfigs)
+            {
+                <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-medium text-white">@lan.InterfaceName</h3>
+                        <label class="flex items-center gap-2 text-slate-300">
+                            <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="lan.EnableDhcp" />
+                            <span>Enable DHCP Server</span>
+                        </label>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="text-xs text-slate-400">Server IP</label>
+                            <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-3 py-2 font-mono"
+                                   @bind="lan.ServerIp" placeholder="192.168.1.1" />
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400">Subnet Mask</label>
+                            <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-3 py-2 font-mono"
+                                   @bind="lan.SubnetMask" placeholder="255.255.255.0" />
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400">Domain Name</label>
+                            <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-3 py-2"
+                                   @bind="lan.DomainName" placeholder="local" />
+                        </div>
+                    </div>
+
+                    @if (lan.EnableDhcp)
+                    {
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-slate-700">
+                            <div>
+                                <label class="text-xs text-slate-400">DHCP Range Start</label>
+                                <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-3 py-2 font-mono"
+                                       @bind="lan.DhcpRangeStart" placeholder="192.168.1.100" />
+                            </div>
+                            <div>
+                                <label class="text-xs text-slate-400">DHCP Range End</label>
+                                <input type="text" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-3 py-2 font-mono"
+                                       @bind="lan.DhcpRangeEnd" placeholder="192.168.1.254" />
+                            </div>
+                            <div>
+                                <label class="text-xs text-slate-400">Lease Time (seconds)</label>
+                                <input type="number" class="w-full bg-slate-800 border border-slate-600 text-white rounded px-3 py-2"
+                                       @bind="lan.LeaseTime" />
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>;
+
+    // ========================================
+    // STEP 3: Firewall Rules
+    // ========================================
+    private RenderFragment Step3Firewall => @<div>
+        <h2 class="text-xl font-semibold text-white mb-4">Step 3: Firewall Rules</h2>
+        <p class="text-slate-400 mb-6">Configure basic firewall rules and NAT settings.</p>
+
+        <div class="space-y-6">
+            <!-- NAT Section -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-4">Network Address Translation (NAT)</h3>
+                <label class="flex items-center gap-3 text-slate-300">
+                    <input type="checkbox" class="rounded bg-slate-700 border-slate-600 w-5 h-5" @bind="_firewallConfig.EnableNat" />
+                    <div>
+                        <span class="font-medium">Enable NAT/Masquerade</span>
+                        <p class="text-sm text-slate-400">Allow LAN devices to access the internet through WAN</p>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Input Rules Section -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-4">Allowed Services (Input)</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <label class="flex items-center gap-2 text-slate-300">
+                        <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="_firewallConfig.AllowSsh" />
+                        <span>SSH (Port 22)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300">
+                        <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="_firewallConfig.AllowIcmp" />
+                        <span>ICMP (Ping)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300">
+                        <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="_firewallConfig.AllowDhcp" />
+                        <span>DHCP (Ports 67-68)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300">
+                        <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="_firewallConfig.AllowDns" />
+                        <span>DNS (Port 53)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300">
+                        <input type="checkbox" class="rounded bg-slate-700 border-slate-600" @bind="_firewallConfig.AllowWebInterface" />
+                        <span>Web Interface</span>
+                    </label>
+                </div>
+                @if (_firewallConfig.AllowWebInterface)
+                {
+                    <div class="mt-4">
+                        <label class="text-xs text-slate-400">Web Interface Port</label>
+                        <input type="number" class="w-32 bg-slate-800 border border-slate-600 text-white rounded px-3 py-2"
+                               @bind="_firewallConfig.WebInterfacePort" />
+                    </div>
+                }
+            </div>
+
+            <!-- Forward Rules Section -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-4">Traffic Forwarding</h3>
+                <label class="flex items-center gap-3 text-slate-300">
+                    <input type="checkbox" class="rounded bg-slate-700 border-slate-600 w-5 h-5" @bind="_firewallConfig.ForwardLanToWan" />
+                    <div>
+                        <span class="font-medium">Forward LAN to WAN</span>
+                        <p class="text-sm text-slate-400">Allow LAN devices to communicate with external networks</p>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Security Section -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-4">Security Options</h3>
+                <label class="flex items-center gap-3 text-slate-300">
+                    <input type="checkbox" class="rounded bg-slate-700 border-slate-600 w-5 h-5" @bind="_firewallConfig.BlockInvalidPackets" />
+                    <div>
+                        <span class="font-medium">Block Invalid Packets</span>
+                        <p class="text-sm text-slate-400">Drop packets with invalid connection states</p>
+                    </div>
+                </label>
+            </div>
+        </div>
+    </div>;
+
+    // ========================================
+    // STEP 4: Review & Apply
+    // ========================================
+    private RenderFragment Step4Review => @<div>
+        <h2 class="text-xl font-semibold text-white mb-4">Step 4: Review & Apply</h2>
+        <p class="text-slate-400 mb-6">Review your configuration before applying.</p>
+
+        <div class="space-y-6">
+            <!-- Interfaces Summary -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-3">Network Interfaces</h3>
+                <div class="space-y-2">
+                    @foreach (var iface in _interfaceConfigs.Where(i => i.Role != "disabled"))
+                    {
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="font-mono text-slate-300">@iface.Name</span>
+                            <span class="px-2 py-1 rounded text-xs font-medium
+                                @(iface.Role.StartsWith("wan") ? "bg-blue-500/20 text-blue-300" :
+                                  iface.Role == "lan" ? "bg-green-500/20 text-green-300" :
+                                  "bg-purple-500/20 text-purple-300")">
+                                @iface.Role.ToUpper()
+                            </span>
+                            <span class="font-mono text-slate-400">@(iface.UseDhcp ? "DHCP" : iface.IpAddress)</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- DHCP Summary -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-3">DHCP Configuration</h3>
+                <div class="space-y-2">
+                    @foreach (var lan in _lanConfigs.Where(l => l.EnableDhcp))
+                    {
+                        <div class="text-sm">
+                            <span class="font-mono text-slate-300">@lan.InterfaceName:</span>
+                            <span class="text-slate-400 ml-2">@lan.DhcpRangeStart - @lan.DhcpRangeEnd</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Firewall Summary -->
+            <div class="bg-slate-900/50 border border-slate-600 rounded-lg p-4">
+                <h3 class="font-medium text-white mb-3">Firewall Rules</h3>
+                <div class="flex flex-wrap gap-2">
+                    @if (_firewallConfig.EnableNat)
+                    {
+                        <span class="px-2 py-1 bg-blue-500/20 text-blue-300 rounded text-xs">NAT Enabled</span>
+                    }
+                    @if (_firewallConfig.AllowSsh)
+                    {
+                        <span class="px-2 py-1 bg-green-500/20 text-green-300 rounded text-xs">SSH</span>
+                    }
+                    @if (_firewallConfig.AllowIcmp)
+                    {
+                        <span class="px-2 py-1 bg-green-500/20 text-green-300 rounded text-xs">ICMP</span>
+                    }
+                    @if (_firewallConfig.AllowDhcp)
+                    {
+                        <span class="px-2 py-1 bg-green-500/20 text-green-300 rounded text-xs">DHCP</span>
+                    }
+                    @if (_firewallConfig.AllowDns)
+                    {
+                        <span class="px-2 py-1 bg-green-500/20 text-green-300 rounded text-xs">DNS</span>
+                    }
+                    @if (_firewallConfig.AllowWebInterface)
+                    {
+                        <span class="px-2 py-1 bg-green-500/20 text-green-300 rounded text-xs">Web UI:@_firewallConfig.WebInterfacePort</span>
+                    }
+                    @if (_firewallConfig.ForwardLanToWan)
+                    {
+                        <span class="px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded text-xs">LAN→WAN Forward</span>
+                    }
+                </div>
+            </div>
+
+            <!-- Warning -->
+            <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                <div class="flex items-start gap-3">
+                    <svg class="w-6 h-6 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div>
+                        <p class="text-yellow-300 font-medium">Ready to Apply</p>
+                        <p class="text-yellow-400/70 text-sm mt-1">
+                            Clicking "Apply Configuration" will save all settings to the database and configure your firewall.
+                            Make sure you have reviewed all settings above.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>;
+}

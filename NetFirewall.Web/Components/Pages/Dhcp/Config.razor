@@ -2,8 +2,11 @@
 @rendermode InteractiveServer
 @using System.Net
 @using NetFirewall.Models.Dhcp
+@using NetFirewall.Models.Firewall
 @using NetFirewall.Services.Dhcp
+@using NetFirewall.Services.Firewall
 @inject IDhcpAdminService DhcpService
+@inject IFirewallService FirewallService
 
 <PageTitle>DHCP Configuration - NetFirewall</PageTitle>
 
@@ -338,7 +341,13 @@
                     </div>
                     <div>
                         <label class="form-label">Interface</label>
-                        <input type="text" class="form-input font-mono" @bind="_subnetForm.InterfaceName" placeholder="eth0" />
+                        <select class="form-input font-mono" @bind="_subnetForm.InterfaceId">
+                            <option value="">-- Select Interface --</option>
+                            @foreach (var iface in _interfaces.Where(i => i.Enabled))
+                            {
+                                <option value="@iface.Id">@iface.Name (@iface.Type)</option>
+                            }
+                        </select>
                     </div>
                     <div>
                         <label class="form-label">Interface MTU</label>
@@ -471,6 +480,7 @@
 @code {
     private IReadOnlyList<DhcpSubnet> _subnets = [];
     private IReadOnlyList<DhcpPool> _pools = [];
+    private IReadOnlyList<FwInterface> _interfaces = [];
     private DhcpStats _stats = new();
 
     private string? _errorMessage;
@@ -499,12 +509,14 @@
             var subnetsTask = DhcpService.GetSubnetsAsync();
             var poolsTask = DhcpService.GetPoolsAsync();
             var statsTask = DhcpService.GetStatsAsync();
+            var interfacesTask = FirewallService.GetInterfacesAsync();
 
-            await Task.WhenAll(subnetsTask, poolsTask, statsTask);
+            await Task.WhenAll(subnetsTask, poolsTask, statsTask, interfacesTask);
 
             _subnets = await subnetsTask;
             _pools = await poolsTask;
             _stats = await statsTask;
+            _interfaces = await interfacesTask;
         }
         catch (Exception ex)
         {
@@ -549,7 +561,7 @@
             StaticRoutesJson = subnet.StaticRoutesJson ?? "",
             TimeOffset = subnet.TimeOffset,
             PosixTimezone = subnet.PosixTimezone ?? "",
-            InterfaceName = subnet.InterfaceName ?? "",
+            InterfaceId = subnet.InterfaceId,
             TftpServer = subnet.TftpServer ?? "",
             BootFilename = subnet.BootFilename ?? "",
             BootFilenameUefi = subnet.BootFilenameUefi ?? "",
@@ -599,7 +611,7 @@
                 StaticRoutesJson = string.IsNullOrWhiteSpace(_subnetForm.StaticRoutesJson) ? null : _subnetForm.StaticRoutesJson,
                 TimeOffset = _subnetForm.TimeOffset,
                 PosixTimezone = string.IsNullOrWhiteSpace(_subnetForm.PosixTimezone) ? null : _subnetForm.PosixTimezone,
-                InterfaceName = string.IsNullOrWhiteSpace(_subnetForm.InterfaceName) ? null : _subnetForm.InterfaceName,
+                InterfaceId = _subnetForm.InterfaceId,
                 TftpServer = string.IsNullOrWhiteSpace(_subnetForm.TftpServer) ? null : _subnetForm.TftpServer,
                 BootFilename = string.IsNullOrWhiteSpace(_subnetForm.BootFilename) ? null : _subnetForm.BootFilename,
                 BootFilenameUefi = string.IsNullOrWhiteSpace(_subnetForm.BootFilenameUefi) ? null : _subnetForm.BootFilenameUefi,
@@ -764,7 +776,7 @@
         public string StaticRoutesJson { get; set; } = "";
         public int? TimeOffset { get; set; }
         public string PosixTimezone { get; set; } = "";
-        public string InterfaceName { get; set; } = "";
+        public Guid? InterfaceId { get; set; }
         public string TftpServer { get; set; } = "";
         public string BootFilename { get; set; } = "";
         public string BootFilenameUefi { get; set; } = "";

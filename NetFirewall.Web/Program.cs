@@ -3,6 +3,7 @@ using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
 using NetFirewall.Services.Network;
+using NetFirewall.Services.Setup;
 using NetFirewall.Web.Components;
 using Npgsql;
 
@@ -50,6 +51,9 @@ builder.Services.AddScoped<INetworkConfigService>(sp =>
 // Add DHCP services
 builder.Services.AddScoped<IDhcpAdminService, DhcpAdminService>();
 builder.Services.AddScoped<IDhcpLeasesService, DhcpLeasesService>();
+
+// Add Setup Wizard service
+builder.Services.AddScoped<ISetupWizardService, SetupWizardService>();
 
 // Add System Monitor service (singleton for state tracking)
 builder.Services.AddSingleton<ISystemMonitorService, SystemMonitorService>();

@@ -40,12 +40,20 @@ public sealed class DhcpWorker : BackgroundService
     private readonly ILogger<DhcpWorker> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
-    private readonly Socket _sendSocket;           // UDP socket for sending responses
-    private readonly LinuxRawSocket? _rawSocket;   // Raw packet socket for receiving on Linux
     private readonly Channel<DhcpPacketContext> _packetChannel;
     private readonly ArrayPool<byte> _bufferPool;
-    private readonly string _bindInterface;
     private readonly bool _useRawSocket;
+
+    // Multi-interface support: one socket per interface
+    private List<string> _interfaces = new();
+    private readonly Dictionary<string, LinuxRawSocket> _receiveSocketsByInterface = new();
+    private readonly Dictionary<string, Socket> _sendSocketsByInterface = new();
+
+    // Legacy single-interface support for Windows
+    private Socket? _legacySendSocket;
+
+    // Flag to track if sockets are initialized
+    private bool _socketsInitialized;
 
     // Statistics
     private long _packetsReceived;
@@ -67,53 +75,100 @@ public sealed class DhcpWorker : BackgroundService
         _scopeFactory = scopeFactory;
         _configuration = configuration;
         _bufferPool = ArrayPool<byte>.Shared;
+        _useRawSocket = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
-        // Get interface to bind to from configuration
-        _bindInterface = configuration.GetValue<string>("DHCP:Interface") ?? "ens256";
-
-        // Create UDP socket for sending responses
-        _sendSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _sendSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
-        _sendSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-
-        // On Linux, use raw packet socket (AF_PACKET) for receiving DHCP broadcasts
-        // Standard UDP sockets don't reliably receive packets to 255.255.255.255
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            _useRawSocket = true;
-            _rawSocket = new LinuxRawSocket(_bindInterface, logger);
-            _logger.LogInformation("[SOCKET] Using AF_PACKET raw socket for receiving on Linux");
-
-            // Bind send socket to interface for responses
-            var interfaceBytes = Encoding.ASCII.GetBytes(_bindInterface + '\0');
-            _sendSocket.SetRawSocketOption(SOL_SOCKET, SO_BINDTODEVICE, interfaceBytes);
-            _sendSocket.Bind(new IPEndPoint(IPAddress.Any, 67));
-            _logger.LogInformation("[SOCKET] Send socket bound to 0.0.0.0:67 on interface {Interface}", _bindInterface);
-        }
-        else
-        {
-            // On Windows, use standard UDP socket for both send and receive
-            _useRawSocket = false;
-            _rawSocket = null;
-            _sendSocket.Bind(new IPEndPoint(IPAddress.Any, 67));
-            _logger.LogInformation("[SOCKET] Using standard UDP socket on Windows");
-        }
-
-        // Bounded channel prevents memory growth under load
+        // Channel will be configured based on interfaces loaded from DB
+        // Use multi-writer for Linux (multiple interfaces), single-writer for Windows
         _packetChannel = Channel.CreateBounded<DhcpPacketContext>(new BoundedChannelOptions(100)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
-            SingleWriter = true
+            SingleWriter = !_useRawSocket
         });
+    }
+
+    /// <summary>
+    /// Initialize sockets by loading interfaces from the database.
+    /// Falls back to configuration if no interfaces are configured in subnets.
+    /// </summary>
+    private async Task InitializeSocketsAsync(CancellationToken cancellationToken)
+    {
+        if (_socketsInitialized) return;
+
+        // Get interfaces from database via DhcpSubnetService
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var subnetService = scope.ServiceProvider.GetRequiredService<IDhcpSubnetService>();
+
+        var dbInterfaces = await subnetService.GetEnabledInterfacesAsync(cancellationToken).ConfigureAwait(false);
+        _interfaces = dbInterfaces.Select(i => i.Name).ToList();
+
+        // Fallback to configuration if no interfaces in DB
+        if (_interfaces.Count == 0)
+        {
+            _logger.LogWarning("[INIT] No interfaces found in database subnets, falling back to configuration");
+
+            var interfaceList = _configuration.GetSection("DHCP:Interfaces").Get<string[]>();
+            if (interfaceList == null || interfaceList.Length == 0)
+            {
+                var singleInterface = _configuration.GetValue<string>("DHCP:Interface") ?? "ens256";
+                interfaceList = [singleInterface];
+            }
+            _interfaces = interfaceList.ToList();
+        }
+
+        _logger.LogInformation("[INIT] Initializing sockets for interfaces: {Interfaces}", string.Join(", ", _interfaces));
+
+        if (_useRawSocket)
+        {
+            _logger.LogInformation("[SOCKET] Using AF_PACKET raw sockets for receiving on Linux");
+
+            foreach (var iface in _interfaces)
+            {
+                _receiveSocketsByInterface[iface] = new LinuxRawSocket(iface, _logger);
+                _logger.LogInformation("[SOCKET] Created receive socket for interface {Interface}", iface);
+
+                var sendSocket = CreateSendSocketForInterface(iface);
+                _sendSocketsByInterface[iface] = sendSocket;
+                _logger.LogInformation("[SOCKET] Created send socket for interface {Interface}", iface);
+            }
+        }
+        else
+        {
+            _legacySendSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            _legacySendSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
+            _legacySendSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _legacySendSocket.Bind(new IPEndPoint(IPAddress.Any, 67));
+            _logger.LogInformation("[SOCKET] Using standard UDP socket on Windows");
+        }
+
+        _socketsInitialized = true;
+    }
+
+    private Socket CreateSendSocketForInterface(string interfaceName)
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
+        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+
+        // Bind to interface using SO_BINDTODEVICE
+        var interfaceBytes = Encoding.ASCII.GetBytes(interfaceName + '\0');
+        socket.SetRawSocketOption(SOL_SOCKET, SO_BINDTODEVICE, interfaceBytes);
+        socket.Bind(new IPEndPoint(IPAddress.Any, 67));
+
+        return socket;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.LogInformation("DHCP Server starting...");
+
+        // Initialize sockets from database interfaces
+        await InitializeSocketsAsync(stoppingToken).ConfigureAwait(false);
+
         PrintStartupBanner();
 
-        _logger.LogInformation("DHCP Server starting on port 67");
-        _logger.LogInformation("Listening for DHCP packets on all interfaces (0.0.0.0:67)");
+        _logger.LogInformation("DHCP Server listening on port 67");
+        _logger.LogInformation("Configured interfaces: {Interfaces}", string.Join(", ", _interfaces));
 
         // Start statistics reporter
         _ = ReportStatisticsAsync(stoppingToken);
@@ -136,7 +191,7 @@ public sealed class DhcpWorker : BackgroundService
 
         table.AddRow("Port", "67 (UDP)");
         table.AddRow("Bind Address", "0.0.0.0");
-        table.AddRow("Interface", _bindInterface);
+        table.AddRow("Interfaces", string.Join(", ", _interfaces));
         table.AddRow("Buffer Size", $"{MaxDhcpPacketSize} bytes");
         table.AddRow("Channel Capacity", "100 packets");
         table.AddRow("OS", RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux" : "Windows");
@@ -164,76 +219,24 @@ public sealed class DhcpWorker : BackgroundService
     private async Task ReceivePacketsAsync(CancellationToken stoppingToken)
     {
         var writer = _packetChannel.Writer;
-        var receiveBuffer = new byte[1024]; // Buffer for receiving
 
-        _logger.LogInformation("[RECV] Starting receive loop on interface: {Interface}, UseRawSocket: {UseRaw}",
-            _bindInterface, _useRawSocket);
+        _logger.LogInformation("[RECV] Starting receive loop on interfaces: {Interfaces}, UseRawSocket: {UseRaw}",
+            string.Join(", ", _interfaces), _useRawSocket);
 
         try
         {
-            // Use synchronous receive in a thread pool thread
-            await Task.Run(() =>
+            if (_useRawSocket)
             {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        int receivedBytes;
-                        IPEndPoint? sourceEndPoint;
-
-                        if (_useRawSocket && _rawSocket != null)
-                        {
-                            // Use raw packet socket on Linux
-                            receivedBytes = _rawSocket.Receive(receiveBuffer, out sourceEndPoint);
-                        }
-                        else
-                        {
-                            // Use standard UDP socket on Windows
-                            EndPoint remoteEp = new IPEndPoint(IPAddress.Any, 0);
-
-                            if (!_sendSocket.Poll(1000000, SelectMode.SelectRead))
-                            {
-                                continue;
-                            }
-
-                            receivedBytes = _sendSocket.ReceiveFrom(receiveBuffer, ref remoteEp);
-                            sourceEndPoint = (IPEndPoint)remoteEp;
-                        }
-
-                        if (receivedBytes <= 0) continue;
-
-                        Interlocked.Increment(ref _packetsReceived);
-
-                        _logger.LogInformation("[RECV] Packet received: {Length} bytes from {RemoteEndPoint}",
-                            receivedBytes, sourceEndPoint);
-
-                        ProcessReceivedPacket(writer, receiveBuffer, receivedBytes, sourceEndPoint!);
-                    }
-                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.Interrupted)
-                    {
-                        break;
-                    }
-                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
-                    {
-                        continue;
-                    }
-                    catch (SocketException ex)
-                    {
-                        _logger.LogError(ex, "[RECV] Socket error: {ErrorCode} - {Message}",
-                            ex.SocketErrorCode, ex.Message);
-                        Interlocked.Increment(ref _errorsCount);
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "[RECV] Unexpected error receiving packet");
-                        Interlocked.Increment(ref _errorsCount);
-                    }
-                }
-            }, stoppingToken).ConfigureAwait(false);
+                // Linux: Start a receive task for each interface (parallel)
+                var receiveTasks = _receiveSocketsByInterface.Select(kvp =>
+                    ReceiveOnInterfaceAsync(kvp.Key, kvp.Value, writer, stoppingToken));
+                await Task.WhenAll(receiveTasks).ConfigureAwait(false);
+            }
+            else
+            {
+                // Windows: Single socket receive loop
+                await ReceiveOnWindowsSocketAsync(writer, stoppingToken).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -242,11 +245,119 @@ public sealed class DhcpWorker : BackgroundService
         }
     }
 
-    private void ProcessReceivedPacket(ChannelWriter<DhcpPacketContext> writer, byte[] receiveBuffer, int receivedBytes, IPEndPoint sourceEndPoint)
+    private async Task ReceiveOnInterfaceAsync(
+        string interfaceName,
+        LinuxRawSocket rawSocket,
+        ChannelWriter<DhcpPacketContext> writer,
+        CancellationToken stoppingToken)
+    {
+        var receiveBuffer = new byte[1024];
+
+        _logger.LogInformation("[RECV] Starting receive loop for interface {Interface}", interfaceName);
+
+        await Task.Run(() =>
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var receivedBytes = rawSocket.Receive(receiveBuffer, out var sourceEndPoint);
+
+                    if (receivedBytes <= 0) continue;
+
+                    Interlocked.Increment(ref _packetsReceived);
+
+                    _logger.LogInformation("[RECV] Packet received on {Interface}: {Length} bytes from {RemoteEndPoint}",
+                        interfaceName, receivedBytes, sourceEndPoint);
+
+                    ProcessReceivedPacket(writer, receiveBuffer, receivedBytes, sourceEndPoint!, interfaceName);
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[RECV] Error receiving packet on interface {Interface}", interfaceName);
+                    Interlocked.Increment(ref _errorsCount);
+                }
+            }
+        }, stoppingToken).ConfigureAwait(false);
+
+        _logger.LogInformation("[RECV] Receive loop stopped for interface {Interface}", interfaceName);
+    }
+
+    private async Task ReceiveOnWindowsSocketAsync(
+        ChannelWriter<DhcpPacketContext> writer,
+        CancellationToken stoppingToken)
+    {
+        var receiveBuffer = new byte[1024];
+
+        _logger.LogInformation("[RECV] Starting Windows socket receive loop");
+
+        await Task.Run(() =>
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    EndPoint remoteEp = new IPEndPoint(IPAddress.Any, 0);
+
+                    if (!_legacySendSocket!.Poll(1000000, SelectMode.SelectRead))
+                    {
+                        continue;
+                    }
+
+                    var receivedBytes = _legacySendSocket.ReceiveFrom(receiveBuffer, ref remoteEp);
+                    var sourceEndPoint = (IPEndPoint)remoteEp;
+
+                    if (receivedBytes <= 0) continue;
+
+                    Interlocked.Increment(ref _packetsReceived);
+
+                    _logger.LogInformation("[RECV] Packet received: {Length} bytes from {RemoteEndPoint}",
+                        receivedBytes, sourceEndPoint);
+
+                    // On Windows, we don't know the interface, pass null
+                    ProcessReceivedPacket(writer, receiveBuffer, receivedBytes, sourceEndPoint, null);
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.Interrupted)
+                {
+                    break;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
+                {
+                    continue;
+                }
+                catch (SocketException ex)
+                {
+                    _logger.LogError(ex, "[RECV] Socket error: {ErrorCode} - {Message}",
+                        ex.SocketErrorCode, ex.Message);
+                    Interlocked.Increment(ref _errorsCount);
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[RECV] Unexpected error receiving packet");
+                    Interlocked.Increment(ref _errorsCount);
+                }
+            }
+        }, stoppingToken).ConfigureAwait(false);
+    }
+
+    private void ProcessReceivedPacket(
+        ChannelWriter<DhcpPacketContext> writer,
+        byte[] receiveBuffer,
+        int receivedBytes,
+        IPEndPoint sourceEndPoint,
+        string? interfaceName)
     {
         _logger.LogDebug(
-            "[RECV] Processing packet: {Length} bytes from {RemoteEndPoint}",
-            receivedBytes, sourceEndPoint);
+            "[RECV] Processing packet: {Length} bytes from {RemoteEndPoint} on {Interface}",
+            receivedBytes, sourceEndPoint, interfaceName ?? "unknown");
 
         if (receivedBytes < MinDhcpPacketSize)
         {
@@ -264,6 +375,7 @@ public sealed class DhcpWorker : BackgroundService
             rentedBuffer,
             receivedBytes,
             sourceEndPoint,
+            interfaceName,
             _bufferPool
         );
 
@@ -315,6 +427,9 @@ public sealed class DhcpWorker : BackgroundService
             return;
         }
 
+        // Set the source interface name for subnet selection
+        request.SourceInterfaceName = context.InterfaceName;
+
         // Log the parsed request details
         LogDhcpRequest(request);
 
@@ -336,8 +451,8 @@ public sealed class DhcpWorker : BackgroundService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var dhcpService = scope.ServiceProvider.GetRequiredService<IDhcpServerService>();
 
-        _logger.LogDebug("[PROC] Creating DHCP response for {MessageType} from {Mac}",
-            request.MessageType, request.ClientMac);
+        _logger.LogDebug("[PROC] Creating DHCP response for {MessageType} from {Mac} on interface {Interface}",
+            request.MessageType, request.ClientMac, context.InterfaceName ?? "unknown");
 
         var response = await dhcpService.CreateDhcpResponseAsync(request).ConfigureAwait(false);
 
@@ -347,7 +462,7 @@ public sealed class DhcpWorker : BackgroundService
 
             // Parse response to log what we're sending
             var responseType = ParseResponseMessageType(response);
-            LogDhcpResponse(request, responseType, destination);
+            LogDhcpResponse(request, responseType, destination, context.InterfaceName);
 
             // Track response types
             switch (responseType)
@@ -363,10 +478,12 @@ public sealed class DhcpWorker : BackgroundService
                     break;
             }
 
-            await _sendSocket.SendToAsync(response, SocketFlags.None, destination, stoppingToken).ConfigureAwait(false);
+            // Send response through the correct interface socket
+            var sendSocket = GetSendSocketForInterface(context.InterfaceName);
+            await sendSocket.SendToAsync(response, SocketFlags.None, destination, stoppingToken).ConfigureAwait(false);
 
-            _logger.LogDebug("[SEND] Sent {Length} bytes to {Destination}",
-                response.Length, destination);
+            _logger.LogDebug("[SEND] Sent {Length} bytes to {Destination} via {Interface}",
+                response.Length, destination, context.InterfaceName ?? "default");
         }
         else
         {
@@ -374,6 +491,25 @@ public sealed class DhcpWorker : BackgroundService
                 "[PROC] No response generated for {MessageType} from {Mac} - check subnet/pool configuration",
                 request.MessageType, request.ClientMac);
         }
+    }
+
+    private Socket GetSendSocketForInterface(string? interfaceName)
+    {
+        // On Windows or if interface not specified, use legacy socket
+        if (!_useRawSocket || interfaceName == null)
+        {
+            return _legacySendSocket!;
+        }
+
+        // On Linux, use the interface-specific socket
+        if (_sendSocketsByInterface.TryGetValue(interfaceName, out var socket))
+        {
+            return socket;
+        }
+
+        // Fallback to first available socket if interface not found
+        _logger.LogWarning("[SEND] Interface {Interface} not found in socket map, using first available", interfaceName);
+        return _sendSocketsByInterface.Values.First();
     }
 
     private void LogDhcpRequest(DhcpRequest request)
@@ -410,13 +546,14 @@ public sealed class DhcpWorker : BackgroundService
         }
     }
 
-    private void LogDhcpResponse(DhcpRequest request, DhcpMessageType responseType, IPEndPoint destination)
+    private void LogDhcpResponse(DhcpRequest request, DhcpMessageType responseType, IPEndPoint destination, string? interfaceName = null)
     {
         _logger.LogInformation(
-            "[RESPONSE] {ResponseType,-10} | MAC: {Mac} | Destination: {Destination}",
+            "[RESPONSE] {ResponseType,-10} | MAC: {Mac} | Destination: {Destination} | Interface: {Interface}",
             responseType,
             request.ClientMac,
-            destination);
+            destination,
+            interfaceName ?? "default");
     }
 
     private static DhcpMessageType ParseResponseMessageType(byte[] response)
@@ -659,9 +796,25 @@ public sealed class DhcpWorker : BackgroundService
 
     public override void Dispose()
     {
-        _rawSocket?.Dispose();
-        _sendSocket.Close();
-        _sendSocket.Dispose();
+        // Dispose all receive sockets (Linux raw sockets)
+        foreach (var socket in _receiveSocketsByInterface.Values)
+        {
+            socket.Dispose();
+        }
+        _receiveSocketsByInterface.Clear();
+
+        // Dispose all send sockets
+        foreach (var socket in _sendSocketsByInterface.Values)
+        {
+            socket.Close();
+            socket.Dispose();
+        }
+        _sendSocketsByInterface.Clear();
+
+        // Dispose legacy socket (Windows)
+        _legacySendSocket?.Close();
+        _legacySendSocket?.Dispose();
+
         base.Dispose();
     }
 }
@@ -674,13 +827,19 @@ internal readonly struct DhcpPacketContext : IDisposable
     public byte[] Buffer { get; }
     public int Length { get; }
     public IPEndPoint RemoteEndPoint { get; }
+    /// <summary>
+    /// The network interface name on which this packet was received.
+    /// Null on Windows where interface detection is not available.
+    /// </summary>
+    public string? InterfaceName { get; }
     private readonly ArrayPool<byte> _pool;
 
-    public DhcpPacketContext(byte[] buffer, int length, IPEndPoint remoteEndPoint, ArrayPool<byte> pool)
+    public DhcpPacketContext(byte[] buffer, int length, IPEndPoint remoteEndPoint, string? interfaceName, ArrayPool<byte> pool)
     {
         Buffer = buffer;
         Length = length;
         RemoteEndPoint = remoteEndPoint;
+        InterfaceName = interfaceName;
         _pool = pool;
     }
 

@@ -551,3 +551,51 @@ CREATE TABLE IF NOT EXISTS fw_static_routes (
 
 CREATE INDEX IF NOT EXISTS idx_static_routes_iface ON fw_static_routes(interface_id);
 CREATE INDEX IF NOT EXISTS idx_static_routes_enabled ON fw_static_routes(enabled);
+
+-- ============================================================================
+-- DHCP SUBNET INTERFACE FK MIGRATION
+-- ============================================================================
+
+-- Add interface_id FK to dhcp_subnets (replaces interface_name)
+ALTER TABLE dhcp_subnets ADD COLUMN IF NOT EXISTS interface_id uuid REFERENCES fw_interfaces(id) ON DELETE SET NULL;
+
+-- Create index for the FK
+CREATE INDEX IF NOT EXISTS idx_dhcp_subnets_interface ON dhcp_subnets(interface_id);
+
+-- Migrate existing interface_name data to interface_id (if any)
+UPDATE dhcp_subnets ds
+SET interface_id = fi.id
+FROM fw_interfaces fi
+WHERE ds.interface_name = fi.name
+  AND ds.interface_id IS NULL
+  AND ds.interface_name IS NOT NULL;
+
+-- ============================================================================
+-- SETUP WIZARD
+-- ============================================================================
+
+-- Setup wizard state tracking
+CREATE TABLE IF NOT EXISTS setup_wizard_state (
+    id              uuid        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    current_step    int         NOT NULL DEFAULT 1,
+    is_completed    boolean     NOT NULL DEFAULT false,
+
+    -- Step 1: Interfaces configuration (JSON snapshot)
+    interfaces_config   jsonb,
+
+    -- Step 2: LAN/DHCP configuration (JSON snapshot)
+    lan_config          jsonb,
+
+    -- Step 3: Firewall rules configuration (JSON snapshot)
+    firewall_config     jsonb,
+
+    -- Step 4: Optional services (JSON snapshot)
+    services_config     jsonb,
+
+    started_at      timestamp   DEFAULT now(),
+    completed_at    timestamp,
+    updated_at      timestamp   DEFAULT now()
+);
+
+-- Ensure only one wizard state row exists
+CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_wizard_singleton ON setup_wizard_state ((true));

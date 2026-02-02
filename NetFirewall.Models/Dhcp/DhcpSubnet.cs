@@ -1,4 +1,5 @@
 using System.Net;
+using NetFirewall.Models.Firewall;
 using RepoDb.Attributes;
 
 namespace NetFirewall.Models.Dhcp;
@@ -122,10 +123,21 @@ public class DhcpSubnet
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Network interface this subnet is bound to
+    /// Network interface ID this subnet is bound to (FK to fw_interfaces)
     /// </summary>
-    [Map("interface_name")]
-    public string? InterfaceName { get; set; }
+    [Map("interface_id")]
+    public Guid? InterfaceId { get; set; }
+
+    /// <summary>
+    /// Navigation property for the network interface
+    /// </summary>
+    public FwInterface? Interface { get; set; }
+
+    /// <summary>
+    /// Gets the interface name from the navigation property.
+    /// Used for socket binding in multi-interface DHCP server.
+    /// </summary>
+    public string? InterfaceName => Interface?.Name;
 
     [Map("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -39,6 +39,12 @@ public class DhcpRequest
     public bool IsPxeRequest { get; set; }
     public IPEndPoint RemoteEndPoint { get; set; }
 
+    /// <summary>
+    /// The network interface name on which this request was received.
+    /// Used for multi-interface DHCP server to select the correct subnet.
+    /// </summary>
+    public string? SourceInterfaceName { get; set; }
+
     public DhcpRequest()
     {
         Xid = new byte[ 4 ];

@@ -1,5 +1,6 @@
 using System.Net;
 using NetFirewall.Models.Dhcp;
+using NetFirewall.Models.Firewall;
 
 namespace NetFirewall.Services.Dhcp;
 
@@ -28,6 +29,12 @@ public interface IDhcpSubnetService
     /// Get all enabled subnets.
     /// </summary>
     Task<IReadOnlyList<DhcpSubnet>> GetAllSubnetsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get unique network interfaces from enabled subnets.
+    /// Used by DhcpWorker to determine which interfaces to listen on.
+    /// </summary>
+    Task<IReadOnlyList<FwInterface>> GetEnabledInterfacesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get subnet by ID with its pools.

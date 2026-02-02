@@ -3,6 +3,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Dhcp;
+using NetFirewall.Models.Firewall;
 using Npgsql;
 
 namespace NetFirewall.Services.Dhcp;
@@ -43,12 +44,34 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         CancellationToken cancellationToken = default)
     {
         _logger.LogDebug(
-            "[SUBNET] FindSubnetForRequest: MAC={Mac}, CiAddr={CiAddr}, GiAddr={GiAddr}, RequestedIp={RequestedIp}",
-            request.ClientMac, request.CiAddr, request.GiAddr, request.RequestedIp);
+            "[SUBNET] FindSubnetForRequest: MAC={Mac}, CiAddr={CiAddr}, GiAddr={GiAddr}, RequestedIp={RequestedIp}, Interface={Interface}",
+            request.ClientMac, request.CiAddr, request.GiAddr, request.RequestedIp, request.SourceInterfaceName ?? "unknown");
 
         await EnsureCacheLoadedAsync(cancellationToken).ConfigureAwait(false);
 
         _logger.LogDebug("[SUBNET] Cache has {Count} subnets available", _subnetCache.Count);
+
+        // Priority 0 (NEW): Use source interface name if available
+        // This is the highest priority for multi-interface DHCP server scenarios
+        if (!string.IsNullOrEmpty(request.SourceInterfaceName))
+        {
+            _logger.LogDebug("[SUBNET] Checking SourceInterfaceName {Interface} for subnet match", request.SourceInterfaceName);
+            var interfaceSubnet = _subnetCache.Values
+                .FirstOrDefault(s => s.Enabled &&
+                    string.Equals(s.InterfaceName, request.SourceInterfaceName, StringComparison.OrdinalIgnoreCase));
+
+            if (interfaceSubnet != null)
+            {
+                _logger.LogDebug("[SUBNET] Found subnet '{SubnetName}' ({Network}) via interface {Interface}",
+                    interfaceSubnet.Name, interfaceSubnet.Network, request.SourceInterfaceName);
+                return interfaceSubnet;
+            }
+            else
+            {
+                _logger.LogDebug("[SUBNET] No subnet configured for interface {Interface}, falling back to other criteria",
+                    request.SourceInterfaceName);
+            }
+        }
 
         // Priority 1: Use giaddr (relay agent) if present and not 0.0.0.0
         if (request.GiAddr != null && !request.GiAddr.Equals(IPAddress.Any))
@@ -574,15 +597,18 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        // Load subnets
+        // Load subnets with interface data
         const string subnetSql = @"
-            SELECT id, name, network::text, subnet_mask, router, broadcast, domain_name,
-                   dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time,
-                   interface_mtu, tftp_server, boot_filename, boot_filename_uefi,
-                   interface_name, enabled, created_at, updated_at
-            FROM dhcp_subnets
-            WHERE enabled = true
-            ORDER BY name";
+            SELECT s.id, s.name, s.network::text, s.subnet_mask, s.router, s.broadcast, s.domain_name,
+                   s.dns_servers, s.ntp_servers, s.wins_servers, s.default_lease_time, s.max_lease_time,
+                   s.interface_mtu, s.tftp_server, s.boot_filename, s.boot_filename_uefi,
+                   s.interface_id, s.enabled, s.created_at, s.updated_at,
+                   -- fw_interfaces fields (for navigation property)
+                   fi.id as fi_id, fi.name as fi_name, fi.type as fi_type, fi.enabled as fi_enabled
+            FROM dhcp_subnets s
+            LEFT JOIN fw_interfaces fi ON s.interface_id = fi.id
+            WHERE s.enabled = true
+            ORDER BY s.name";
 
         _logger.LogTrace("[SQL] Loading subnets: {Sql}", subnetSql);
 
@@ -648,7 +674,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
     private static DhcpSubnet ReadSubnetFromReader(NpgsqlDataReader reader)
     {
-        return new DhcpSubnet
+        var subnet = new DhcpSubnet
         {
             Id = reader.GetGuid(0),
             Name = reader.GetString(1),
@@ -666,11 +692,25 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             TftpServer = reader.IsDBNull(13) ? null : reader.GetString(13),
             BootFilename = reader.IsDBNull(14) ? null : reader.GetString(14),
             BootFilenameUefi = reader.IsDBNull(15) ? null : reader.GetString(15),
-            InterfaceName = reader.IsDBNull(16) ? null : reader.GetString(16),
+            InterfaceId = reader.IsDBNull(16) ? null : reader.GetGuid(16),
             Enabled = reader.GetBoolean(17),
             CreatedAt = reader.GetDateTime(18),
             UpdatedAt = reader.GetDateTime(19)
         };
+
+        // Populate FwInterface navigation property if interface_id is set
+        if (!reader.IsDBNull(20))
+        {
+            subnet.Interface = new FwInterface
+            {
+                Id = reader.GetGuid(20),
+                Name = reader.GetString(21),
+                Type = reader.GetString(22),
+                Enabled = reader.GetBoolean(23)
+            };
+        }
+
+        return subnet;
     }
 
     private async Task<List<DhcpPool>> LoadPoolsForSubnetAsync(
@@ -787,6 +827,24 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         return _subnetCache.Values.OrderBy(s => s.Name).ToList();
     }
 
+    public async Task<IReadOnlyList<FwInterface>> GetEnabledInterfacesAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureCacheLoadedAsync(cancellationToken).ConfigureAwait(false);
+
+        // Get unique interfaces from enabled subnets that have an interface configured
+        var interfaces = _subnetCache.Values
+            .Where(s => s.Enabled && s.Interface != null && s.Interface.Enabled)
+            .Select(s => s.Interface!)
+            .DistinctBy(i => i.Id)
+            .OrderBy(i => i.Name)
+            .ToList();
+
+        _logger.LogDebug("[SUBNET] GetEnabledInterfacesAsync returning {Count} interfaces: {Names}",
+            interfaces.Count, string.Join(", ", interfaces.Select(i => i.Name)));
+
+        return interfaces;
+    }
+
     public async Task<DhcpSubnet?> GetSubnetWithPoolsAsync(Guid subnetId, CancellationToken cancellationToken = default)
     {
         await EnsureCacheLoadedAsync(cancellationToken).ConfigureAwait(false);
@@ -843,10 +901,10 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         const string sql = @"
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
                 dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time,
-                interface_mtu, tftp_server, boot_filename, boot_filename_uefi, interface_name, enabled)
+                interface_mtu, tftp_server, boot_filename, boot_filename_uefi, interface_id, enabled)
             VALUES (@id, @name, @network::cidr, @subnetMask, @router, @broadcast, @domainName,
                 @dnsServers, @ntpServers, @winsServers, @defaultLeaseTime, @maxLeaseTime,
-                @interfaceMtu, @tftpServer, @bootFilename, @bootFilenameUefi, @interfaceName, @enabled)";
+                @interfaceMtu, @tftpServer, @bootFilename, @bootFilenameUefi, @interfaceId, @enabled)";
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         cmd.Parameters.AddWithValue("id", subnet.Id);
@@ -865,7 +923,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         cmd.Parameters.AddWithValue("tftpServer", (object?)subnet.TftpServer ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilename", (object?)subnet.BootFilename ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameUefi", (object?)subnet.BootFilenameUefi ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("interfaceName", (object?)subnet.InterfaceName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("interfaceId", (object?)subnet.InterfaceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
 
         await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -889,7 +947,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 default_lease_time = @defaultLeaseTime, max_lease_time = @maxLeaseTime,
                 interface_mtu = @interfaceMtu, tftp_server = @tftpServer,
                 boot_filename = @bootFilename, boot_filename_uefi = @bootFilenameUefi,
-                interface_name = @interfaceName, enabled = @enabled, updated_at = @updatedAt
+                interface_id = @interfaceId, enabled = @enabled, updated_at = @updatedAt
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, connection);
@@ -909,7 +967,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         cmd.Parameters.AddWithValue("tftpServer", (object?)subnet.TftpServer ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilename", (object?)subnet.BootFilename ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameUefi", (object?)subnet.BootFilenameUefi ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("interfaceName", (object?)subnet.InterfaceName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("interfaceId", (object?)subnet.InterfaceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
         cmd.Parameters.AddWithValue("updatedAt", DateTime.UtcNow);
 

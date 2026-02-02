@@ -56,10 +56,10 @@ public sealed class DhcpAdminService : IDhcpAdminService
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
                 dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time, interface_mtu,
                 tftp_server, boot_filename, boot_filename_uefi, domain_search, static_routes,
-                time_offset, posix_timezone, interface_name, enabled, created_at, updated_at)
+                time_offset, posix_timezone, interface_id, enabled, created_at, updated_at)
             VALUES (@id, @name, @network, @mask, @router, @broadcast, @domain, @dns, @ntp, @wins, @defLease, @maxLease,
                 @mtu, @tftp, @bootFile, @bootFileUefi, @domainSearch, @routes::jsonb, @timeOffset, @posixTz,
-                @iface, @enabled, @created, @updated)";
+                @ifaceId, @enabled, @created, @updated)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddSubnetParams(cmd, subnet);
@@ -83,7 +83,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 default_lease_time = @defLease, max_lease_time = @maxLease, interface_mtu = @mtu,
                 tftp_server = @tftp, boot_filename = @bootFile, boot_filename_uefi = @bootFileUefi,
                 domain_search = @domainSearch, static_routes = @routes::jsonb, time_offset = @timeOffset,
-                posix_timezone = @posixTz, interface_name = @iface, enabled = @enabled, updated_at = @updated
+                posix_timezone = @posixTz, interface_id = @ifaceId, enabled = @enabled, updated_at = @updated
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -131,7 +131,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("routes", subnet.StaticRoutesJson ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("timeOffset", subnet.TimeOffset ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("posixTz", subnet.PosixTimezone ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("iface", subnet.InterfaceName ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("ifaceId", subnet.InterfaceId ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
         cmd.Parameters.AddWithValue("created", subnet.CreatedAt);
         cmd.Parameters.AddWithValue("updated", subnet.UpdatedAt);
@@ -166,7 +166,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 StaticRoutesJson = reader.IsDBNull(reader.GetOrdinal("static_routes")) ? null : reader.GetString(reader.GetOrdinal("static_routes")),
                 TimeOffset = reader.IsDBNull(reader.GetOrdinal("time_offset")) ? null : reader.GetInt32(reader.GetOrdinal("time_offset")),
                 PosixTimezone = reader.IsDBNull(reader.GetOrdinal("posix_timezone")) ? null : reader.GetString(reader.GetOrdinal("posix_timezone")),
-                InterfaceName = reader.IsDBNull(reader.GetOrdinal("interface_name")) ? null : reader.GetString(reader.GetOrdinal("interface_name")),
+                InterfaceId = reader.IsDBNull(reader.GetOrdinal("interface_id")) ? null : reader.GetGuid(reader.GetOrdinal("interface_id")),
                 Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at")),
                 UpdatedAt = reader.GetDateTime(reader.GetOrdinal("updated_at"))

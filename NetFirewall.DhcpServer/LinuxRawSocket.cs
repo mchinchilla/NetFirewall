@@ -38,6 +38,11 @@ public sealed class LinuxRawSocket : IDisposable
     private readonly ILogger _logger;
     private bool _disposed;
 
+    /// <summary>
+    /// The network interface name this socket is bound to.
+    /// </summary>
+    public string InterfaceName { get; }
+
     [DllImport("libc", SetLastError = true)]
     private static extern int socket(int domain, int type, int protocol);
 
@@ -86,6 +91,7 @@ public sealed class LinuxRawSocket : IDisposable
     public LinuxRawSocket(string interfaceName, ILogger logger)
     {
         _logger = logger;
+        InterfaceName = interfaceName;
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
