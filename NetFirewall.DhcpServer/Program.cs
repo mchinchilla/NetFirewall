@@ -58,11 +58,13 @@ class Program
                      * Write-through ensures durability with PostgreSQL */
                     services.AddSingleton<LeaseCache>();
 
-                    /* Services - Scoped for per-request lifecycle */
+                    /* Services */
                     services.AddScoped<IDhcpServerService, DhcpServerService>();
                     services.AddScoped<IDdnsService, DdnsService>();
                     services.AddScoped<IDhcpLeasesService, DhcpLeasesService>();
-                    services.AddScoped<IDhcpSubnetService, DhcpSubnetService>();
+
+                    /* Subnet Service - Singleton to maintain cache across requests */
+                    services.AddSingleton<IDhcpSubnetService, DhcpSubnetService>();
 
                     /* Failover - Singleton for persistent connection to peer */
                     services.AddSingleton<IFailoverService, FailoverService>();

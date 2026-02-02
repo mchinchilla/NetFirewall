@@ -181,6 +181,14 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
+        // FIRST: Check for MAC reservation
+        var reservedIp = await GetMacReservationAsync(connection, macAddress, cancellationToken).ConfigureAwait(false);
+        if (reservedIp != null)
+        {
+            _logger.LogInformation("[SUBNET] Found MAC reservation: {Ip} for {Mac}", reservedIp, macAddress);
+            return (reservedIp, null); // Return reserved IP, no pool (it's a static assignment)
+        }
+
         // Get pools for this subnet
         if (!_poolCache.TryGetValue(subnet.Id, out var pools))
         {
@@ -296,15 +304,12 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             .Select(e => (Start: e.IpStart, End: e.IpEnd ?? e.IpStart))
             .ToList();
 
-        // Query for available IP
+        // Query for available IP using generate_series with offset from range start
+        // This avoids overflow by only generating the number of IPs in the range
         const string sql = @"
             WITH pool_ips AS (
-                SELECT ip::inet AS ip
-                FROM generate_series(
-                    @rangeStart::inet - '0.0.0.0'::inet,
-                    @rangeEnd::inet - '0.0.0.0'::inet
-                ) AS ip_int,
-                LATERAL (SELECT (@rangeStart::inet + ip_int - (@rangeStart::inet - '0.0.0.0'::inet))::inet AS ip) AS computed
+                SELECT (@rangeStart::inet + gs)::inet AS ip
+                FROM generate_series(0, (@rangeEnd::inet - @rangeStart::inet)::integer) AS gs
             ),
             used_ips AS (
                 SELECT ip_address FROM dhcp_leases
@@ -437,6 +442,33 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             if (++bytes[i] != 0)
                 return new IPAddress(bytes);
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Check if a MAC address has a static IP reservation.
+    /// </summary>
+    private async Task<IPAddress?> GetMacReservationAsync(
+        NpgsqlConnection connection,
+        string macAddress,
+        CancellationToken cancellationToken)
+    {
+        const string sql = "SELECT reserved_ip FROM dhcp_mac_reservations WHERE UPPER(mac_address) = UPPER(@mac) LIMIT 1";
+
+        _logger.LogDebug("[SUBNET] Checking MAC reservation for {Mac}", macAddress);
+
+        await using var cmd = new NpgsqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("mac", macAddress);
+
+        var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+
+        if (result is IPAddress ip)
+        {
+            _logger.LogDebug("[SUBNET] MAC reservation found: {Ip} for {Mac}", ip, macAddress);
+            return ip;
+        }
+
+        _logger.LogDebug("[SUBNET] No MAC reservation for {Mac}", macAddress);
         return null;
     }
 
