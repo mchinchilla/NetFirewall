@@ -129,6 +129,39 @@
                         <span class="ml-2 font-mono text-gray-900 dark:text-white">@(subnet.InterfaceName ?? "-")</span>
                     </div>
                 </div>
+                @if (subnet.NtpServers != null || subnet.WinsServers != null || subnet.InterfaceMtu.HasValue || !string.IsNullOrEmpty(subnet.DomainSearchList))
+                {
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm border-t border-gray-100 dark:border-gray-700 pt-4">
+                        @if (subnet.NtpServers != null)
+                        {
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-400">NTP:</span>
+                                <span class="ml-2 font-mono text-gray-900 dark:text-white">@string.Join(", ", subnet.NtpServers.Select(n => n.ToString()))</span>
+                            </div>
+                        }
+                        @if (subnet.WinsServers != null)
+                        {
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-400">WINS:</span>
+                                <span class="ml-2 font-mono text-gray-900 dark:text-white">@string.Join(", ", subnet.WinsServers.Select(w => w.ToString()))</span>
+                            </div>
+                        }
+                        @if (subnet.InterfaceMtu.HasValue)
+                        {
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-400">MTU:</span>
+                                <span class="ml-2 text-gray-900 dark:text-white">@subnet.InterfaceMtu</span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(subnet.DomainSearchList))
+                        {
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-400">Domain Search:</span>
+                                <span class="ml-2 text-gray-900 dark:text-white">@subnet.DomainSearchList</span>
+                            </div>
+                        }
+                    </div>
+                }
 
                 @if (subnetPools.Any())
                 {
@@ -237,7 +270,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-3 gap-4">
                     <div>
                         <label class="form-label">Subnet Mask</label>
                         <input type="text" class="form-input font-mono" @bind="_subnetForm.SubnetMask" placeholder="255.255.255.0" />
@@ -245,6 +278,10 @@
                     <div>
                         <label class="form-label">Gateway (Router)</label>
                         <input type="text" class="form-input font-mono" @bind="_subnetForm.Router" placeholder="192.168.1.1" />
+                    </div>
+                    <div>
+                        <label class="form-label">Broadcast</label>
+                        <input type="text" class="form-input font-mono" @bind="_subnetForm.Broadcast" placeholder="192.168.1.255" />
                     </div>
                 </div>
 
@@ -261,6 +298,28 @@
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
+                        <label class="form-label">Primary NTP Server</label>
+                        <input type="text" class="form-input font-mono" @bind="_subnetForm.Ntp1" placeholder="pool.ntp.org" />
+                    </div>
+                    <div>
+                        <label class="form-label">Secondary NTP Server</label>
+                        <input type="text" class="form-input font-mono" @bind="_subnetForm.Ntp2" placeholder="time.google.com" />
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="form-label">Primary WINS Server</label>
+                        <input type="text" class="form-input font-mono" @bind="_subnetForm.Wins1" placeholder="192.168.1.10" />
+                    </div>
+                    <div>
+                        <label class="form-label">Secondary WINS Server</label>
+                        <input type="text" class="form-input font-mono" @bind="_subnetForm.Wins2" placeholder="192.168.1.11" />
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
                         <label class="form-label">Default Lease Time (seconds)</label>
                         <input type="number" class="form-input" @bind="_subnetForm.DefaultLeaseTime" />
                         <p class="text-xs text-gray-500 mt-1">Default: 86400 (24 hours)</p>
@@ -272,14 +331,49 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label class="form-label">Domain Name (optional)</label>
+                        <label class="form-label">Domain Name</label>
                         <input type="text" class="form-input" @bind="_subnetForm.DomainName" placeholder="local.lan" />
                     </div>
                     <div>
-                        <label class="form-label">Interface (optional)</label>
+                        <label class="form-label">Interface</label>
                         <input type="text" class="form-input font-mono" @bind="_subnetForm.InterfaceName" placeholder="eth0" />
+                    </div>
+                    <div>
+                        <label class="form-label">Interface MTU</label>
+                        <input type="number" class="form-input" @bind="_subnetForm.InterfaceMtu" placeholder="1500" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="form-label">Domain Search List</label>
+                    <input type="text" class="form-input" @bind="_subnetForm.DomainSearchList" placeholder="example.com,corp.example.com" />
+                    <p class="text-xs text-gray-500 mt-1">Comma-separated list of domains for DNS search (Option 119)</p>
+                </div>
+
+                <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
+                    <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Time Settings</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="form-label">Time Offset (seconds from UTC)</label>
+                            <input type="number" class="form-input" @bind="_subnetForm.TimeOffset" placeholder="-18000" />
+                            <p class="text-xs text-gray-500 mt-1">e.g., -18000 for EST (UTC-5)</p>
+                        </div>
+                        <div>
+                            <label class="form-label">POSIX Timezone</label>
+                            <input type="text" class="form-input" @bind="_subnetForm.PosixTimezone" placeholder="EST5EDT,M3.2.0,M11.1.0" />
+                            <p class="text-xs text-gray-500 mt-1">POSIX TZ string (Option 100)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
+                    <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Static Routes (Option 121)</h4>
+                    <div>
+                        <label class="form-label">Classless Static Routes (JSON)</label>
+                        <textarea class="form-input font-mono text-sm" rows="3" @bind="_subnetForm.StaticRoutesJson" placeholder='[{"network": "10.0.0.0/8", "gateway": "192.168.1.1"}]'></textarea>
+                        <p class="text-xs text-gray-500 mt-1">RFC 3442 format: array of objects with "network" (CIDR) and "gateway"</p>
                     </div>
                 </div>
 
@@ -355,6 +449,10 @@
                     <div class="flex items-center gap-3">
                         <input type="checkbox" class="form-checkbox" id="poolKnownOnly" @bind="_poolForm.KnownClientsOnly" />
                         <label for="poolKnownOnly" class="text-sm text-gray-700 dark:text-gray-300">Known clients only</label>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input type="checkbox" class="form-checkbox" id="poolDenyBootp" @bind="_poolForm.DenyBootp" />
+                        <label for="poolDenyBootp" class="text-sm text-gray-700 dark:text-gray-300">Deny BOOTP clients (DHCP only)</label>
                     </div>
                     <div class="flex items-center gap-3">
                         <input type="checkbox" class="form-checkbox" id="poolEnabled" @bind="_poolForm.Enabled" />
@@ -436,11 +534,21 @@
             Network = subnet.Network,
             SubnetMask = subnet.SubnetMask?.ToString() ?? "",
             Router = subnet.Router?.ToString() ?? "",
+            Broadcast = subnet.Broadcast?.ToString() ?? "",
             Dns1 = subnet.DnsServers?.Length > 0 ? subnet.DnsServers[0].ToString() : "",
             Dns2 = subnet.DnsServers?.Length > 1 ? subnet.DnsServers[1].ToString() : "",
+            Ntp1 = subnet.NtpServers?.Length > 0 ? subnet.NtpServers[0].ToString() : "",
+            Ntp2 = subnet.NtpServers?.Length > 1 ? subnet.NtpServers[1].ToString() : "",
+            Wins1 = subnet.WinsServers?.Length > 0 ? subnet.WinsServers[0].ToString() : "",
+            Wins2 = subnet.WinsServers?.Length > 1 ? subnet.WinsServers[1].ToString() : "",
             DefaultLeaseTime = subnet.DefaultLeaseTime,
             MaxLeaseTime = subnet.MaxLeaseTime,
+            InterfaceMtu = subnet.InterfaceMtu,
             DomainName = subnet.DomainName ?? "",
+            DomainSearchList = subnet.DomainSearchList ?? "",
+            StaticRoutesJson = subnet.StaticRoutesJson ?? "",
+            TimeOffset = subnet.TimeOffset,
+            PosixTimezone = subnet.PosixTimezone ?? "",
             InterfaceName = subnet.InterfaceName ?? "",
             TftpServer = subnet.TftpServer ?? "",
             BootFilename = subnet.BootFilename ?? "",
@@ -461,16 +569,36 @@
             if (!string.IsNullOrWhiteSpace(_subnetForm.Dns2) && IPAddress.TryParse(_subnetForm.Dns2, out var dns2))
                 dnsServers.Add(dns2);
 
+            var ntpServers = new List<IPAddress>();
+            if (!string.IsNullOrWhiteSpace(_subnetForm.Ntp1) && IPAddress.TryParse(_subnetForm.Ntp1, out var ntp1))
+                ntpServers.Add(ntp1);
+            if (!string.IsNullOrWhiteSpace(_subnetForm.Ntp2) && IPAddress.TryParse(_subnetForm.Ntp2, out var ntp2))
+                ntpServers.Add(ntp2);
+
+            var winsServers = new List<IPAddress>();
+            if (!string.IsNullOrWhiteSpace(_subnetForm.Wins1) && IPAddress.TryParse(_subnetForm.Wins1, out var wins1))
+                winsServers.Add(wins1);
+            if (!string.IsNullOrWhiteSpace(_subnetForm.Wins2) && IPAddress.TryParse(_subnetForm.Wins2, out var wins2))
+                winsServers.Add(wins2);
+
             var subnet = new DhcpSubnet
             {
                 Name = _subnetForm.Name,
                 Network = _subnetForm.Network,
                 SubnetMask = string.IsNullOrWhiteSpace(_subnetForm.SubnetMask) ? null : IPAddress.Parse(_subnetForm.SubnetMask),
                 Router = string.IsNullOrWhiteSpace(_subnetForm.Router) ? null : IPAddress.Parse(_subnetForm.Router),
+                Broadcast = string.IsNullOrWhiteSpace(_subnetForm.Broadcast) ? null : IPAddress.Parse(_subnetForm.Broadcast),
                 DnsServers = dnsServers.Count > 0 ? dnsServers.ToArray() : null,
+                NtpServers = ntpServers.Count > 0 ? ntpServers.ToArray() : null,
+                WinsServers = winsServers.Count > 0 ? winsServers.ToArray() : null,
                 DefaultLeaseTime = _subnetForm.DefaultLeaseTime,
                 MaxLeaseTime = _subnetForm.MaxLeaseTime,
+                InterfaceMtu = _subnetForm.InterfaceMtu,
                 DomainName = string.IsNullOrWhiteSpace(_subnetForm.DomainName) ? null : _subnetForm.DomainName,
+                DomainSearchList = string.IsNullOrWhiteSpace(_subnetForm.DomainSearchList) ? null : _subnetForm.DomainSearchList,
+                StaticRoutesJson = string.IsNullOrWhiteSpace(_subnetForm.StaticRoutesJson) ? null : _subnetForm.StaticRoutesJson,
+                TimeOffset = _subnetForm.TimeOffset,
+                PosixTimezone = string.IsNullOrWhiteSpace(_subnetForm.PosixTimezone) ? null : _subnetForm.PosixTimezone,
                 InterfaceName = string.IsNullOrWhiteSpace(_subnetForm.InterfaceName) ? null : _subnetForm.InterfaceName,
                 TftpServer = string.IsNullOrWhiteSpace(_subnetForm.TftpServer) ? null : _subnetForm.TftpServer,
                 BootFilename = string.IsNullOrWhiteSpace(_subnetForm.BootFilename) ? null : _subnetForm.BootFilename,
@@ -540,6 +668,7 @@
             Priority = pool.Priority,
             AllowUnknownClients = pool.AllowUnknownClients,
             KnownClientsOnly = pool.KnownClientsOnly,
+            DenyBootp = pool.DenyBootp,
             Enabled = pool.Enabled
         };
         _showPoolModal = true;
@@ -559,6 +688,7 @@
                 Priority = _poolForm.Priority,
                 AllowUnknownClients = _poolForm.AllowUnknownClients,
                 KnownClientsOnly = _poolForm.KnownClientsOnly,
+                DenyBootp = _poolForm.DenyBootp,
                 Enabled = _poolForm.Enabled
             };
 
@@ -619,11 +749,21 @@
         public string Network { get; set; } = "";
         public string SubnetMask { get; set; } = "";
         public string Router { get; set; } = "";
+        public string Broadcast { get; set; } = "";
         public string Dns1 { get; set; } = "";
         public string Dns2 { get; set; } = "";
+        public string Ntp1 { get; set; } = "";
+        public string Ntp2 { get; set; } = "";
+        public string Wins1 { get; set; } = "";
+        public string Wins2 { get; set; } = "";
         public int DefaultLeaseTime { get; set; } = 86400;
         public int MaxLeaseTime { get; set; } = 604800;
+        public int? InterfaceMtu { get; set; }
         public string DomainName { get; set; } = "";
+        public string DomainSearchList { get; set; } = "";
+        public string StaticRoutesJson { get; set; } = "";
+        public int? TimeOffset { get; set; }
+        public string PosixTimezone { get; set; } = "";
         public string InterfaceName { get; set; } = "";
         public string TftpServer { get; set; } = "";
         public string BootFilename { get; set; } = "";
@@ -639,6 +779,7 @@
         public int Priority { get; set; } = 100;
         public bool AllowUnknownClients { get; set; } = true;
         public bool KnownClientsOnly { get; set; } = false;
+        public bool DenyBootp { get; set; } = false;
         public bool Enabled { get; set; } = true;
     }
 }

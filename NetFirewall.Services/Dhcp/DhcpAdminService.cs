@@ -54,10 +54,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
         const string sql = @"
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
-                dns_servers, ntp_servers, default_lease_time, max_lease_time, tftp_server, boot_filename,
-                boot_filename_uefi, domain_search, static_routes, interface_name, enabled, created_at, updated_at)
-            VALUES (@id, @name, @network, @mask, @router, @broadcast, @domain, @dns, @ntp, @defLease, @maxLease,
-                @tftp, @bootFile, @bootFileUefi, @domainSearch, @routes::jsonb, @iface, @enabled, @created, @updated)";
+                dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time, interface_mtu,
+                tftp_server, boot_filename, boot_filename_uefi, domain_search, static_routes,
+                time_offset, posix_timezone, interface_name, enabled, created_at, updated_at)
+            VALUES (@id, @name, @network, @mask, @router, @broadcast, @domain, @dns, @ntp, @wins, @defLease, @maxLease,
+                @mtu, @tftp, @bootFile, @bootFileUefi, @domainSearch, @routes::jsonb, @timeOffset, @posixTz,
+                @iface, @enabled, @created, @updated)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddSubnetParams(cmd, subnet);
@@ -77,10 +79,11 @@ public sealed class DhcpAdminService : IDhcpAdminService
         const string sql = @"
             UPDATE dhcp_subnets SET
                 name = @name, network = @network, subnet_mask = @mask, router = @router, broadcast = @broadcast,
-                domain_name = @domain, dns_servers = @dns, ntp_servers = @ntp, default_lease_time = @defLease,
-                max_lease_time = @maxLease, tftp_server = @tftp, boot_filename = @bootFile,
-                boot_filename_uefi = @bootFileUefi, domain_search = @domainSearch, static_routes = @routes::jsonb,
-                interface_name = @iface, enabled = @enabled, updated_at = @updated
+                domain_name = @domain, dns_servers = @dns, ntp_servers = @ntp, wins_servers = @wins,
+                default_lease_time = @defLease, max_lease_time = @maxLease, interface_mtu = @mtu,
+                tftp_server = @tftp, boot_filename = @bootFile, boot_filename_uefi = @bootFileUefi,
+                domain_search = @domainSearch, static_routes = @routes::jsonb, time_offset = @timeOffset,
+                posix_timezone = @posixTz, interface_name = @iface, enabled = @enabled, updated_at = @updated
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -117,13 +120,17 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("domain", subnet.DomainName ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("dns", subnet.DnsServers ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("ntp", subnet.NtpServers ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("wins", subnet.WinsServers ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("defLease", subnet.DefaultLeaseTime);
         cmd.Parameters.AddWithValue("maxLease", subnet.MaxLeaseTime);
+        cmd.Parameters.AddWithValue("mtu", subnet.InterfaceMtu ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("tftp", subnet.TftpServer ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("bootFile", subnet.BootFilename ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("bootFileUefi", subnet.BootFilenameUefi ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("domainSearch", subnet.DomainSearchList ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("routes", subnet.StaticRoutesJson ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("timeOffset", subnet.TimeOffset ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("posixTz", subnet.PosixTimezone ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("iface", subnet.InterfaceName ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
         cmd.Parameters.AddWithValue("created", subnet.CreatedAt);
@@ -148,13 +155,17 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 DomainName = reader.IsDBNull(reader.GetOrdinal("domain_name")) ? null : reader.GetString(reader.GetOrdinal("domain_name")),
                 DnsServers = reader.IsDBNull(reader.GetOrdinal("dns_servers")) ? null : reader.GetFieldValue<IPAddress[]>(reader.GetOrdinal("dns_servers")),
                 NtpServers = reader.IsDBNull(reader.GetOrdinal("ntp_servers")) ? null : reader.GetFieldValue<IPAddress[]>(reader.GetOrdinal("ntp_servers")),
+                WinsServers = reader.IsDBNull(reader.GetOrdinal("wins_servers")) ? null : reader.GetFieldValue<IPAddress[]>(reader.GetOrdinal("wins_servers")),
                 DefaultLeaseTime = reader.GetInt32(reader.GetOrdinal("default_lease_time")),
                 MaxLeaseTime = reader.GetInt32(reader.GetOrdinal("max_lease_time")),
+                InterfaceMtu = reader.IsDBNull(reader.GetOrdinal("interface_mtu")) ? null : reader.GetInt32(reader.GetOrdinal("interface_mtu")),
                 TftpServer = reader.IsDBNull(reader.GetOrdinal("tftp_server")) ? null : reader.GetString(reader.GetOrdinal("tftp_server")),
                 BootFilename = reader.IsDBNull(reader.GetOrdinal("boot_filename")) ? null : reader.GetString(reader.GetOrdinal("boot_filename")),
                 BootFilenameUefi = reader.IsDBNull(reader.GetOrdinal("boot_filename_uefi")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_uefi")),
                 DomainSearchList = reader.IsDBNull(reader.GetOrdinal("domain_search")) ? null : reader.GetString(reader.GetOrdinal("domain_search")),
                 StaticRoutesJson = reader.IsDBNull(reader.GetOrdinal("static_routes")) ? null : reader.GetString(reader.GetOrdinal("static_routes")),
+                TimeOffset = reader.IsDBNull(reader.GetOrdinal("time_offset")) ? null : reader.GetInt32(reader.GetOrdinal("time_offset")),
+                PosixTimezone = reader.IsDBNull(reader.GetOrdinal("posix_timezone")) ? null : reader.GetString(reader.GetOrdinal("posix_timezone")),
                 InterfaceName = reader.IsDBNull(reader.GetOrdinal("interface_name")) ? null : reader.GetString(reader.GetOrdinal("interface_name")),
                 Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at")),
