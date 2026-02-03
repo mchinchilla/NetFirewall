@@ -376,6 +376,11 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 {
                     _logger.LogDebug("[POOL] IP {Ip} is declined (ARP conflict), continuing search", ip);
                 }
+                // Check if IP is already leased in cache (cache is authoritative over DB)
+                else if (_leaseCache?.IsIpLeased(ip) == true)
+                {
+                    _logger.LogDebug("[POOL] IP {Ip} is already leased in cache, continuing search", ip);
+                }
                 else
                 {
                     _logger.LogDebug("[POOL] Found available IP {Ip} in pool '{PoolName}'", ip, pool.Name);
@@ -422,6 +427,14 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
             // Skip declined IPs (ARP conflict)
             if (_leaseCache?.IsIpDeclined(current) == true)
+            {
+                current = IncrementIp(current);
+                if (current == null) break;
+                continue;
+            }
+
+            // Skip IPs already leased in cache (cache is authoritative over DB)
+            if (_leaseCache?.IsIpLeased(current) == true)
             {
                 current = IncrementIp(current);
                 if (current == null) break;
