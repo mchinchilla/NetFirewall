@@ -35,6 +35,19 @@ public interface IDhcpAdminService
     Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default);
     Task<bool> DeleteReservationAsync(Guid id, CancellationToken ct = default);
 
+    // Client Class operations
+    Task<IReadOnlyList<DhcpClass>> GetClassesAsync(CancellationToken ct = default);
+    Task<DhcpClass?> GetClassByIdAsync(Guid id, CancellationToken ct = default);
+    Task<DhcpClass> CreateClassAsync(DhcpClass dhcpClass, CancellationToken ct = default);
+    Task<DhcpClass> UpdateClassAsync(DhcpClass dhcpClass, CancellationToken ct = default);
+    Task<bool> DeleteClassAsync(Guid id, CancellationToken ct = default);
+
+    // Exclusion operations
+    Task<IReadOnlyList<DhcpExclusion>> GetExclusionsAsync(Guid? subnetId = null, CancellationToken ct = default);
+    Task<DhcpExclusion> CreateExclusionAsync(DhcpExclusion exclusion, CancellationToken ct = default);
+    Task<DhcpExclusion> UpdateExclusionAsync(DhcpExclusion exclusion, CancellationToken ct = default);
+    Task<bool> DeleteExclusionAsync(Guid id, CancellationToken ct = default);
+
     // Statistics
     Task<DhcpStats> GetStatsAsync(CancellationToken ct = default);
 

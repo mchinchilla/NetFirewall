@@ -50,7 +50,7 @@
     }
 
     <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
         <div class="stat-card">
             <p class="stat-label">Total Subnets</p>
             <p class="stat-value">@_subnets.Count</p>
@@ -62,6 +62,10 @@
         <div class="stat-card">
             <p class="stat-label">Total Pools</p>
             <p class="stat-value">@_pools.Count</p>
+        </div>
+        <div class="stat-card">
+            <p class="stat-label">Total Exclusions</p>
+            <p class="stat-value">@_exclusions.Count</p>
         </div>
         <div class="stat-card">
             <p class="stat-label">Pool Size</p>
@@ -100,6 +104,12 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                         </svg>
                         Add Pool
+                    </button>
+                    <button class="btn-secondary text-sm" @onclick="() => ShowAddExclusionModal(subnet)">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
+                        Add Exclusion
                     </button>
                     <button class="btn-icon text-blue-400 hover:text-blue-600" title="Edit Subnet" @onclick="() => ShowEditSubnetModal(subnet)">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -225,6 +235,52 @@
                 {
                     <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
                         <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No IP pools configured. Add a pool to start serving DHCP requests.</p>
+                    </div>
+                }
+
+                @{
+                    var subnetExclusions = _exclusions.Where(e => e.SubnetId == subnet.Id).ToList();
+                }
+                @if (subnetExclusions.Any())
+                {
+                    <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">IP Exclusions</h4>
+                        <div class="overflow-x-auto">
+                            <table class="table text-sm">
+                                <thead>
+                                    <tr>
+                                        <th>IP Start</th>
+                                        <th>IP End</th>
+                                        <th>Reason</th>
+                                        <th class="w-24">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var excl in subnetExclusions)
+                                    {
+                                        <tr>
+                                            <td class="font-mono">@excl.IpStart</td>
+                                            <td class="font-mono">@(excl.IpEnd?.ToString() ?? "Single IP")</td>
+                                            <td>@(excl.Reason ?? "-")</td>
+                                            <td>
+                                                <div class="flex items-center gap-2">
+                                                    <button class="btn-icon text-blue-400 hover:text-blue-600" title="Edit Exclusion" @onclick="() => ShowEditExclusionModal(excl)">
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                        </svg>
+                                                    </button>
+                                                    <button class="btn-icon text-red-400 hover:text-red-600" title="Delete Exclusion" @onclick="() => DeleteExclusion(excl)">
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 }
             </div>
@@ -477,9 +533,43 @@
     </div>
 }
 
+@* Exclusion Modal *@
+@if (_showExclusionModal)
+{
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-750">
+                <h3 class="text-lg font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent">
+                    @(_editExclusionId.HasValue ? "Edit Exclusion" : "Add Exclusion")
+                </h3>
+            </div>
+            <div class="px-6 py-5 space-y-5">
+                <div>
+                    <label class="form-label">IP Start <span class="text-red-500">*</span></label>
+                    <input type="text" class="form-input font-mono" @bind="_exclusionForm.IpStart" placeholder="192.168.1.1" />
+                </div>
+                <div>
+                    <label class="form-label">IP End (optional)</label>
+                    <input type="text" class="form-input font-mono" @bind="_exclusionForm.IpEnd" placeholder="192.168.1.10" />
+                    <p class="text-xs text-gray-500 mt-1">Leave empty for a single IP exclusion</p>
+                </div>
+                <div>
+                    <label class="form-label">Reason (optional)</label>
+                    <input type="text" class="form-input" @bind="_exclusionForm.Reason" placeholder="Reserved for router, printer, etc." />
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 flex justify-end gap-3">
+                <button class="btn-secondary" @onclick="() => _showExclusionModal = false">Cancel</button>
+                <button class="btn-primary" @onclick="SaveExclusion">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private IReadOnlyList<DhcpSubnet> _subnets = [];
     private IReadOnlyList<DhcpPool> _pools = [];
+    private IReadOnlyList<DhcpExclusion> _exclusions = [];
     private IReadOnlyList<FwInterface> _interfaces = [];
     private DhcpStats _stats = new();
 
@@ -497,6 +587,12 @@
     private Guid? _poolSubnetId = null;
     private PoolFormModel _poolForm = new();
 
+    // Exclusion Modal
+    private bool _showExclusionModal = false;
+    private Guid? _editExclusionId = null;
+    private Guid? _exclusionSubnetId = null;
+    private ExclusionFormModel _exclusionForm = new();
+
     protected override async Task OnInitializedAsync()
     {
         await LoadDataAsync();
@@ -508,13 +604,15 @@
         {
             var subnetsTask = DhcpService.GetSubnetsAsync();
             var poolsTask = DhcpService.GetPoolsAsync();
+            var exclusionsTask = DhcpService.GetExclusionsAsync();
             var statsTask = DhcpService.GetStatsAsync();
             var interfacesTask = FirewallService.GetInterfacesAsync();
 
-            await Task.WhenAll(subnetsTask, poolsTask, statsTask, interfacesTask);
+            await Task.WhenAll(subnetsTask, poolsTask, exclusionsTask, statsTask, interfacesTask);
 
             _subnets = await subnetsTask;
             _pools = await poolsTask;
+            _exclusions = await exclusionsTask;
             _stats = await statsTask;
             _interfaces = await interfacesTask;
         }
@@ -740,6 +838,77 @@
         }
     }
 
+    private void ShowAddExclusionModal(DhcpSubnet subnet)
+    {
+        _editExclusionId = null;
+        _exclusionSubnetId = subnet.Id;
+        _exclusionForm = new ExclusionFormModel();
+        _showExclusionModal = true;
+        ClearMessages();
+    }
+
+    private void ShowEditExclusionModal(DhcpExclusion exclusion)
+    {
+        _editExclusionId = exclusion.Id;
+        _exclusionSubnetId = exclusion.SubnetId;
+        _exclusionForm = new ExclusionFormModel
+        {
+            IpStart = exclusion.IpStart.ToString(),
+            IpEnd = exclusion.IpEnd?.ToString() ?? "",
+            Reason = exclusion.Reason ?? ""
+        };
+        _showExclusionModal = true;
+        ClearMessages();
+    }
+
+    private async Task SaveExclusion()
+    {
+        try
+        {
+            var exclusion = new DhcpExclusion
+            {
+                SubnetId = _exclusionSubnetId!.Value,
+                IpStart = IPAddress.Parse(_exclusionForm.IpStart),
+                IpEnd = string.IsNullOrWhiteSpace(_exclusionForm.IpEnd) ? null : IPAddress.Parse(_exclusionForm.IpEnd),
+                Reason = string.IsNullOrWhiteSpace(_exclusionForm.Reason) ? null : _exclusionForm.Reason
+            };
+
+            if (_editExclusionId.HasValue)
+            {
+                exclusion.Id = _editExclusionId.Value;
+                await DhcpService.UpdateExclusionAsync(exclusion);
+                _successMessage = "Exclusion updated successfully";
+            }
+            else
+            {
+                await DhcpService.CreateExclusionAsync(exclusion);
+                _successMessage = "Exclusion created successfully";
+            }
+
+            _showExclusionModal = false;
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error saving exclusion: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteExclusion(DhcpExclusion exclusion)
+    {
+        try
+        {
+            ClearMessages();
+            await DhcpService.DeleteExclusionAsync(exclusion.Id);
+            _successMessage = "Exclusion deleted successfully";
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error deleting exclusion: {ex.Message}";
+        }
+    }
+
     private void ClearMessages()
     {
         _errorMessage = null;
@@ -793,5 +962,12 @@
         public bool KnownClientsOnly { get; set; } = false;
         public bool DenyBootp { get; set; } = false;
         public bool Enabled { get; set; } = true;
+    }
+
+    private class ExclusionFormModel
+    {
+        public string IpStart { get; set; } = "";
+        public string IpEnd { get; set; } = "";
+        public string Reason { get; set; } = "";
     }
 }

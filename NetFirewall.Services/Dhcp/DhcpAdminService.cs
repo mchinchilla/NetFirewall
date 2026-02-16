@@ -466,6 +466,218 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
     #endregion
 
+    #region Client Class Operations
+
+    public async Task<IReadOnlyList<DhcpClass>> GetClassesAsync(CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "SELECT * FROM dhcp_classes ORDER BY priority, name";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        return await ReadClassesAsync(cmd, ct);
+    }
+
+    public async Task<DhcpClass?> GetClassByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "SELECT * FROM dhcp_classes WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        var results = await ReadClassesAsync(cmd, ct);
+        return results.FirstOrDefault();
+    }
+
+    public async Task<DhcpClass> CreateClassAsync(DhcpClass dhcpClass, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        dhcpClass.Id = Guid.NewGuid();
+        dhcpClass.CreatedAt = DateTime.UtcNow;
+
+        const string sql = @"
+            INSERT INTO dhcp_classes (id, name, match_type, match_value, options, next_server, boot_filename, priority, enabled, created_at)
+            VALUES (@id, @name, @matchType, @matchValue, @options::jsonb, @nextServer, @bootFile, @priority, @enabled, @created)";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        AddClassParams(cmd, dhcpClass);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogInformation("Created client class {Name}", dhcpClass.Name);
+
+        return dhcpClass;
+    }
+
+    public async Task<DhcpClass> UpdateClassAsync(DhcpClass dhcpClass, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        const string sql = @"
+            UPDATE dhcp_classes SET
+                name = @name, match_type = @matchType, match_value = @matchValue, options = @options::jsonb,
+                next_server = @nextServer, boot_filename = @bootFile, priority = @priority, enabled = @enabled
+            WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        AddClassParams(cmd, dhcpClass);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogInformation("Updated client class {Name}", dhcpClass.Name);
+
+        return dhcpClass;
+    }
+
+    public async Task<bool> DeleteClassAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "DELETE FROM dhcp_classes WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        var rows = await cmd.ExecuteNonQueryAsync(ct);
+        if (rows > 0) _logger.LogInformation("Deleted client class {Id}", id);
+
+        return rows > 0;
+    }
+
+    private static void AddClassParams(NpgsqlCommand cmd, DhcpClass dhcpClass)
+    {
+        cmd.Parameters.AddWithValue("id", dhcpClass.Id);
+        cmd.Parameters.AddWithValue("name", dhcpClass.Name);
+        cmd.Parameters.AddWithValue("matchType", dhcpClass.MatchType);
+        cmd.Parameters.AddWithValue("matchValue", dhcpClass.MatchValue);
+        cmd.Parameters.AddWithValue("options", dhcpClass.Options ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("nextServer", dhcpClass.NextServer ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFile", dhcpClass.BootFilename ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("priority", dhcpClass.Priority);
+        cmd.Parameters.AddWithValue("enabled", dhcpClass.Enabled);
+        cmd.Parameters.AddWithValue("created", dhcpClass.CreatedAt);
+    }
+
+    private static async Task<IReadOnlyList<DhcpClass>> ReadClassesAsync(NpgsqlCommand cmd, CancellationToken ct)
+    {
+        var list = new List<DhcpClass>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new DhcpClass
+            {
+                Id = reader.GetGuid(reader.GetOrdinal("id")),
+                Name = reader.GetString(reader.GetOrdinal("name")),
+                MatchType = reader.GetString(reader.GetOrdinal("match_type")),
+                MatchValue = reader.GetString(reader.GetOrdinal("match_value")),
+                Options = reader.IsDBNull(reader.GetOrdinal("options")) ? null : reader.GetString(reader.GetOrdinal("options")),
+                NextServer = reader.IsDBNull(reader.GetOrdinal("next_server")) ? null : reader.GetFieldValue<IPAddress>(reader.GetOrdinal("next_server")),
+                BootFilename = reader.IsDBNull(reader.GetOrdinal("boot_filename")) ? null : reader.GetString(reader.GetOrdinal("boot_filename")),
+                Priority = reader.GetInt32(reader.GetOrdinal("priority")),
+                Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
+                CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
+            });
+        }
+
+        return list;
+    }
+
+    #endregion
+
+    #region Exclusion Operations
+
+    public async Task<IReadOnlyList<DhcpExclusion>> GetExclusionsAsync(Guid? subnetId = null, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        var sql = "SELECT * FROM dhcp_exclusions";
+        if (subnetId.HasValue) sql += " WHERE subnet_id = @subnetId";
+        sql += " ORDER BY ip_start";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        if (subnetId.HasValue) cmd.Parameters.AddWithValue("subnetId", subnetId.Value);
+
+        var list = new List<DhcpExclusion>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new DhcpExclusion
+            {
+                Id = reader.GetGuid(reader.GetOrdinal("id")),
+                SubnetId = reader.GetGuid(reader.GetOrdinal("subnet_id")),
+                IpStart = reader.GetFieldValue<IPAddress>(reader.GetOrdinal("ip_start")),
+                IpEnd = reader.IsDBNull(reader.GetOrdinal("ip_end")) ? null : reader.GetFieldValue<IPAddress>(reader.GetOrdinal("ip_end")),
+                Reason = reader.IsDBNull(reader.GetOrdinal("reason")) ? null : reader.GetString(reader.GetOrdinal("reason")),
+                CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
+            });
+        }
+
+        return list;
+    }
+
+    public async Task<DhcpExclusion> CreateExclusionAsync(DhcpExclusion exclusion, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        exclusion.Id = Guid.NewGuid();
+        exclusion.CreatedAt = DateTime.UtcNow;
+
+        const string sql = @"
+            INSERT INTO dhcp_exclusions (id, subnet_id, ip_start, ip_end, reason, created_at)
+            VALUES (@id, @subnet, @start, @end, @reason, @created)";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", exclusion.Id);
+        cmd.Parameters.AddWithValue("subnet", exclusion.SubnetId);
+        cmd.Parameters.AddWithValue("start", exclusion.IpStart);
+        cmd.Parameters.AddWithValue("end", exclusion.IpEnd ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("reason", exclusion.Reason ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("created", exclusion.CreatedAt);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogInformation("Created exclusion {Start} in subnet {Subnet}", exclusion.IpStart, exclusion.SubnetId);
+
+        return exclusion;
+    }
+
+    public async Task<DhcpExclusion> UpdateExclusionAsync(DhcpExclusion exclusion, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        const string sql = @"
+            UPDATE dhcp_exclusions SET
+                subnet_id = @subnet, ip_start = @start, ip_end = @end, reason = @reason
+            WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", exclusion.Id);
+        cmd.Parameters.AddWithValue("subnet", exclusion.SubnetId);
+        cmd.Parameters.AddWithValue("start", exclusion.IpStart);
+        cmd.Parameters.AddWithValue("end", exclusion.IpEnd ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("reason", exclusion.Reason ?? (object)DBNull.Value);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogInformation("Updated exclusion {Id}", exclusion.Id);
+
+        return exclusion;
+    }
+
+    public async Task<bool> DeleteExclusionAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "DELETE FROM dhcp_exclusions WHERE id = @id";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        var rows = await cmd.ExecuteNonQueryAsync(ct);
+        if (rows > 0) _logger.LogInformation("Deleted exclusion {Id}", id);
+
+        return rows > 0;
+    }
+
+    #endregion
+
     #region Statistics
 
     public async Task<DhcpStats> GetStatsAsync(CancellationToken ct = default)

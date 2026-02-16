@@ -7,13 +7,14 @@
 @using System.Timers
 @inject IFirewallService FirewallService
 @inject IDhcpLeasesService DhcpLeasesService
+@inject IDhcpAdminService DhcpAdminService
 @implements IDisposable
 
 <PageTitle>Dashboard - NetFirewall</PageTitle>
 
 <div class="space-y-6">
     <!-- Stats Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <!-- Active Interfaces -->
         <div class="stat-card group">
             <div class="flex items-center justify-between">
@@ -73,7 +74,55 @@
                 </div>
             </div>
         </div>
+
+        <!-- DHCP Utilization -->
+        <div class="stat-card group">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="stat-label">DHCP Utilization</p>
+                    <p class="stat-value">@(_dhcpStats.UtilizationPercent.ToString("F0"))%</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">@_dhcpStats.ActiveLeases / @_dhcpStats.TotalPoolSize</p>
+                </div>
+                <div class="w-14 h-14 bg-gradient-to-br from-purple-400 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/25 group-hover:scale-110 transition-transform duration-300">
+                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+                    </svg>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <!-- Failover Status Banner -->
+    @if (_failoverStatus != null)
+    {
+        <a href="/dhcp/failover" class="block @(_failoverStatus.IsHealthy
+            ? "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/10 border border-green-200 dark:border-green-800 hover:border-green-300 dark:hover:border-green-700"
+            : "bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/10 border border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700") rounded-xl p-4 transition-colors">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="@(_failoverStatus.IsHealthy
+                        ? "w-10 h-10 bg-gradient-to-br from-green-400 to-emerald-600"
+                        : "w-10 h-10 bg-gradient-to-br from-red-400 to-red-600") rounded-xl flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="font-semibold @(_failoverStatus.IsHealthy ? "text-green-800 dark:text-green-200" : "text-red-800 dark:text-red-200")">
+                            DHCP Failover: @(_failoverStatus.IsHealthy ? "Healthy" : "Degraded")
+                        </p>
+                        <p class="text-sm @(_failoverStatus.IsHealthy ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")">
+                            Local: @_failoverStatus.LocalState | Peer: @_failoverStatus.PeerState
+                        </p>
+                    </div>
+                </div>
+                <svg class="w-5 h-5 @(_failoverStatus.IsHealthy ? "text-green-400" : "text-red-400")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+            </div>
+        </a>
+    }
 
     <!-- Interface Status & WAN Status -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -265,6 +314,8 @@
 
 @code {
     private FirewallStats _stats = new();
+    private DhcpStats _dhcpStats = new();
+    private DhcpFailoverStatus? _failoverStatus;
     private IReadOnlyList<FwInterface> _interfaces = [];
     private IReadOnlyList<FwInterface> _wanInterfaces = [];
     private IReadOnlyList<DhcpLease> _leases = [];
@@ -287,13 +338,17 @@
         var statsTask = FirewallService.GetStatsAsync();
         var interfacesTask = FirewallService.GetInterfacesAsync();
         var leasesTask = DhcpLeasesService.GetAllActiveLeasesAsync();
+        var dhcpStatsTask = DhcpAdminService.GetStatsAsync();
+        var failoverTask = DhcpAdminService.GetFailoverStatusAsync();
 
-        await Task.WhenAll(statsTask, interfacesTask, leasesTask);
+        await Task.WhenAll(statsTask, interfacesTask, leasesTask, dhcpStatsTask, failoverTask);
 
         _stats = await statsTask;
         _interfaces = await interfacesTask;
         _leases = (await leasesTask).OrderByDescending(l => l.StartTime).ToList();
         _wanInterfaces = _interfaces.Where(i => i.Type == "WAN").OrderBy(i => i.Role).ToList();
+        _dhcpStats = await dhcpStatsTask;
+        _failoverStatus = await failoverTask;
     }
 
     private async Task RefreshDataAsync()
