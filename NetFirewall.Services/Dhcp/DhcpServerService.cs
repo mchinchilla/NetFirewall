@@ -278,7 +278,8 @@ public sealed class DhcpServerService : IDhcpServerService
                 await _dhcpLeasesService.AssignLeaseAsync(
                     request.ClientMac,
                     requestedIp,
-                    leaseTime
+                    leaseTime,
+                    request.Hostname
                 ).ConfigureAwait(false);
 
                 _logger.LogInformation(

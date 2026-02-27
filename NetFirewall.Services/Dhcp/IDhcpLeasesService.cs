@@ -7,7 +7,7 @@ public interface IDhcpLeasesService
 {
     // Single lease operations
     Task<IPAddress?> OfferLeaseAsync(string macAddress, IPAddress? rangeStart, IPAddress rangeEnd);
-    Task AssignLeaseAsync(string macAddress, IPAddress ipAddress, int leaseTime);
+    Task AssignLeaseAsync(string macAddress, IPAddress ipAddress, int leaseTime, string? hostname = null);
 
     /// <summary>
     /// Assign a lease with DDNS support.

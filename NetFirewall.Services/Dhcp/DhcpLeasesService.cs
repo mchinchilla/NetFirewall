@@ -267,12 +267,12 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         return null;
     }
 
-    public async Task AssignLeaseAsync(string macAddress, IPAddress ipAddress, int leaseTime)
+    public async Task AssignLeaseAsync(string macAddress, IPAddress ipAddress, int leaseTime, string? hostname = null)
     {
         // FAST PATH: Use cache with async write-through
         if (_leaseCache != null)
         {
-            await _leaseCache.SetLeaseAsync(macAddress, ipAddress, leaseTime).ConfigureAwait(false);
+            await _leaseCache.SetLeaseAsync(macAddress, ipAddress, leaseTime, hostname).ConfigureAwait(false);
 
             if (_logger.IsEnabled(LogLevel.Debug))
             {
@@ -293,15 +293,16 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
             // Upsert in single query
             const string sql = @"
-                INSERT INTO dhcp_leases (id, mac_address, ip_address, start_time, end_time)
-                VALUES (@id, @mac, @ip, @start, @end)
+                INSERT INTO dhcp_leases (id, mac_address, ip_address, hostname, start_time, end_time)
+                VALUES (@id, @mac, @ip, @hostname, @start, @end)
                 ON CONFLICT (mac_address)
-                DO UPDATE SET ip_address = @ip, start_time = @start, end_time = @end";
+                DO UPDATE SET ip_address = @ip, hostname = @hostname, start_time = @start, end_time = @end";
 
             await using var cmd = new NpgsqlCommand(sql, connection, transaction);
             cmd.Parameters.AddWithValue("id", Guid.NewGuid());
             cmd.Parameters.AddWithValue("mac", parsedMac);
             cmd.Parameters.AddWithValue("ip", ipAddress);
+            cmd.Parameters.AddWithValue("hostname", hostname ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("start", now);
             cmd.Parameters.AddWithValue("end", endTime);
 
