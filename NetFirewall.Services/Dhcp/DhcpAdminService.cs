@@ -413,6 +413,36 @@ public sealed class DhcpAdminService : IDhcpAdminService
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
+        // Validate IP is not already reserved by another device
+        await using (var checkIp = new NpgsqlCommand(
+            "SELECT mac_address FROM dhcp_mac_reservations WHERE reserved_ip = @ip LIMIT 1", conn))
+        {
+            checkIp.Parameters.AddWithValue("ip", reservation.ReservedIp);
+            await using var reader = await checkIp.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var existingMac = reader.GetFieldValue<PhysicalAddress>(0);
+                var macBytes = existingMac.GetAddressBytes();
+                var macStr = string.Join(":", macBytes.Select(b => b.ToString("X2")));
+                throw new InvalidOperationException(
+                    $"IP {reservation.ReservedIp} is already reserved for MAC {macStr}");
+            }
+        }
+
+        // Validate MAC does not already have a reservation
+        await using (var checkMac = new NpgsqlCommand(
+            "SELECT reserved_ip FROM dhcp_mac_reservations WHERE mac_address = @mac LIMIT 1", conn))
+        {
+            checkMac.Parameters.AddWithValue("mac", reservation.MacAddress);
+            await using var reader = await checkMac.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var existingIp = reader.GetFieldValue<IPAddress>(0);
+                throw new InvalidOperationException(
+                    $"MAC {FormatMacAddress(reservation.MacAddress)} already has a reservation for IP {existingIp}");
+            }
+        }
+
         reservation.Id = Guid.NewGuid();
 
         const string sql = @"
@@ -434,6 +464,38 @@ public sealed class DhcpAdminService : IDhcpAdminService
     public async Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        // Validate IP is not already reserved by another device (excluding self)
+        await using (var checkIp = new NpgsqlCommand(
+            "SELECT mac_address FROM dhcp_mac_reservations WHERE reserved_ip = @ip AND id != @id LIMIT 1", conn))
+        {
+            checkIp.Parameters.AddWithValue("ip", reservation.ReservedIp);
+            checkIp.Parameters.AddWithValue("id", reservation.Id);
+            await using var reader = await checkIp.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var existingMac = reader.GetFieldValue<PhysicalAddress>(0);
+                var macBytes = existingMac.GetAddressBytes();
+                var macStr = string.Join(":", macBytes.Select(b => b.ToString("X2")));
+                throw new InvalidOperationException(
+                    $"IP {reservation.ReservedIp} is already reserved for MAC {macStr}");
+            }
+        }
+
+        // Validate MAC does not already have a different reservation (excluding self)
+        await using (var checkMac = new NpgsqlCommand(
+            "SELECT reserved_ip FROM dhcp_mac_reservations WHERE mac_address = @mac AND id != @id LIMIT 1", conn))
+        {
+            checkMac.Parameters.AddWithValue("mac", reservation.MacAddress);
+            checkMac.Parameters.AddWithValue("id", reservation.Id);
+            await using var reader = await checkMac.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var existingIp = reader.GetFieldValue<IPAddress>(0);
+                throw new InvalidOperationException(
+                    $"MAC {FormatMacAddress(reservation.MacAddress)} already has a reservation for IP {existingIp}");
+            }
+        }
 
         const string sql = @"
             UPDATE dhcp_mac_reservations SET
@@ -787,6 +849,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         11 => "ConflictDone",
         _ => "Unknown"
     };
+
+    private static string FormatMacAddress(PhysicalAddress mac)
+    {
+        var bytes = mac.GetAddressBytes();
+        return string.Join(":", bytes.Select(b => b.ToString("X2")));
+    }
 
     #endregion
 

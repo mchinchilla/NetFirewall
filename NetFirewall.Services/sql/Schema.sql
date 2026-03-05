@@ -43,7 +43,8 @@ create table dhcp_mac_reservations
     mac_address macaddr not null,
     reserved_ip inet    not null,
     description text,
-    unique (mac_address, reserved_ip)
+    unique (mac_address),
+    unique (reserved_ip)
 );
 
 -- add indexes for better performance
@@ -51,9 +52,6 @@ create table dhcp_mac_reservations
 create unique index idx_dhcp_leases_mac_address on dhcp_leases (mac_address);
 create index idx_dhcp_leases_ip_address on dhcp_leases (ip_address);
 create index idx_dhcp_leases_end_time on dhcp_leases (end_time);
--- dhcp_mac_reservations
-create index idx_dhcp_mac_reservations_mac_address on dhcp_mac_reservations (mac_address);
-create index idx_dhcp_mac_reservations_reserved_ip on dhcp_mac_reservations (reserved_ip);
 
 -- ============================================================================
 -- DHCP MULTI-SUBNET TABLES (Advanced Features)
