@@ -64,6 +64,145 @@ window.NetFw.hydrateBeforePaint = async function () {
     applyDom(state);
 };
 
+/* =====================================================================
+ * Chart.js integration — exposed as window.NetFw.charts
+ * Centralized so views never construct Chart() inline (rule #3 — single
+ * JS file). Charts auto-retint when the user changes theme/mode.
+ * ===================================================================== */
+window.NetFw.charts = {
+    _instances: new Set(),
+
+    /** Resolve a CSS custom property to a real `rgb(...)` string. */
+    readColor(varName) {
+        const probe = document.createElement("div");
+        probe.style.color = `var(--${varName})`;
+        probe.style.display = "none";
+        document.body.appendChild(probe);
+        const c = getComputedStyle(probe).color;
+        probe.remove();
+        return c;
+    },
+
+    _withAlpha(rgbString, alpha) {
+        // getComputedStyle returns "rgb(R, G, B)" or "rgba(R, G, B, A)"
+        const m = rgbString.match(/rgba?\(([^)]+)\)/);
+        if (!m) return rgbString;
+        const parts = m[1].split(",").map(s => s.trim());
+        const [r, g, b] = parts;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    },
+
+    _verticalGradient(ctx, height, color) {
+        const g = ctx.createLinearGradient(0, 0, 0, height || 200);
+        g.addColorStop(0, this._withAlpha(color, 0.35));
+        g.addColorStop(1, this._withAlpha(color, 0));
+        return g;
+    },
+
+    register(chart, retintFn) {
+        chart._netfwRetint = retintFn;
+        this._instances.add(chart);
+    },
+
+    retintAll() {
+        for (const chart of this._instances) {
+            try {
+                if (typeof chart._netfwRetint === "function") chart._netfwRetint();
+                chart.update("none");
+            } catch { /* chart may have been destroyed by a navigation */ }
+        }
+    },
+
+    /**
+     * Traffic line chart used on the dashboard.
+     * data = { labels: string[], inSeries: number[], outSeries: number[] }
+     */
+    makeTraffic(canvasEl, data) {
+        const ctx = canvasEl.getContext("2d");
+        const accent = this.readColor("accent");
+        const secondary = this.readColor("jordy-blue-500");
+        const fgMuted = this.readColor("surface-fg-muted");
+        const border = this.readColor("surface-border");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [
+                    {
+                        label: "In",
+                        data: data.inSeries,
+                        borderColor: accent,
+                        backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, accent),
+                        fill: true,
+                        tension: 0.38,
+                        pointRadius: 0,
+                        borderWidth: 2
+                    },
+                    {
+                        label: "Out",
+                        data: data.outSeries,
+                        borderColor: secondary,
+                        backgroundColor: "transparent",
+                        borderDash: [4, 4],
+                        tension: 0.38,
+                        pointRadius: 0,
+                        borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: "bottom",
+                        labels: { color: fgMuted, boxWidth: 10, boxHeight: 10, padding: 16, font: { size: 11 } }
+                    },
+                    tooltip: {
+                        backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted,
+                        borderColor: border, borderWidth: 1, padding: 10, displayColors: true
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: fgMuted, maxTicksLimit: 8, font: { size: 10 } } },
+                    y: {
+                        grid: { color: border, drawTicks: false },
+                        ticks: { color: fgMuted, font: { size: 10 }, callback: (v) => v + " Mbps" },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        this.register(chart, () => {
+            const a = this.readColor("accent");
+            const s = this.readColor("jordy-blue-500");
+            const fm = this.readColor("surface-fg-muted");
+            const bd = this.readColor("surface-border");
+            const el = this.readColor("surface-elevated");
+            const f = this.readColor("surface-fg");
+            chart.data.datasets[0].borderColor = a;
+            chart.data.datasets[0].backgroundColor = this._verticalGradient(ctx, canvasEl.clientHeight, a);
+            chart.data.datasets[1].borderColor = s;
+            chart.options.plugins.legend.labels.color = fm;
+            chart.options.plugins.tooltip.backgroundColor = el;
+            chart.options.plugins.tooltip.titleColor = f;
+            chart.options.plugins.tooltip.bodyColor = fm;
+            chart.options.plugins.tooltip.borderColor = bd;
+            chart.options.scales.x.ticks.color = fm;
+            chart.options.scales.y.ticks.color = fm;
+            chart.options.scales.y.grid.color = bd;
+        });
+
+        return chart;
+    }
+};
+
 /* ---------- Alpine wiring ---------- */
 document.addEventListener("alpine:init", () => {
     Alpine.store("ui", {
@@ -108,6 +247,15 @@ document.addEventListener("alpine:init", () => {
                 sidebarCollapsed: this.sidebarCollapsed
             };
         }
+    });
+
+    // Re-tint all live charts whenever theme, mode or sidebar variant changes.
+    Alpine.effect(() => {
+        const ui = Alpine.store("ui");
+        // Touch the reactive props so the effect tracks them:
+        void ui.theme; void ui.mode; void ui.sidebar;
+        // Defer one frame so the CSS variables have been recomputed.
+        requestAnimationFrame(() => window.NetFw.charts.retintAll());
     });
 
     /* ---------- Confirm dialog store ----------
