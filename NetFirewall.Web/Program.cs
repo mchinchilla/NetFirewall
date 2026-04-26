@@ -8,6 +8,7 @@ using NetFirewall.Services.Network;
 using NetFirewall.Services.Processes;
 using NetFirewall.Web.Auth;
 using NetFirewall.Web.Auth.Bootstrap;
+using NetFirewall.Web.Daemon;
 using NetFirewall.Web.Filters;
 using Npgsql;
 using RepoDb;
@@ -62,13 +63,39 @@ builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
 
-// ----- Network config writers + resolver -----
+// ----- Network config writers (each distro family + a NoOp) -----
+// These are the LOW-LEVEL writers that actually shell out (Process.Start).
+// When Daemon:Enabled = true they are NOT what controllers receive directly —
+// they're wrapped inside DaemonNetworkConfigService which proxies to the daemon.
 builder.Services.AddKeyedSingleton<INetworkConfigService, DebianInterfacesConfigService>(NetworkConfigMethod.Interfaces);
 builder.Services.AddKeyedSingleton<INetworkConfigService, NetplanConfigService>(NetworkConfigMethod.Netplan);
 builder.Services.AddKeyedSingleton<INetworkConfigService, NetworkManagerConfigService>(NetworkConfigMethod.NetworkManager);
 builder.Services.AddKeyedSingleton<INetworkConfigService, NoOpNetworkConfigService>(NetworkConfigMethod.Unknown);
-builder.Services.AddSingleton<INetworkConfigResolver, NetworkConfigResolver>();
-builder.Services.AddScoped<IStaticRouteApplicator, StaticRouteApplicator>();
+
+// Concrete resolver registered separately so the decorator can wrap it without Scrutor.
+builder.Services.AddSingleton<NetworkConfigResolver>();
+
+// ----- Daemon client + DI swap -----
+builder.Services.AddHttpContextAccessor();
+builder.Services.Configure<DaemonClientOptions>(builder.Configuration.GetSection(DaemonClientOptions.SectionName));
+var daemonOpts = builder.Configuration.GetSection(DaemonClientOptions.SectionName).Get<DaemonClientOptions>() ?? new DaemonClientOptions();
+
+if (daemonOpts.Enabled)
+{
+    // Daemon owns OS mutations. The Web's INetworkConfigResolver returns a
+    // wrapper that proxies write ops over the Unix socket while keeping read
+    // ops (preview / file path / validate) local — controllers stay unchanged.
+    builder.Services.AddSingleton<IDaemonClient, DaemonClient>();
+    builder.Services.AddScoped<IStaticRouteApplicator, DaemonStaticRouteApplicator>();
+    builder.Services.AddSingleton<INetworkConfigResolver>(sp =>
+        new DaemonResolverDecorator(sp.GetRequiredService<NetworkConfigResolver>(), sp));
+}
+else
+{
+    // Legacy path — Web shells out directly. Useful for local-only debugging.
+    builder.Services.AddSingleton<INetworkConfigResolver>(sp => sp.GetRequiredService<NetworkConfigResolver>());
+    builder.Services.AddScoped<IStaticRouteApplicator, StaticRouteApplicator>();
+}
 
 // ----- Auth services (rule #8: every process is DI-registered) -----
 builder.Services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
@@ -86,6 +113,11 @@ builder.Services.AddScoped<ISessionCookieIssuer, SessionCookieIssuer>();
 // Bootstrap: holds the one-time admin-creation token; issuer is a hosted service.
 builder.Services.AddSingleton<IBootstrapTokenStore, BootstrapTokenStore>();
 builder.Services.AddHostedService<BootstrapTokenIssuer>();
+
+// Setup wizard + dependency (IDhcpSubnetService — needed by the wizard's
+// ApplyLanConfigAsync, otherwise unused in the Web today).
+builder.Services.AddSingleton<NetFirewall.Services.Dhcp.IDhcpSubnetService, NetFirewall.Services.Dhcp.DhcpSubnetService>();
+builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFirewall.Services.Setup.SetupWizardService>();
 
 // Runtime metadata for the login system-info card.
 builder.Services.AddSingleton<IAppInfoService, AppInfoService>();

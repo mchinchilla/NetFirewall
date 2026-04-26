@@ -1,0 +1,166 @@
+@model NetFirewall.Web.Models.Setup.WizardPageViewModel
+
+@{
+    var roles = Model.Step1.Interfaces.Where(i => i.Role != "disabled").ToList();
+}
+
+<header class="mb-5">
+    <h2 class="text-lg font-semibold">Step 5 — Review &amp; apply</h2>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        Final preview. Apply writes to <code class="text-[11px] px-1 rounded" style="background-color: var(--surface-muted);">fw_interfaces</code>,
+        <code class="text-[11px] px-1 rounded" style="background-color: var(--surface-muted);">dhcp_subnets</code>,
+        <code class="text-[11px] px-1 rounded" style="background-color: var(--surface-muted);">fw_filter_rules</code>, etc.
+        Networking is NOT restarted automatically — you'll get a button after apply.
+    </p>
+</header>
+
+<div class="space-y-5">
+    @* ----- Interfaces ----- *@
+    <section>
+        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">Interfaces</h3>
+        @if (roles.Count == 0)
+        {
+            <p class="text-sm" style="color: var(--surface-fg-muted);">All interfaces disabled — nothing to apply.</p>
+        }
+        else
+        {
+            <ul class="text-sm space-y-1">
+                @foreach (var i in roles)
+                {
+                    <li class="flex items-center gap-2">
+                        <span class="font-mono text-xs">@i.Name</span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
+                              style="background-color: var(--accent-soft); color: var(--accent);">@i.Role</span>
+                        @if (!string.IsNullOrEmpty(i.IpAddress))
+                        {
+                            <span class="text-xs font-mono" style="color: var(--surface-fg-muted);">@i.IpAddress</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    @* ----- LANs / DHCP ----- *@
+    @if (Model.Step2.Lans.Any(l => l.EnableDhcp))
+    {
+        <section>
+            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">DHCP scopes</h3>
+            <ul class="text-sm space-y-1">
+                @foreach (var l in Model.Step2.Lans.Where(l => l.EnableDhcp))
+                {
+                    <li class="font-mono text-xs">
+                        @l.InterfaceName · @l.NetworkCidr · range @l.DhcpRangeStart–@l.DhcpRangeEnd
+                        <span style="color: var(--surface-fg-muted);"> · @(l.DomainName ?? "(no domain)") · @(l.LeaseTime / 3600)h</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @* ----- Firewall ----- *@
+    <section>
+        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">Firewall</h3>
+        <p class="text-sm" style="color: var(--surface-fg-muted);">
+            @{
+                var on = new List<string>();
+                if (Model.Step3.EnableNat)            on.Add("NAT");
+                if (Model.Step3.ForwardLanToWan)      on.Add("LAN→WAN forward");
+                if (Model.Step3.AllowSsh)             on.Add("SSH");
+                if (Model.Step3.AllowIcmp)            on.Add("ICMP");
+                if (Model.Step3.AllowDhcp)            on.Add("DHCP");
+                if (Model.Step3.AllowDns)             on.Add("DNS");
+                if (Model.Step3.AllowWebInterface)    on.Add($"Web on :{Model.Step3.WebInterfacePort}");
+                if (Model.Step3.BlockInvalidPackets)  on.Add("drop invalid");
+            }
+            @(on.Count == 0 ? "(no rules selected)" : string.Join(" · ", on))
+        </p>
+    </section>
+
+    @* ----- Services ----- *@
+    @if (Model.Step4.EnableDnsForwarder || Model.Step4.EnableWireGuard || Model.Step4.EnableQos)
+    {
+        <section>
+            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">Optional services</h3>
+            <ul class="text-sm space-y-1" style="color: var(--surface-fg-muted);">
+                @if (Model.Step4.EnableDnsForwarder)
+                {
+                    <li>DNS forwarder → @Model.Step4.UpstreamDns1@(string.IsNullOrEmpty(Model.Step4.UpstreamDns2) ? "" : $", {Model.Step4.UpstreamDns2}")</li>
+                }
+                @if (Model.Step4.EnableWireGuard)
+                {
+                    <li>WireGuard @Model.Step4.WireGuardSubnet on UDP/@Model.Step4.WireGuardPort</li>
+                }
+                @if (Model.Step4.EnableQos)
+                {
+                    <li>QoS down @Model.Step4.DownloadBandwidthMbps Mbps · up @Model.Step4.UploadBandwidthMbps Mbps</li>
+                }
+            </ul>
+        </section>
+    }
+</div>
+
+<div class="mt-6 pt-4 border-t flex items-center justify-between gap-2"
+     style="border-color: var(--surface-border);">
+    <form method="post" action="/setup/wizard/back/5" class="inline">
+        @Html.AntiForgeryToken()
+        <button type="submit" class="btn btn-ghost">← Back</button>
+    </form>
+
+    <div class="flex items-center gap-2"
+         x-data="{ applied: false }"
+         @@elevationGranted.window="applied || htmx.trigger($refs.applyBtn, 'doApply')">
+        <button type="button" class="btn btn-ghost text-xs"
+                hx-post="/setup/wizard/reset"
+                hx-trigger="confirmed-reset"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Reset wizard?',
+                        message: 'Clears every step and starts over. Already-applied data stays in fw_interfaces / dhcp_subnets — only the wizard state is wiped.',
+                        confirmLabel: 'Reset',
+                        level: 'warning'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed-reset');
+                })()">Reset wizard</button>
+
+        <button type="button" class="btn btn-primary"
+                x-ref="applyBtn"
+                hx-post="/setup/wizard/complete"
+                hx-trigger="confirmed-apply, doApply"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Apply setup?',
+                        message: 'Writes interfaces, DHCP scopes, firewall rules and optional services to the database. You can edit any of these afterwards from their dedicated pages.',
+                        confirmLabel: 'Apply now',
+                        level: 'warning'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed-apply');
+                })()">
+            Apply setup
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+        </button>
+    </div>
+</div>
+
+@if (Model.IsCompleted)
+{
+    <div class="mt-5 rounded-md border-l-2 px-3 py-3 text-sm flex items-start justify-between gap-3"
+         style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg); border-color: var(--feedback-success-bd);">
+        <div>
+            <p class="font-semibold">Setup applied.</p>
+            <p class="text-xs mt-0.5">Networking has not been restarted yet. Apply and reach out via the new IP after restart.</p>
+        </div>
+        <button type="button" class="btn btn-primary text-xs"
+                hx-post="/setup/wizard/restart-networking"
+                hx-trigger="confirmed-restart"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Restart networking?',
+                        message: 'Networking will be restarted. If your management session uses one of the configured interfaces, you may lose connectivity until DHCP re-leases.',
+                        confirmLabel: 'Restart now',
+                        level: 'danger'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed-restart');
+                })()">Restart networking</button>
+    </div>
+}

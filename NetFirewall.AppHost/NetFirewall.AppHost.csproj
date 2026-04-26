@@ -15,6 +15,7 @@
     <ProjectReference Include="..\NetFirewall.ApiService\NetFirewall.ApiService.csproj" />
     <ProjectReference Include="..\NetFirewall.DhcpServer\NetFirewall.DhcpServer.csproj" />
     <ProjectReference Include="..\NetFirewall.Web\NetFirewall.Web.csproj" />
+    <ProjectReference Include="..\NetFirewall.Daemon\NetFirewall.Daemon.csproj" />
   </ItemGroup>
 
   <ItemGroup>

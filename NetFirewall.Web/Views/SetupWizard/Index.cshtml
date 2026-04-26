@@ -1,0 +1,25 @@
+@model NetFirewall.Web.Models.Setup.WizardPageViewModel
+@{
+    ViewData["Title"] = "Setup wizard";
+}
+
+<div class="mb-6" style="animation: var(--animate-slide-up);">
+    <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">First-run setup</p>
+    <h1 class="text-2xl font-semibold tracking-tight">NetFirewall setup wizard</h1>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        Five guided steps. Your progress saves after each step — close the tab and resume later.
+    </p>
+</div>
+
+@await Html.PartialAsync("_Stepper", Model.CurrentStep)
+
+<section class="card max-w-4xl" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    @switch (Model.CurrentStep)
+    {
+        case 1: @await Html.PartialAsync("_Step1Network", Model.Step1); break;
+        case 2: @await Html.PartialAsync("_Step2Lan", Model.Step2); break;
+        case 3: @await Html.PartialAsync("_Step3Firewall", Model.Step3); break;
+        case 4: @await Html.PartialAsync("_Step4Services", Model.Step4); break;
+        case 5: @await Html.PartialAsync("_Step5Review", Model); break;
+    }
+</section>

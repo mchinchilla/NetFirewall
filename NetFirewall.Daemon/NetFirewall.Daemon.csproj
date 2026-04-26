@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AssemblyName>netfirewall-daemon</AssemblyName>
+        <RootNamespace>NetFirewall.Daemon</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+        <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
+        <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+        <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+        <PackageReference Include="Npgsql" Version="10.0.2" />
+        <PackageReference Include="RepoDb.PostgreSql" Version="1.13.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\NetFirewall.ServiceDefaults\NetFirewall.ServiceDefaults.csproj" />
+        <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
+        <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
+    </ItemGroup>
+
+</Project>

@@ -65,6 +65,33 @@ window.NetFw.hydrateBeforePaint = async function () {
 };
 
 /**
+ * Pad a number with a leading zero. Tiny helper used by the runtime tickers.
+ */
+window.NetFw._pad2 = (n) => String(n).padStart(2, "0");
+
+/**
+ * Format a millisecond duration as `Nd HH:MM:SS` (or `HH:MM:SS` for under a day).
+ */
+window.NetFw.formatUptime = function (ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    const p = window.NetFw._pad2;
+    return d > 0 ? `${d}d ${p(h)}:${p(m)}:${p(sec)}` : `${p(h)}:${p(m)}:${p(sec)}`;
+};
+
+/**
+ * Format a Date as `YYYY-MM-DD HH:MM:SS` in the browser's local timezone.
+ */
+window.NetFw.formatLocalDateTime = function (date) {
+    const p = window.NetFw._pad2;
+    return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ` +
+           `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
+};
+
+/**
  * Trigger a browser download of the user's TOTP recovery codes as a .txt file.
  * Called from the enrollment view + Account/Security after regeneration.
  */
@@ -225,6 +252,28 @@ window.NetFw.charts = {
 
 /* ---------- Alpine wiring ---------- */
 document.addEventListener("alpine:init", () => {
+
+    /* ---------- runtimeMetrics ---------- live clock + uptime for system-info card.
+     * Pass the server's startedAt (epoch ms) as a constructor arg:
+     *   <div x-data="runtimeMetrics(@startedAtMs)" ...>
+     * Exposes:
+     *   x-text="clock"    -- "YYYY-MM-DD HH:MM:SS" (browser local TZ)
+     *   x-text="uptime"   -- "Nd HH:MM:SS" or "HH:MM:SS"
+     */
+    Alpine.data("runtimeMetrics", (startedAtMs) => ({
+        startedAtMs: Number(startedAtMs) || Date.now(),
+        nowMs: Date.now(),
+        _timer: null,
+        init() {
+            this._timer = window.setInterval(() => { this.nowMs = Date.now(); }, 1000);
+        },
+        destroy() {
+            if (this._timer) window.clearInterval(this._timer);
+        },
+        get clock()  { return window.NetFw.formatLocalDateTime(new Date(this.nowMs)); },
+        get uptime() { return window.NetFw.formatUptime(this.nowMs - this.startedAtMs); }
+    }));
+
     Alpine.store("ui", {
         ...DEFAULT_STATE,
         palettes: PALETTES,

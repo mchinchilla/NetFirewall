@@ -57,6 +57,25 @@ public interface ISetupWizardService
     /// Reset the wizard to start fresh.
     /// </summary>
     Task ResetWizardAsync(CancellationToken ct = default);
+
+    // ------------------------------------------------------------------
+    // Typed step accessors. Controllers call these instead of touching
+    // the JSON columns directly (project rule #10 — no SQL/parsing in
+    // controllers). Returns null when the step has not been saved yet.
+    // ------------------------------------------------------------------
+
+    Task<List<WizardInterfaceConfig>?> GetStep1InterfacesAsync(CancellationToken ct = default);
+    Task<List<WizardLanConfig>?>       GetStep2LanAsync(CancellationToken ct = default);
+    Task<WizardFirewallConfig?>        GetStep3FirewallAsync(CancellationToken ct = default);
+    Task<WizardServicesConfig?>        GetStep4ServicesAsync(CancellationToken ct = default);
+
+    Task SaveStep1InterfacesAsync(List<WizardInterfaceConfig> configs, CancellationToken ct = default);
+    Task SaveStep2LanAsync(List<WizardLanConfig> configs, CancellationToken ct = default);
+    Task SaveStep3FirewallAsync(WizardFirewallConfig config, CancellationToken ct = default);
+    Task SaveStep4ServicesAsync(WizardServicesConfig config, CancellationToken ct = default);
+
+    /// <summary>Advance the saved current_step pointer (1-5; 5 = complete summary).</summary>
+    Task SetCurrentStepAsync(int step, CancellationToken ct = default);
 }
 
 /// <summary>

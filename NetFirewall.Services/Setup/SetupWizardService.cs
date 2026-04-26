@@ -593,4 +593,77 @@ public class SetupWizardService : ISetupWizardService
 
         _logger.LogInformation("Setup wizard reset");
     }
+
+    // ------------------------------------------------------------------
+    // Typed step accessors. Wrap the JSON columns so callers (controllers,
+    // background jobs) never deal with serialization themselves.
+    // ------------------------------------------------------------------
+
+    public async Task<List<WizardInterfaceConfig>?> GetStep1InterfacesAsync(CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        return Deserialize<List<WizardInterfaceConfig>>(state.InterfacesConfigJson);
+    }
+
+    public async Task<List<WizardLanConfig>?> GetStep2LanAsync(CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        return Deserialize<List<WizardLanConfig>>(state.LanConfigJson);
+    }
+
+    public async Task<WizardFirewallConfig?> GetStep3FirewallAsync(CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        return Deserialize<WizardFirewallConfig>(state.FirewallConfigJson);
+    }
+
+    public async Task<WizardServicesConfig?> GetStep4ServicesAsync(CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        return Deserialize<WizardServicesConfig>(state.ServicesConfigJson);
+    }
+
+    public async Task SaveStep1InterfacesAsync(List<WizardInterfaceConfig> configs, CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        state.InterfacesConfigJson = JsonSerializer.Serialize(configs, JsonOptions);
+        if (state.CurrentStep < 2) state.CurrentStep = 2;
+        await UpdateWizardStateAsync(state, ct);
+    }
+
+    public async Task SaveStep2LanAsync(List<WizardLanConfig> configs, CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        state.LanConfigJson = JsonSerializer.Serialize(configs, JsonOptions);
+        if (state.CurrentStep < 3) state.CurrentStep = 3;
+        await UpdateWizardStateAsync(state, ct);
+    }
+
+    public async Task SaveStep3FirewallAsync(WizardFirewallConfig config, CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        state.FirewallConfigJson = JsonSerializer.Serialize(config, JsonOptions);
+        if (state.CurrentStep < 4) state.CurrentStep = 4;
+        await UpdateWizardStateAsync(state, ct);
+    }
+
+    public async Task SaveStep4ServicesAsync(WizardServicesConfig config, CancellationToken ct = default)
+    {
+        var state = await GetOrCreateWizardStateAsync(ct);
+        state.ServicesConfigJson = JsonSerializer.Serialize(config, JsonOptions);
+        if (state.CurrentStep < 5) state.CurrentStep = 5;
+        await UpdateWizardStateAsync(state, ct);
+    }
+
+    public async Task SetCurrentStepAsync(int step, CancellationToken ct = default)
+    {
+        if (step < 1 || step > 5) throw new ArgumentOutOfRangeException(nameof(step));
+        var state = await GetOrCreateWizardStateAsync(ct);
+        if (state.CurrentStep == step) return;
+        state.CurrentStep = step;
+        await UpdateWizardStateAsync(state, ct);
+    }
+
+    private static T? Deserialize<T>(string? json) where T : class
+        => string.IsNullOrEmpty(json) ? null : JsonSerializer.Deserialize<T>(json, JsonOptions);
 }
