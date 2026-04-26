@@ -1,0 +1,35 @@
+@model NetFirewall.Web.Models.Dhcp.ExclusionFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="exclusion-form"
+      hx-post="/Dhcp/Subnets/@Model.SubnetId/Exclusions/save"
+      hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="SubnetId" value="@Model.SubnetId" />
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.IpStart), Label = "Start IP", Required = true, Value = Model.IpStart,
+                Placeholder = "192.168.10.5"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.IpEnd), Label = "End IP (optional)", Value = Model.IpEnd,
+                Placeholder = "192.168.10.9",
+                Help = "Leave empty for a single-IP exclusion."
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Reason), Label = "Reason", Kind = FormFieldKind.Textarea, Value = Model.Reason,
+            Placeholder = "core switch · static gateway · …"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create exclusion")</button>
+    </div>
+</form>

@@ -1,0 +1,65 @@
+@model NetFirewall.Web.Models.Dhcp.ClassFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="class-form" hx-post="/Dhcp/Classes/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Class name", Required = true, Value = Model.Name,
+            Placeholder = "PXE-UEFI-x64"
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.MatchType), Label = "Match type", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.MatchType,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("vendor_class",  "Vendor class (option 60)"),
+                    new FormFieldViewModel.SelectOption("user_class",    "User class (option 77)"),
+                    new FormFieldViewModel.SelectOption("mac_prefix",    "MAC prefix"),
+                    new FormFieldViewModel.SelectOption("hardware_type", "Hardware type"),
+                    new FormFieldViewModel.SelectOption("client_id",     "Client ID (option 61)"),
+                    new FormFieldViewModel.SelectOption("hostname",      "Hostname (option 12)"),
+                    new FormFieldViewModel.SelectOption("relay_agent",   "Relay agent info (option 82)"),
+                    new FormFieldViewModel.SelectOption("option",        "Generic option")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.MatchValue), Label = "Match value", Required = true, Value = Model.MatchValue,
+                Placeholder = "PXEClient:Arch:00007",
+                Help = "Substring match against the option / prefix."
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.NextServer), Label = "Next-server (TFTP)", Value = Model.NextServer,
+                Placeholder = "192.168.10.5"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.BootFilename), Label = "Boot filename", Value = Model.BootFilename,
+                Placeholder = "ipxe.efi"
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.Priority.ToString(), Min = "0", Max = "1000",
+                Help = "Lower = checked first."
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+                Value = Model.Enabled ? "true" : "false"
+            })
+        </div>
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create class")</button>
+    </div>
+</form>

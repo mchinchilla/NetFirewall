@@ -1,0 +1,32 @@
+@{
+    ViewData["Title"] = "DHCP — Classes";
+    Layout = "_Layout";
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">DHCP</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Client classes</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Classify clients by vendor / user / MAC prefix / option to override TFTP server, boot file, and pool eligibility.
+            Classic use case: PXE booting different architectures (BIOS vs UEFI).
+        </p>
+    </div>
+    <button type="button" class="btn btn-primary"
+            hx-get="/Dhcp/Classes/edit"
+            hx-target="#drawer-body" hx-swap="innerHTML"
+            @@click="$store.drawer.openRaw('Add class')">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        Add class
+    </button>
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <div id="classes-table"
+         hx-get="/Dhcp/Classes/table"
+         hx-trigger="load, refreshClasses from:body"
+         hx-swap="innerHTML">
+        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+    </div>
+</section>

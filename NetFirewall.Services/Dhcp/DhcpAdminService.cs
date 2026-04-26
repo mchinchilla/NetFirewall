@@ -982,4 +982,171 @@ public sealed class DhcpAdminService : IDhcpAdminService
     }
 
     #endregion
+
+    // =====================================================================
+    //  Fetch-by-id helpers + Failover peer CRUD added when the Web admin
+    //  pages were built. Same NpgsqlCommand + parameterised SQL pattern.
+    // =====================================================================
+
+    public async Task<DhcpExclusion?> GetExclusionByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("SELECT * FROM dhcp_exclusions WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        return new DhcpExclusion
+        {
+            Id = reader.GetGuid(reader.GetOrdinal("id")),
+            SubnetId = reader.GetGuid(reader.GetOrdinal("subnet_id")),
+            IpStart = reader.GetFieldValue<IPAddress>(reader.GetOrdinal("ip_start")),
+            IpEnd = reader.IsDBNull(reader.GetOrdinal("ip_end")) ? null : reader.GetFieldValue<IPAddress>(reader.GetOrdinal("ip_end")),
+            Reason = reader.IsDBNull(reader.GetOrdinal("reason")) ? null : reader.GetString(reader.GetOrdinal("reason")),
+            CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
+        };
+    }
+
+    public async Task<DdnsConfig?> GetDdnsConfigByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("SELECT * FROM dhcp_ddns_config WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        return ReadDdnsRow(reader);
+    }
+
+    private static DdnsConfig ReadDdnsRow(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(r.GetOrdinal("id")),
+        SubnetId = r.IsDBNull(r.GetOrdinal("subnet_id")) ? null : r.GetGuid(r.GetOrdinal("subnet_id")),
+        EnableForward = r.GetBoolean(r.GetOrdinal("enable_forward")),
+        EnableReverse = r.GetBoolean(r.GetOrdinal("enable_reverse")),
+        ForwardZone = r.IsDBNull(r.GetOrdinal("forward_zone")) ? null : r.GetString(r.GetOrdinal("forward_zone")),
+        ReverseZone = r.IsDBNull(r.GetOrdinal("reverse_zone")) ? null : r.GetString(r.GetOrdinal("reverse_zone")),
+        DnsServer = r.GetFieldValue<IPAddress>(r.GetOrdinal("dns_server")),
+        DnsPort = r.GetInt32(r.GetOrdinal("dns_port")),
+        TsigKeyName = r.IsDBNull(r.GetOrdinal("tsig_key_name")) ? null : r.GetString(r.GetOrdinal("tsig_key_name")),
+        TsigKeySecret = r.IsDBNull(r.GetOrdinal("tsig_key_secret")) ? null : r.GetString(r.GetOrdinal("tsig_key_secret")),
+        TsigAlgorithm = r.GetString(r.GetOrdinal("tsig_algorithm")),
+        Ttl = r.GetInt32(r.GetOrdinal("ttl")),
+        UpdateStyle = r.GetString(r.GetOrdinal("update_style")),
+        OverrideClientUpdate = r.GetBoolean(r.GetOrdinal("override_client_update")),
+        AllowClientUpdates = r.GetBoolean(r.GetOrdinal("allow_client_updates")),
+        ConflictResolution = r.GetString(r.GetOrdinal("conflict_resolution")),
+        Enabled = r.GetBoolean(r.GetOrdinal("enabled")),
+        CreatedAt = r.GetDateTime(r.GetOrdinal("created_at")),
+        UpdatedAt = r.GetDateTime(r.GetOrdinal("updated_at"))
+    };
+
+    // ---------- failover peers ----------
+
+    public async Task<IReadOnlyList<FailoverPeer>> GetFailoverPeersAsync(CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("SELECT * FROM dhcp_failover_peers ORDER BY name", conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var list = new List<FailoverPeer>();
+        while (await reader.ReadAsync(ct)) list.Add(ReadFailoverPeer(reader));
+        return list;
+    }
+
+    public async Task<FailoverPeer?> GetFailoverPeerByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("SELECT * FROM dhcp_failover_peers WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadFailoverPeer(reader) : null;
+    }
+
+    public async Task<FailoverPeer> CreateFailoverPeerAsync(FailoverPeer p, CancellationToken ct = default)
+    {
+        if (p.Id == Guid.Empty) p.Id = Guid.NewGuid();
+        if (p.CreatedAt == default) p.CreatedAt = DateTime.UtcNow;
+
+        const string sql = @"
+            INSERT INTO dhcp_failover_peers
+                (id, name, role, peer_address, peer_port, local_address, local_port,
+                 max_response_delay, max_unacked_updates, mclt, split, load_balance_max,
+                 auto_partner_down, shared_secret, enabled, created_at)
+            VALUES
+                (@id, @name, @role, @peer_addr, @peer_port, @local_addr, @local_port,
+                 @max_resp, @max_unacked, @mclt, @split, @lb_max,
+                 @auto_pd, @secret, @enabled, @created)";
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        BindFailoverPeer(cmd, p);
+        await cmd.ExecuteNonQueryAsync(ct);
+        return p;
+    }
+
+    public async Task<FailoverPeer> UpdateFailoverPeerAsync(FailoverPeer p, CancellationToken ct = default)
+    {
+        const string sql = @"
+            UPDATE dhcp_failover_peers SET
+                name = @name, role = @role,
+                peer_address = @peer_addr, peer_port = @peer_port,
+                local_address = @local_addr, local_port = @local_port,
+                max_response_delay = @max_resp, max_unacked_updates = @max_unacked,
+                mclt = @mclt, split = @split, load_balance_max = @lb_max,
+                auto_partner_down = @auto_pd, shared_secret = @secret, enabled = @enabled
+            WHERE id = @id";
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        BindFailoverPeer(cmd, p);
+        await cmd.ExecuteNonQueryAsync(ct);
+        return p;
+    }
+
+    public async Task<bool> DeleteFailoverPeerAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("DELETE FROM dhcp_failover_peers WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    private static void BindFailoverPeer(NpgsqlCommand cmd, FailoverPeer p)
+    {
+        cmd.Parameters.AddWithValue("id",          p.Id);
+        cmd.Parameters.AddWithValue("name",        p.Name);
+        cmd.Parameters.AddWithValue("role",        p.Role);
+        cmd.Parameters.AddWithValue("peer_addr",   p.PeerAddress);
+        cmd.Parameters.AddWithValue("peer_port",   p.PeerPort);
+        var pl = cmd.Parameters.Add("local_addr", NpgsqlTypes.NpgsqlDbType.Inet);
+        pl.Value = (object?)p.LocalAddress ?? DBNull.Value;
+        cmd.Parameters.AddWithValue("local_port",  p.LocalPort);
+        cmd.Parameters.AddWithValue("max_resp",    p.MaxResponseDelay);
+        cmd.Parameters.AddWithValue("max_unacked", p.MaxUnackedUpdates);
+        cmd.Parameters.AddWithValue("mclt",        p.Mclt);
+        cmd.Parameters.AddWithValue("split",       p.Split);
+        cmd.Parameters.AddWithValue("lb_max",      p.LoadBalanceMax);
+        cmd.Parameters.AddWithValue("auto_pd",     p.AutoPartnerDown);
+        cmd.Parameters.AddWithValue("secret",      (object?)p.SharedSecret ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("enabled",     p.Enabled);
+        cmd.Parameters.AddWithValue("created",     p.CreatedAt);
+    }
+
+    private static FailoverPeer ReadFailoverPeer(NpgsqlDataReader r) => new()
+    {
+        Id              = r.GetGuid(r.GetOrdinal("id")),
+        Name            = r.GetString(r.GetOrdinal("name")),
+        Role            = r.GetString(r.GetOrdinal("role")),
+        PeerAddress     = r.GetFieldValue<IPAddress>(r.GetOrdinal("peer_address")),
+        PeerPort        = r.GetInt32(r.GetOrdinal("peer_port")),
+        LocalAddress    = r.IsDBNull(r.GetOrdinal("local_address")) ? null : r.GetFieldValue<IPAddress>(r.GetOrdinal("local_address")),
+        LocalPort       = r.GetInt32(r.GetOrdinal("local_port")),
+        MaxResponseDelay = r.GetInt32(r.GetOrdinal("max_response_delay")),
+        MaxUnackedUpdates = r.GetInt32(r.GetOrdinal("max_unacked_updates")),
+        Mclt            = r.GetInt32(r.GetOrdinal("mclt")),
+        Split           = r.GetInt32(r.GetOrdinal("split")),
+        LoadBalanceMax  = r.GetInt32(r.GetOrdinal("load_balance_max")),
+        AutoPartnerDown = r.GetInt32(r.GetOrdinal("auto_partner_down")),
+        SharedSecret    = r.IsDBNull(r.GetOrdinal("shared_secret")) ? null : r.GetString(r.GetOrdinal("shared_secret")),
+        Enabled         = r.GetBoolean(r.GetOrdinal("enabled")),
+        CreatedAt       = r.GetDateTime(r.GetOrdinal("created_at"))
+    };
 }

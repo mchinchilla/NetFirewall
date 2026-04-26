@@ -1,0 +1,134 @@
+@model NetFirewall.Web.Models.Dhcp.DdnsFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var subnets = (IReadOnlyList<NetFirewall.Models.Dhcp.DhcpSubnet>)(ViewBag.Subnets ?? Array.Empty<NetFirewall.Models.Dhcp.DhcpSubnet>());
+    var scopeOptions = new List<FormFieldViewModel.SelectOption> { new("", "Global (default for all subnets)") };
+    foreach (var s in subnets)
+        scopeOptions.Add(new(s.Id.ToString(), $"{s.Name} — {s.Network}", s.Id == Model.SubnetId));
+}
+
+<form id="ddns-form" hx-post="/Dhcp/Ddns/save" hx-target="this" hx-swap="outerHTML"
+      x-data="{ showAdvanced: false }">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.SubnetId), Label = "Scope", Kind = FormFieldKind.Select,
+            Value = Model.SubnetId?.ToString(), Options = scopeOptions,
+            Help = "Global covers every subnet. Per-subnet overrides win when present."
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DnsServer), Label = "DNS server", Required = true, Value = Model.DnsServer,
+                Placeholder = "10.0.0.53"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DnsPort), Label = "Port", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.DnsPort.ToString(), Min = "1", Max = "65535"
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.ForwardZone), Label = "Forward zone (A/AAAA)", Value = Model.ForwardZone,
+                Placeholder = "lan.example.com"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.ReverseZone), Label = "Reverse zone (PTR)", Value = Model.ReverseZone,
+                Placeholder = "(auto)",
+                Help = "Auto-generated from the subnet network if blank."
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.EnableForward), Label = "Enable forward updates", Kind = FormFieldKind.Checkbox,
+                Value = Model.EnableForward ? "true" : "false"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.EnableReverse), Label = "Enable reverse updates", Kind = FormFieldKind.Checkbox,
+                Value = Model.EnableReverse ? "true" : "false"
+            })
+        </div>
+
+        <div class="rounded-lg border p-4" style="border-color: var(--surface-border);">
+            <h3 class="text-xs uppercase tracking-wider font-semibold mb-3" style="color: var(--surface-fg-muted);">TSIG signing</h3>
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.TsigKeyName), Label = "TSIG key name", Value = Model.TsigKeyName,
+                    Placeholder = "dhcp-key"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.TsigAlgorithm), Label = "TSIG algorithm", Kind = FormFieldKind.Select,
+                    Value = Model.TsigAlgorithm,
+                    Options = new[] {
+                        new FormFieldViewModel.SelectOption("hmac-sha256", "hmac-sha256 (default)"),
+                        new FormFieldViewModel.SelectOption("hmac-sha512", "hmac-sha512"),
+                        new FormFieldViewModel.SelectOption("hmac-sha1",   "hmac-sha1"),
+                        new FormFieldViewModel.SelectOption("hmac-md5.sig-alg.reg.int", "hmac-md5 (legacy)")
+                    }
+                })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.TsigKeySecret), Label = "TSIG key secret (Base64)", Kind = FormFieldKind.Password,
+                WithPasswordToggle = true, Value = Model.TsigKeySecret,
+                Help = "Generate with <code>tsig-keygen -a hmac-sha256 dhcp-key</code>."
+            })
+        </div>
+
+        <button type="button" class="text-xs font-medium hover:underline"
+                style="color: var(--accent);"
+                @@click="showAdvanced = !showAdvanced">
+            <span x-show="!showAdvanced">Show advanced (TTL, conflict resolution, client updates)</span>
+            <span x-show="showAdvanced">Hide advanced</span>
+        </button>
+
+        <div x-show="showAdvanced" x-transition class="space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.Ttl), Label = "Record TTL (s)", Kind = FormFieldKind.Number, Required = true,
+                    Value = Model.Ttl.ToString(), Min = "30", Max = "86400"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.UpdateStyle), Label = "Update style", Kind = FormFieldKind.Select,
+                    Value = Model.UpdateStyle,
+                    Options = new[] {
+                        new FormFieldViewModel.SelectOption("standard", "standard (hostname + domain)"),
+                        new FormFieldViewModel.SelectOption("interim",  "interim (FQDN option 81)"),
+                        new FormFieldViewModel.SelectOption("none",     "none")
+                    }
+                })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.ConflictResolution), Label = "Conflict resolution", Kind = FormFieldKind.Select,
+                Value = Model.ConflictResolution,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("check-with-dhcid",  "DHCID-verified (RFC 4703)"),
+                    new FormFieldViewModel.SelectOption("no-check",          "Don't check (clobber)"),
+                    new FormFieldViewModel.SelectOption("fail-on-conflict",  "Fail on conflict")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.OverrideClientUpdate), Label = "Override client-supplied FQDN",
+                Kind = FormFieldKind.Checkbox, Value = Model.OverrideClientUpdate ? "true" : "false"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.AllowClientUpdates), Label = "Let clients update their own A record (server only does PTR)",
+                Kind = FormFieldKind.Checkbox, Value = Model.AllowClientUpdates ? "true" : "false"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create config")</button>
+    </div>
+</form>

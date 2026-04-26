@@ -44,9 +44,17 @@ public interface IDhcpAdminService
 
     // Exclusion operations
     Task<IReadOnlyList<DhcpExclusion>> GetExclusionsAsync(Guid? subnetId = null, CancellationToken ct = default);
+    Task<DhcpExclusion?> GetExclusionByIdAsync(Guid id, CancellationToken ct = default);
     Task<DhcpExclusion> CreateExclusionAsync(DhcpExclusion exclusion, CancellationToken ct = default);
     Task<DhcpExclusion> UpdateExclusionAsync(DhcpExclusion exclusion, CancellationToken ct = default);
     Task<bool> DeleteExclusionAsync(Guid id, CancellationToken ct = default);
+
+    // Failover peer config (persistent — runtime state lives in IFailoverService)
+    Task<IReadOnlyList<FailoverPeer>> GetFailoverPeersAsync(CancellationToken ct = default);
+    Task<FailoverPeer?> GetFailoverPeerByIdAsync(Guid id, CancellationToken ct = default);
+    Task<FailoverPeer> CreateFailoverPeerAsync(FailoverPeer peer, CancellationToken ct = default);
+    Task<FailoverPeer> UpdateFailoverPeerAsync(FailoverPeer peer, CancellationToken ct = default);
+    Task<bool> DeleteFailoverPeerAsync(Guid id, CancellationToken ct = default);
 
     // Statistics
     Task<DhcpStats> GetStatsAsync(CancellationToken ct = default);
@@ -56,6 +64,7 @@ public interface IDhcpAdminService
 
     // DDNS Config
     Task<IReadOnlyList<DdnsConfig>> GetDdnsConfigsAsync(CancellationToken ct = default);
+    Task<DdnsConfig?> GetDdnsConfigByIdAsync(Guid id, CancellationToken ct = default);
     Task<DdnsConfig> CreateDdnsConfigAsync(DdnsConfig config, CancellationToken ct = default);
     Task<DdnsConfig> UpdateDdnsConfigAsync(DdnsConfig config, CancellationToken ct = default);
     Task<bool> DeleteDdnsConfigAsync(Guid id, CancellationToken ct = default);

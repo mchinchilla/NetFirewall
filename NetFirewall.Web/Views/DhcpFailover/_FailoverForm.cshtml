@@ -1,0 +1,108 @@
+@model NetFirewall.Web.Models.Dhcp.FailoverPeerFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="failover-form" hx-post="/Dhcp/Failover/save" hx-target="this" hx-swap="outerHTML"
+      x-data="{ showAdvanced: false }">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Relationship name", Required = true, Value = Model.Name,
+            Placeholder = "ha-pair-1",
+            Help = "Same name on both peers."
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Role), Label = "This server's role", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.Role,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("primary",   "Primary"),
+                    new FormFieldViewModel.SelectOption("secondary", "Secondary")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Enabled), Label = "Enabled (start failover protocol)",
+                Kind = FormFieldKind.Checkbox, Value = Model.Enabled ? "true" : "false"
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.PeerAddress), Label = "Peer address", Required = true, Value = Model.PeerAddress,
+                Placeholder = "10.0.0.2"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.PeerPort), Label = "Peer port", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.PeerPort.ToString(), Min = "1", Max = "65535"
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.LocalAddress), Label = "Local bind address (optional)", Value = Model.LocalAddress,
+                Placeholder = "(auto)"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.LocalPort), Label = "Local port", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.LocalPort.ToString(), Min = "1", Max = "65535"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.SharedSecret), Label = "Shared secret (optional)", Kind = FormFieldKind.Password,
+            WithPasswordToggle = true, Value = Model.SharedSecret,
+            Help = "Authenticates failover messages between peers."
+        })
+
+        <button type="button" class="text-xs font-medium hover:underline"
+                style="color: var(--accent);"
+                @@click="showAdvanced = !showAdvanced">
+            <span x-show="!showAdvanced">Show advanced (timing, MCLT, split, load-balance)</span>
+            <span x-show="showAdvanced">Hide advanced</span>
+        </button>
+
+        <div x-show="showAdvanced" x-transition class="space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.Mclt), Label = "MCLT (s)", Kind = FormFieldKind.Number, Required = true,
+                    Value = Model.Mclt.ToString(), Min = "60", Max = "86400",
+                    Help = "Maximum Client Lead Time. 3600 (1h) is conservative."
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.Split), Label = "Address split (0-255)", Kind = FormFieldKind.Number, Required = true,
+                    Value = Model.Split.ToString(), Min = "0", Max = "255",
+                    Help = "Primary serves 0..split-1, secondary the rest. 128 = 50/50."
+                })
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.MaxResponseDelay), Label = "Max response delay (s)", Kind = FormFieldKind.Number,
+                    Value = Model.MaxResponseDelay.ToString(), Min = "5", Max = "600"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.MaxUnackedUpdates), Label = "Max unacked updates", Kind = FormFieldKind.Number,
+                    Value = Model.MaxUnackedUpdates.ToString(), Min = "1", Max = "1000"
+                })
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.LoadBalanceMax), Label = "Load-balance max (s)", Kind = FormFieldKind.Number,
+                    Value = Model.LoadBalanceMax.ToString(), Min = "0", Max = "60"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.AutoPartnerDown), Label = "Auto partner-down delay (s)", Kind = FormFieldKind.Number,
+                    Value = Model.AutoPartnerDown.ToString(), Min = "0", Max = "86400",
+                    Help = "0 = manual intervention required after partner failure."
+                })
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create peer")</button>
+    </div>
+</form>
