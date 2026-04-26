@@ -30,8 +30,8 @@ else
                                 <span class="relative flex h-2 w-2">
                                     @if (row.IsUp)
                                     {
-                                        <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style="background-color: var(--magic-mint-500);"></span>
-                                        <span class="relative inline-flex rounded-full h-2 w-2" style="background-color: var(--magic-mint-600);"></span>
+                                        <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style="background-color: var(--feedback-success-bd);"></span>
+                                        <span class="relative inline-flex rounded-full h-2 w-2" style="background-color: var(--feedback-success-bd);"></span>
                                     }
                                     else
                                     {
@@ -59,15 +59,15 @@ else
                             {
                                 case InterfaceRowStatus.Configured:
                                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                          style="background-color: var(--magic-mint-100); color: var(--magic-mint-900);">Configured</span>
+                                          style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Configured</span>
                                     break;
                                 case InterfaceRowStatus.Detected:
                                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                          style="background-color: var(--jordy-blue-100); color: var(--jordy-blue-900);">Detected</span>
+                                          style="background-color: var(--feedback-info-bg); color: var(--feedback-info-fg);">Detected</span>
                                     break;
                                 case InterfaceRowStatus.Missing:
                                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                          style="background-color: var(--taupe-gray-100); color: var(--taupe-gray-900);">Missing</span>
+                                          style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Missing</span>
                                     break;
                             }
                         </td>

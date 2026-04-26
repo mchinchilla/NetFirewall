@@ -81,6 +81,49 @@
  * at the darkest palette step (--xxx-1500 ≈ near-black). Borders use a
  * mid-light step softened with white so dividers don't shout. */
 
+/* =====================================================================
+ * FEEDBACK TOKENS — semantic hues for success / danger / warning / info.
+ * Theme-agnostic so error / confirmation states stay consistent across
+ * every palette. View code MUST reference these (or the Tailwind utilities
+ * below) instead of hard-coded hex literals / Tailwind palette names.
+ * ===================================================================== */
+:root {
+    --feedback-success-bg:  var(--magic-mint-100);
+    --feedback-success-fg:  var(--magic-mint-900);
+    --feedback-success-bd:  var(--magic-mint-600);
+
+    --feedback-danger-bg:   #fde2e2;
+    --feedback-danger-fg:   #8b1f1f;
+    --feedback-danger-bd:   #b94545;
+
+    --feedback-warning-bg:  var(--taupe-gray-100);
+    --feedback-warning-fg:  var(--taupe-gray-900);
+    --feedback-warning-bd:  var(--taupe-gray-600);
+
+    --feedback-info-bg:     var(--jordy-blue-100);
+    --feedback-info-fg:     var(--jordy-blue-900);
+    --feedback-info-bd:     var(--jordy-blue-500);
+
+    /* Solid button colors for destructive / warning actions. Foreground is
+     * always near-white because the bd color is dark enough for AA contrast. */
+    --feedback-danger-btn-bg:  #b94545;
+    --feedback-danger-btn-fg:  #ffffff;
+    --feedback-warning-btn-bg: var(--taupe-gray-700);
+    --feedback-warning-btn-fg: #ffffff;
+}
+
+/* Dark-mode overrides — keep the mood consistent with the surface. */
+[data-mode="dark"] {
+    --feedback-success-bg:  color-mix(in srgb, var(--magic-mint-1500) 65%, var(--magic-mint-900));
+    --feedback-success-fg:  var(--magic-mint-100);
+    --feedback-danger-bg:   #3b1414;
+    --feedback-danger-fg:   #f5b5b5;
+    --feedback-warning-bg:  color-mix(in srgb, var(--taupe-gray-1500) 65%, var(--taupe-gray-900));
+    --feedback-warning-fg:  var(--taupe-gray-100);
+    --feedback-info-bg:     color-mix(in srgb, var(--jordy-blue-1500) 65%, var(--jordy-blue-900));
+    --feedback-info-fg:     var(--jordy-blue-100);
+}
+
 :root,
 [data-theme="boulder"][data-mode="light"] {
     --surface-bg:        color-mix(in srgb, var(--boulder-50) 22%, #ffffff);
@@ -386,6 +429,19 @@
     --color-accent-fg:         var(--accent-fg);
     --color-accent-soft:       var(--accent-soft);
 
+    --color-feedback-success-bg: var(--feedback-success-bg);
+    --color-feedback-success-fg: var(--feedback-success-fg);
+    --color-feedback-success-bd: var(--feedback-success-bd);
+    --color-feedback-danger-bg:  var(--feedback-danger-bg);
+    --color-feedback-danger-fg:  var(--feedback-danger-fg);
+    --color-feedback-danger-bd:  var(--feedback-danger-bd);
+    --color-feedback-warning-bg: var(--feedback-warning-bg);
+    --color-feedback-warning-fg: var(--feedback-warning-fg);
+    --color-feedback-warning-bd: var(--feedback-warning-bd);
+    --color-feedback-info-bg:    var(--feedback-info-bg);
+    --color-feedback-info-fg:    var(--feedback-info-fg);
+    --color-feedback-info-bd:    var(--feedback-info-bd);
+
     --animate-blob:            blob 22s ease-in-out infinite;
     --animate-blob-slow:       blob 38s ease-in-out infinite reverse;
     --animate-fade-in:         fade-in 0.35s ease-out both;
@@ -501,6 +557,7 @@
         --tw-ring-color: var(--accent);
     }
     .input::placeholder { color: var(--surface-fg-muted); opacity: 0.7; }
+    .input-error { border-color: var(--feedback-danger-bd); }
 
     .kpi {
         @apply rounded-xl border p-5 shadow-sm relative overflow-hidden

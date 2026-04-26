@@ -355,6 +355,83 @@ document.addEventListener("alpine:init", () => {
         }
     });
 
+    /* ---------- Elevation store (TOTP step-up modal) ----------
+     * Opened automatically when any HTMX request hits a [RequireElevated]
+     * endpoint and gets back HX-Trigger:showElevationModal. Stores the
+     * original request so it can be replayed verbatim after success.
+     */
+    Alpine.store("elevation", {
+        open: false,
+        code: "",
+        error: "",
+        busy: false,
+        retry: null, // { url, method }
+
+        request(retry) {
+            this.retry = retry || null;
+            this.code = "";
+            this.error = "";
+            this.busy = false;
+            this.open = true;
+            // Focus the input next tick (after x-show toggles).
+            requestAnimationFrame(() => document.getElementById("elev-code")?.focus());
+        },
+
+        cancel() {
+            this.open = false;
+            this.retry = null;
+            this.code = "";
+        },
+
+        async submit() {
+            if (this.busy) return;
+            const code = (this.code || "").trim();
+            if (!/^\d{6}$/.test(code)) {
+                this.error = "Enter the 6-digit code from your authenticator.";
+                return;
+            }
+            this.error = "";
+            this.busy = true;
+
+            const meta = document.querySelector('meta[name="request-token"]');
+            const form = new FormData();
+            form.append("code", code);
+            form.append("retryUrl", this.retry?.url ?? "");
+            form.append("retryMethod", this.retry?.method ?? "");
+
+            try {
+                const res = await fetch("/auth/elevate", {
+                    method: "POST",
+                    body: form,
+                    credentials: "same-origin",
+                    headers: {
+                        "HX-Request": "true",
+                        "RequestVerificationToken": meta?.getAttribute("content") ?? ""
+                    }
+                });
+
+                if (!res.ok) {
+                    this.error = res.status === 401
+                        ? "Invalid code — try again."
+                        : `Verification failed (HTTP ${res.status}).`;
+                    this.busy = false;
+                    return;
+                }
+
+                // Success — close modal and replay the original request.
+                const retry = this.retry;
+                this.cancel();
+                if (retry?.url && window.htmx) {
+                    const verb = (retry.method || "GET").toLowerCase();
+                    window.htmx.ajax(verb, retry.url, { target: "body", swap: "none" });
+                }
+            } catch (err) {
+                this.error = `Network error: ${err.message}`;
+                this.busy = false;
+            }
+        }
+    });
+
     Alpine.store("toasts", {
         items: [],
         _seq: 0,
@@ -405,11 +482,25 @@ document.addEventListener("htmx:configRequest", (event) => {
     if (meta) event.detail.headers["RequestVerificationToken"] = meta.getAttribute("content");
 });
 
-/* HTMX server errors → red toast. */
+/* Step-up modal trigger from RequireElevated 401 responses. */
+document.addEventListener("showElevationModal", (event) => {
+    const elev = window.Alpine?.store("elevation");
+    if (!elev) return;
+    elev.request(event.detail || null);
+});
+
+/* HTMX server errors → red toast. Skip the noise on 401 elevation challenges
+ * (the elevation modal handles those). */
 document.addEventListener("htmx:responseError", async (event) => {
+    const status = event.detail?.xhr?.status ?? "?";
+    if (status === 401) {
+        // If the server triggered the elevation modal, htmx already dispatched
+        // showElevationModal — don't double-toast.
+        const trigger = event.detail?.xhr?.getResponseHeader?.("HX-Trigger") ?? "";
+        if (trigger.includes("showElevationModal")) return;
+    }
     const store = window.Alpine?.store("toasts");
     if (!store) return;
-    const status = event.detail?.xhr?.status ?? "?";
     store.error(`Server returned HTTP ${status}.`);
 });
 

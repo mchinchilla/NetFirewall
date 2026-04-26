@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+@*
+    Minimal layout for unauthenticated flows (login, TOTP enrollment, bootstrap).
+    Uses the same theme system + decorative blobs as the dashboard, but no
+    sidebar / top header / drawer / confirm — those need an authenticated session.
+*@
+<html lang="en" class="h-full" data-theme="boulder" data-mode="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - NetFirewall</title>
+    @await Html.PartialAsync("_HeadStyles")
+</head>
+<body class="flex flex-col min-h-screen relative overflow-x-hidden"
+      x-data>
+    @await Html.PartialAsync("_BackgroundBlobs")
+
+    <main class="flex flex-1 items-center justify-center px-4 py-10">
+        <div class="w-full max-w-md" style="animation: var(--animate-slide-up);">
+            <div class="flex items-center justify-center gap-2 mb-6">
+                <span class="inline-flex h-9 w-9 items-center justify-center rounded-lg"
+                      style="background-color: var(--accent); color: var(--accent-fg);">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25 4.5 5.25v6c0 4.97 3.5 9.25 7.5 10.5 4-1.25 7.5-5.53 7.5-10.5v-6L12 2.25Z" />
+                    </svg>
+                </span>
+                <span class="text-lg font-semibold tracking-tight">NetFirewall</span>
+            </div>
+
+            @RenderBody()
+        </div>
+    </main>
+
+    @await Html.PartialAsync("_Toasts")
+    @await Html.PartialAsync("_Scripts")
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

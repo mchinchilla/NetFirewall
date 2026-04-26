@@ -102,22 +102,22 @@
         </header>
         <ol class="relative space-y-4 pl-5">
             <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--magic-mint-500); --tw-ring-color: var(--surface-elevated);"></span>
+                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--feedback-success-bd); --tw-ring-color: var(--surface-elevated);"></span>
                 <p class="text-sm font-medium">DHCP DDNS sync completed</p>
                 <p class="text-xs" style="color: var(--surface-fg-muted);">42 records · 3 min ago</p>
             </li>
             <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--jordy-blue-500); --tw-ring-color: var(--surface-elevated);"></span>
+                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--feedback-info-bd); --tw-ring-color: var(--surface-elevated);"></span>
                 <p class="text-sm font-medium">Filter rule #87 added</p>
                 <p class="text-xs" style="color: var(--surface-fg-muted);">forward · drop · 14 min ago</p>
             </li>
             <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--taupe-gray-600); --tw-ring-color: var(--surface-elevated);"></span>
+                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--feedback-warning-bd); --tw-ring-color: var(--surface-elevated);"></span>
                 <p class="text-sm font-medium">WAN failover: primary → secondary</p>
                 <p class="text-xs" style="color: var(--surface-fg-muted);">15.4s downtime · 27 min ago</p>
             </li>
             <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--twilight-500); --tw-ring-color: var(--surface-elevated);"></span>
+                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--accent); --tw-ring-color: var(--surface-elevated);"></span>
                 <p class="text-sm font-medium">Lease renewed</p>
                 <p class="text-xs" style="color: var(--surface-fg-muted);">192.168.10.42 · b8:27:eb:… · 1 h ago</p>
             </li>
@@ -172,7 +172,7 @@
                             <div class="flex items-center gap-2">
                                 <div class="h-1.5 w-32 rounded-full overflow-hidden" style="background-color: var(--surface-muted);">
                                     <div class="h-full rounded-full"
-                                         style="width: @(pct)%; background-color: @(status == "warn" ? "var(--taupe-gray-600)" : "var(--accent)");"></div>
+                                         style="width: @(pct)%; background-color: @(status == "warn" ? "var(--feedback-warning-bd)" : "var(--accent)");"></div>
                                 </div>
                                 <span class="text-xs" style="color: var(--surface-fg-muted);">@(pct)%</span>
                             </div>
@@ -181,12 +181,12 @@
                             @if (status == "warn")
                             {
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--taupe-gray-100); color: var(--taupe-gray-900);">Near full</span>
+                                      style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Near full</span>
                             }
                             else
                             {
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--magic-mint-100); color: var(--magic-mint-900);">Healthy</span>
+                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Healthy</span>
                             }
                         </td>
                     </tr>

@@ -1,0 +1,14 @@
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Invalid bootstrap token";
+}
+
+<div class="card">
+    <h1 class="text-xl font-semibold" style="color: var(--feedback-danger-fg);">Invalid bootstrap token</h1>
+    <p class="text-sm mt-2" style="color: var(--surface-fg-muted);">
+        The token you provided does not match the one that was issued at startup.
+        Check the application logs for the correct value, or — if the token has been
+        consumed — the bootstrap is already complete and you should sign in normally.
+    </p>
+    <a href="/login" class="btn btn-primary mt-4">Go to sign in</a>
+</div>

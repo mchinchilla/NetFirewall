@@ -1,0 +1,53 @@
+@model NetFirewall.Web.Models.Auth.BootstrapViewModel
+@using NetFirewall.Web.Models
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "First-run setup";
+}
+
+<div class="card">
+    <h1 class="text-xl font-semibold tracking-tight">Create the first admin</h1>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        Bootstrap token verified. This wizard runs only once — after the admin
+        account exists, this page returns 404.
+    </p>
+
+    <form asp-action="Bootstrap" method="post" class="mt-5 space-y-4">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="Token" />
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Username),
+            Label = "Username", Required = true, Value = Model.Username,
+            AlpineExtra = "autofocus autocomplete=\"username\"",
+            Help = "Letters, digits, underscore, dot, dash. 3-64 chars.",
+            Pattern = "^[a-zA-Z0-9_.\\-]+$",
+            Error = ViewData.ModelState[nameof(Model.Username)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Email),
+            Label = "Email (optional)", Kind = FormFieldKind.Email, Value = Model.Email,
+            AlpineExtra = "autocomplete=\"email\"",
+            Error = ViewData.ModelState[nameof(Model.Email)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Password),
+            Label = "Password", Kind = FormFieldKind.Password, Required = true,
+            AlpineExtra = "autocomplete=\"new-password\"",
+            Help = "Minimum 12 characters. A long passphrase is best.",
+            MinLength = 12, MaxLength = 128,
+            Error = ViewData.ModelState[nameof(Model.Password)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.ConfirmPassword),
+            Label = "Confirm password", Kind = FormFieldKind.Password, Required = true,
+            AlpineExtra = "autocomplete=\"new-password\"",
+            Error = ViewData.ModelState[nameof(Model.ConfirmPassword)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        <button type="submit" class="btn btn-primary w-full">Create admin and continue to login</button>
+    </form>
+</div>

@@ -1,0 +1,56 @@
+@model NetFirewall.Web.Models.Auth.LoginTotpViewModel
+@using NetFirewall.Web.Models
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Two-factor";
+}
+
+<div class="card" x-data="{ recovery: @(Model.IsRecoveryCode ? "true" : "false") }">
+    <h1 class="text-xl font-semibold tracking-tight">Two-factor</h1>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <span x-show="!recovery">Enter the 6-digit code from your authenticator app.</span>
+        <span x-show="recovery">Enter one of your recovery codes (it will be consumed).</span>
+    </p>
+
+    @if (!ViewData.ModelState.IsValid && ViewData.ModelState[""]?.Errors.Count > 0)
+    {
+        <div class="mt-4 rounded-md border-l-2 px-3 py-2 text-sm"
+             style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg); border-color: var(--feedback-danger-bd);">
+            @foreach (var err in ViewData.ModelState[""]!.Errors) { <p>@err.ErrorMessage</p> }
+        </div>
+    }
+
+    <form asp-action="LoginTotp" method="post" class="mt-5 space-y-4">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="ReturnUrl" />
+        <input type="hidden" name="IsRecoveryCode" :value="recovery" />
+
+        <div class="space-y-1.5">
+            <label for="f-Code" class="block text-xs font-medium">
+                <span x-show="!recovery">Authenticator code</span>
+                <span x-show="recovery">Recovery code</span>
+                <span style="color: var(--feedback-danger-fg);">*</span>
+            </label>
+            <input id="f-Code" name="Code" required autofocus autocomplete="one-time-code"
+                   class="@(ViewData.ModelState[nameof(Model.Code)]?.Errors.Count > 0 ? "input input-error" : "input")"
+                   :placeholder="recovery ? 'XXXXX-XXXXX' : '123456'"
+                   :inputmode="recovery ? 'text' : 'numeric'"
+                   :pattern="recovery ? '^[A-Z0-9\\-]{11}$' : '^\\d{6}$'"
+                   :maxlength="recovery ? 11 : 6"
+                   value="@Model.Code" />
+            @if (ViewData.ModelState[nameof(Model.Code)]?.Errors.FirstOrDefault() is { } err)
+            {
+                <p class="text-xs" style="color: var(--feedback-danger-fg);">@err.ErrorMessage</p>
+            }
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full">Verify</button>
+
+        <button type="button" class="text-xs hover:underline w-full text-center"
+                style="color: var(--accent);"
+                @@click="recovery = !recovery">
+            <span x-show="!recovery">Use a recovery code instead</span>
+            <span x-show="recovery">Use authenticator app instead</span>
+        </button>
+    </form>
+</div>

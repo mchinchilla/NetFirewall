@@ -107,6 +107,7 @@ public sealed class NetworkController : Controller
 
     [HttpPost("/Network/Apply/{id:guid}")]
     [ValidateAntiForgeryToken]
+    [NetFirewall.Web.Filters.RequireElevated]
     public async Task<IActionResult> Apply(Guid id, CancellationToken ct)
     {
         var iface = await _firewallService.GetInterfaceByIdAsync(id, ct);

@@ -16,7 +16,7 @@
     if (!string.IsNullOrEmpty(Model.Placeholder)) commonAttrs.Add($"placeholder=\"{Model.Placeholder}\"");
 
     var attrs = string.Join(" ", commonAttrs);
-    var inputClass = hasError ? "input border-red-400" : "input";
+    var inputClass = hasError ? "input input-error" : "input";
 }
 
 @if (Model.Kind == FormFieldKind.Checkbox)
@@ -42,7 +42,7 @@ else
             @Model.Label
             @if (Model.Required)
             {
-                <span style="color: #b94545;">*</span>
+                <span style="color: var(--feedback-danger-fg);">*</span>
             }
         </label>
 
@@ -75,7 +75,7 @@ else
 
         @if (hasError)
         {
-            <p class="text-xs" style="color: #b94545;">@Model.Error</p>
+            <p class="text-xs" style="color: var(--feedback-danger-fg);">@Model.Error</p>
         }
         else if (!string.IsNullOrEmpty(Model.Help))
         {

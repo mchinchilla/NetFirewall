@@ -1,0 +1,51 @@
+@model NetFirewall.Web.Models.Auth.LoginViewModel
+@using NetFirewall.Web.Models
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Sign in";
+}
+
+<div class="card">
+    <h1 class="text-xl font-semibold tracking-tight">Sign in</h1>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">Use your username and password.</p>
+
+    @if (!ViewData.ModelState.IsValid && ViewData.ModelState[""]?.Errors.Count > 0)
+    {
+        <div class="mt-4 rounded-md border-l-2 px-3 py-2 text-sm"
+             style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg); border-color: var(--feedback-danger-bd);">
+            @foreach (var err in ViewData.ModelState[""]!.Errors)
+            {
+                <p>@err.ErrorMessage</p>
+            }
+        </div>
+    }
+
+    <form asp-action="Login" method="post" class="mt-5 space-y-4">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="ReturnUrl" />
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Username),
+            Label = "Username",
+            Value = Model.Username,
+            Required = true,
+            AlpineExtra = "autofocus autocomplete=\"username\"",
+            Error = ViewData.ModelState[nameof(Model.Username)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Password),
+            Label = "Password",
+            Kind = FormFieldKind.Password,
+            Required = true,
+            AlpineExtra = "autocomplete=\"current-password\"",
+            Error = ViewData.ModelState[nameof(Model.Password)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        <button type="submit" class="btn btn-primary w-full">Continue</button>
+    </form>
+</div>
+
+<p class="text-center text-xs mt-4" style="color: var(--surface-fg-muted);">
+    Protected by per-account TOTP and rate-limited login attempts.
+</p>

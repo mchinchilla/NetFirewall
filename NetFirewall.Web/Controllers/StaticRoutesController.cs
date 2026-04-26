@@ -89,6 +89,7 @@ public sealed class StaticRoutesController : Controller
 
     [HttpPost("apply/{id:guid}")]
     [ValidateAntiForgeryToken]
+    [NetFirewall.Web.Filters.RequireElevated]
     public async Task<IActionResult> Apply(Guid id, CancellationToken ct)
     {
         var envelope = await _applicator.ApplyAsync(id, ct);
@@ -98,6 +99,7 @@ public sealed class StaticRoutesController : Controller
 
     [HttpPost("delete/{id:guid}")]
     [ValidateAntiForgeryToken]
+    [NetFirewall.Web.Filters.RequireElevated]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var envelope = await _applicator.RemoveAsync(id, ct);

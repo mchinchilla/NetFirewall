@@ -16,14 +16,14 @@
              }">
             <span class="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] shrink-0"
                   :style="{
-                     'background-color': t.level === 'success' ? 'var(--magic-mint-100)'
-                                       : t.level === 'error'   ? '#fde2e2'
-                                       : t.level === 'warning' ? 'var(--taupe-gray-100)'
-                                       : 'var(--jordy-blue-100)',
-                     'color':            t.level === 'success' ? 'var(--magic-mint-900)'
-                                       : t.level === 'error'   ? '#8b1f1f'
-                                       : t.level === 'warning' ? 'var(--taupe-gray-900)'
-                                       : 'var(--jordy-blue-900)'
+                     'background-color': t.level === 'success' ? 'var(--feedback-success-bg)'
+                                       : t.level === 'error'   ? 'var(--feedback-danger-bg)'
+                                       : t.level === 'warning' ? 'var(--feedback-warning-bg)'
+                                       : 'var(--feedback-info-bg)',
+                     'color':            t.level === 'success' ? 'var(--feedback-success-fg)'
+                                       : t.level === 'error'   ? 'var(--feedback-danger-fg)'
+                                       : t.level === 'warning' ? 'var(--feedback-warning-fg)'
+                                       : 'var(--feedback-info-fg)'
                   }">
                 <svg x-show="t.level === 'success'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
                 <svg x-show="t.level === 'error'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>

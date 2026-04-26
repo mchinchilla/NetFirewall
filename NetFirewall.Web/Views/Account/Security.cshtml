@@ -1,0 +1,95 @@
+@{
+    ViewData["Title"] = "Account security";
+    var user = (NetFirewall.Models.Auth.User?)ViewBag.User;
+    var totpEnrolled = (bool)(ViewBag.TotpEnrolled ?? false);
+    var unusedRecovery = (int)(ViewBag.UnusedRecovery ?? 0);
+    var sessions = (IReadOnlyList<NetFirewall.Models.Auth.UserSession>)(ViewBag.Sessions ?? Array.Empty<NetFirewall.Models.Auth.UserSession>());
+}
+
+<div class="mb-6" style="animation: var(--animate-slide-up);">
+    <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Account</p>
+    <h1 class="text-2xl font-semibold tracking-tight">Security</h1>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">Manage second factors and active sessions for <strong>@user?.Username</strong>.</p>
+</div>
+
+<div class="grid gap-4 grid-cols-1 lg:grid-cols-2">
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <h2 class="text-base font-semibold">Two-factor authentication</h2>
+        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+            Status:
+            @if (totpEnrolled)
+            {
+                <span class="font-medium" style="color: var(--feedback-success-bd);">Enrolled</span>
+            }
+            else
+            {
+                <span class="font-medium" style="color: var(--feedback-danger-fg);">Not enrolled</span>
+            }
+            · Recovery codes left:
+            <span class="font-medium" style="color: var(--surface-fg);">@unusedRecovery</span>
+        </p>
+        <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" class="btn btn-ghost text-xs"
+                    hx-post="/account/security/recovery/regenerate"
+                    hx-trigger="confirmed-regen"
+                    @@click.prevent="(async () => {
+                        const ok = await $store.confirm.ask({
+                            title: 'Regenerate recovery codes?',
+                            message: 'Your existing recovery codes will stop working immediately.',
+                            confirmLabel: 'Regenerate',
+                            level: 'warning'
+                        });
+                        if (ok) htmx.trigger($el, 'confirmed-regen');
+                    })()">
+                Regenerate recovery codes
+            </button>
+        </div>
+    </section>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
+        <h2 class="text-base font-semibold">Active sessions</h2>
+        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+            @sessions.Count active session(s). Revoke any you don't recognize.
+        </p>
+
+        <ul class="mt-3 divide-y" style="border-color: var(--surface-border);">
+            @foreach (var s in sessions)
+            {
+                var isCurrent = s.Id.ToString() == User.FindFirstValue(NetFirewall.Web.Auth.SessionCookieAuthHandler.SessionIdClaim);
+                <li class="py-3 flex items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium truncate">
+                            @(s.Ip?.ToString() ?? "(unknown ip)")
+                            @if (isCurrent)
+                            {
+                                <span class="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium"
+                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">This session</span>
+                            }
+                            @if (s.IsElevated(DateTimeOffset.UtcNow))
+                            {
+                                <span class="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium"
+                                      style="background-color: var(--feedback-info-bg); color: var(--feedback-info-fg);">Elevated</span>
+                            }
+                        </p>
+                        <p class="text-xs truncate" style="color: var(--surface-fg-muted);">@(s.UserAgent ?? "(no user agent)")</p>
+                        <p class="text-[11px] mt-0.5" style="color: var(--surface-fg-muted);">
+                            Last seen @s.LastSeenAt.LocalDateTime.ToString("g") · expires @s.ExpiresAt.LocalDateTime.ToString("g")
+                        </p>
+                    </div>
+                    @if (!isCurrent)
+                    {
+                        <button type="button" class="btn btn-ghost text-xs shrink-0" style="color: var(--feedback-danger-fg);"
+                                hx-post="/account/security/revoke/@s.Id"
+                                hx-trigger="confirmed-rev">
+                            Revoke
+                        </button>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+</div>
+
+@functions {
+    string ClaimsExt(string type) => User.FindFirst(type)?.Value ?? string.Empty;
+}

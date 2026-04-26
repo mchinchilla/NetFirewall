@@ -1,0 +1,64 @@
+@*
+    Singleton TOTP step-up modal. Opens automatically when any HTMX request
+    hits a [RequireElevated] action and gets back HX-Trigger:showElevationModal.
+    On success, the dialog closes and re-fires the original request via
+    Alpine.store('elevation') (defined in site.js).
+*@
+<div x-cloak x-data
+     x-show="$store.elevation.open"
+     @@keydown.escape.window="$store.elevation.cancel()"
+     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     role="dialog" aria-modal="true">
+
+    <div class="absolute inset-0"
+         style="background-color: rgba(0,0,0,0.45);"
+         @@click="$store.elevation.cancel()"></div>
+
+    <div class="relative w-full max-w-sm rounded-xl border shadow-xl"
+         style="background-color: var(--surface-elevated); border-color: var(--surface-border);"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+
+        <header class="px-5 pt-5">
+            <div class="flex items-start gap-3">
+                <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                      style="background-color: var(--accent-soft); color: var(--accent);">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+                </span>
+                <div class="flex-1">
+                    <h3 class="text-base font-semibold">Confirm with TOTP</h3>
+                    <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+                        Destructive actions need a fresh code from your authenticator. Elevation lasts 15 minutes.
+                    </p>
+                </div>
+            </div>
+        </header>
+
+        <form @@submit.prevent="$store.elevation.submit()" class="px-5 py-4 space-y-3">
+            <div class="space-y-1.5">
+                <label for="elev-code" class="block text-xs font-medium">6-digit code</label>
+                <input id="elev-code" type="text" inputmode="numeric" pattern="^\d{6}$" maxlength="6"
+                       autocomplete="one-time-code"
+                       x-model="$store.elevation.code"
+                       x-ref="elevCode"
+                       class="input text-center tracking-widest font-mono"
+                       :class="$store.elevation.error ? 'input-error' : ''"
+                       placeholder="123456" />
+                <p x-show="$store.elevation.error" x-text="$store.elevation.error" class="text-xs" style="color: var(--feedback-danger-fg);"></p>
+            </div>
+        </form>
+
+        <div class="px-5 pb-4 flex items-center justify-end gap-2 border-t pt-4"
+             style="border-color: var(--surface-border);">
+            <button type="button" class="btn btn-ghost"
+                    @@click="$store.elevation.cancel()">Cancel</button>
+            <button type="button" class="btn btn-primary"
+                    :disabled="$store.elevation.busy"
+                    @@click="$store.elevation.submit()">
+                <span x-show="!$store.elevation.busy">Verify</span>
+                <span x-show="$store.elevation.busy">Verifying…</span>
+            </button>
+        </div>
+    </div>
+</div>

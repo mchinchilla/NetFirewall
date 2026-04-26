@@ -42,7 +42,7 @@ else
                             @if (row.Route.Enabled)
                             {
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--magic-mint-100); color: var(--magic-mint-900);">Enabled</span>
+                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Enabled</span>
                             }
                             else
                             {
@@ -73,7 +73,7 @@ else
                                     var via = row.Route.Gateway?.ToString() ?? "direct";
                                     var deleteMsg = $"{row.Route.Destination} via {via} on {row.InterfaceName}";
                                 }
-                                <button type="button" class="btn btn-ghost text-xs" style="color: #b94545;"
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
                                         hx-post="/Network/Routes/delete/@row.Route.Id"
                                         hx-trigger="confirmed-del"
                                         data-msg="@deleteMsg"
