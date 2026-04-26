@@ -1,0 +1,78 @@
+@*
+    Compact breadcrumb shown above the page body. Default behavior derives
+    crumbs from the request path: every segment becomes a clickable crumb,
+    GUID segments are rendered as "…", segment names are title-cased and
+    spaces are inserted before camelCase boundaries.
+
+    A page can override this by setting ViewData["Crumbs"] to a list of
+    (label, url) tuples. Pass url=null for non-clickable crumbs (the
+    current page's terminal segment).
+*@
+@{
+    var path = Context.Request.Path.Value ?? "/";
+
+    static bool IsGuid(string s) => Guid.TryParse(s, out _);
+
+    static string Pretty(string raw)
+    {
+        // Insert spaces before capitals in camel/PascalCase: "FilterRules" -> "Filter Rules"
+        var sb = new System.Text.StringBuilder(raw.Length + 4);
+        for (int i = 0; i < raw.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(raw[i]) && !char.IsUpper(raw[i - 1])) sb.Append(' ');
+            sb.Append(raw[i]);
+        }
+        return sb.ToString();
+    }
+
+    var explicitCrumbs = ViewData["Crumbs"] as IReadOnlyList<(string Label, string? Url)>;
+    List<(string Label, string? Url)> crumbs;
+
+    if (explicitCrumbs is not null)
+    {
+        crumbs = explicitCrumbs.ToList();
+    }
+    else
+    {
+        crumbs = new List<(string, string?)>();
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var acc = "";
+        for (int i = 0; i < segments.Length; i++)
+        {
+            var seg = segments[i];
+            acc += "/" + seg;
+            var label = IsGuid(seg) ? "…" : Pretty(seg);
+            // Last segment is the current page — no link.
+            crumbs.Add((label, i == segments.Length - 1 ? null : acc));
+        }
+    }
+}
+
+@if (crumbs.Count > 0)
+{
+    <nav aria-label="Breadcrumb" class="px-4 sm:px-6 lg:px-8 pt-3 -mb-1">
+        <ol class="flex flex-wrap items-center gap-1 text-xs" style="color: var(--surface-fg-muted);">
+            <li>
+                <a href="/" class="hover:underline" style="color: var(--surface-fg-muted);">
+                    <svg class="h-3.5 w-3.5 inline-block -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955a1.5 1.5 0 0 1 2.121 0L21 11.999M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>
+                </a>
+            </li>
+            @foreach (var (label, url) in crumbs)
+            {
+                <li aria-hidden="true">
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                </li>
+                <li>
+                    @if (!string.IsNullOrEmpty(url))
+                    {
+                        <a href="@url" class="hover:underline">@label</a>
+                    }
+                    else
+                    {
+                        <span style="color: var(--surface-fg);">@label</span>
+                    }
+                </li>
+            }
+        </ol>
+    </nav>
+}

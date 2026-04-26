@@ -109,6 +109,7 @@ builder.Services.AddScoped<IUserTotpService, UserTotpService>();
 builder.Services.AddScoped<IRecoveryCodeService, RecoveryCodeService>();
 builder.Services.AddScoped<IAuthAuditService, AuthAuditService>();
 builder.Services.AddScoped<ISessionCookieIssuer, SessionCookieIssuer>();
+builder.Services.AddScoped<IPendingAuthTicket, PendingAuthTicket>();
 
 // Bootstrap: holds the one-time admin-creation token; issuer is a hosted service.
 builder.Services.AddSingleton<IBootstrapTokenStore, BootstrapTokenStore>();

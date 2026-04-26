@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models.Auth;
 using NetFirewall.Services.Auth;
+using NetFirewall.Web.Auth;
 using NetFirewall.Web.Auth.Bootstrap;
 using NetFirewall.Web.Models.Auth;
 
@@ -18,17 +19,20 @@ public sealed class SetupController : Controller
     private readonly IUserService _users;
     private readonly IPasswordHasher _hasher;
     private readonly IAuthAuditService _audit;
+    private readonly IPendingAuthTicket _pending;
 
     public SetupController(
         IBootstrapTokenStore tokenStore,
         IUserService users,
         IPasswordHasher hasher,
-        IAuthAuditService audit)
+        IAuthAuditService audit,
+        IPendingAuthTicket pending)
     {
         _tokenStore = tokenStore;
         _users = users;
         _hasher = hasher;
         _audit = audit;
+        _pending = pending;
     }
 
     [HttpGet("/setup/bootstrap")]
@@ -76,6 +80,9 @@ public sealed class SetupController : Controller
             HttpContext.Connection.RemoteIpAddress, Request.Headers.UserAgent.ToString(),
             new { role = UserRoles.Admin, via = "bootstrap" }, ct);
 
-        return RedirectToAction("Login", "Auth");
+        // The user just proved password ownership by setting it; carry them
+        // straight into TOTP enrollment instead of bouncing through /login.
+        _pending.Issue(user.Id);
+        return RedirectToAction("EnrollTotp", "Account");
     }
 }

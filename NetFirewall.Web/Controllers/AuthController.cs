@@ -18,9 +18,6 @@ public sealed class AuthController : Controller
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ElevationDuration = TimeSpan.FromMinutes(15);
 
-    // Two-step session ticket carried in TempData between /login and /login/totp.
-    private const string PendingUserKey = "auth.pending_user_id";
-
     private readonly IUserService _users;
     private readonly IUserTotpService _totp;
     private readonly IRecoveryCodeService _recovery;
@@ -28,6 +25,7 @@ public sealed class AuthController : Controller
     private readonly ISessionCookieIssuer _cookieIssuer;
     private readonly IPasswordHasher _hasher;
     private readonly IAuthAuditService _audit;
+    private readonly IPendingAuthTicket _pending;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -38,6 +36,7 @@ public sealed class AuthController : Controller
         ISessionCookieIssuer cookieIssuer,
         IPasswordHasher hasher,
         IAuthAuditService audit,
+        IPendingAuthTicket pending,
         ILogger<AuthController> logger)
     {
         _users = users;
@@ -47,6 +46,7 @@ public sealed class AuthController : Controller
         _cookieIssuer = cookieIssuer;
         _hasher = hasher;
         _audit = audit;
+        _pending = pending;
         _logger = logger;
     }
 
@@ -110,8 +110,7 @@ public sealed class AuthController : Controller
 
         // Step 2: TOTP. If the user hasn't enrolled yet, force enrollment now.
         var hasTotp = await _totp.HasEnrolledAsync(user.Id, ct);
-        TempData[PendingUserKey] = user.Id.ToString();
-        TempData["auth.return_url"] = model.ReturnUrl;
+        _pending.Issue(user.Id, model.ReturnUrl);
 
         if (!hasTotp)
             return RedirectToAction("EnrollTotp", "Account");
@@ -124,18 +123,18 @@ public sealed class AuthController : Controller
     [HttpGet("/login/totp")]
     public IActionResult LoginTotp(string? returnUrl = null)
     {
-        if (!TryGetPendingUserId(out _)) return RedirectToAction(nameof(Login), new { returnUrl });
-        return View(new LoginTotpViewModel { ReturnUrl = returnUrl });
+        if (!_pending.TryRead(out _, out var stashedReturn, out _))
+            return RedirectToAction(nameof(Login), new { returnUrl });
+        return View(new LoginTotpViewModel { ReturnUrl = returnUrl ?? stashedReturn });
     }
 
     [HttpPost("/login/totp"), ValidateAntiForgeryToken]
     public async Task<IActionResult> LoginTotp(LoginTotpViewModel model, CancellationToken ct)
     {
-        if (!TryGetPendingUserId(out var userId))
+        if (!_pending.TryRead(out var userId, out var stashedReturn, out _))
             return RedirectToAction(nameof(Login), new { returnUrl = model.ReturnUrl });
 
-        // Re-stash for the next render in case validation fails.
-        TempData[PendingUserKey] = userId.ToString();
+        if (string.IsNullOrEmpty(model.ReturnUrl)) model.ReturnUrl = stashedReturn;
 
         if (!ModelState.IsValid) return View(model);
 
@@ -165,7 +164,7 @@ public sealed class AuthController : Controller
             user.Id, user.Username, ip, ua, ct: ct);
 
         await _cookieIssuer.IssueAsync(HttpContext, user, ct);
-        TempData.Remove(PendingUserKey);
+        _pending.Clear();
 
         return LocalRedirect(string.IsNullOrEmpty(model.ReturnUrl) ? "/" : model.ReturnUrl);
     }
@@ -221,13 +220,6 @@ public sealed class AuthController : Controller
     }
 
     // ---------------------------------------------------------- helpers
-
-    private bool TryGetPendingUserId(out Guid id)
-    {
-        id = Guid.Empty;
-        var raw = TempData.Peek(PendingUserKey) as string;
-        return !string.IsNullOrEmpty(raw) && Guid.TryParse(raw, out id);
-    }
 
     internal IPAddress? ClientIp()
     {

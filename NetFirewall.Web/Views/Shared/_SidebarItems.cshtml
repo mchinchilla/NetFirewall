@@ -6,9 +6,49 @@
 @{
     var forceExpanded = ViewData["ForceExpanded"] as bool? ?? false;
     string ShowLabel() => forceExpanded ? string.Empty : "x-show=\"!$store.ui.sidebarCollapsed\" x-transition.opacity";
+
+    var path = Context.Request.Path.Value ?? "/";
+
+    // True when the current request is exactly this URL or a child route.
+    // Use trailing-slash matching so "/Firewall/Qos" doesn't light up
+    // "/Firewall/QosOther" but does match "/Firewall/Qos/{id}/Classes".
+    bool IsActive(string href)
+    {
+        if (string.IsNullOrEmpty(href) || href == "#") return false;
+        if (href == "/") return path == "/";
+        return string.Equals(path, href, StringComparison.OrdinalIgnoreCase)
+               || path.StartsWith(href + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // True when ANY child route in the same section matches — used to auto-open
+    // the collapsible group on first render.
+    bool AnyActive(params string[] hrefs) => hrefs.Any(IsActive);
+
+    string ActiveCls(string href) => IsActive(href) ? " active" : string.Empty;
+
+    // Pre-compute group open states — avoids re-evaluating per link.
+    var dhcpHrefs = new[] {
+        Url.Action("Index", "DhcpSubnets")!, Url.Action("Index", "DhcpReservations")!,
+        Url.Action("Index", "DhcpLeases")!, Url.Action("Index", "DhcpClasses")!,
+        Url.Action("Index", "DhcpDdns")!, Url.Action("Index", "DhcpFailover")!
+    };
+    var fwHrefs = new[] {
+        Url.Action("Interfaces", "Network")!, Url.Action("Index", "FwFilterRules")!,
+        Url.Action("Index", "FwNatRules")!, Url.Action("Index", "FwPortForwards")!,
+        Url.Action("Index", "FwTrafficMarks")!, Url.Action("Index", "FwMangleRules")!,
+        Url.Action("Index", "FwQosConfigs")!, Url.Action("Index", "StaticRoutes")!,
+        Url.Action("Index", "FwAuditLog")!, Url.Action("Index", "FwApply")!
+    };
+    var netHrefs = new[] {
+        Url.Action("Interfaces", "Network")!, Url.Action("Index", "StaticRoutes")!
+    };
+
+    var dhcpOpen = AnyActive(dhcpHrefs) ? "true" : "false";
+    var fwOpen   = AnyActive(fwHrefs)   ? "true" : "false";
+    var netOpen  = AnyActive(netHrefs)  ? "true" : "false";
 }
 
-<a href="@Url.Action("Index", "Home")" class="nav-link active">
+<a href="@Url.Action("Index", "Home")" class="nav-link@(ActiveCls(Url.Action("Index", "Home")!))">
     <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
         <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955a1.5 1.5 0 0 1 2.121 0L21 11.999M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
     </svg>
@@ -16,7 +56,7 @@
 </a>
 
 @* DHCP section *@
-<div x-data="{ open: true }" class="pt-2">
+<div x-data="{ open: @dhcpOpen }" class="pt-2">
     <button type="button" class="w-full nav-link" @@click="open = !open">
         <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3v4.5a3 3 0 0 1-3 3m-13.5 0a3 3 0 0 0-3 3v3a3 3 0 0 0 3 3h13.5a3 3 0 0 0 3-3v-3a3 3 0 0 0-3-3m-9.75 4.5h.008v.008H8.25v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375-9h.008v.008H8.25V9.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
@@ -27,17 +67,17 @@
         </svg>
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
-        <a href="@Url.Action("Index", "DhcpSubnets")"      class="nav-link py-1.5">Subnets &amp; pools</a>
-        <a href="@Url.Action("Index", "DhcpReservations")" class="nav-link py-1.5">Reservations</a>
-        <a href="@Url.Action("Index", "DhcpLeases")"       class="nav-link py-1.5">Leases (live)</a>
-        <a href="@Url.Action("Index", "DhcpClasses")"  class="nav-link py-1.5">Classes</a>
-        <a href="@Url.Action("Index", "DhcpDdns")"     class="nav-link py-1.5">Dynamic DNS</a>
-        <a href="@Url.Action("Index", "DhcpFailover")" class="nav-link py-1.5">Failover</a>
+        <a href="@Url.Action("Index", "DhcpSubnets")"      class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpSubnets")!))">Subnets &amp; pools</a>
+        <a href="@Url.Action("Index", "DhcpReservations")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpReservations")!))">Reservations</a>
+        <a href="@Url.Action("Index", "DhcpLeases")"       class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpLeases")!))">Leases (live)</a>
+        <a href="@Url.Action("Index", "DhcpClasses")"      class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpClasses")!))">Classes</a>
+        <a href="@Url.Action("Index", "DhcpDdns")"         class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpDdns")!))">Dynamic DNS</a>
+        <a href="@Url.Action("Index", "DhcpFailover")"     class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpFailover")!))">Failover</a>
     </div>
 </div>
 
 @* Firewall section *@
-<div x-data="{ open: false }">
+<div x-data="{ open: @fwOpen }">
     <button type="button" class="w-full nav-link" @@click="open = !open">
         <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
@@ -48,21 +88,21 @@
         </svg>
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
-        <a href="@Url.Action("Index", "Network")" class="nav-link py-1.5">Interfaces</a>
-        <a href="@Url.Action("Index", "FwFilterRules")" class="nav-link py-1.5">Filter rules</a>
-        <a href="@Url.Action("Index", "FwNatRules")" class="nav-link py-1.5">NAT rules</a>
-        <a href="@Url.Action("Index", "FwPortForwards")" class="nav-link py-1.5">Port forwards</a>
-        <a href="@Url.Action("Index", "FwTrafficMarks")" class="nav-link py-1.5">Traffic marks</a>
-        <a href="@Url.Action("Index", "FwMangleRules")" class="nav-link py-1.5">Mangle rules</a>
-        <a href="@Url.Action("Index", "FwQosConfigs")" class="nav-link py-1.5">QoS</a>
-        <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5">Static routes</a>
-        <a href="@Url.Action("Index", "FwAuditLog")" class="nav-link py-1.5">Audit log</a>
-        <a href="@Url.Action("Index", "FwApply")" class="nav-link py-1.5" style="color: var(--accent);">Apply / Live ruleset</a>
+        <a href="@Url.Action("Interfaces", "Network")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Network")!))">Interfaces</a>
+        <a href="@Url.Action("Index", "FwFilterRules")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwFilterRules")!))">Filter rules</a>
+        <a href="@Url.Action("Index", "FwNatRules")"    class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwNatRules")!))">NAT rules</a>
+        <a href="@Url.Action("Index", "FwPortForwards")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwPortForwards")!))">Port forwards</a>
+        <a href="@Url.Action("Index", "FwTrafficMarks")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwTrafficMarks")!))">Traffic marks</a>
+        <a href="@Url.Action("Index", "FwMangleRules")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwMangleRules")!))">Mangle rules</a>
+        <a href="@Url.Action("Index", "FwQosConfigs")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwQosConfigs")!))">QoS</a>
+        <a href="@Url.Action("Index", "StaticRoutes")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
+        <a href="@Url.Action("Index", "FwAuditLog")"     class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwAuditLog")!))">Audit log</a>
+        <a href="@Url.Action("Index", "FwApply")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwApply")!))" style="color: var(--accent);">Apply / Live ruleset</a>
     </div>
 </div>
 
 @* Network *@
-<div x-data="{ open: false }">
+<div x-data="{ open: @netOpen }">
     <button type="button" class="w-full nav-link" @@click="open = !open">
         <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" />
@@ -73,8 +113,8 @@
         </svg>
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
-        <a href="@Url.Action("Interfaces", "Network")" class="nav-link py-1.5">Interfaces</a>
-        <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5">Static routes</a>
+        <a href="@Url.Action("Interfaces", "Network")" class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Network")!))">Interfaces</a>
+        <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
     </div>
 </div>
 
@@ -87,7 +127,7 @@
 </a>
 
 @* Setup *@
-<a href="@Url.Action("Index", "SetupWizard")" class="nav-link">
+<a href="@Url.Action("Index", "SetupWizard")" class="nav-link@(ActiveCls(Url.Action("Index", "SetupWizard")!))">
     <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
         <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z" />
     </svg>

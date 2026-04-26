@@ -17,8 +17,6 @@ namespace NetFirewall.Web.Controllers;
 [Authorize] // most actions; AllowAnonymous on enrollment because the user is in mid-login flow
 public sealed class AccountController : Controller
 {
-    private const string PendingUserKey = "auth.pending_user_id";
-
     private readonly IUserService _users;
     private readonly ITotpService _rawTotp;
     private readonly IUserTotpService _userTotp;
@@ -27,6 +25,7 @@ public sealed class AccountController : Controller
     private readonly ISessionCookieIssuer _cookieIssuer;
     private readonly IPasswordHasher _hasher;
     private readonly IAuthAuditService _audit;
+    private readonly IPendingAuthTicket _pending;
 
     public AccountController(
         IUserService users,
@@ -36,7 +35,8 @@ public sealed class AccountController : Controller
         ISessionService sessions,
         ISessionCookieIssuer cookieIssuer,
         IPasswordHasher hasher,
-        IAuthAuditService audit)
+        IAuthAuditService audit,
+        IPendingAuthTicket pending)
     {
         _users = users;
         _rawTotp = rawTotp;
@@ -46,6 +46,7 @@ public sealed class AccountController : Controller
         _cookieIssuer = cookieIssuer;
         _hasher = hasher;
         _audit = audit;
+        _pending = pending;
     }
 
     // -------------------------------------------------- TOTP enrollment
@@ -58,15 +59,15 @@ public sealed class AccountController : Controller
     [HttpGet("/account/totp/enroll"), AllowAnonymous]
     public async Task<IActionResult> EnrollTotp(CancellationToken ct)
     {
-        if (!TryGetPendingUserId(out var uid)) return Redirect("/login");
+        if (!_pending.TryRead(out var uid, out var stashedReturn, out _)) return Redirect("/login");
         var user = await _users.GetByIdAsync(uid, ct);
         if (user is null) return Redirect("/login");
 
-        // Generate a fresh secret + recovery codes; persist them only when the
-        // user proves they captured the secret (POST below verifies a code).
+        // Generate a fresh secret + recovery codes; persist the secret in the
+        // pending-auth ticket so the POST can verify the user-typed code
+        // against what we showed in the QR.
         var secret = _rawTotp.GenerateSecret();
-        TempData["auth.enroll_secret"] = Convert.ToBase64String(secret);
-        TempData[PendingUserKey] = uid.ToString();
+        _pending.Issue(uid, stashedReturn, secret);
 
         var codes = await _recovery.RegenerateAsync(uid, 10, ct);
 
@@ -82,27 +83,19 @@ public sealed class AccountController : Controller
     [HttpPost("/account/totp/enroll"), AllowAnonymous, ValidateAntiForgeryToken]
     public async Task<IActionResult> EnrollTotp(TotpEnrollConfirmViewModel model, CancellationToken ct)
     {
-        if (!TryGetPendingUserId(out var uid)) return Redirect("/login");
-        var raw = TempData["auth.enroll_secret"] as string;
-        if (string.IsNullOrEmpty(raw)) return Redirect("/account/totp/enroll");
-        TempData[PendingUserKey] = uid.ToString();
+        if (!_pending.TryRead(out var uid, out var returnUrl, out var secret) || secret is null)
+            return Redirect("/account/totp/enroll");
 
         var user = await _users.GetByIdAsync(uid, ct);
         if (user is null) return Redirect("/login");
 
         if (!ModelState.IsValid)
-        {
-            // Restore TempData so the GET re-renders the same QR.
-            TempData["auth.enroll_secret"] = raw;
             return RedirectToAction(nameof(EnrollTotp));
-        }
 
-        var secret = Convert.FromBase64String(raw);
         var step = _rawTotp.Verify(secret, model.Code, lastUsedStep: null, DateTimeOffset.UtcNow);
         if (step is null)
         {
             ModelState.AddModelError(nameof(model.Code), "That code does not match. Try again.");
-            TempData["auth.enroll_secret"] = raw;
             return RedirectToAction(nameof(EnrollTotp));
         }
 
@@ -112,9 +105,8 @@ public sealed class AccountController : Controller
 
         // Issue the real session cookie now and finish login.
         await _cookieIssuer.IssueAsync(HttpContext, user, ct);
-        TempData.Remove(PendingUserKey);
+        _pending.Clear();
 
-        var returnUrl = TempData["auth.return_url"] as string;
         return LocalRedirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
     }
 
@@ -157,10 +149,4 @@ public sealed class AccountController : Controller
         return Json(new { success = true, codes });
     }
 
-    private bool TryGetPendingUserId(out Guid id)
-    {
-        id = Guid.Empty;
-        var raw = TempData.Peek(PendingUserKey) as string;
-        return !string.IsNullOrEmpty(raw) && Guid.TryParse(raw, out id);
-    }
 }
