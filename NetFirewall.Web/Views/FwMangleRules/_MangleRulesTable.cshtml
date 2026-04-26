@@ -1,0 +1,80 @@
+@model IReadOnlyList<NetFirewall.Models.Firewall.FwMangleRule>
+@{
+    var markNames = (IDictionary<Guid, string>)(ViewBag.MarkNames ?? new Dictionary<Guid, string>());
+}
+
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">No mangle rules in this chain.</div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Pri</th>
+                    <th class="px-5 py-2 font-medium">Chain</th>
+                    <th class="px-5 py-2 font-medium">Mark</th>
+                    <th class="px-5 py-2 font-medium hidden md:table-cell">Match</th>
+                    <th class="px-5 py-2 font-medium">Status</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var r in Model.OrderBy(x => x.Chain).ThenBy(x => x.Priority))
+                {
+                    var markLabel = r.MarkId is { } id && markNames.TryGetValue(id, out var n) ? n : "(no mark)";
+                    <tr>
+                        <td class="px-5 py-3 font-mono text-xs">@r.Priority</td>
+                        <td class="px-5 py-3 font-mono text-xs">@r.Chain</td>
+                        <td class="px-5 py-3 font-mono text-xs">@markLabel</td>
+                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">
+                            @if (!string.IsNullOrEmpty(r.Description)) { <span class="block font-medium" style="color: var(--surface-fg);">@r.Description</span> }
+                            @{
+                                var match = new List<string>();
+                                if (!string.IsNullOrEmpty(r.Protocol)) match.Add($"proto {r.Protocol}");
+                                if (r.SourceAddresses is { Length: > 0 }) match.Add($"src {string.Join(",", r.SourceAddresses)}");
+                                if (r.DestinationAddresses is { Length: > 0 }) match.Add($"dst {string.Join(",", r.DestinationAddresses)}");
+                                if (r.DestinationPorts is { Length: > 0 }) match.Add($"dport {string.Join(",", r.DestinationPorts)}");
+                            }
+                            <span class="font-mono">@(match.Count == 0 ? "any" : string.Join(" · ", match))</span>
+                        </td>
+                        <td class="px-5 py-3">
+                            @if (r.Enabled)
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">Disabled</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Firewall/MangleRules/edit/@r.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit mangle rule')">Edit</button>
+                                @{ var msg = $"Delete mangle rule on {r.Chain} (priority {r.Priority})?"; }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Firewall/MangleRules/delete/@r.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete rule?', message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete', level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

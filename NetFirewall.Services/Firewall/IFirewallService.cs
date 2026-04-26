@@ -73,6 +73,18 @@ public interface IFirewallService
     Task<IReadOnlyList<FwAuditLog>> GetAuditLogsAsync(int limit = 100, int offset = 0, CancellationToken ct = default);
     Task LogAuditAsync(string tableName, Guid recordId, string action, object? oldValues, object? newValues, string? userId = null, CancellationToken ct = default);
 
+    /// <summary>Filtered + paginated audit log query — backs the Web's audit viewer.</summary>
+    Task<IReadOnlyList<FwAuditLog>> SearchAuditLogsAsync(
+        string? tableName = null,
+        string? action = null,
+        DateTime? since = null,
+        int limit = 100,
+        int offset = 0,
+        CancellationToken ct = default);
+
+    /// <summary>Distinct values to populate the audit viewer's filter dropdowns.</summary>
+    Task<IReadOnlyList<string>> GetAuditTableNamesAsync(CancellationToken ct = default);
+
     // Configuration generation
     Task<string> GenerateNftablesConfigAsync(CancellationToken ct = default);
     Task<string> GenerateNftablesConfigPreviewAsync(CancellationToken ct = default);

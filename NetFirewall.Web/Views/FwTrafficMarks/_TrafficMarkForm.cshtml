@@ -1,0 +1,39 @@
+@model NetFirewall.Web.Models.Firewall.TrafficMarkFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="traffic-mark-form" hx-post="/Firewall/TrafficMarks/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Name), Label = "Name", Required = true, Value = Model.Name,
+                Placeholder = "WAN1"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.MarkValue), Label = "Mark value (decimal)", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.MarkValue > 0 ? Model.MarkValue.ToString() : "",
+                Min = "1", Max = "2147483647",
+                Help = "256 = 0x100, 512 = 0x200, 768 = 0x300, etc."
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.RouteTable), Label = "Route table (optional)", Value = Model.RouteTable,
+            Placeholder = "wan1",
+            Help = "Name of the rt_table entry — used by ip rule fwmark for policy routing."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description", Kind = FormFieldKind.Textarea,
+            Value = Model.Description
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create mark")</button>
+    </div>
+</form>

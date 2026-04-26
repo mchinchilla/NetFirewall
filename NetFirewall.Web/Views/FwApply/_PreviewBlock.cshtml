@@ -1,0 +1,9 @@
+@model string
+
+<div>
+    <p class="text-xs mb-2" style="color: var(--surface-fg-muted);">
+        Generated @DateTime.Now.ToString("g") · @Model.Length bytes
+    </p>
+    <pre class="text-xs p-4 rounded-lg overflow-auto font-mono max-h-[500px]"
+         style="background-color: var(--surface-muted); color: var(--surface-fg); border: 1px solid var(--surface-border);"><code>@Model</code></pre>
+</div>

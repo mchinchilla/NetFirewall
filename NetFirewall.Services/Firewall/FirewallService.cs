@@ -1249,6 +1249,63 @@ public sealed class FirewallService : IFirewallService
 
     #region Audit Log
 
+    public Task<IReadOnlyList<FwAuditLog>> SearchAuditLogsAsync(
+        string? tableName = null,
+        string? action = null,
+        DateTime? since = null,
+        int limit = 100,
+        int offset = 0,
+        CancellationToken ct = default)
+        => RunAuditQueryAsync(tableName, action, since, limit, offset, ct);
+
+    public async Task<IReadOnlyList<string>> GetAuditTableNamesAsync(CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(
+            "SELECT DISTINCT table_name FROM fw_audit_log ORDER BY table_name", conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var list = new List<string>();
+        while (await reader.ReadAsync(ct)) list.Add(reader.GetString(0));
+        return list;
+    }
+
+    private async Task<IReadOnlyList<FwAuditLog>> RunAuditQueryAsync(
+        string? tableName, string? action, DateTime? since, int limit, int offset, CancellationToken ct)
+    {
+        var where = new List<string>();
+        if (!string.IsNullOrEmpty(tableName)) where.Add("table_name = @table");
+        if (!string.IsNullOrEmpty(action))    where.Add("action = @action");
+        if (since.HasValue)                    where.Add("created_at >= @since");
+        var whereClause = where.Count == 0 ? "" : "WHERE " + string.Join(" AND ", where);
+        var sql = $"SELECT * FROM fw_audit_log {whereClause} ORDER BY created_at DESC LIMIT @limit OFFSET @offset";
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        if (!string.IsNullOrEmpty(tableName)) cmd.Parameters.AddWithValue("table",  tableName);
+        if (!string.IsNullOrEmpty(action))    cmd.Parameters.AddWithValue("action", action);
+        if (since.HasValue)                    cmd.Parameters.AddWithValue("since",  since.Value);
+        cmd.Parameters.AddWithValue("limit", limit);
+        cmd.Parameters.AddWithValue("offset", offset);
+
+        var list = new List<FwAuditLog>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new FwAuditLog
+            {
+                Id = reader.GetGuid(reader.GetOrdinal("id")),
+                TableName = reader.GetString(reader.GetOrdinal("table_name")),
+                RecordId = reader.GetGuid(reader.GetOrdinal("record_id")),
+                Action = reader.GetString(reader.GetOrdinal("action")),
+                OldValues = reader.IsDBNull(reader.GetOrdinal("old_values")) ? null : reader.GetString(reader.GetOrdinal("old_values")),
+                NewValues = reader.IsDBNull(reader.GetOrdinal("new_values")) ? null : reader.GetString(reader.GetOrdinal("new_values")),
+                UserId = reader.IsDBNull(reader.GetOrdinal("user_id")) ? null : reader.GetString(reader.GetOrdinal("user_id")),
+                CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
+            });
+        }
+        return list;
+    }
+
     public async Task<IReadOnlyList<FwAuditLog>> GetAuditLogsAsync(int limit = 100, int offset = 0, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);

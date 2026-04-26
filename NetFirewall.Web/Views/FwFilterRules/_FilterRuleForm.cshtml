@@ -1,0 +1,121 @@
+@model NetFirewall.Web.Models.Firewall.FilterRuleFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var ifaces = (IReadOnlyList<NetFirewall.Models.Firewall.FwInterface>)(ViewBag.Interfaces ?? Array.Empty<NetFirewall.Models.Firewall.FwInterface>());
+    var ifaceOptions = new List<FormFieldViewModel.SelectOption> { new("", "any") };
+    foreach (var i in ifaces)
+        ifaceOptions.Add(new(i.Id.ToString(), $"{i.Name} ({i.Type})"));
+}
+<form id="filter-rule-form" hx-post="/Firewall/FilterRules/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        <div class="grid grid-cols-3 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Chain), Label = "Chain", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.Chain,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("input", "Input"),
+                    new FormFieldViewModel.SelectOption("forward", "Forward"),
+                    new FormFieldViewModel.SelectOption("output", "Output")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Action), Label = "Action", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.Action,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("accept", "Accept"),
+                    new FormFieldViewModel.SelectOption("drop",   "Drop"),
+                    new FormFieldViewModel.SelectOption("reject", "Reject"),
+                    new FormFieldViewModel.SelectOption("log",    "Log only")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.Priority.ToString(), Min = "0", Max = "10000",
+                Help = "Lower = first."
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description", Value = Model.Description,
+            Placeholder = "Allow SSH from LAN"
+        })
+
+        <div class="grid grid-cols-3 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Protocol), Label = "Protocol", Kind = FormFieldKind.Select,
+                Value = Model.Protocol,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("",      "any"),
+                    new FormFieldViewModel.SelectOption("tcp",   "TCP"),
+                    new FormFieldViewModel.SelectOption("udp",   "UDP"),
+                    new FormFieldViewModel.SelectOption("icmp",  "ICMP"),
+                    new FormFieldViewModel.SelectOption("icmpv6","ICMPv6"),
+                    new FormFieldViewModel.SelectOption("sctp",  "SCTP")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.InterfaceInId), Label = "In interface", Kind = FormFieldKind.Select,
+                Value = Model.InterfaceInId?.ToString(), Options = ifaceOptions
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.InterfaceOutId), Label = "Out interface", Kind = FormFieldKind.Select,
+                Value = Model.InterfaceOutId?.ToString(), Options = ifaceOptions
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.SourceAddresses), Label = "Source addresses",
+                Value = Model.SourceAddresses,
+                Placeholder = "192.168.10.0/24, 10.0.0.0/8",
+                Help = "Comma-separated IPs / CIDRs. Empty = any."
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DestinationAddresses), Label = "Destination addresses",
+                Value = Model.DestinationAddresses,
+                Placeholder = "(any)"
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DestinationPorts), Label = "Destination ports",
+                Value = Model.DestinationPorts,
+                Placeholder = "22, 80, 443, 8000-9000"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.ConnectionStates), Label = "Connection states",
+                Value = Model.ConnectionStates,
+                Placeholder = "established, related",
+                Help = "Comma-separated: new, established, related, invalid."
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.RateLimit), Label = "Rate limit", Value = Model.RateLimit,
+                Placeholder = "10/second",
+                Pattern = @"^\d+/(second|minute|hour|day)$"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.LogPrefix), Label = "Log prefix", Value = Model.LogPrefix,
+                Placeholder = "DROPPED-INVALID:",
+                Help = "Used when action = log."
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create rule")</button>
+    </div>
+</form>

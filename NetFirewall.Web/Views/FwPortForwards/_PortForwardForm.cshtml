@@ -1,0 +1,83 @@
+@model NetFirewall.Web.Models.Firewall.PortForwardFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var ifaces = (IReadOnlyList<NetFirewall.Models.Firewall.FwInterface>)(ViewBag.Interfaces ?? Array.Empty<NetFirewall.Models.Firewall.FwInterface>());
+    var ifaceOptions = new List<FormFieldViewModel.SelectOption> { new("", "any") };
+    foreach (var i in ifaces)
+        ifaceOptions.Add(new(i.Id.ToString(), $"{i.Name} ({i.Type})"));
+}
+<form id="port-forward-form" hx-post="/Firewall/PortForwards/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description", Value = Model.Description,
+            Placeholder = "Web server"
+        })
+
+        <div class="grid grid-cols-3 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Protocol), Label = "Protocol", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.Protocol,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("tcp",     "TCP"),
+                    new FormFieldViewModel.SelectOption("udp",     "UDP"),
+                    new FormFieldViewModel.SelectOption("tcp/udp", "TCP + UDP")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.InterfaceId), Label = "Interface (in)", Kind = FormFieldKind.Select,
+                Value = Model.InterfaceId?.ToString(), Options = ifaceOptions
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.Priority.ToString(), Min = "0", Max = "10000"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.SourceAddresses), Label = "Allowed source addresses",
+            Value = Model.SourceAddresses,
+            Placeholder = "(any)",
+            Help = "Comma-separated IPs / CIDRs. Empty = open to internet."
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.ExternalPortStart), Label = "External port (start)", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.ExternalPortStart > 0 ? Model.ExternalPortStart.ToString() : "",
+                Min = "1", Max = "65535"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.ExternalPortEnd), Label = "External port (end, optional)", Kind = FormFieldKind.Number,
+                Value = Model.ExternalPortEnd?.ToString(),
+                Min = "1", Max = "65535",
+                Help = "Empty = single port."
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.InternalIp), Label = "Internal IP", Required = true, Value = Model.InternalIp,
+                Placeholder = "192.168.10.50"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.InternalPort), Label = "Internal port", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.InternalPort > 0 ? Model.InternalPort.ToString() : "",
+                Min = "1", Max = "65535"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create forward")</button>
+    </div>
+</form>

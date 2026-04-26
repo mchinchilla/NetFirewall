@@ -1,0 +1,79 @@
+@model NetFirewall.Web.Models.Firewall.MangleRuleFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var marks = (IReadOnlyList<NetFirewall.Models.Firewall.FwTrafficMark>)(ViewBag.Marks ?? Array.Empty<NetFirewall.Models.Firewall.FwTrafficMark>());
+    var markOptions = new List<FormFieldViewModel.SelectOption> { new("", "(no mark)") };
+    foreach (var m in marks)
+        markOptions.Add(new(m.Id.ToString(), $"{m.Name} (0x{m.MarkValue:X})"));
+}
+<form id="mangle-rule-form" hx-post="/Firewall/MangleRules/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        <div class="grid grid-cols-3 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Chain), Label = "Chain", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.Chain,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("prerouting",  "Prerouting (incoming)"),
+                    new FormFieldViewModel.SelectOption("postrouting", "Postrouting (outgoing)")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.MarkId), Label = "Mark to apply", Kind = FormFieldKind.Select,
+                Value = Model.MarkId?.ToString(), Options = markOptions
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.Priority.ToString(), Min = "0", Max = "10000"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description", Value = Model.Description,
+            Placeholder = "Mark high-priority VoIP"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Protocol), Label = "Protocol", Kind = FormFieldKind.Select,
+            Value = Model.Protocol,
+            Options = new[] {
+                new FormFieldViewModel.SelectOption("",      "any"),
+                new FormFieldViewModel.SelectOption("tcp",   "TCP"),
+                new FormFieldViewModel.SelectOption("udp",   "UDP"),
+                new FormFieldViewModel.SelectOption("icmp",  "ICMP"),
+                new FormFieldViewModel.SelectOption("icmpv6","ICMPv6"),
+                new FormFieldViewModel.SelectOption("sctp",  "SCTP")
+            }
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.SourceAddresses), Label = "Source addresses",
+                Value = Model.SourceAddresses, Placeholder = "(any)"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DestinationAddresses), Label = "Destination addresses",
+                Value = Model.DestinationAddresses, Placeholder = "(any)"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.DestinationPorts), Label = "Destination ports",
+            Value = Model.DestinationPorts,
+            Placeholder = "5060, 5061, 10000-20000"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create rule")</button>
+    </div>
+</form>

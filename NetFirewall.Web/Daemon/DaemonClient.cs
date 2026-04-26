@@ -58,6 +58,25 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<NetworkApplyResult>> RemoveRouteAsync(Guid id, CancellationToken ct = default)
         => PostAsync<NetworkApplyResult>($"/v1/routes/{id}/remove", ct);
 
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyFirewallAsync(CancellationToken ct = default)
+        => PostAsync<NftApplyResultDto>("/v1/firewall/apply", ct);
+
+    public async Task<string?> GetCurrentRulesetAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "/v1/firewall/current-ruleset");
+            AttachSessionHeader(req);
+            using var resp = await _http.SendAsync(req, ct);
+            return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync(ct) : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not fetch current nft ruleset from daemon");
+            return null;
+        }
+    }
+
     public async Task<bool> IsAliveAsync(CancellationToken ct = default)
     {
         try

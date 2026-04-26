@@ -1,0 +1,74 @@
+@model IReadOnlyList<NetFirewall.Models.Firewall.FwPortForward>
+@{
+    var ifaceNames = (IDictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+}
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">No port forwards configured.</div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Pri</th>
+                    <th class="px-5 py-2 font-medium">Proto</th>
+                    <th class="px-5 py-2 font-medium">Interface</th>
+                    <th class="px-5 py-2 font-medium">External</th>
+                    <th class="px-5 py-2 font-medium">→ Internal</th>
+                    <th class="px-5 py-2 font-medium">Status</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var pf in Model.OrderBy(x => x.Priority))
+                {
+                    var ifname = pf.InterfaceId is { } id && ifaceNames.TryGetValue(id, out var n) ? n : "any";
+                    var ext = pf.ExternalPortEnd.HasValue && pf.ExternalPortEnd.Value > pf.ExternalPortStart
+                        ? $"{pf.ExternalPortStart}-{pf.ExternalPortEnd.Value}"
+                        : pf.ExternalPortStart.ToString();
+                    <tr>
+                        <td class="px-5 py-3 font-mono text-xs">@pf.Priority</td>
+                        <td class="px-5 py-3 font-mono text-xs uppercase">@pf.Protocol</td>
+                        <td class="px-5 py-3 font-mono text-xs">@ifname</td>
+                        <td class="px-5 py-3 font-mono text-xs">:@ext</td>
+                        <td class="px-5 py-3 font-mono text-xs">@pf.InternalIp:@pf.InternalPort</td>
+                        <td class="px-5 py-3">
+                            @if (pf.Enabled)
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">Disabled</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Firewall/PortForwards/edit/@pf.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit port forward')">Edit</button>
+                                @{ var msg = $"Delete forward {pf.Protocol}/{ext} → {pf.InternalIp}:{pf.InternalPort}?"; }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Firewall/PortForwards/delete/@pf.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete forward?', message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete', level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

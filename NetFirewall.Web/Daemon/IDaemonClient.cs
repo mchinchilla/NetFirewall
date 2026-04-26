@@ -22,6 +22,14 @@ public interface IDaemonClient
     /// <summary><c>POST /v1/routes/{id}/remove</c></summary>
     Task<ServiceResponse<NetworkApplyResult>> RemoveRouteAsync(Guid routeId, CancellationToken ct = default);
 
+    /// <summary><c>POST /v1/firewall/apply</c> — generate nftables.conf and run <c>nft -f</c>.</summary>
+    Task<ServiceResponse<NftApplyResultDto>> ApplyFirewallAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/firewall/current-ruleset</c> — read live <c>nft list ruleset</c>.</summary>
+    Task<string?> GetCurrentRulesetAsync(CancellationToken ct = default);
+
     /// <summary>Lightweight health probe (no auth on the daemon side).</summary>
     Task<bool> IsAliveAsync(CancellationToken ct = default);
 }
+
+public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string? Output, string? Error);
