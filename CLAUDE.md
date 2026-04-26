@@ -38,6 +38,65 @@ dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/wanmonitor  NetFirewa
 dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/dhcpserver NetFirewall.DhcpServer
 ```
 
+## Production deployment
+
+Production is two systemd units (`netfirewall-daemon`, `netfirewall-web`)
+behind a TLS-terminating reverse proxy. Everything lives under `deploy/`:
+
+```
+deploy/
+  systemd/                              hardened .service files
+  config/{daemon,web}.json.template     prod appsettings (mode 0640)
+  env/{daemon,web}.env.template         secrets — mode 0600/0640
+  nginx/netfirewall.conf                reverse-proxy example with TLS
+  install.sh                            idempotent installer
+  uninstall.sh                          reverse install (--purge wipes data)
+  README.txt                            operational handbook
+```
+
+**Install** on a Debian/Ubuntu/Rocky/Alma/openSUSE host with .NET 10 SDK,
+PostgreSQL 14+ and systemd 250+:
+
+```bash
+sudo deploy/install.sh
+```
+
+The installer creates `netfirewall` group + `netfirewall-web` user (system,
+nologin), lays out `/opt/netfirewall/{daemon,web,migrations}`, `/etc/netfirewall/`,
+`/var/lib/netfirewall/{web,daemon}/`, `/var/log/netfirewall/` (with `/run/netfirewall/`
+provided by systemd `RuntimeDirectory=`), publishes both projects + the migration
+runner, generates an AES-256 master key for TOTP encryption, runs migrations,
+installs and enables both unit files.
+
+**Hardening highlights** (full list in the unit files):
+- Daemon runs as `root` but `CapabilityBoundingSet=CAP_NET_ADMIN
+  CAP_DAC_OVERRIDE CAP_NET_RAW` — no `CAP_SYS_ADMIN`, no `CAP_SYS_MODULE`,
+  no ptrace, no audit, etc. `ProtectSystem=strict` + tight `ReadWritePaths`.
+- Web runs as `netfirewall-web` with **zero capabilities**, only writable
+  path is `/var/lib/netfirewall/web`. Member of `netfirewall` group so it
+  can connect to the daemon's Unix socket (mode 0660 root:netfirewall).
+- Both: `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `ProtectHome`,
+  `ProtectKernelTunables/Modules/Logs/ControlGroups/Clock/Hostname`,
+  `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies`,
+  curated `SystemCallFilter` (denies `@mount @swap @reboot @raw-io
+  @cpu-emulation @privileged`).
+- **`MemoryDenyWriteExecute` is intentionally OFF** — would crash the .NET
+  JIT. Switch to `dotnet publish --publish-ready-to-run` or NativeAOT to
+  enable it; documented as future work.
+
+**Master key (TOTP secrets cipher)** lives in `/etc/netfirewall/web.env`
+mode 0640 root:netfirewall-web. The Web reads it via `EnvironmentFile=`.
+Phase 2.3 will move this to the daemon so the Web doesn't hold the key —
+meanwhile, a Web-process compromise can decrypt TOTP secrets.
+
+**Upgrading**: re-run `sudo deploy/install.sh`. Idempotent — preserves
+master key + connection password, re-publishes binaries, applies pending
+migrations, restarts both services.
+
+**Removing**: `sudo deploy/uninstall.sh` (keeps data) or
+`sudo deploy/uninstall.sh --purge` (wipes config + state + users; the PG
+database is NEVER touched automatically).
+
 ## Database migrations
 
 Schema is managed by **`NetFirewall.Migrations`** — a tiny console runner that

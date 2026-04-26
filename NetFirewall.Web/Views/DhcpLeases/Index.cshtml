@@ -1,0 +1,47 @@
+@{
+    ViewData["Title"] = "DHCP — Leases";
+    Layout = "_Layout";
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);"
+     x-data="{ includeExpired: false }">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">DHCP</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Active leases</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Live view from the running DHCP server. Auto-refreshes every 30 seconds.
+        </p>
+    </div>
+    <div class="flex items-center gap-2">
+        <label class="flex items-center gap-2 text-xs cursor-pointer">
+            <input type="checkbox" x-model="includeExpired" class="h-4 w-4 rounded"
+                   @@change="htmx.trigger(document.getElementById('leases-table'), 'manual-refresh')" />
+            <span>Include expired</span>
+        </label>
+        <button type="button" class="btn btn-ghost"
+                hx-post="/Dhcp/Leases/cleanup-expired"
+                hx-trigger="confirmed-cleanup"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Cleanup expired leases?',
+                        message: 'Removes every lease past its end_time from the database. Active leases are NOT touched.',
+                        confirmLabel: 'Cleanup',
+                        level: 'warning'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed-cleanup');
+                })()">Cleanup expired</button>
+    </div>
+
+    <div class="w-full">
+        <section class="card mt-3" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+            <div id="leases-table"
+                 hx-get="/Dhcp/Leases/table"
+                 :hx-vals="JSON.stringify({ includeExpired })"
+                 hx-trigger="load, refreshLeases from:body, manual-refresh, every 30s"
+                 hx-swap="innerHTML">
+                <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+            </div>
+        </section>
+    </div>
+</div>

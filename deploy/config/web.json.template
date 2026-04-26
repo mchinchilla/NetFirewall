@@ -1,0 +1,32 @@
+{
+  "Serilog": {
+    "Using": [ "Serilog.Sinks.Console", "Serilog.Sinks.File" ],
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "Microsoft.Hosting.Lifetime": "Information",
+        "Microsoft.AspNetCore": "Warning",
+        "System": "Warning"
+      }
+    },
+    "WriteTo": [
+      { "Name": "Console", "Args": { "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}" } },
+      { "Name": "File",    "Args": {
+          "path": "/var/log/netfirewall/web/netfirewall_web-.log",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 30,
+          "outputTemplate": "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+      } }
+    ],
+    "Enrich": [ "FromLogContext", "WithMachineName", "WithThreadId" ],
+    "Properties": { "Application": "NetFirewall.Web" }
+  },
+  "Daemon": {
+    "Enabled": true,
+    "SocketPath": "/run/netfirewall/control.sock",
+    "SessionHeader": "X-NetFw-Session",
+    "Timeout": "00:00:30"
+  },
+  "AllowedHosts": "*"
+}

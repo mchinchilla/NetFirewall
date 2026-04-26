@@ -1,0 +1,66 @@
+[Unit]
+Description=NetFirewall web admin UI
+Documentation=file:///opt/netfirewall/README.txt
+After=network-online.target postgresql.service netfirewall-daemon.service
+Wants=network-online.target
+Requires=netfirewall-daemon.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+# Unprivileged. Group `netfirewall` gives this user access to the daemon socket.
+User=netfirewall-web
+Group=netfirewall
+
+WorkingDirectory=/opt/netfirewall/web
+ExecStart=/opt/netfirewall/web/NetFirewall.Web
+EnvironmentFile=-/etc/netfirewall/web.env
+
+# State + logs under /var/lib/netfirewall/web (owned by netfirewall-web).
+StateDirectory=netfirewall/web
+StateDirectoryMode=0750
+LogsDirectory=netfirewall/web
+LogsDirectoryMode=0750
+
+# ─── Hardening ─────────────────────────────────────────────────────────
+# No capabilities at all — the Web is just an HTTP server talking to PG and
+# the daemon socket. If something tries to escalate, the kernel says no.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+# Only writable path: its own state/log dir.
+ReadWritePaths=/var/lib/netfirewall/web /var/log/netfirewall/web
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @swap @reboot @raw-io @cpu-emulation @privileged
+
+# Same JIT note as the daemon — MemoryDenyWriteExecute would break .NET.
+
+LimitNOFILE=8192
+TasksMax=64
+
+Restart=on-failure
+RestartSec=5
+
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

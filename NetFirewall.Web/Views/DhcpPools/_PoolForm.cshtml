@@ -1,0 +1,62 @@
+@model NetFirewall.Web.Models.Dhcp.PoolFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="pool-form"
+      hx-post="/Dhcp/Subnets/@Model.SubnetId/Pools/save"
+      hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="SubnetId" value="@Model.SubnetId" />
+    @if (Model.Id.HasValue)
+    {
+        <input type="hidden" name="Id" value="@Model.Id" />
+    }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Pool name (optional)", Value = Model.Name,
+            Placeholder = "guest, employees, …"
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.RangeStart), Label = "Range start", Required = true, Value = Model.RangeStart,
+                Placeholder = "192.168.10.10"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.RangeEnd), Label = "Range end", Required = true, Value = Model.RangeEnd,
+                Placeholder = "192.168.10.250"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Number, Required = true,
+            Value = Model.Priority.ToString(), Min = "0", Max = "1000",
+            Help = "Lower number = checked first when multiple pools match a request."
+        })
+
+        <div class="space-y-2">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.AllowUnknownClients), Label = "Allow unknown clients (no reservation needed)",
+                Kind = FormFieldKind.Checkbox, Value = Model.AllowUnknownClients ? "true" : "false"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.KnownClientsOnly), Label = "Known clients only (reservations + classes)",
+                Kind = FormFieldKind.Checkbox, Value = Model.KnownClientsOnly ? "true" : "false"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DenyBootp), Label = "Deny legacy BOOTP requests",
+                Kind = FormFieldKind.Checkbox, Value = Model.DenyBootp ? "true" : "false"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Enabled), Label = "Enabled",
+                Kind = FormFieldKind.Checkbox, Value = Model.Enabled ? "true" : "false"
+            })
+        </div>
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save changes" : "Create pool")</button>
+    </div>
+</form>

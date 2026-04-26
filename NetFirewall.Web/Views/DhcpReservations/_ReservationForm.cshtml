@@ -1,0 +1,39 @@
+@model NetFirewall.Web.Models.Dhcp.ReservationFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="reservation-form"
+      hx-post="/Dhcp/Reservations/save"
+      hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue)
+    {
+        <input type="hidden" name="Id" value="@Model.Id" />
+    }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.MacAddress), Label = "MAC address", Required = true, Value = Model.MacAddress,
+            Placeholder = "AA:BB:CC:DD:EE:FF",
+            Pattern = @"^([0-9A-Fa-f]{2}([:-])){5}[0-9A-Fa-f]{2}$",
+            Help = "Lowercase or uppercase, separator <code>:</code> or <code>-</code>."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.ReservedIp), Label = "Reserved IP", Required = true, Value = Model.ReservedIp,
+            Placeholder = "192.168.10.50",
+            Help = "Should fall inside one of the subnet's pools (or be excluded from auto-assignment)."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description", Kind = FormFieldKind.Textarea,
+            Value = Model.Description,
+            Placeholder = "office printer, NAS, …"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save changes" : "Create reservation")</button>
+    </div>
+</form>

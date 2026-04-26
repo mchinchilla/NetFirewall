@@ -1,0 +1,59 @@
+@model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpMacReservation>
+
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+        No reservations yet. Add one to permanently bind a MAC address to an IP.
+    </div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">MAC</th>
+                    <th class="px-5 py-2 font-medium">Reserved IP</th>
+                    <th class="px-5 py-2 font-medium hidden md:table-cell">Description</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var r in Model.OrderBy(x => x.ReservedIp?.ToString()))
+                {
+                    <tr>
+                        <td class="px-5 py-3 font-mono text-xs">@r.MacAddress</td>
+                        <td class="px-5 py-3 font-mono text-xs font-medium">@r.ReservedIp</td>
+                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">
+                            @(r.Description ?? "—")
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Dhcp/Reservations/edit/@r.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit reservation')">Edit</button>
+                                @{
+                                    var msg = $"Delete reservation for {r.MacAddress} → {r.ReservedIp}? The IP will rejoin the general pool.";
+                                }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Dhcp/Reservations/delete/@r.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete reservation?',
+                                                message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete',
+                                                level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

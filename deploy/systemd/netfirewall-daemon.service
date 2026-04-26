@@ -1,0 +1,88 @@
+[Unit]
+Description=NetFirewall privileged daemon (network mutations)
+Documentation=file:///opt/netfirewall/README.txt
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+# The daemon owns OS mutations. The Web cannot start cleanly without it.
+Before=netfirewall-web.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+# Runs as root because it has to write /etc/network/*, /etc/NetworkManager/*,
+# /etc/netplan/* and invoke nmcli / ip / ifup. CapabilityBoundingSet below
+# clamps that root down to the strict minimum.
+User=root
+Group=root
+
+WorkingDirectory=/opt/netfirewall/daemon
+ExecStart=/opt/netfirewall/daemon/netfirewall-daemon
+EnvironmentFile=-/etc/netfirewall/daemon.env
+
+# Created/owned by systemd before the unit starts; perms 0750 on /run/netfirewall
+# means only root + members of group `netfirewall` can traverse it.
+RuntimeDirectory=netfirewall
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=no
+
+# Persistent state (logs). Owned by root since the daemon runs as root.
+StateDirectory=netfirewall/daemon
+StateDirectoryMode=0750
+LogsDirectory=netfirewall/daemon
+LogsDirectoryMode=0750
+
+# ─── Hardening ─────────────────────────────────────────────────────────
+# Capability clamp — only what's needed:
+#   CAP_NET_ADMIN   — modify interfaces, routes, addresses
+#   CAP_DAC_OVERRIDE — read/write files in /etc/network /etc/NetworkManager
+#   CAP_NET_RAW     — required by some `ip` / `nft` operations
+# Everything else (including CAP_SYS_ADMIN, CAP_SYS_MODULE, CAP_SYS_PTRACE,
+# CAP_AUDIT_WRITE, CAP_KILL, CAP_CHOWN, etc.) is unavailable.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_NET_RAW
+AmbientCapabilities=
+
+NoNewPrivileges=yes
+
+# ProtectSystem=strict makes /usr /boot /efi read-only for the process.
+# ReadWritePaths re-opens only the directories the daemon legitimately writes.
+ProtectSystem=strict
+ReadWritePaths=/etc/network /etc/NetworkManager /etc/netplan /etc/nftables.conf /var/log/netfirewall
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+# @system-service is a curated allow-list; we additionally deny @mount, @swap,
+# @reboot, @raw-io which the daemon never needs.
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @swap @reboot @raw-io @cpu-emulation
+
+# NOTE: MemoryDenyWriteExecute is intentionally omitted — the .NET JIT writes
+# executable pages and the runtime would crash. Switch to ReadyToRun / NativeAOT
+# publish to enable it.
+
+# Resource limits (sane defaults — bump if you have a busy network).
+LimitNOFILE=8192
+TasksMax=128
+
+Restart=on-failure
+RestartSec=5
+
+# Stop politely; SIGINT lets ASP.NET shut down cleanly.
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,83 @@
+@model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpPool>
+@{
+    var subnetId = (Guid)ViewBag.SubnetId;
+}
+
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+        No pools yet. Add one to start handing out leases from this subnet.
+    </div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Name</th>
+                    <th class="px-5 py-2 font-medium">Range</th>
+                    <th class="px-5 py-2 font-medium hidden md:table-cell">Priority</th>
+                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Flags</th>
+                    <th class="px-5 py-2 font-medium">Status</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var p in Model.OrderBy(p => p.Priority))
+                {
+                    <tr>
+                        <td class="px-5 py-3 font-medium">@(p.Name ?? "—")</td>
+                        <td class="px-5 py-3 font-mono text-xs">@p.RangeStart  →  @p.RangeEnd</td>
+                        <td class="px-5 py-3 hidden md:table-cell">@p.Priority</td>
+                        <td class="px-5 py-3 hidden lg:table-cell text-xs" style="color: var(--surface-fg-muted);">
+                            @{
+                                var flags = new List<string>();
+                                if (p.AllowUnknownClients) flags.Add("unknown OK");
+                                if (p.KnownClientsOnly)    flags.Add("known only");
+                                if (p.DenyBootp)           flags.Add("no BOOTP");
+                            }
+                            @(flags.Count == 0 ? "—" : string.Join(" · ", flags))
+                        </td>
+                        <td class="px-5 py-3">
+                            @if (p.Enabled)
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">Disabled</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Dhcp/Subnets/@subnetId/Pools/edit/@p.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit pool')">Edit</button>
+                                @{
+                                    var msg = $"Delete pool {p.RangeStart}–{p.RangeEnd}? Existing leases stay until they expire.";
+                                }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Dhcp/Subnets/@subnetId/Pools/delete/@p.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete pool?',
+                                                message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete',
+                                                level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

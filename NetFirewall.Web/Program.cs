@@ -114,9 +114,13 @@ builder.Services.AddScoped<ISessionCookieIssuer, SessionCookieIssuer>();
 builder.Services.AddSingleton<IBootstrapTokenStore, BootstrapTokenStore>();
 builder.Services.AddHostedService<BootstrapTokenIssuer>();
 
-// Setup wizard + dependency (IDhcpSubnetService — needed by the wizard's
-// ApplyLanConfigAsync, otherwise unused in the Web today).
+// DHCP services. Subnet service is the cached singleton used by both the
+// setup wizard and the DHCP admin pages. Admin facade is what controllers
+// inject for full CRUD over subnets / pools / leases / reservations.
 builder.Services.AddSingleton<NetFirewall.Services.Dhcp.IDhcpSubnetService, NetFirewall.Services.Dhcp.DhcpSubnetService>();
+builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpAdminService, NetFirewall.Services.Dhcp.DhcpAdminService>();
+
+// Setup wizard.
 builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFirewall.Services.Setup.SetupWizardService>();
 
 // Runtime metadata for the login system-info card.

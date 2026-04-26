@@ -1,0 +1,131 @@
+@model NetFirewall.Web.Models.Dhcp.SubnetFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var ifaces = (IReadOnlyList<NetFirewall.Models.Firewall.FwInterface>)(ViewBag.Interfaces ?? Array.Empty<NetFirewall.Models.Firewall.FwInterface>());
+    var ifaceOptions = new List<FormFieldViewModel.SelectOption> {
+        new("", "(unbound — auto-detect)")
+    };
+    foreach (var i in ifaces.Where(i => i.Type == "LAN"))
+    {
+        ifaceOptions.Add(new(i.Id.ToString(), $"{i.Name} ({i.Type})", i.Id == Model.InterfaceId));
+    }
+}
+<form id="subnet-form"
+      hx-post="/Dhcp/Subnets/save" hx-target="this" hx-swap="outerHTML"
+      x-data="{ showAdvanced: false }">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue)
+    {
+        <input type="hidden" name="Id" value="@Model.Id" />
+    }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Subnet name", Required = true, Value = Model.Name,
+            Placeholder = "office-lan",
+            Help = "Friendly identifier shown in tables and logs."
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Network), Label = "Network CIDR", Required = true, Value = Model.Network,
+                Placeholder = "192.168.10.0/24",
+                Pattern = @"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.SubnetMask), Label = "Subnet mask", Required = true, Value = Model.SubnetMask,
+                Placeholder = "255.255.255.0"
+            })
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Router), Label = "Router (gateway for clients)", Value = Model.Router,
+                Placeholder = "192.168.10.1"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DomainName), Label = "Domain name", Value = Model.DomainName,
+                Placeholder = "lan.local"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.DnsServersRaw), Label = "DNS servers", Value = Model.DnsServersRaw,
+            Placeholder = "1.1.1.1, 8.8.8.8",
+            Help = "Comma-separated IPv4 list."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.InterfaceId), Label = "Bind to interface", Kind = FormFieldKind.Select,
+            Value = Model.InterfaceId?.ToString(),
+            Options = ifaceOptions,
+            Help = "Restricts the scope to a specific NIC. Leave unbound for auto-detection."
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DefaultLeaseTime), Label = "Default lease (s)", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.DefaultLeaseTime.ToString(), Min = "60", Max = "2592000",
+                Help = "86400 = 1 day"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.MaxLeaseTime), Label = "Max lease (s)", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.MaxLeaseTime.ToString(), Min = "60", Max = "2592000"
+            })
+        </div>
+
+        <button type="button" class="text-xs font-medium hover:underline"
+                style="color: var(--accent);"
+                @@click="showAdvanced = !showAdvanced">
+            <span x-show="!showAdvanced">Show advanced (NTP, WINS, PXE, MTU…)</span>
+            <span x-show="showAdvanced">Hide advanced</span>
+        </button>
+
+        <div x-show="showAdvanced" x-transition class="space-y-4">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.NtpServersRaw), Label = "NTP servers", Value = Model.NtpServersRaw,
+                Placeholder = "10.0.0.1, 10.0.0.2"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.WinsServersRaw), Label = "WINS servers", Value = Model.WinsServersRaw
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DomainSearchList), Label = "Domain search list",
+                Value = Model.DomainSearchList,
+                Placeholder = "lan.local, dmz.local"
+            })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.Broadcast), Label = "Broadcast address", Value = Model.Broadcast,
+                    Placeholder = "(auto)"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.InterfaceMtu), Label = "Interface MTU", Kind = FormFieldKind.Number,
+                    Value = Model.InterfaceMtu?.ToString(), Min = "576", Max = "9216"
+                })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.TftpServer), Label = "TFTP server (PXE)", Value = Model.TftpServer
+            })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.BootFilename), Label = "Boot filename (BIOS)", Value = Model.BootFilename
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.BootFilenameUefi), Label = "Boot filename (UEFI)", Value = Model.BootFilenameUefi
+                })
+            </div>
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save changes" : "Create subnet")</button>
+    </div>
+</form>
