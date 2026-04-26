@@ -1,0 +1,26 @@
+@model ErrorViewModel
+@{
+    ViewData["Title"] = "Error";
+}
+
+<section class="card max-w-2xl" style="animation: var(--animate-slide-up);">
+    <h1 class="text-2xl font-semibold" style="color: #b94545;">An error occurred</h1>
+    <p class="mt-1" style="color: var(--surface-fg-muted);">Something went wrong while processing your request.</p>
+
+    @if (Model.ShowRequestId)
+    {
+        <p class="mt-4 text-sm">
+            <span class="font-medium">Request ID:</span>
+            <code class="ml-1 rounded px-1.5 py-0.5 text-xs"
+                  style="background-color: var(--surface-muted); color: var(--surface-fg);">@Model.RequestId</code>
+        </p>
+    }
+
+    <div class="mt-6 pt-4 border-t" style="border-color: var(--surface-border);">
+        <h3 class="text-sm font-semibold">Development mode</h3>
+        <p class="mt-1 text-sm" style="color: var(--surface-fg-muted);">
+            Set <code class="rounded px-1 text-xs" style="background-color: var(--surface-muted);">ASPNETCORE_ENVIRONMENT=Development</code> and restart the app to see detailed error pages.
+            Do not enable this in production.
+        </p>
+    </div>
+</section>

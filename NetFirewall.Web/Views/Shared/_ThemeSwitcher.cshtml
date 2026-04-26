@@ -1,0 +1,78 @@
+@*
+    Theme switcher — palette grid in 2 columns, with mode (light/dark/mixed) row.
+    Backed by Alpine.store('ui'). Each tile is a live miniature of the theme.
+*@
+<div class="relative" x-data="{ open: false }">
+    <button type="button"
+            class="h-9 w-9 inline-flex items-center justify-center rounded-md btn-ghost"
+            @@click="open = !open"
+            aria-label="Change theme">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
+        </svg>
+    </button>
+
+    <div x-cloak x-show="open" @@click.outside="open = false"
+         x-transition.opacity.duration.150ms
+         class="absolute right-0 mt-2 w-[420px] origin-top-right rounded-xl border shadow-lg overflow-hidden"
+         style="background-color: var(--surface-elevated); border-color: var(--surface-border);">
+
+        @* Mode row *@
+        <div class="px-4 pt-4">
+            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Mode</p>
+            <div class="mt-2 grid grid-cols-3 gap-1.5 p-1 rounded-lg"
+                 style="background-color: var(--surface-muted);">
+                <template x-for="m in ['light', 'dark']" :key="m">
+                    <button type="button"
+                            class="px-3 py-1.5 rounded-md text-xs font-medium capitalize transition"
+                            :class="$store.ui.mode === m ? 'shadow-sm' : 'opacity-70 hover:opacity-100'"
+                            :style="$store.ui.mode === m
+                                ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
+                                : 'color: var(--surface-fg-muted);'"
+                            @@click="$store.ui.setMode(m)"
+                            x-text="m"></button>
+                </template>
+                <button type="button"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium transition"
+                        :class="$store.ui.sidebar === 'dark' ? 'shadow-sm' : 'opacity-70 hover:opacity-100'"
+                        :style="$store.ui.sidebar === 'dark'
+                            ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
+                            : 'color: var(--surface-fg-muted);'"
+                        @@click="$store.ui.setSidebarVariant($store.ui.sidebar === 'dark' ? 'auto' : 'dark')">
+                    Mixed
+                </button>
+            </div>
+        </div>
+
+        @* Palette grid *@
+        <div class="px-4 pt-4 pb-4">
+            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Palette</p>
+            <div class="mt-2 grid grid-cols-2 gap-2">
+                <template x-for="p in $store.ui.palettes" :key="p.id">
+                    <button type="button"
+                            class="group relative rounded-lg border p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md"
+                            :class="$store.ui.theme === p.id ? 'ring-2' : ''"
+                            :style="$store.ui.theme === p.id
+                                ? `border-color: ${p.hex}; --tw-ring-color: ${p.hex};`
+                                : 'border-color: var(--surface-border);'"
+                            @@click="$store.ui.setTheme(p.id)">
+
+                        @* Mini preview: top header bar + sidebar + content using palette swatches *@
+                        <div class="flex h-12 overflow-hidden rounded-md border"
+                             style="border-color: var(--surface-border);">
+                            <div class="w-3" :style="`background-color: var(--${p.id}-1500);`"></div>
+                            <div class="flex-1 flex flex-col">
+                                <div class="h-2.5" :style="`background-color: var(--${p.id}-200);`"></div>
+                                <div class="flex-1" :style="`background-color: var(--${p.id}-50);`"></div>
+                            </div>
+                        </div>
+                        <div class="mt-2 flex items-center justify-between">
+                            <span class="text-xs font-medium truncate" x-text="p.label"></span>
+                            <span class="h-3 w-3 rounded-full ring-1" :style="`background-color: ${p.hex}; --tw-ring-color: var(--surface-border);`"></span>
+                        </div>
+                    </button>
+                </template>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,74 @@
+@*
+    Sidebar — collapsible nav rail with sections.
+    Width animates between collapsed (w-16) and expanded (w-64) via Alpine state.
+    Mobile drawer is rendered via the same partial; the parent layout owns 'mobileNav'.
+*@
+<aside class="hidden md:flex flex-col border-r overflow-hidden transition-[width] duration-300 ease-out shrink-0"
+       :class="$store.ui.sidebarCollapsed ? 'w-16' : 'w-64'"
+       style="background-color: var(--sidebar-bg); border-color: var(--sidebar-border); color: var(--sidebar-fg);">
+
+    @* Brand *@
+    <div class="h-14 flex items-center gap-2 px-4 border-b shrink-0"
+         style="border-color: var(--sidebar-border);">
+        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg shrink-0"
+              style="background-color: var(--accent); color: var(--accent-fg);">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25 4.5 5.25v6c0 4.97 3.5 9.25 7.5 10.5 4-1.25 7.5-5.53 7.5-10.5v-6L12 2.25Z" />
+            </svg>
+        </span>
+        <span class="font-semibold tracking-tight whitespace-nowrap"
+              x-show="!$store.ui.sidebarCollapsed"
+              x-transition.opacity>NetFirewall</span>
+    </div>
+
+    @* Nav sections *@
+    <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+        @await Html.PartialAsync("_SidebarItems")
+    </nav>
+
+    @* Footer status pill *@
+    <div class="border-t p-3 shrink-0" style="border-color: var(--sidebar-border);">
+        <div class="flex items-center gap-2 rounded-lg px-2 py-2"
+             style="background-color: var(--sidebar-elevated);">
+            <span class="relative flex h-2.5 w-2.5 shrink-0">
+                <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+                      style="background-color: var(--magic-mint-500);"></span>
+                <span class="relative inline-flex rounded-full h-2.5 w-2.5"
+                      style="background-color: var(--magic-mint-600);"></span>
+            </span>
+            <div x-show="!$store.ui.sidebarCollapsed" x-transition.opacity class="min-w-0">
+                <p class="text-xs font-semibold whitespace-nowrap">All systems</p>
+                <p class="text-[11px] whitespace-nowrap" style="color: var(--sidebar-fg-muted);">Operational</p>
+            </div>
+        </div>
+    </div>
+</aside>
+
+@* Mobile drawer *@
+<div x-cloak x-show="mobileNav" class="md:hidden fixed inset-0 z-40">
+    <div class="absolute inset-0" style="background-color: rgba(0,0,0,0.45);" @@click="mobileNav = false"></div>
+    <aside class="relative h-full w-72 flex flex-col border-r"
+           x-transition:enter="transition ease-out duration-200"
+           x-transition:enter-start="-translate-x-full"
+           x-transition:enter-end="translate-x-0"
+           x-transition:leave="transition ease-in duration-150"
+           x-transition:leave-start="translate-x-0"
+           x-transition:leave-end="-translate-x-full"
+           style="background-color: var(--sidebar-bg); border-color: var(--sidebar-border); color: var(--sidebar-fg);">
+        <div class="h-14 flex items-center justify-between px-4 border-b" style="border-color: var(--sidebar-border);">
+            <div class="flex items-center gap-2">
+                <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg"
+                      style="background-color: var(--accent); color: var(--accent-fg);">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25 4.5 5.25v6c0 4.97 3.5 9.25 7.5 10.5 4-1.25 7.5-5.53 7.5-10.5v-6L12 2.25Z"/></svg>
+                </span>
+                <span class="font-semibold tracking-tight">NetFirewall</span>
+            </div>
+            <button @@click="mobileNav = false" class="h-8 w-8 inline-flex items-center justify-center rounded-md btn-ghost" aria-label="Close">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+            @await Html.PartialAsync("_SidebarItems", new ViewDataDictionary(ViewData) { ["ForceExpanded"] = true })
+        </nav>
+    </aside>
+</div>

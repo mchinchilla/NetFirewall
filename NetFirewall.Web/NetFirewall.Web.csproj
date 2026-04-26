@@ -1,29 +1,38 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>8c79e5a0-d80b-4703-b3ef-ece3ae847133</UserSecretsId>
-    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <TailwindInput>Styles/site.css</TailwindInput>
+        <TailwindOutput>wwwroot/css/site.css</TailwindOutput>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\NetFirewall.ServiceDefaults\NetFirewall.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
-    <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+        <PackageReference Include="Serilog.Settings.Configuration" Version="9.0.0" />
+        <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+        <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+        <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+        <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+    </ItemGroup>
 
-  <!-- Tailwind CSS Build (requires tailwindcss in PATH) -->
-  <Target Name="TailwindBuild" BeforeTargets="Build">
-    <Message Importance="high" Text="Building Tailwind CSS..." />
-    <Exec Command="tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css --minify" WorkingDirectory="$(ProjectDir)" Condition="'$(Configuration)' == 'Release'" />
-    <Exec Command="tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css" WorkingDirectory="$(ProjectDir)" Condition="'$(Configuration)' != 'Release'" />
-  </Target>
+    <ItemGroup>
+        <ProjectReference Include="..\NetFirewall.ServiceDefaults\NetFirewall.ServiceDefaults.csproj" />
+        <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
+    </ItemGroup>
 
-  <!-- Watch Tailwind CSS during development -->
-  <Target Name="TailwindWatch" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
-    <Message Importance="high" Text="Tailwind CSS compiled. For watch mode, run: tailwindcss -i ./Styles/app.css -o ./wwwroot/css/app.css --watch" />
-  </Target>
+    <ItemGroup>
+        <Content Remove="Styles/**" />
+        <None Include="Styles/**" />
+    </ItemGroup>
+
+    <Target Name="BuildTailwindCss" BeforeTargets="BeforeBuild;AssignTargetPaths"
+            Inputs="$(TailwindInput);@(Content);@(None)"
+            Outputs="$(TailwindOutput)">
+        <Message Importance="high" Text="Compiling Tailwind CSS: $(TailwindInput) -> $(TailwindOutput)" />
+        <Exec Command="tailwindcss -i $(TailwindInput) -o $(TailwindOutput) --minify"
+              WorkingDirectory="$(MSBuildProjectDirectory)" />
+    </Target>
 
 </Project>

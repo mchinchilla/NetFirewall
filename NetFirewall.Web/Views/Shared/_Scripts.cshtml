@@ -1,0 +1,7 @@
+@*
+    End-of-body library scripts. Per-page scripts are rendered by the layout
+    via @@RenderSectionAsync("Scripts") — that call CANNOT live in a partial,
+    so it stays in _Layout.cshtml right after this partial is included.
+*@
+<script src="~/lib/htmx/htmx.min.js" asp-append-version="true"></script>
+<script src="~/lib/alpinejs/alpine.min.js" defer asp-append-version="true"></script>

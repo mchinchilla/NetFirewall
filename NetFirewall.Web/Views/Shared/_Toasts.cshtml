@@ -1,0 +1,42 @@
+@*
+    Toast container — bound to Alpine.store('toasts').
+    Triggered by JS calls or by HTMX HX-Trigger:'showToast' events.
+*@
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2 w-[320px] max-w-[calc(100vw-2rem)]"
+     x-data
+     aria-live="polite"
+     aria-atomic="false">
+    <template x-for="t in $store.toasts.items" :key="t.id">
+        <div class="toast"
+             :class="{
+                 'toast-success': t.level === 'success',
+                 'toast-error':   t.level === 'error',
+                 'toast-info':    t.level === 'info',
+                 'toast-warning': t.level === 'warning'
+             }">
+            <span class="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] shrink-0"
+                  :style="{
+                     'background-color': t.level === 'success' ? 'var(--magic-mint-100)'
+                                       : t.level === 'error'   ? '#fde2e2'
+                                       : t.level === 'warning' ? 'var(--taupe-gray-100)'
+                                       : 'var(--jordy-blue-100)',
+                     'color':            t.level === 'success' ? 'var(--magic-mint-900)'
+                                       : t.level === 'error'   ? '#8b1f1f'
+                                       : t.level === 'warning' ? 'var(--taupe-gray-900)'
+                                       : 'var(--jordy-blue-900)'
+                  }">
+                <svg x-show="t.level === 'success'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                <svg x-show="t.level === 'error'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                <svg x-show="t.level === 'warning'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+                <svg x-show="t.level === 'info'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg>
+            </span>
+            <div class="flex-1 min-w-0">
+                <p x-show="t.title" class="text-sm font-semibold" x-text="t.title"></p>
+                <p class="text-sm" :class="t.title ? 'mt-0.5' : ''" x-text="t.message"></p>
+            </div>
+            <button @@click="$store.toasts.dismiss(t.id)" class="shrink-0 -m-1 p-1 rounded hover:opacity-70" aria-label="Dismiss">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+    </template>
+</div>

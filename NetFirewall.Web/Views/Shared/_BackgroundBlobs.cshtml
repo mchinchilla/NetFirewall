@@ -1,0 +1,12 @@
+@*
+    Decorative animated geometry behind every page. Colors come from
+    --blob-a / --blob-b semantic tokens so they re-tint per theme.
+*@
+<div class="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
+    <div class="blob h-[420px] w-[420px] -top-32 -left-32"
+         style="background: radial-gradient(closest-side, var(--blob-a), transparent 70%); animation: var(--animate-blob);"></div>
+    <div class="blob h-[520px] w-[520px] top-1/3 -right-40"
+         style="background: radial-gradient(closest-side, var(--blob-b), transparent 70%); animation: var(--animate-blob-slow);"></div>
+    <div class="blob h-[360px] w-[360px] -bottom-24 left-1/3"
+         style="background: radial-gradient(closest-side, var(--blob-a), transparent 70%); animation: var(--animate-blob); animation-delay: -8s;"></div>
+</div>

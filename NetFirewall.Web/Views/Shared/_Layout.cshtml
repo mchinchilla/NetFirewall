@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+@*
+    Dashboard shell — composes partials only. Each visual concern lives in
+    its own _Partial under Views/Shared/ per project rule #7.
+*@
+<html lang="en" class="h-full" data-theme="boulder" data-mode="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - NetFirewall</title>
+    @await Html.PartialAsync("_HeadStyles")
+</head>
+<body class="flex flex-col min-h-screen relative overflow-x-hidden"
+      x-data="{ mobileNav: false }">
+
+    @await Html.PartialAsync("_BackgroundBlobs")
+
+    <div class="flex flex-1 min-h-0">
+        @await Html.PartialAsync("_Sidebar")
+
+        <div class="flex flex-col flex-1 min-w-0">
+            @await Html.PartialAsync("_TopHeader")
+
+            <main role="main" class="flex-1 px-4 sm:px-6 lg:px-8 py-6"
+                  style="animation: var(--animate-fade-in);">
+                @RenderBody()
+            </main>
+
+            @await Html.PartialAsync("_Footer")
+        </div>
+    </div>
+
+    @await Html.PartialAsync("_Toasts")
+    @await Html.PartialAsync("_ConfirmDialog")
+
+    @await Html.PartialAsync("_Scripts")
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>
