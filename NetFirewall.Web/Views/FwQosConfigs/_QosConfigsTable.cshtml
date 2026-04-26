@@ -1,0 +1,68 @@
+@model IReadOnlyList<NetFirewall.Models.Firewall.FwQosConfig>
+@{
+    var ifaceNames = (Dictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+}
+
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">No QoS configurations yet.</div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Interface</th>
+                    <th class="px-5 py-2 font-medium">Total bandwidth</th>
+                    <th class="px-5 py-2 font-medium">Status</th>
+                    <th class="px-5 py-2 font-medium hidden md:table-cell">Created</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var c in Model.OrderBy(x => ifaceNames.TryGetValue(x.InterfaceId ?? Guid.Empty, out var n) ? n : ""))
+                {
+                    var ifaceName = c.InterfaceId.HasValue && ifaceNames.TryGetValue(c.InterfaceId.Value, out var nm)
+                        ? nm : "(unbound)";
+                    <tr>
+                        <td class="px-5 py-3 font-medium">@ifaceName</td>
+                        <td class="px-5 py-3 font-mono text-xs">@c.TotalBandwidthMbps Mbps</td>
+                        <td class="px-5 py-3">
+                            @if (c.Enabled)
+                            {
+                                <span class="badge" style="background: color-mix(in srgb, var(--feedback-success-fg) 15%, transparent); color: var(--feedback-success-fg);">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="badge" style="background: color-mix(in srgb, var(--surface-fg-muted) 15%, transparent); color: var(--surface-fg-muted);">Disabled</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">@c.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <a class="btn btn-ghost text-xs" href="/Firewall/Qos/@c.Id/Classes">Classes</a>
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Firewall/Qos/edit/@c.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit QoS config')">Edit</button>
+                                @{ var msg = $"Delete QoS config for '{ifaceName}'? All child classes will also be deleted (cascade)."; }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Firewall/Qos/delete/@c.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete QoS config?', message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete', level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

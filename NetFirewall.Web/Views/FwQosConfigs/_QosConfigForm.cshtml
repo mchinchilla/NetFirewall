@@ -1,0 +1,40 @@
+@model NetFirewall.Web.Models.Firewall.QosConfigFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var ifaces = (IReadOnlyList<NetFirewall.Models.Firewall.FwInterface>)(ViewBag.Interfaces ?? Array.Empty<NetFirewall.Models.Firewall.FwInterface>());
+    var ifaceOptions = new List<FormFieldViewModel.SelectOption> { new("", "Select interface…") };
+    foreach (var i in ifaces.OrderBy(x => x.Name))
+        ifaceOptions.Add(new(i.Id.ToString(), $"{i.Name} ({i.Type})"));
+}
+
+<form id="qos-config-form" hx-post="/Firewall/Qos/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.InterfaceId), Label = "Interface", Kind = FormFieldKind.Select, Required = true,
+            Value = Model.InterfaceId == Guid.Empty ? "" : Model.InterfaceId.ToString(),
+            Options = ifaceOptions,
+            Help = "Pick the egress NIC that this HTB tree will shape."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.TotalBandwidthMbps), Label = "Total bandwidth (Mbps)", Kind = FormFieldKind.Number, Required = true,
+            Value = Model.TotalBandwidthMbps > 0 ? Model.TotalBandwidthMbps.ToString() : "",
+            Min = "1", Max = "100000",
+            Help = "Cap for the link — typically your ISP's upload speed."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create config")</button>
+    </div>
+</form>

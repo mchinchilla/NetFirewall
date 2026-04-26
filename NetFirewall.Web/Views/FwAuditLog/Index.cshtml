@@ -1,0 +1,73 @@
+@{
+    ViewData["Title"] = "Firewall — Audit log";
+    Layout = "_Layout";
+    var tableNames = (IReadOnlyList<string>)(ViewBag.TableNames ?? Array.Empty<string>());
+}
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);"
+     x-data="{ table: '', action: '', since: '24h', page: 1 }">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Firewall</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Audit log</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">Every CRUD on firewall tables — who, when, before/after.</p>
+    </div>
+
+    <div class="flex flex-wrap items-end gap-2">
+        <label class="text-xs flex flex-col gap-1">
+            <span style="color: var(--surface-fg-muted);">Table</span>
+            <select x-model="table"
+                    @@change="page = 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')"
+                    class="input py-1 text-xs">
+                <option value="">All tables</option>
+                @foreach (var t in tableNames)
+                {
+                    <option value="@t">@t</option>
+                }
+            </select>
+        </label>
+        <label class="text-xs flex flex-col gap-1">
+            <span style="color: var(--surface-fg-muted);">Action</span>
+            <select x-model="action"
+                    @@change="page = 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')"
+                    class="input py-1 text-xs">
+                <option value="">All actions</option>
+                <option value="INSERT">INSERT</option>
+                <option value="UPDATE">UPDATE</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+        </label>
+        <label class="text-xs flex flex-col gap-1">
+            <span style="color: var(--surface-fg-muted);">Since</span>
+            <select x-model="since"
+                    @@change="page = 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')"
+                    class="input py-1 text-xs">
+                <option value="1h">Last hour</option>
+                <option value="24h">Last 24 h</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+                <option value="">All time</option>
+            </select>
+        </label>
+    </div>
+
+    <section class="card mt-3 w-full" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="audit-log-table"
+             hx-get="/Firewall/AuditLog/table"
+             :hx-vals="JSON.stringify({ table, action, since, page })"
+             hx-trigger="load, manual-refresh"
+             hx-swap="innerHTML">
+            <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between text-xs" style="color: var(--surface-fg-muted);">
+            <span>Page <span x-text="page"></span></span>
+            <div class="inline-flex items-center gap-1">
+                <button type="button" class="btn btn-ghost text-xs"
+                        :disabled="page <= 1"
+                        @@click="page = Math.max(1, page - 1); htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')">Previous</button>
+                <button type="button" class="btn btn-ghost text-xs"
+                        @@click="page = page + 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')">Next</button>
+            </div>
+        </div>
+    </section>
+</div>

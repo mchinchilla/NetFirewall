@@ -1,0 +1,61 @@
+@model IReadOnlyList<NetFirewall.Models.Firewall.FwQosClass>
+@{
+    var markNames = (Dictionary<Guid, string>)(ViewBag.MarkNames ?? new Dictionary<Guid, string>());
+    var configId = (Guid)ViewBag.ConfigId;
+}
+
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">No classes yet — add one to begin shaping.</div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Name</th>
+                    <th class="px-5 py-2 font-medium">Mark</th>
+                    <th class="px-5 py-2 font-medium">Guaranteed</th>
+                    <th class="px-5 py-2 font-medium">Ceiling</th>
+                    <th class="px-5 py-2 font-medium">Priority</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var c in Model.OrderBy(x => x.Priority).ThenBy(x => x.Name))
+                {
+                    <tr>
+                        <td class="px-5 py-3 font-medium">@c.Name</td>
+                        <td class="px-5 py-3 font-mono text-xs">@(c.MarkId.HasValue && markNames.TryGetValue(c.MarkId.Value, out var n) ? n : "—")</td>
+                        <td class="px-5 py-3 font-mono text-xs">@c.GuaranteedMbps Mbps</td>
+                        <td class="px-5 py-3 font-mono text-xs">@c.CeilingMbps Mbps</td>
+                        <td class="px-5 py-3">
+                            <span class="badge" style="background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);">@c.Priority</span>
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Firewall/Qos/@configId/Classes/edit/@c.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit class')">Edit</button>
+                                @{ var msg = $"Delete class '{c.Name}' ({c.GuaranteedMbps}/{c.CeilingMbps} Mbps)?"; }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Firewall/Qos/@configId/Classes/delete/@c.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete class?', message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete', level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

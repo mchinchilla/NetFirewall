@@ -1,0 +1,63 @@
+@model NetFirewall.Web.Models.Firewall.QosClassFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var marks = (IReadOnlyList<NetFirewall.Models.Firewall.FwTrafficMark>)(ViewBag.Marks ?? Array.Empty<NetFirewall.Models.Firewall.FwTrafficMark>());
+    var markOptions = new List<FormFieldViewModel.SelectOption> { new("", "(no mark)") };
+    foreach (var m in marks.OrderBy(x => x.MarkValue))
+        markOptions.Add(new(m.Id.ToString(), $"{m.Name} (0x{m.MarkValue:X})"));
+
+    var prioOptions = Enumerable.Range(1, 7)
+        .Select(i => new FormFieldViewModel.SelectOption(i.ToString(), i switch
+        {
+            1 => "1 — highest",
+            7 => "7 — lowest",
+            _ => i.ToString()
+        }))
+        .ToList();
+}
+
+<form id="qos-class-form" hx-post="/Firewall/Qos/@Model.QosConfigId/Classes/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="QosConfigId" value="@Model.QosConfigId" />
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Class name", Required = true, Value = Model.Name,
+            Placeholder = "voip"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.MarkId), Label = "Bound mark", Kind = FormFieldKind.Select,
+            Value = Model.MarkId?.ToString(), Options = markOptions,
+            Help = "Packets carrying this fwmark land in this class."
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.GuaranteedMbps), Label = "Guaranteed (Mbps)", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.GuaranteedMbps > 0 ? Model.GuaranteedMbps.ToString() : "",
+                Min = "1", Max = "100000",
+                Help = "HTB rate — minimum reserved share."
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.CeilingMbps), Label = "Ceiling (Mbps)", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.CeilingMbps > 0 ? Model.CeilingMbps.ToString() : "",
+                Min = "1", Max = "100000",
+                Help = "HTB ceil — maximum when borrowing is available."
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Select, Required = true,
+            Value = Model.Priority.ToString(), Options = prioOptions,
+            Help = "Lower = served first when contending for spare bandwidth."
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create class")</button>
+    </div>
+</form>

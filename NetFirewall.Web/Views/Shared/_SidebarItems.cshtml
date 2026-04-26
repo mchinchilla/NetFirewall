@@ -48,13 +48,15 @@
         </svg>
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
-        <a href="#" class="nav-link py-1.5">Interfaces</a>
-        <a href="#" class="nav-link py-1.5">Filter rules</a>
-        <a href="#" class="nav-link py-1.5">NAT rules</a>
-        <a href="#" class="nav-link py-1.5">Port forwards</a>
-        <a href="#" class="nav-link py-1.5">Mangle / QoS</a>
-        <a href="#" class="nav-link py-1.5">Static routes</a>
-        <a href="#" class="nav-link py-1.5">Audit log</a>
+        <a href="@Url.Action("Index", "Network")" class="nav-link py-1.5">Interfaces</a>
+        <a href="@Url.Action("Index", "FwFilterRules")" class="nav-link py-1.5">Filter rules</a>
+        <a href="@Url.Action("Index", "FwNatRules")" class="nav-link py-1.5">NAT rules</a>
+        <a href="@Url.Action("Index", "FwPortForwards")" class="nav-link py-1.5">Port forwards</a>
+        <a href="@Url.Action("Index", "FwTrafficMarks")" class="nav-link py-1.5">Traffic marks</a>
+        <a href="@Url.Action("Index", "FwMangleRules")" class="nav-link py-1.5">Mangle rules</a>
+        <a href="@Url.Action("Index", "FwQosConfigs")" class="nav-link py-1.5">QoS</a>
+        <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5">Static routes</a>
+        <a href="@Url.Action("Index", "FwAuditLog")" class="nav-link py-1.5">Audit log</a>
     </div>
 </div>
 
