@@ -64,10 +64,15 @@ public sealed class AuthController : Controller
         var ua = Request.Headers.UserAgent.ToString();
         var user = await _users.GetByUsernameAsync(model.Username, ct);
 
-        // Constant-ish-time response: always do a hash so timing doesn't reveal user existence.
+        // Constant-ish-time response: always do a real-cost hash so timing
+        // doesn't reveal user existence. Salt + hash both 32 bytes (matching
+        // Argon2PasswordHasher defaults) so the work matches a true verify.
         if (user is null)
         {
-            await _hasher.VerifyAsync(model.Password, "$argon2id$v=19$m=65536,t=3,p=4$AAAA$AAAA", ct);
+            const string dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$" +
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$" +
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+            await _hasher.VerifyAsync(model.Password, dummyHash, ct);
             await _audit.LogAsync(AuthAuditEvents.LoginFailed, username: model.Username, ip: ip, userAgent: ua,
                 detail: new { reason = "user_not_found" }, ct: ct);
             ModelState.AddModelError(string.Empty, "Username or password is invalid.");

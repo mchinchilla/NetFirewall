@@ -1,0 +1,59 @@
+@*
+    Right-side brand panel for the auth split layout. Uses --accent so the
+    panel re-tints with the active theme. Decorative SVG grid + soft blobs
+    sit underneath the centered hero.
+*@
+<aside class="hidden lg:flex relative overflow-hidden flex-col items-center justify-center text-center px-12 py-12"
+       style="background-color: var(--accent); color: var(--accent-fg);">
+
+    @* Subtle grid pattern *@
+    <svg class="absolute inset-0 h-full w-full opacity-15" aria-hidden="true">
+        <defs>
+            <pattern id="auth-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" stroke-width="0.5" />
+            </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#auth-grid)" />
+    </svg>
+
+    @* Glow blobs *@
+    <div class="pointer-events-none absolute -top-40 -left-40 h-[420px] w-[420px] rounded-full opacity-25"
+         style="background: radial-gradient(closest-side, color-mix(in srgb, var(--accent-fg) 60%, transparent), transparent 70%); filter: blur(80px); animation: var(--animate-blob);"></div>
+    <div class="pointer-events-none absolute -bottom-32 -right-32 h-[460px] w-[460px] rounded-full opacity-20"
+         style="background: radial-gradient(closest-side, color-mix(in srgb, var(--accent-fg) 50%, transparent), transparent 70%); filter: blur(90px); animation: var(--animate-blob-slow);"></div>
+
+    <div class="relative z-10 max-w-md" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
+        <div class="inline-flex h-20 w-20 items-center justify-center rounded-2xl mb-6 shadow-2xl"
+             style="background-color: color-mix(in srgb, var(--accent-fg) 12%, transparent); backdrop-filter: blur(8px);">
+            <svg class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25 4.5 5.25v6c0 4.97 3.5 9.25 7.5 10.5 4-1.25 7.5-5.53 7.5-10.5v-6L12 2.25Z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4" />
+            </svg>
+        </div>
+
+        <h2 class="text-3xl font-semibold tracking-tight">NetFirewall</h2>
+        <p class="mt-1 text-sm font-medium" style="color: color-mix(in srgb, var(--accent-fg) 80%, transparent);">
+            Personal firewall · DHCP · WAN failover
+        </p>
+
+        <p class="mt-6 text-sm leading-relaxed" style="color: color-mix(in srgb, var(--accent-fg) 85%, transparent);">
+            Self-hosted networking for the home and small office. Built from scratch in C# / .NET 10
+            with a single-pane admin for nftables, DHCP scopes, dual-WAN routing and per-distro
+            interface management.
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center justify-center gap-2">
+            @foreach (var pill in new[] { "DHCP Server", "nftables", "WAN failover", "Multi-distro", "TOTP-gated" })
+            {
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ring-1"
+                      style="background-color: color-mix(in srgb, var(--accent-fg) 12%, transparent);
+                             color: var(--accent-fg);
+                             --tw-ring-color: color-mix(in srgb, var(--accent-fg) 25%, transparent);">@pill</span>
+            }
+        </div>
+    </div>
+
+    <div class="relative z-10 mt-auto pt-12 text-xs" style="color: color-mix(in srgb, var(--accent-fg) 70%, transparent);">
+        Forward-only schema migrations · Argon2id passwords · Server-side opaque sessions
+    </div>
+</aside>

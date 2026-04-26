@@ -26,6 +26,15 @@ public sealed class FormFieldViewModel
     public string? Max { get; init; }
     public IReadOnlyList<SelectOption>? Options { get; init; } // for Select kind
 
+    /// <summary>SVG path data for a leading icon (Heroicons-style 24x24 viewBox).</summary>
+    public string? IconPath { get; init; }
+
+    /// <summary>For password fields: render an eye toggle that flips type=password ↔ text.</summary>
+    public bool WithPasswordToggle { get; init; }
+
+    /// <summary>Visual size — affects vertical padding. Default Default.</summary>
+    public FormFieldSize Size { get; init; } = FormFieldSize.Default;
+
     public sealed record SelectOption(string Value, string Label, bool Selected = false);
 }
 
@@ -39,3 +48,5 @@ public enum FormFieldKind
     Checkbox,
     Textarea
 }
+
+public enum FormFieldSize { Default, Large }

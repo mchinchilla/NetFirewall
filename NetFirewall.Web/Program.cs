@@ -87,6 +87,9 @@ builder.Services.AddScoped<ISessionCookieIssuer, SessionCookieIssuer>();
 builder.Services.AddSingleton<IBootstrapTokenStore, BootstrapTokenStore>();
 builder.Services.AddHostedService<BootstrapTokenIssuer>();
 
+// Runtime metadata for the login system-info card.
+builder.Services.AddSingleton<IAppInfoService, AppInfoService>();
+
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();

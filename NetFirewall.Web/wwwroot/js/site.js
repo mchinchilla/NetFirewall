@@ -64,6 +64,26 @@ window.NetFw.hydrateBeforePaint = async function () {
     applyDom(state);
 };
 
+/**
+ * Trigger a browser download of the user's TOTP recovery codes as a .txt file.
+ * Called from the enrollment view + Account/Security after regeneration.
+ */
+window.NetFw.downloadRecoveryCodes = function (codes) {
+    if (!Array.isArray(codes) || codes.length === 0) return;
+    const body =
+        "NetFirewall recovery codes\n\n" +
+        codes.join("\n") +
+        "\n\nEach code works once. Store them somewhere safe — anyone with one can sign in as you.\n";
+    const blob = new Blob([body], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "netfirewall-recovery-codes.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+    window.Alpine?.store("toasts")?.success("Recovery codes downloaded. Store them somewhere safe.");
+};
+
 /* =====================================================================
  * Chart.js integration — exposed as window.NetFw.charts
  * Centralized so views never construct Chart() inline (rule #3 — single

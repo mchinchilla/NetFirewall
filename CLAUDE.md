@@ -36,6 +36,35 @@ dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/wanmonitor  NetFirewa
 dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/dhcpserver NetFirewall.DhcpServer
 ```
 
+## Database migrations
+
+Schema is managed by **`NetFirewall.Migrations`** — a tiny console runner that
+tracks applied files in a `__migrations` table with SHA-256 drift detection.
+Migration files live in `NetFirewall.Services/sql/migrations/` named
+`NNNNN_description.sql` (5-digit prefix, applied in filename order).
+
+```bash
+bin/db.sh status      # list applied / pending / drifted
+bin/db.sh up          # apply all pending (each in its own transaction)
+bin/db.sh reset       # DROP SCHEMA public CASCADE then up — DEV ONLY, asks for "reset" confirmation
+bin/db.sh reset --yes # skip the prompt
+bin/db.sh seed        # apply NetFirewall.Services/sql/seeds/demo_interfaces.sql via psql (idempotent ON CONFLICT)
+```
+
+Connection string priority (handled inside the CLI):
+
+1. `--connection "Host=..."` flag.
+2. `NETFIREWALL_CONN` env var.
+3. `ConnectionStrings:DefaultConnection` from `NetFirewall.Web/appsettings.json`.
+
+**Forward-only**, no down-migrations on purpose. To revert a schema change,
+write a NEW migration that undoes it. **Never edit a migration that has
+already been applied** — the runner detects checksum drift and refuses to
+proceed until you write a new file instead.
+
+`NetFirewall.Services/sql/Schema.sql.reference` is the previous all-in-one
+dump kept for human reference only. Do NOT apply it directly; use the runner.
+
 The DHCP Server binds UDP/67 and requires root (or `CAP_NET_BIND_SERVICE` + `CAP_NET_RAW`) when run outside the Aspire dev host. WAN Monitor mutates routing tables and similarly requires root in production.
 
 Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Program.cs` — it's a standalone systemd worker. Only `ApiService`, `Web`, and `DhcpServer` come up under Aspire.
@@ -44,6 +73,7 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
 
 ### Service projects
 
+- **NetFirewall.Migrations** — standalone console (`netfirewall-migrate`) that applies / tracks / drift-checks the SQL files in `NetFirewall.Services/sql/migrations/`. NOT registered with Aspire — invoked via `bin/db.sh` or `dotnet run --project NetFirewall.Migrations`.
 - **NetFirewall.AppHost** — Aspire orchestrator (ApiService + Web + DhcpServer).
 - **NetFirewall.WanMonitor** — Background worker for dual-WAN monitoring/failover. Pings configured IPs through each interface (see `WanMonitorService`) and runs the bash commands listed in `appsettings.json` → `BashCommands.ExtraPrimaryCommands` / `ExtraSecondaryCommands` on state changes. Runs under systemd via `UseSystemd()`.
 - **NetFirewall.DhcpServer** — RFC 2131 server with PXE boot support. Standalone host (not ASP.NET) using `Host.CreateDefaultBuilder` + `UseSystemd`. See "DHCP Server internals" below.

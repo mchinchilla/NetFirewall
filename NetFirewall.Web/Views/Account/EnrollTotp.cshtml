@@ -2,6 +2,11 @@
 @{
     Layout = "_AuthLayout";
     ViewData["Title"] = "Set up two-factor";
+
+    // Pre-serialize once so the button's onclick handler stays a one-liner —
+    // Razor doesn't like @string.Join(...) inline (string is a keyword).
+    var recoveryCodesJson = System.Text.Json.JsonSerializer.Serialize(Model.RecoveryCodes);
+    var otpAuthUriJson    = System.Text.Json.JsonSerializer.Serialize(Model.OtpAuthUri);
 }
 
 <div class="card max-w-lg mx-auto">
@@ -29,21 +34,14 @@
             Recovery codes — save these now
         </p>
         <div class="grid grid-cols-2 gap-1.5 font-mono text-xs">
-            @foreach (var code in Model.RecoveryCodes)
+            @* Loop variable name avoids `code` because Razor reserves @@code as a directive. *@
+            @foreach (var rc in Model.RecoveryCodes)
             {
-                <span class="px-2 py-1 rounded" style="background-color: var(--surface-elevated);">@code</span>
+                <span class="px-2 py-1 rounded" style="background-color: var(--surface-elevated);">@rc</span>
             }
         </div>
         <button type="button" class="btn btn-ghost text-xs mt-3 w-full"
-                @@click="
-                    const text = '@string.Join("\\n", Model.RecoveryCodes)';
-                    const blob = new Blob(['NetFirewall recovery codes\n\n' + text + '\n\nEach code works once. Store them somewhere safe — anyone with one can sign in as you.\n'], {type: 'text/plain'});
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url; a.download = 'netfirewall-recovery-codes.txt'; a.click();
-                    URL.revokeObjectURL(url);
-                    $store.toasts.success('Recovery codes downloaded. Store them somewhere safe.');
-                ">
+                @@click="NetFw.downloadRecoveryCodes(@Html.Raw(recoveryCodesJson))">
             Download as .txt
         </button>
         <p class="text-[11px] mt-2" style="color: var(--surface-fg-muted);">
@@ -75,7 +73,7 @@
     <script src="~/lib/qrcode/qrcode.min.js" asp-append-version="true"></script>
     <script>
         (function () {
-            const uri = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.OtpAuthUri));
+            const uri = @Html.Raw(otpAuthUriJson);
             const qr = qrcode(0, 'M');
             qr.addData(uri);
             qr.make();

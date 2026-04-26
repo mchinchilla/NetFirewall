@@ -5,20 +5,22 @@
     ViewData["Title"] = "First-run setup";
 }
 
-<div class="card">
-    <h1 class="text-xl font-semibold tracking-tight">Create the first admin</h1>
+<div>
+    <h1 class="text-2xl font-semibold tracking-tight">Create the first admin</h1>
     <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
         Bootstrap token verified. This wizard runs only once — after the admin
         account exists, this page returns 404.
     </p>
 
-    <form asp-action="Bootstrap" method="post" class="mt-5 space-y-4">
+    <form asp-action="Bootstrap" method="post" class="mt-7 space-y-4">
         @Html.AntiForgeryToken()
         <input type="hidden" asp-for="Token" />
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Username),
             Label = "Username", Required = true, Value = Model.Username,
+            Size = FormFieldSize.Large,
+            IconPath = "M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z",
             AlpineExtra = "autofocus autocomplete=\"username\"",
             Help = "Letters, digits, underscore, dot, dash. 3-64 chars.",
             Pattern = "^[a-zA-Z0-9_.\\-]+$",
@@ -28,6 +30,8 @@
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Email),
             Label = "Email (optional)", Kind = FormFieldKind.Email, Value = Model.Email,
+            Size = FormFieldSize.Large,
+            IconPath = "M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75",
             AlpineExtra = "autocomplete=\"email\"",
             Error = ViewData.ModelState[nameof(Model.Email)]?.Errors.FirstOrDefault()?.ErrorMessage
         })
@@ -35,6 +39,9 @@
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Password),
             Label = "Password", Kind = FormFieldKind.Password, Required = true,
+            Size = FormFieldSize.Large,
+            WithPasswordToggle = true,
+            IconPath = "M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z",
             AlpineExtra = "autocomplete=\"new-password\"",
             Help = "Minimum 12 characters. A long passphrase is best.",
             MinLength = 12, MaxLength = 128,
@@ -44,10 +51,18 @@
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.ConfirmPassword),
             Label = "Confirm password", Kind = FormFieldKind.Password, Required = true,
+            Size = FormFieldSize.Large,
+            WithPasswordToggle = true,
+            IconPath = "M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z",
             AlpineExtra = "autocomplete=\"new-password\"",
             Error = ViewData.ModelState[nameof(Model.ConfirmPassword)]?.Errors.FirstOrDefault()?.ErrorMessage
         })
 
-        <button type="submit" class="btn btn-primary w-full">Create admin and continue to login</button>
+        <button type="submit" class="btn btn-primary w-full py-2.5">
+            Create admin and continue
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+            </svg>
+        </button>
     </form>
 </div>
