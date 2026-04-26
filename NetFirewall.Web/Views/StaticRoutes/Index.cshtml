@@ -1,0 +1,32 @@
+@{
+    ViewData["Title"] = "Static routes";
+    Layout = "_Layout";
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Network</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Static routes</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Routes are bound to interfaces. Applying a route regenerates the iface's persistent config and live-adds the route via <code class="text-xs">ip route</code>.
+        </p>
+    </div>
+    <button type="button" class="btn btn-primary"
+            hx-get="/Network/Routes/edit"
+            hx-target="#drawer-body"
+            hx-swap="innerHTML"
+            @@click="$store.drawer.openRaw('Add static route')">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        Add route
+    </button>
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <div id="routes-table"
+         hx-get="/Network/Routes/table"
+         hx-trigger="load, refreshRoutes from:body"
+         hx-swap="innerHTML">
+        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading routes…</div>
+    </div>
+</section>

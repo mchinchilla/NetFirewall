@@ -258,6 +258,46 @@ document.addEventListener("alpine:init", () => {
         requestAnimationFrame(() => window.NetFw.charts.retintAll());
     });
 
+    /* ---------- Drawer store (singleton lateral drawer) ----------
+     * Opens HTMX-loaded content into #drawer-body.
+     *   Alpine.store('drawer').open({ title: 'Edit interface', url: '/network/edit/eth0' })
+     * For inline content (no HTMX fetch), call openRaw(title) and inject yourself.
+     */
+    Alpine.store("drawer", {
+        open: false,
+        title: "",
+        loading: false,
+
+        openRaw(title) {
+            this.title = title || "";
+            this.loading = false;
+            this.open = true;
+        },
+
+        async openUrl({ title = "", url } = {}) {
+            this.title = title;
+            this.loading = true;
+            this.open = true;
+            try {
+                const res = await fetch(url, { headers: { "HX-Request": "true" } });
+                const html = await res.text();
+                const target = document.getElementById("drawer-body");
+                if (target) target.innerHTML = html;
+                if (window.htmx) window.htmx.process(target);
+            } catch (err) {
+                window.Alpine?.store("toasts")?.error(`Failed to load: ${err.message}`);
+                this.close();
+                return;
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        close() {
+            this.open = false;
+        }
+    });
+
     /* ---------- Confirm dialog store ----------
      * Singleton modal rendered once by _ConfirmDialog.cshtml in _Layout.
      * Two ways to use (both async per rule #2):
@@ -356,6 +396,13 @@ document.addEventListener("showToast", (event) => {
         title: detail.title || "",
         message: detail.message || ""
     });
+});
+
+/* Auto-attach the ASP.NET Core anti-forgery token to every HTMX request.
+ * The token is rendered into <meta name="request-token"> by _HeadStyles.cshtml. */
+document.addEventListener("htmx:configRequest", (event) => {
+    const meta = document.querySelector('meta[name="request-token"]');
+    if (meta) event.detail.headers["RequestVerificationToken"] = meta.getAttribute("content");
 });
 
 /* HTMX server errors → red toast. */

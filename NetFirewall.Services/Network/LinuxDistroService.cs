@@ -38,18 +38,16 @@ public sealed partial class LinuxDistroService : ILinuxDistroService
                 // Determine family
                 info.Family = info.Id.ToLowerInvariant() switch
                 {
-                    "debian" => DistroFamily.Debian,
-                    "ubuntu" => DistroFamily.Debian,
-                    "linuxmint" => DistroFamily.Debian,
-                    "raspbian" => DistroFamily.Debian,
-                    "fedora" => DistroFamily.RedHat,
-                    "rhel" => DistroFamily.RedHat,
-                    "centos" => DistroFamily.RedHat,
-                    "rocky" => DistroFamily.RedHat,
-                    "alma" => DistroFamily.RedHat,
-                    "arch" => DistroFamily.Arch,
-                    "manjaro" => DistroFamily.Arch,
-                    "alpine" => DistroFamily.Alpine,
+                    "debian" or "ubuntu" or "linuxmint" or "raspbian" or "pop" or "kali"
+                        => DistroFamily.Debian,
+                    "fedora" or "rhel" or "centos" or "rocky" or "almalinux" or "alma" or "ol"
+                        => DistroFamily.RedHat,
+                    "arch" or "manjaro" or "endeavouros"
+                        => DistroFamily.Arch,
+                    "alpine"
+                        => DistroFamily.Alpine,
+                    "opensuse" or "opensuse-leap" or "opensuse-tumbleweed" or "sles" or "sled"
+                        => DistroFamily.Suse,
                     _ => DistroFamily.Unknown
                 };
             }
@@ -384,24 +382,32 @@ public sealed partial class LinuxDistroService : ILinuxDistroService
 
     private static NetworkConfigMethod DetermineConfigMethod(LinuxDistroInfo info)
     {
-        // Ubuntu 18.04+ uses netplan
+        // Ubuntu 18.04+ ships netplan by default.
         if (info.Id.Equals("ubuntu", StringComparison.OrdinalIgnoreCase) &&
             Directory.Exists("/etc/netplan"))
         {
             return NetworkConfigMethod.Netplan;
         }
 
-        // Debian and derivatives use /etc/network/interfaces
+        // RHEL 8+ / Rocky / Alma / Fedora and openSUSE 15+ default to NetworkManager keyfiles.
+        if ((info.Family == DistroFamily.RedHat || info.Family == DistroFamily.Suse) &&
+            Directory.Exists("/etc/NetworkManager/system-connections"))
+        {
+            return NetworkConfigMethod.NetworkManager;
+        }
+
+        // Debian and derivatives use /etc/network/interfaces.
         if (info.Family == DistroFamily.Debian &&
             File.Exists("/etc/network/interfaces"))
         {
             return NetworkConfigMethod.Interfaces;
         }
 
-        // Check for files as fallback
+        // Filesystem fallbacks for unknown IDs.
         if (Directory.Exists("/etc/netplan"))
             return NetworkConfigMethod.Netplan;
-
+        if (Directory.Exists("/etc/NetworkManager/system-connections"))
+            return NetworkConfigMethod.NetworkManager;
         if (File.Exists("/etc/network/interfaces"))
             return NetworkConfigMethod.Interfaces;
 

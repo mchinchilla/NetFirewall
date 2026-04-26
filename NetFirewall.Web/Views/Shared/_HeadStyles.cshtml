@@ -1,9 +1,13 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @*
     <head>-time assets:
       - Tailwind-compiled stylesheet
+      - Anti-forgery token exposed as a <meta> so site.js can attach it to
+        every HTMX request via the htmx:configRequest hook.
       - site.js loaded synchronously so the pre-paint theme hydrator can run
         BEFORE the body parses (avoids FOUC when switching themes).
 *@
+<meta name="request-token" content="@Antiforgery.GetAndStoreTokens(Context).RequestToken" />
 <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 <script src="~/js/site.js" asp-append-version="true"></script>
 <script>

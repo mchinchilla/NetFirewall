@@ -1,0 +1,36 @@
+@model NetFirewall.Models.System.LinuxDistroInfo
+@{
+    ViewData["Title"] = "Network interfaces";
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Network</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Interfaces</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Detected on
+            <span class="font-medium" style="color: var(--surface-fg);">@Model.Name @Model.Version</span>
+            · writer:
+            <span class="font-medium" style="color: var(--surface-fg);">@Model.ConfigMethod</span>
+        </p>
+    </div>
+    <button type="button" class="btn btn-ghost"
+            hx-get="/Network/InterfacesTable"
+            hx-target="#interfaces-table"
+            hx-swap="innerHTML"
+            hx-indicator="#refresh-indicator">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+        <span>Re-detect</span>
+        <span id="refresh-indicator" class="htmx-indicator text-xs opacity-70">…</span>
+    </button>
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <div id="interfaces-table"
+         hx-get="/Network/InterfacesTable"
+         hx-trigger="load, refreshInterfaces from:body"
+         hx-swap="innerHTML">
+        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Detecting interfaces…</div>
+    </div>
+</section>

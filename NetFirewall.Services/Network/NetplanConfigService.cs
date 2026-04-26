@@ -1,21 +1,23 @@
-using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Firewall;
 using NetFirewall.Models.System;
+using NetFirewall.Services.Processes;
 
 namespace NetFirewall.Services.Network;
 
 public sealed class NetplanConfigService : INetworkConfigService
 {
     private readonly ILogger<NetplanConfigService> _logger;
+    private readonly IProcessRunner _runner;
     private const string NetplanDir = "/etc/netplan";
     private const string ConfigPrefix = "60-netfirewall";
 
     public NetworkConfigMethod ConfigMethod => NetworkConfigMethod.Netplan;
 
-    public NetplanConfigService(ILogger<NetplanConfigService> logger)
+    public NetplanConfigService(IProcessRunner runner, ILogger<NetplanConfigService> logger)
     {
+        _runner = runner;
         _logger = logger;
     }
 
@@ -170,8 +172,8 @@ public sealed class NetplanConfigService : INetworkConfigService
             await File.WriteAllTextAsync(configPath, config);
 
             // Apply with netplan apply
-            var applyResult = await RunCommandAsync("netplan", "apply");
-            result.Success = applyResult.ExitCode == 0;
+            var applyResult = await _runner.RunAsync("netplan", "apply");
+            result.Success = applyResult.Success;
             result.Output = applyResult.Output;
             result.ErrorOutput = applyResult.Error;
             result.ExitCode = applyResult.ExitCode;
@@ -191,11 +193,11 @@ public sealed class NetplanConfigService : INetworkConfigService
 
     public async Task<NetworkApplyResult> RestartNetworkingAsync()
     {
-        var result = await RunCommandAsync("netplan", "apply");
+        var result = await _runner.RunAsync("netplan", "apply");
         return new NetworkApplyResult
         {
-            Success = result.ExitCode == 0,
-            Message = result.ExitCode == 0 ? "Networking restarted" : "Failed to restart networking",
+            Success = result.Success,
+            Message = result.Success ? "Networking restarted" : "Failed to restart networking",
             Output = result.Output,
             ErrorOutput = result.Error,
             ExitCode = result.ExitCode
@@ -211,8 +213,8 @@ public sealed class NetplanConfigService : INetworkConfigService
             await File.WriteAllTextAsync(tempFile, config);
 
             // netplan generate validates the config
-            var result = await RunCommandAsync("netplan", "generate");
-            return result.ExitCode == 0;
+            var result = await _runner.RunAsync("netplan", "generate");
+            return result.Success;
         }
         catch (Exception ex)
         {
@@ -260,26 +262,4 @@ public sealed class NetplanConfigService : INetworkConfigService
         return cidr;
     }
 
-    private static async Task<(int ExitCode, string Output, string Error)> RunCommandAsync(string command, string args)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = command,
-            Arguments = args,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = Process.Start(psi);
-        if (process == null)
-            return (-1, "", "Failed to start process");
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, output, error);
-    }
 }

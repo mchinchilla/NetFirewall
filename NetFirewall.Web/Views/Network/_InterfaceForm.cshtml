@@ -1,0 +1,172 @@
+@model NetFirewall.Web.Models.Network.InterfaceFormViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Network
+
+@*
+    Drawer-loaded form. Uses Alpine for dependent-field gating (static vs dhcp,
+    VLAN advanced toggle) and HTMX for the Save round-trip. After save, the
+    Preview + Apply controls become enabled.
+*@
+<form id="iface-form"
+      hx-post="/Network/Save"
+      hx-target="this"
+      hx-swap="outerHTML"
+      x-data="{
+        addressing: '@Model.AddressingMode',
+        showAdvanced: @(Model.VlanId.HasValue ? "true" : "false"),
+        savedId: @(Model.Id?.ToString("\"D\"") ?? "null")
+      }">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="Id" :value="savedId" />
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = "Name",
+            Label = "Interface name",
+            Value = Model.Name,
+            Required = true,
+            Disabled = Model.Id.HasValue,
+            Help = "OS-level NIC name (e.g. eth0, ens192). 1-15 chars.",
+            Pattern = "^[a-zA-Z0-9_.\\-]{1,15}$"
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Type",
+                Label = "Type",
+                Kind = FormFieldKind.Select,
+                Value = Model.Type,
+                Required = true,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("WAN", "WAN"),
+                    new FormFieldViewModel.SelectOption("LAN", "LAN"),
+                    new FormFieldViewModel.SelectOption("VPN", "VPN"),
+                    new FormFieldViewModel.SelectOption("DISABLED", "Disabled")
+                }
+            })
+
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Role",
+                Label = "Role",
+                Kind = FormFieldKind.Select,
+                Value = Model.Role,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("primary_wan", "Primary WAN"),
+                    new FormFieldViewModel.SelectOption("secondary_wan", "Secondary WAN"),
+                    new FormFieldViewModel.SelectOption("local_network", "Local network"),
+                    new FormFieldViewModel.SelectOption("wireguard_tunnel", "WireGuard tunnel"),
+                    new FormFieldViewModel.SelectOption("openvpn_tunnel", "OpenVPN tunnel")
+                }
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = "AddressingMode",
+            Label = "Addressing",
+            Kind = FormFieldKind.Select,
+            Value = Model.AddressingMode,
+            Required = true,
+            AlpineModel = "addressing",
+            Options = new[] {
+                new FormFieldViewModel.SelectOption("static", "Static"),
+                new FormFieldViewModel.SelectOption("dhcp", "DHCP"),
+                new FormFieldViewModel.SelectOption("disabled", "Disabled")
+            }
+        })
+
+        <div x-show="addressing === 'static'" x-transition class="space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "IpAddress",
+                    Label = "IPv4 address",
+                    Value = Model.IpAddress,
+                    Placeholder = "192.168.1.10",
+                    AlpineExtra = ":required=\"addressing === 'static'\""
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "SubnetMask",
+                    Label = "Subnet mask",
+                    Value = Model.SubnetMask,
+                    Placeholder = "255.255.255.0",
+                    AlpineExtra = ":required=\"addressing === 'static'\""
+                })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Gateway",
+                Label = "Gateway",
+                Value = Model.Gateway,
+                Placeholder = "192.168.1.1"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "DnsServers",
+                Label = "DNS servers",
+                Value = Model.DnsServers,
+                Placeholder = "8.8.8.8, 1.1.1.1",
+                Help = "Comma-separated IPv4 addresses."
+            })
+        </div>
+
+        <button type="button" class="text-xs font-medium hover:underline"
+                style="color: var(--accent);"
+                @@click="showAdvanced = !showAdvanced">
+            <span x-show="!showAdvanced">Show advanced</span>
+            <span x-show="showAdvanced">Hide advanced</span>
+        </button>
+
+        <div x-show="showAdvanced" x-transition class="space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Mtu", Label = "MTU", Kind = FormFieldKind.Number,
+                    Value = Model.Mtu?.ToString(),
+                    Min = "576", Max = "9000", Placeholder = "1500"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "VlanId", Label = "VLAN ID", Kind = FormFieldKind.Number,
+                    Value = Model.VlanId?.ToString(),
+                    Min = "1", Max = "4094", Placeholder = "(none)"
+                })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "VlanParent", Label = "VLAN parent",
+                Value = Model.VlanParent,
+                Placeholder = "eth0"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Description", Label = "Description",
+                Kind = FormFieldKind.Textarea,
+                Value = Model.Description
+            })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "AutoStart", Label = "Auto-start at boot", Kind = FormFieldKind.Checkbox,
+                    Value = Model.AutoStart ? "true" : "false"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Enabled", Label = "Enabled", Kind = FormFieldKind.Checkbox,
+                    Value = Model.Enabled ? "true" : "false"
+                })
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost"
+                @@click="$store.drawer.close()">Cancel</button>
+
+        <button type="button" class="btn btn-ghost"
+                :disabled="!savedId"
+                hx-get=""
+                :hx-get="`/Network/Preview/${savedId}`"
+                hx-target="#preview-area"
+                hx-swap="innerHTML">
+            Preview
+        </button>
+
+        <button type="submit" class="btn btn-primary">
+            @(Model.Id.HasValue ? "Save changes" : "Create")
+        </button>
+    </div>
+
+    <div id="preview-area" class="mt-4"></div>
+</form>

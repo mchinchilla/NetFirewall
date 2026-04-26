@@ -1,0 +1,47 @@
+@*
+    Reusable right-side slide-in drawer. Singleton in _Layout, controlled
+    by Alpine.store('drawer'). HTMX target loads its body content.
+
+    Open from anywhere (controller or JS):
+        Alpine.store('drawer').open({ title: 'Edit interface', url: '/network/edit/eth0' });
+
+    Or from a server-rendered link:
+        <button hx-get="/network/edit/eth0" hx-target="#drawer-body" hx-swap="innerHTML"
+                @click="$store.drawer.openRaw('Edit interface')">Edit</button>
+*@
+<div x-cloak x-data
+     x-show="$store.drawer.open"
+     @@keydown.escape.window="$store.drawer.close()"
+     class="fixed inset-0 z-40"
+     role="dialog" aria-modal="true">
+
+    <div class="absolute inset-0"
+         style="background-color: rgba(0,0,0,0.45);"
+         x-show="$store.drawer.open"
+         x-transition.opacity.duration.150ms
+         @@click="$store.drawer.close()"></div>
+
+    <aside class="absolute top-0 right-0 h-full w-full sm:w-[480px] flex flex-col border-l shadow-2xl"
+           style="background-color: var(--surface-elevated); border-color: var(--surface-border);"
+           x-show="$store.drawer.open"
+           x-transition:enter="transition ease-out duration-250"
+           x-transition:enter-start="translate-x-full"
+           x-transition:enter-end="translate-x-0"
+           x-transition:leave="transition ease-in duration-200"
+           x-transition:leave-start="translate-x-0"
+           x-transition:leave-end="translate-x-full">
+
+        <header class="flex items-center justify-between px-5 py-4 border-b shrink-0"
+                style="border-color: var(--surface-border);">
+            <h2 class="text-base font-semibold" x-text="$store.drawer.title"></h2>
+            <button @@click="$store.drawer.close()" class="h-8 w-8 inline-flex items-center justify-center rounded-md btn-ghost" aria-label="Close">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </button>
+        </header>
+
+        <div id="drawer-body" class="flex-1 overflow-y-auto px-5 py-4">
+            @* HTMX-loaded content lands here *@
+            <div x-show="$store.drawer.loading" class="text-sm" style="color: var(--surface-fg-muted);">Loading…</div>
+        </div>
+    </aside>
+</div>

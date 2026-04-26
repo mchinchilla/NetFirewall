@@ -1,0 +1,85 @@
+@model NetFirewall.Web.Models.FormFieldViewModel
+@using NetFirewall.Web.Models
+@{
+    var fieldId = $"f-{Model.Name}";
+    var hasError = !string.IsNullOrEmpty(Model.Error);
+    var commonAttrs = new List<string> { $"id=\"{fieldId}\"", $"name=\"{Model.Name}\"" };
+    if (Model.Required) commonAttrs.Add("required");
+    if (Model.Disabled) commonAttrs.Add("disabled");
+    if (!string.IsNullOrEmpty(Model.AlpineModel)) commonAttrs.Add($"x-model=\"{Model.AlpineModel}\"");
+    if (!string.IsNullOrEmpty(Model.AlpineExtra)) commonAttrs.Add(Model.AlpineExtra);
+    if (!string.IsNullOrEmpty(Model.Pattern)) commonAttrs.Add($"pattern=\"{Model.Pattern}\"");
+    if (Model.MinLength.HasValue) commonAttrs.Add($"minlength=\"{Model.MinLength.Value}\"");
+    if (Model.MaxLength.HasValue) commonAttrs.Add($"maxlength=\"{Model.MaxLength.Value}\"");
+    if (!string.IsNullOrEmpty(Model.Min)) commonAttrs.Add($"min=\"{Model.Min}\"");
+    if (!string.IsNullOrEmpty(Model.Max)) commonAttrs.Add($"max=\"{Model.Max}\"");
+    if (!string.IsNullOrEmpty(Model.Placeholder)) commonAttrs.Add($"placeholder=\"{Model.Placeholder}\"");
+
+    var attrs = string.Join(" ", commonAttrs);
+    var inputClass = hasError ? "input border-red-400" : "input";
+}
+
+@if (Model.Kind == FormFieldKind.Checkbox)
+{
+    <label for="@fieldId" class="flex items-start gap-2.5 cursor-pointer">
+        <input type="checkbox" @Html.Raw(attrs)
+               value="true"
+               @(Model.Value == "true" ? "checked" : "")
+               class="mt-0.5 h-4 w-4 rounded" />
+        <span class="text-sm">
+            @Model.Label
+            @if (!string.IsNullOrEmpty(Model.Help))
+            {
+                <span class="block text-xs mt-0.5" style="color: var(--surface-fg-muted);">@Model.Help</span>
+            }
+        </span>
+    </label>
+}
+else
+{
+    <div class="space-y-1.5">
+        <label for="@fieldId" class="block text-xs font-medium" style="color: var(--surface-fg);">
+            @Model.Label
+            @if (Model.Required)
+            {
+                <span style="color: #b94545;">*</span>
+            }
+        </label>
+
+        @switch (Model.Kind)
+        {
+            case FormFieldKind.Select:
+                <select class="@inputClass" @Html.Raw(attrs)>
+                    @foreach (var opt in Model.Options ?? Array.Empty<FormFieldViewModel.SelectOption>())
+                    {
+                        <option value="@opt.Value" selected="@(opt.Selected || opt.Value == Model.Value)">@opt.Label</option>
+                    }
+                </select>
+                break;
+            case FormFieldKind.Textarea:
+                <textarea class="@inputClass" rows="3" @Html.Raw(attrs)>@Model.Value</textarea>
+                break;
+            default:
+                {
+                    var type = Model.Kind switch
+                    {
+                        FormFieldKind.Email    => "email",
+                        FormFieldKind.Number   => "number",
+                        FormFieldKind.Password => "password",
+                        _                      => "text"
+                    };
+                    <input type="@type" class="@inputClass" value="@Model.Value" @Html.Raw(attrs) />
+                    break;
+                }
+        }
+
+        @if (hasError)
+        {
+            <p class="text-xs" style="color: #b94545;">@Model.Error</p>
+        }
+        else if (!string.IsNullOrEmpty(Model.Help))
+        {
+            <p class="text-xs" style="color: var(--surface-fg-muted);">@Model.Help</p>
+        }
+    </div>
+}

@@ -16,12 +16,14 @@ public enum DistroFamily
     Debian,
     RedHat,
     Arch,
-    Alpine
+    Alpine,
+    Suse
 }
 
 public enum NetworkConfigMethod
 {
     Unknown,
-    Netplan,        // Ubuntu 18.04+ uses netplan with YAML files
-    Interfaces      // Debian uses /etc/network/interfaces
+    Netplan,            // Ubuntu 18.04+ uses netplan with YAML files
+    Interfaces,         // Debian uses /etc/network/interfaces
+    NetworkManager      // RHEL/Rocky/Alma 8+, openSUSE — keyfiles under /etc/NetworkManager/system-connections/
 }

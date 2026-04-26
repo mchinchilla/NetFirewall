@@ -1,0 +1,28 @@
+@model NetFirewall.Web.Controllers.NetworkController.PreviewViewModel
+@{
+    var ifaceId = ViewContext.RouteData.Values["id"]?.ToString();
+}
+<div class="rounded-lg border" style="border-color: var(--surface-border);">
+    <header class="flex items-center justify-between px-4 py-2 border-b"
+            style="border-color: var(--surface-border); background-color: var(--surface-muted);">
+        <div class="text-xs">
+            <span class="font-semibold">@Model.Method</span>
+            <span style="color: var(--surface-fg-muted);"> · @Model.FilePath</span>
+        </div>
+        <button type="button" class="btn btn-primary text-xs"
+                hx-post="/Network/Apply/@ifaceId"
+                hx-trigger="confirmed"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Apply network configuration?',
+                        message: 'This will write the file above and bring the interface up. Make sure you can still reach the host afterwards.',
+                        confirmLabel: 'Apply now',
+                        level: 'warning'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed');
+                })()">
+            Apply
+        </button>
+    </header>
+    <pre class="text-xs p-4 overflow-x-auto font-mono" style="color: var(--surface-fg);"><code>@Model.Content</code></pre>
+</div>

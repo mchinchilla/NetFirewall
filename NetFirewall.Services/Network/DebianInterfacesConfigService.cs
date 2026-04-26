@@ -1,21 +1,23 @@
-using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Firewall;
 using NetFirewall.Models.System;
+using NetFirewall.Services.Processes;
 
 namespace NetFirewall.Services.Network;
 
 public sealed class DebianInterfacesConfigService : INetworkConfigService
 {
     private readonly ILogger<DebianInterfacesConfigService> _logger;
+    private readonly IProcessRunner _runner;
     private const string InterfacesDir = "/etc/network/interfaces.d";
     private const string ConfigPrefix = "60-netfirewall";
 
     public NetworkConfigMethod ConfigMethod => NetworkConfigMethod.Interfaces;
 
-    public DebianInterfacesConfigService(ILogger<DebianInterfacesConfigService> logger)
+    public DebianInterfacesConfigService(IProcessRunner runner, ILogger<DebianInterfacesConfigService> logger)
     {
+        _runner = runner;
         _logger = logger;
     }
 
@@ -152,25 +154,26 @@ public sealed class DebianInterfacesConfigService : INetworkConfigService
 
             // Apply by bringing interface down and up
             // First try ifdown/ifup
-            var downResult = await RunCommandAsync("ifdown", $"--force {iface.Name}");
-            var upResult = await RunCommandAsync("ifup", iface.Name);
+            var downResult = await _runner.RunAsync("ifdown", $"--force {iface.Name}");
+            var upResult = await _runner.RunAsync("ifup", iface.Name);
+            _ = downResult;
 
             if (upResult.ExitCode != 0)
             {
                 // Fallback to ip commands
-                await RunCommandAsync("ip", $"link set {iface.Name} down");
-                await RunCommandAsync("ip", $"link set {iface.Name} up");
+                await _runner.RunAsync("ip", $"link set {iface.Name} down");
+                await _runner.RunAsync("ip", $"link set {iface.Name} up");
 
                 // If static, apply IP manually
                 if (iface.AddressingMode == "static" && iface.IpAddress != null && iface.SubnetMask != null)
                 {
                     var prefix = SubnetMaskToCidr(iface.SubnetMask.ToString());
-                    await RunCommandAsync("ip", $"addr flush dev {iface.Name}");
-                    await RunCommandAsync("ip", $"addr add {iface.IpAddress}/{prefix} dev {iface.Name}");
+                    await _runner.RunAsync("ip", $"addr flush dev {iface.Name}");
+                    await _runner.RunAsync("ip", $"addr add {iface.IpAddress}/{prefix} dev {iface.Name}");
 
                     if (iface.Gateway != null)
                     {
-                        await RunCommandAsync("ip", $"route add default via {iface.Gateway} dev {iface.Name}");
+                        await _runner.RunAsync("ip", $"route add default via {iface.Gateway} dev {iface.Name}");
                     }
                 }
             }
@@ -195,11 +198,11 @@ public sealed class DebianInterfacesConfigService : INetworkConfigService
 
     public async Task<NetworkApplyResult> RestartNetworkingAsync()
     {
-        var result = await RunCommandAsync("systemctl", "restart networking");
+        var result = await _runner.RunAsync("systemctl", "restart networking");
         return new NetworkApplyResult
         {
-            Success = result.ExitCode == 0,
-            Message = result.ExitCode == 0 ? "Networking restarted" : "Failed to restart networking",
+            Success = result.Success,
+            Message = result.Success ? "Networking restarted" : "Failed to restart networking",
             Output = result.Output,
             ErrorOutput = result.Error,
             ExitCode = result.ExitCode
@@ -257,33 +260,4 @@ public sealed class DebianInterfacesConfigService : INetworkConfigService
         return cidr;
     }
 
-    private static async Task<(int ExitCode, string Output, string Error)> RunCommandAsync(string command, string args)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = command,
-            Arguments = args,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        try
-        {
-            using var process = Process.Start(psi);
-            if (process == null)
-                return (-1, "", "Failed to start process");
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            return (process.ExitCode, output, error);
-        }
-        catch (Exception ex)
-        {
-            return (-1, "", ex.Message);
-        }
-    }
 }

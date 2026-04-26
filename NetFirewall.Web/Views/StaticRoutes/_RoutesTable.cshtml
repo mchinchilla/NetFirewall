@@ -1,0 +1,96 @@
+@model IReadOnlyList<NetFirewall.Web.Models.Network.StaticRouteRowViewModel>
+
+@if (Model.Count == 0)
+{
+    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+        No static routes yet. Click <span class="font-medium" style="color: var(--surface-fg);">Add route</span> to create one.
+    </div>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Destination</th>
+                    <th class="px-5 py-2 font-medium">Via</th>
+                    <th class="px-5 py-2 font-medium">Interface</th>
+                    <th class="px-5 py-2 font-medium hidden md:table-cell">Metric</th>
+                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Description</th>
+                    <th class="px-5 py-2 font-medium">Status</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var row in Model)
+                {
+                    <tr>
+                        <td class="px-5 py-3 font-mono text-xs">@row.Route.Destination</td>
+                        <td class="px-5 py-3 font-mono text-xs">@(row.Route.Gateway?.ToString() ?? "(direct)")</td>
+                        <td class="px-5 py-3">
+                            <span class="font-medium">@row.InterfaceName</span>
+                            @if (!string.IsNullOrEmpty(row.InterfaceType))
+                            {
+                                <span class="text-xs ml-1" style="color: var(--surface-fg-muted);">/ @row.InterfaceType</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 hidden md:table-cell">@row.Route.Metric</td>
+                        <td class="px-5 py-3 hidden lg:table-cell text-xs" style="color: var(--surface-fg-muted);">
+                            @(row.Route.Description ?? "—")
+                        </td>
+                        <td class="px-5 py-3">
+                            @if (row.Route.Enabled)
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--magic-mint-100); color: var(--magic-mint-900);">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                      style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">Disabled</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Network/Routes/edit/@row.Route.Id"
+                                        hx-target="#drawer-body"
+                                        hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit route')">Edit</button>
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-post="/Network/Routes/apply/@row.Route.Id"
+                                        hx-trigger="confirmed-apply"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Apply route?',
+                                                message: 'Regenerates the interface config and live-adds the route via ip route.',
+                                                confirmLabel: 'Apply',
+                                                level: 'warning'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-apply');
+                                        })()">Apply</button>
+                                @{
+                                    var via = row.Route.Gateway?.ToString() ?? "direct";
+                                    var deleteMsg = $"{row.Route.Destination} via {via} on {row.InterfaceName}";
+                                }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: #b94545;"
+                                        hx-post="/Network/Routes/delete/@row.Route.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@deleteMsg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete route?',
+                                                message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete',
+                                                level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
