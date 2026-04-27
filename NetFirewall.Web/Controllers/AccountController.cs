@@ -59,17 +59,25 @@ public sealed class AccountController : Controller
     [HttpGet("/account/totp/enroll"), AllowAnonymous]
     public async Task<IActionResult> EnrollTotp(CancellationToken ct)
     {
-        if (!_pending.TryRead(out var uid, out var stashedReturn, out _)) return Redirect("/login");
+        if (!_pending.TryRead(out var uid, out var stashedReturn, out var existingSecret)) return Redirect("/login");
         var user = await _users.GetByIdAsync(uid, ct);
         if (user is null) return Redirect("/login");
 
-        // Generate a fresh secret + recovery codes; persist the secret in the
-        // pending-auth ticket so the POST can verify the user-typed code
-        // against what we showed in the QR.
-        var secret = _rawTotp.GenerateSecret();
-        _pending.Issue(uid, stashedReturn, secret);
+        // Reuse the pending secret if one already exists for this enrollment
+        // attempt. Generating fresh on every GET would invalidate the QR the
+        // user already scanned (so DUO/Google Authenticator codes would never
+        // match) and silently rotate the secret on every page reload — both
+        // visible as "TOTP just stopped working" with zero log evidence.
+        var secret = existingSecret ?? _rawTotp.GenerateSecret();
+        if (existingSecret is null)
+            _pending.Issue(uid, stashedReturn, secret);
 
-        var codes = await _recovery.RegenerateAsync(uid, 10, ct);
+        // Recovery codes also stick to the first GET. Re-issuing them on every
+        // refresh would invalidate the codes the user just wrote down.
+        var codes = TempData["EnrollRecoveryCodes"] as IReadOnlyList<string>
+                    ?? await _recovery.RegenerateAsync(uid, 10, ct);
+        TempData["EnrollRecoveryCodes"] = codes;
+        TempData.Keep("EnrollRecoveryCodes");
 
         var vm = new TotpEnrollViewModel
         {
@@ -89,14 +97,27 @@ public sealed class AccountController : Controller
         var user = await _users.GetByIdAsync(uid, ct);
         if (user is null) return Redirect("/login");
 
+        // Re-render the view (NOT a redirect) on validation/verify errors so
+        // ModelState survives — and so we don't trip a fresh-secret rotation
+        // by bouncing through the GET.
+        var codes = TempData["EnrollRecoveryCodes"] as IReadOnlyList<string> ?? Array.Empty<string>();
+        TempData.Keep("EnrollRecoveryCodes");
+
+        TotpEnrollViewModel BuildVm() => new()
+        {
+            SecretBase32 = _rawTotp.ToBase32(secret),
+            OtpAuthUri = _rawTotp.BuildEnrollmentUri(secret, "NetFirewall", user.Username).ToString(),
+            RecoveryCodes = codes
+        };
+
         if (!ModelState.IsValid)
-            return RedirectToAction(nameof(EnrollTotp));
+            return View(BuildVm());
 
         var step = _rawTotp.Verify(secret, model.Code, lastUsedStep: null, DateTimeOffset.UtcNow);
         if (step is null)
         {
             ModelState.AddModelError(nameof(model.Code), "That code does not match. Try again.");
-            return RedirectToAction(nameof(EnrollTotp));
+            return View(BuildVm());
         }
 
         await _userTotp.EnrollAsync(uid, secret, ct);
@@ -106,6 +127,7 @@ public sealed class AccountController : Controller
         // Issue the real session cookie now and finish login.
         await _cookieIssuer.IssueAsync(HttpContext, user, ct);
         _pending.Clear();
+        TempData.Remove("EnrollRecoveryCodes");
 
         return LocalRedirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
     }

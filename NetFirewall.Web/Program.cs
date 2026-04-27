@@ -92,7 +92,12 @@ if (daemonOpts.Enabled)
 }
 else
 {
-    // Legacy path — Web shells out directly. Useful for local-only debugging.
+    // Legacy / dev path — Web shells out directly. Controllers still take
+    // IDaemonClient as a dependency (apply buttons, WireGuard status), so we
+    // hand them a stub that returns "daemon disabled" failures cleanly.
+    // Without this, every controller that touches the daemon would crash at
+    // DI activation with a confusing "service not registered" error.
+    builder.Services.AddSingleton<IDaemonClient, NullDaemonClient>();
     builder.Services.AddSingleton<INetworkConfigResolver>(sp => sp.GetRequiredService<NetworkConfigResolver>());
     builder.Services.AddScoped<IStaticRouteApplicator, StaticRouteApplicator>();
 }

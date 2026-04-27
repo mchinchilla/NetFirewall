@@ -1,0 +1,77 @@
+using NetFirewall.Models;
+using NetFirewall.Models.System;
+using NetFirewall.Models.Vpn;
+
+namespace NetFirewall.Web.Daemon;
+
+/// <summary>
+/// In-process stand-in for <see cref="IDaemonClient"/> used when
+/// <c>Daemon:Enabled=false</c> (dev / single-process Web). Read-only probes
+/// degrade quietly (alive=false, no live ruleset / WireGuard status). Apply /
+/// crypto operations return a <see cref="ServiceResponse{T}"/> failure with
+/// an explicit "daemon disabled" message — visible in the UI as a
+/// non-shouting toast / error banner, not a 500.
+///
+/// The TOTP cipher path is NOT served by this class — when daemon is disabled,
+/// <c>Program.cs</c> registers <see cref="NetFirewall.Services.Auth.AesGcmTotpSecretCipher"/>
+/// directly, so callers go to the in-process AES cipher and never touch this stub.
+/// EncryptTotpAsync / DecryptTotpAsync exist here only to satisfy the interface.
+/// </summary>
+public sealed class NullDaemonClient : IDaemonClient
+{
+    private const string DisabledMessage =
+        "Daemon is disabled (Daemon:Enabled=false). This operation requires the netfirewall daemon — start it or run a full Linux deployment.";
+
+    private static ServiceResponse<T> Disabled<T>() => ServiceResponse<T>.Fail(DisabledMessage);
+
+    public Task<ServiceResponse<NetworkApplyResult>> ApplyInterfaceAsync(Guid interfaceId, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetworkApplyResult>());
+
+    public Task<ServiceResponse<NetworkApplyResult>> RestartNetworkingAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetworkApplyResult>());
+
+    public Task<ServiceResponse<NetworkApplyResult>> ApplyRouteAsync(Guid routeId, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetworkApplyResult>());
+
+    public Task<ServiceResponse<NetworkApplyResult>> RemoveRouteAsync(Guid routeId, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetworkApplyResult>());
+
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyFirewallAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NftApplyResultDto>());
+
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyQosAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NftApplyResultDto>());
+
+    public Task<string?> GetCurrentRulesetAsync(CancellationToken ct = default) =>
+        Task.FromResult<string?>(null);
+
+    public Task<bool> IsAliveAsync(CancellationToken ct = default) =>
+        Task.FromResult(false);
+
+    // The TOTP path goes through ITotpSecretCipher and is rebound to the
+    // in-process AES cipher when daemon is off — this method shouldn't be
+    // reached. If it ever is, throw loud so the misconfig is obvious.
+    public Task<byte[]> EncryptTotpAsync(byte[] plaintext, CancellationToken ct = default) =>
+        throw new InvalidOperationException(
+            "EncryptTotpAsync called on NullDaemonClient — TOTP cipher should be AesGcmTotpSecretCipher when daemon is disabled. Misconfigured DI?");
+
+    public Task<byte[]> DecryptTotpAsync(byte[] ciphertext, CancellationToken ct = default) =>
+        throw new InvalidOperationException(
+            "DecryptTotpAsync called on NullDaemonClient — TOTP cipher should be AesGcmTotpSecretCipher when daemon is disabled. Misconfigured DI?");
+
+    public Task<ServiceResponse<WireGuardKeyPairDto>> GenerateWireGuardKeyPairAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<WireGuardKeyPairDto>());
+
+    public Task<ServiceResponse<WireGuardPskDto>> GenerateWireGuardPskAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<WireGuardPskDto>());
+
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NftApplyResultDto>());
+
+    public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NftApplyResultDto>());
+
+    public Task<ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>.Ok(
+            Array.Empty<WgPeerLiveStatus>(), "Daemon disabled — no live status available."));
+}
