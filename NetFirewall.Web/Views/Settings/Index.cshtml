@@ -1,0 +1,95 @@
+@model IReadOnlyList<NetFirewall.Web.Services.AppSettingValue>
+@using NetFirewall.Web.Services
+@{
+    ViewData["Title"] = "Settings";
+    Layout = "_Layout";
+    var grouped = Model.GroupBy(v => v.Descriptor.Category).OrderBy(g => g.Key).ToList();
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">System</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Runtime-tunable knobs. Changes take effect on the next read by the consuming service. Admin only — saving requires step-up TOTP.
+        </p>
+    </div>
+</div>
+
+@foreach (var group in grouped)
+{
+    <section class="card mb-4" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <header class="mb-4">
+            <h2 class="text-base font-semibold">@group.Key</h2>
+            <p class="text-xs" style="color: var(--surface-fg-muted);">@group.Count() setting@(group.Count() == 1 ? "" : "s")</p>
+        </header>
+
+        <div class="divide-y" style="border-color: var(--surface-border);">
+            @foreach (var s in group)
+            {
+                var inputId = $"set-{s.Descriptor.Key.Replace('.', '-')}";
+                <form class="grid gap-3 md:grid-cols-[1fr_auto] items-start py-4"
+                      hx-post="/Admin/Settings/save" hx-swap="none">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="key" value="@s.Descriptor.Key" />
+
+                    <div class="space-y-1">
+                        <div class="flex items-baseline gap-2">
+                            <label for="@inputId" class="text-sm font-medium">@s.Descriptor.Label</label>
+                            <span class="text-xs font-mono" style="color: var(--surface-fg-muted);">@s.Descriptor.Key</span>
+                            @if (s.IsDefault)
+                            {
+                                <span class="text-xs px-1.5 py-0.5 rounded"
+                                      style="background: color-mix(in srgb, var(--surface-fg-muted) 12%, transparent); color: var(--surface-fg-muted);">default</span>
+                            }
+                            else
+                            {
+                                <span class="text-xs px-1.5 py-0.5 rounded"
+                                      style="background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);">customized</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(s.Descriptor.Description))
+                        {
+                            <p class="text-xs" style="color: var(--surface-fg-muted);">@s.Descriptor.Description</p>
+                        }
+
+                        @switch (s.Descriptor.Type)
+                        {
+                            case AppSettingType.Enum:
+                                <select id="@inputId" name="value" class="input mt-2 max-w-md">
+                                    @foreach (var opt in s.Descriptor.AllowedValues ?? Array.Empty<string>())
+                                    {
+                                        <option value="@opt" selected="@(opt == s.Value)">@opt</option>
+                                    }
+                                </select>
+                                break;
+                            case AppSettingType.Bool:
+                                <select id="@inputId" name="value" class="input mt-2 max-w-md">
+                                    <option value="true"  selected="@(s.Value == "true")">true</option>
+                                    <option value="false" selected="@(s.Value == "false")">false</option>
+                                </select>
+                                break;
+                            case AppSettingType.Int:
+                                <input id="@inputId" name="value" type="number" inputmode="numeric"
+                                       value="@s.Value" class="input mt-2 max-w-md font-mono" />
+                                break;
+                            default:
+                                <input id="@inputId" name="value" type="text"
+                                       value="@s.Value" class="input mt-2 max-w-md" />
+                                break;
+                        }
+
+                        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+                            Default: <span class="font-mono">@(string.IsNullOrEmpty(s.Descriptor.DefaultValue) ? "(empty)" : s.Descriptor.DefaultValue)</span>
+                        </p>
+                    </div>
+
+                    <div class="flex items-start pt-1 md:pt-7">
+                        <button type="submit" class="btn btn-primary text-xs">Save</button>
+                    </div>
+                </form>
+            }
+        </div>
+    </section>
+}
