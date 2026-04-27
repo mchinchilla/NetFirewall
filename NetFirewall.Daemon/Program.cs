@@ -62,6 +62,11 @@ builder.Services.AddKeyedSingleton<INetworkConfigService, NoOpNetworkConfigServi
 builder.Services.AddSingleton<INetworkConfigResolver, NetworkConfigResolver>();
 builder.Services.AddScoped<IStaticRouteApplicator, StaticRouteApplicator>();
 
+// ----- Settings — same singleton service the Web uses, lets the collector
+//        and audit pruner read operator-tunable retention values. -----
+builder.Services.AddSingleton<NetFirewall.Services.Settings.IAppSettingsService,
+                              NetFirewall.Services.Settings.AppSettingsService>();
+
 // ----- Monitoring (collector runs HERE, not in Web — daemon is long-lived
 //        and stays running across Web restarts so we don't lose samples). -----
 builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorService,
@@ -71,6 +76,7 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
 builder.Services.Configure<NetFirewall.Services.Monitoring.MetricsCollectorOptions>(
     builder.Configuration.GetSection("Metrics"));
 builder.Services.AddHostedService<NetFirewall.Services.Monitoring.MetricsCollectorService>();
+builder.Services.AddHostedService<NetFirewall.Services.Firewall.AuditPrunerService>();
 
 // ----- Auth services (sessions read from same Postgres as Web) -----
 builder.Services.AddScoped<IUserService, UserService>();
