@@ -7,8 +7,8 @@
 <div class="space-y-3" x-data="{ copied: false }">
     <div class="flex items-baseline justify-between gap-3">
         <div>
-            <p class="text-xs font-mono" style="color: var(--surface-fg-muted);">@name</p>
-            <p class="text-xs mt-0.5" style="color: var(--surface-fg-muted);">@lineCount lines · @Model.Length bytes</p>
+            <p class="text-xs font-mono text-surface-fg-muted">@name</p>
+            <p class="text-xs mt-0.5 text-surface-fg-muted">@lineCount lines · @Model.Length bytes</p>
         </div>
         <button type="button" class="btn btn-ghost text-xs"
                 @@click="navigator.clipboard.writeText($refs.code.textContent).then(() => { copied = true; setTimeout(() => copied = false, 1500); })"
@@ -18,7 +18,7 @@
     <pre class="text-xs p-4 rounded overflow-auto max-h-[70vh] leading-relaxed"
          style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent); color: var(--surface-fg);"><code x-ref="code">@Model</code></pre>
 
-    <div class="pt-3 border-t flex items-center justify-end" style="border-color: var(--surface-border);">
+    <div class="pt-3 border-t flex items-center justify-end border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Close</button>
     </div>
 </div>

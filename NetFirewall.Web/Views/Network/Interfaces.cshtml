@@ -6,13 +6,13 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Network</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
         <h1 class="text-2xl font-semibold tracking-tight">Interfaces</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Detected on
-            <span class="font-medium" style="color: var(--surface-fg);">@Model.Name @Model.Version</span>
+            <span class="font-medium text-surface-fg">@Model.Name @Model.Version</span>
             · writer:
-            <span class="font-medium" style="color: var(--surface-fg);">@Model.ConfigMethod</span>
+            <span class="font-medium text-surface-fg">@Model.ConfigMethod</span>
         </p>
     </div>
     <button type="button" class="btn btn-ghost"
@@ -31,6 +31,6 @@
          hx-get="/Network/InterfacesTable"
          hx-trigger="load, refreshInterfaces from:body"
          hx-swap="innerHTML">
-        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Detecting interfaces…</div>
+        <div class="text-sm py-8 text-center text-surface-fg-muted">Detecting interfaces…</div>
     </div>
 </section>

@@ -21,13 +21,13 @@
 
 @if (Model.Server is null)
 {
-    <p class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">No server configured.</p>
+    <p class="text-sm py-8 text-center text-surface-fg-muted">No server configured.</p>
 }
 else if (Model.Status.Count == 0)
 {
-    <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">
+    <p class="text-sm py-6 text-center text-surface-fg-muted">
         Interface @Model.Server.Name is not up, or no peers have ever handshook.
-        Click <span class="font-medium" style="color: var(--surface-fg);">Apply</span> above to bring it up.
+        Click <span class="font-medium text-surface-fg">Apply</span> above to bring it up.
     </p>
 }
 else
@@ -35,7 +35,7 @@ else
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">Peer</th>
                     <th class="px-5 py-2 font-medium hidden md:table-cell">Endpoint</th>
                     <th class="px-5 py-2 font-medium">Last handshake</th>
@@ -43,7 +43,7 @@ else
                     <th class="px-5 py-2 font-medium">TX</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @{ var byPubkey = Model.Peers.ToDictionary(p => p.PublicKey, p => p); }
                 @foreach (var s in Model.Status.OrderByDescending(s => s.LastHandshakeAt ?? DateTime.MinValue))
                 {
@@ -56,9 +56,9 @@ else
                                       style="background-color: @(fresh ? "var(--feedback-success-bd)" : "var(--surface-fg-muted)");"></span>
                                 <span class="font-medium">@name</span>
                             </div>
-                            <p class="text-xs font-mono mt-0.5" style="color: var(--surface-fg-muted);">@s.PublicKey[..16]…</p>
+                            <p class="text-xs font-mono mt-0.5 text-surface-fg-muted">@s.PublicKey[..16]…</p>
                         </td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@(s.Endpoint ?? "—")</td>
+                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@(s.Endpoint ?? "—")</td>
                         <td class="px-5 py-3 text-xs">@FmtAgo(s.LastHandshakeAt)</td>
                         <td class="px-5 py-3 font-mono text-xs">@FmtBytes(s.RxBytes)</td>
                         <td class="px-5 py-3 font-mono text-xs">@FmtBytes(s.TxBytes)</td>

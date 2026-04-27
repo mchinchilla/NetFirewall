@@ -2,7 +2,7 @@
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
         No reservations yet. Add one to permanently bind a MAC address to an IP.
     </div>
 }
@@ -11,20 +11,20 @@ else
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">MAC</th>
                     <th class="px-5 py-2 font-medium">Reserved IP</th>
                     <th class="px-5 py-2 font-medium hidden md:table-cell">Description</th>
                     <th class="px-5 py-2 font-medium text-right">Actions</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @foreach (var r in Model.OrderBy(x => x.ReservedIp?.ToString()))
                 {
                     <tr>
                         <td class="px-5 py-3 font-mono text-xs">@r.MacAddress</td>
                         <td class="px-5 py-3 font-mono text-xs font-medium">@r.ReservedIp</td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">
+                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">
                             @(r.Description ?? "—")
                         </td>
                         <td class="px-5 py-3 text-right">
@@ -36,7 +36,7 @@ else
                                 @{
                                     var msg = $"Delete reservation for {r.MacAddress} → {r.ReservedIp}? The IP will rejoin the general pool.";
                                 }
-                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
                                         hx-post="/Dhcp/Reservations/delete/@r.Id"
                                         hx-trigger="confirmed-del"
                                         data-msg="@msg"

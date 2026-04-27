@@ -94,7 +94,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Overview</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Overview</p>
         <h1 class="text-2xl font-semibold tracking-tight">Network at a glance</h1>
     </div>
     <div class="flex items-center gap-2">
@@ -133,18 +133,18 @@
         <header class="flex items-center justify-between mb-4">
             <div>
                 <h2 class="text-base font-semibold">Traffic — last 24h</h2>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">Hourly aggregate from <span class="font-mono">system_metrics_hourly</span></p>
+                <p class="text-xs text-surface-fg-muted">Hourly aggregate from <span class="font-mono">system_metrics_hourly</span></p>
             </div>
-            <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline" style="color: var(--accent);">Open in monitoring →</a>
+            <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
         </header>
 
         @if (Model.TrafficLabels.Length == 0)
         {
             <div class="h-56 flex flex-col items-center justify-center text-center">
-                <p class="text-sm font-medium" style="color: var(--surface-fg);">No traffic samples yet.</p>
-                <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+                <p class="text-sm font-medium text-surface-fg">No traffic samples yet.</p>
+                <p class="text-xs mt-1 text-surface-fg-muted">
                     The collector aggregates hourly. Wait ~1 hour after the daemon starts, or check
-                    <a class="hover:underline" style="color: var(--accent);" href="@Url.Action("Index", "Monitoring")">live monitoring</a>.
+                    <a class="hover:underline text-accent" href="@Url.Action("Index", "Monitoring")">live monitoring</a>.
                 </p>
             </div>
         }
@@ -156,9 +156,9 @@
             </div>
 
             <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
-                <div><p class="font-semibold text-sm">@Model.TrafficAvgInMbps.ToString("0.#") Mbps</p><p style="color: var(--surface-fg-muted);">Avg in</p></div>
-                <div><p class="font-semibold text-sm">@Model.TrafficAvgOutMbps.ToString("0.#") Mbps</p><p style="color: var(--surface-fg-muted);">Avg out</p></div>
-                <div><p class="font-semibold text-sm">@FmtBytes(Model.TrafficTotalBytes)</p><p style="color: var(--surface-fg-muted);">24h total</p></div>
+                <div><p class="font-semibold text-sm">@Model.TrafficAvgInMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg in</p></div>
+                <div><p class="font-semibold text-sm">@Model.TrafficAvgOutMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg out</p></div>
+                <div><p class="font-semibold text-sm">@FmtBytes(Model.TrafficTotalBytes)</p><p class="text-surface-fg-muted">24h total</p></div>
             </div>
         }
     </section>
@@ -166,11 +166,11 @@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
         <header class="flex items-center justify-between mb-3">
             <h2 class="text-base font-semibold">Recent activity</h2>
-            <a href="@Url.Action("Index", "FwAuditLog")" class="text-xs hover:underline" style="color: var(--accent);">View all</a>
+            <a href="@Url.Action("Index", "FwAuditLog")" class="text-xs hover:underline text-accent">View all</a>
         </header>
         @if (Model.RecentActivity.Count == 0)
         {
-            <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">No firewall activity logged yet.</p>
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No firewall activity logged yet.</p>
         }
         else
         {
@@ -189,7 +189,7 @@
                         <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4"
                               style="background-color: @dotColor; --tw-ring-color: var(--surface-elevated);"></span>
                         <p class="text-sm font-medium">@a.Title</p>
-                        <p class="text-xs" style="color: var(--surface-fg-muted);">@a.Detail · @AgoFromNow(a.Timestamp)</p>
+                        <p class="text-xs text-surface-fg-muted">@a.Detail · @AgoFromNow(a.Timestamp)</p>
                     </li>
                 }
             </ol>
@@ -202,14 +202,14 @@
     <header class="flex items-center justify-between mb-3">
         <div>
             <h2 class="text-base font-semibold">Subnets &amp; pools</h2>
-            <p class="text-xs" style="color: var(--surface-fg-muted);">Lease utilisation per subnet</p>
+            <p class="text-xs text-surface-fg-muted">Lease utilisation per subnet</p>
         </div>
         <a href="@Url.Action("Index", "DhcpSubnets")" class="btn btn-ghost text-xs">Manage subnets</a>
     </header>
     @if (Model.Subnets.Count == 0)
     {
-        <p class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">
-            No subnets configured. <a class="hover:underline" style="color: var(--accent);" href="@Url.Action("Index", "SetupWizard")">Run the setup wizard</a> to get started.
+        <p class="text-sm py-8 text-center text-surface-fg-muted">
+            No subnets configured. <a class="hover:underline text-accent" href="@Url.Action("Index", "SetupWizard")">Run the setup wizard</a> to get started.
         </p>
     }
     else
@@ -217,7 +217,7 @@
         <div class="overflow-x-auto -mx-5">
             <table class="min-w-full text-sm">
                 <thead>
-                    <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                         <th class="px-5 py-2 font-medium">Subnet</th>
                         <th class="px-5 py-2 font-medium">Pool range</th>
                         <th class="px-5 py-2 font-medium">Used</th>
@@ -225,7 +225,7 @@
                         <th class="px-5 py-2 font-medium">Status</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y" style="border-color: var(--surface-border);">
+                <tbody class="divide-y border-surface-border">
                     @foreach (var s in Model.Subnets)
                     {
                         var barColor = s.Status switch
@@ -237,32 +237,29 @@
                         <tr>
                             <td class="px-5 py-3">
                                 <p class="font-medium">@s.Name</p>
-                                <p class="text-xs font-mono" style="color: var(--surface-fg-muted);">@s.Cidr</p>
+                                <p class="text-xs font-mono text-surface-fg-muted">@s.Cidr</p>
                             </td>
-                            <td class="px-5 py-3 font-mono text-xs" style="color: var(--surface-fg-muted);">@(s.PoolRange ?? "—")</td>
+                            <td class="px-5 py-3 font-mono text-xs text-surface-fg-muted">@(s.PoolRange ?? "—")</td>
                             <td class="px-5 py-3">@s.UsedLeases / @s.Capacity</td>
                             <td class="px-5 py-3 hidden md:table-cell">
                                 <div class="flex items-center gap-2">
-                                    <div class="h-1.5 w-32 rounded-full overflow-hidden" style="background-color: var(--surface-muted);">
+                                    <div class="h-1.5 w-32 rounded-full overflow-hidden bg-surface-muted">
                                         <div class="h-full rounded-full" style="width: @(s.UsagePercent.ToString("0.#"))%; background-color: @barColor;"></div>
                                     </div>
-                                    <span class="text-xs" style="color: var(--surface-fg-muted);">@s.UsagePercent.ToString("0.#")%</span>
+                                    <span class="text-xs text-surface-fg-muted">@s.UsagePercent.ToString("0.#")%</span>
                                 </div>
                             </td>
                             <td class="px-5 py-3">
                                 @switch (s.Status)
                                 {
                                     case "danger":
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                              style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg);">Saturated</span>
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-danger-bg text-feedback-danger-fg">Saturated</span>
                                         break;
                                     case "warn":
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                              style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Near full</span>
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-warning-bg text-feedback-warning-fg">Near full</span>
                                         break;
                                     default:
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                              style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Healthy</span>
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Healthy</span>
                                         break;
                                 }
                             </td>

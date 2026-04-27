@@ -3,7 +3,7 @@
 
 <header class="mb-5">
     <h2 class="text-lg font-semibold">Step 2 — LAN &amp; DHCP</h2>
-    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+    <p class="text-sm mt-1 text-surface-fg-muted">
         For every interface marked LAN in step 1, choose its address space and the DHCP range it should hand out to clients.
         Defaults are sensible if you have no preference.
     </p>
@@ -11,8 +11,7 @@
 
 @if (!ViewData.ModelState.IsValid && ViewData.ModelState["Lans"]?.Errors.Count > 0)
 {
-    <div class="mb-5 rounded-md border-l-2 px-3 py-2 text-sm"
-         style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg); border-color: var(--feedback-danger-bd);">
+    <div class="mb-5 rounded-md border-l-2 px-3 py-2 text-sm bg-feedback-danger-bg text-feedback-danger-fg border-feedback-danger-bd">
         @foreach (var err in ViewData.ModelState["Lans"]!.Errors) { <p>@err.ErrorMessage</p> }
     </div>
 }
@@ -28,8 +27,7 @@
 
     @if (Model.Lans.Count == 0)
     {
-        <div class="rounded-lg border p-6 text-sm text-center"
-             style="border-color: var(--surface-border); color: var(--surface-fg-muted);">
+        <div class="rounded-lg border p-6 text-sm text-center border-surface-border text-surface-fg-muted">
             No LAN interfaces selected in step 1 — go back and mark at least one as LAN, or skip this step.
         </div>
     }
@@ -39,13 +37,13 @@
             @for (var i = 0; i < Model.Lans.Count; i++)
             {
                 var lan = Model.Lans[i];
-                <div class="rounded-lg border p-4" style="border-color: var(--surface-border);">
+                <div class="rounded-lg border p-4 border-surface-border">
                     <input type="hidden" name="Lans[@i].InterfaceName" value="@lan.InterfaceName" />
 
                     <div class="flex items-center justify-between mb-3">
                         <div>
                             <p class="font-mono text-sm font-medium">@lan.InterfaceName</p>
-                            <p class="text-xs" style="color: var(--surface-fg-muted);">LAN configuration</p>
+                            <p class="text-xs text-surface-fg-muted">LAN configuration</p>
                         </div>
                         <label class="flex items-center gap-2 text-xs">
                             <input type="checkbox" name="Lans[@i].EnableDhcp" value="true" @(lan.EnableDhcp ? "checked" : "") class="h-4 w-4 rounded" />
@@ -90,8 +88,7 @@
         </div>
     }
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-between gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-between gap-2 border-surface-border">
         <button type="submit" form="wizard-back-2" class="btn btn-ghost">← Back</button>
         <button type="submit" class="btn btn-primary">
             Continue

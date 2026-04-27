@@ -5,19 +5,18 @@
 }
 
 <div class="mb-6" style="animation: var(--animate-slide-up);">
-    <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">
+    <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">
         @(isRerun ? "Re-running setup" : "First-run setup")
     </p>
     <h1 class="text-2xl font-semibold tracking-tight">NetFirewall setup wizard</h1>
-    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+    <p class="text-sm mt-1 text-surface-fg-muted">
         Five guided steps. Your progress saves after each step — close the tab and resume later.
     </p>
 </div>
 
 @if (isRerun)
 {
-    <div class="mb-6 rounded-md border-l-2 px-3 py-3 text-sm flex items-start gap-3"
-         style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg); border-color: var(--feedback-warning-bd);"
+    <div class="mb-6 rounded-md border-l-2 px-3 py-3 text-sm flex items-start gap-3 bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd"
          role="status">
         <svg class="h-5 w-5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
         <div>

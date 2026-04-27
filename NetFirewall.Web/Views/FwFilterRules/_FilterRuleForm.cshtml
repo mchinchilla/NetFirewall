@@ -131,8 +131,7 @@
         })
     </div>
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
         <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create rule")</button>
     </div>

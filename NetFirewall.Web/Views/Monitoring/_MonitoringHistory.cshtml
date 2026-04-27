@@ -14,12 +14,12 @@
 @if (Model.SampleCount == 0)
 {
     <div class="card text-center py-12">
-        <p class="text-sm font-medium" style="color: var(--surface-fg);">No samples in this window.</p>
-        <p class="text-xs mt-2" style="color: var(--surface-fg-muted);">
+        <p class="text-sm font-medium text-surface-fg">No samples in this window.</p>
+        <p class="text-xs mt-2 text-surface-fg-muted">
             The collector runs in the daemon. Check it's up:
             <span class="font-mono">systemctl status netfirewall-daemon</span>
         </p>
-        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-xs mt-1 text-surface-fg-muted">
             Range: @Model.From.ToLocalTime():yyyy-MM-dd HH:mm → @Model.To.ToLocalTime():HH:mm
         </p>
     </div>
@@ -31,7 +31,7 @@ else
         <section class="card">
             <header class="flex items-baseline justify-between mb-3">
                 <h2 class="text-base font-semibold">CPU · Memory · Load</h2>
-                <span class="text-xs" style="color: var(--surface-fg-muted);">@Model.SampleCount samples</span>
+                <span class="text-xs text-surface-fg-muted">@Model.SampleCount samples</span>
             </header>
             <div class="relative h-64">
                 <canvas x-init="$nextTick(() => NetFw.charts.makeSystemHistory($el, data))"></canvas>
@@ -41,7 +41,7 @@ else
         <section class="card">
             <header class="flex items-baseline justify-between mb-3">
                 <h2 class="text-base font-semibold">Network bandwidth</h2>
-                <span class="text-xs" style="color: var(--surface-fg-muted);">RX / TX</span>
+                <span class="text-xs text-surface-fg-muted">RX / TX</span>
             </header>
             <div class="relative h-64">
                 <canvas x-init="$nextTick(() => NetFw.charts.makeNetworkHistory($el, { labels: data.labels, rx: data.rx, tx: data.tx }))"></canvas>
@@ -49,7 +49,7 @@ else
         </section>
     </div>
 
-    <p class="text-xs mt-3 text-right" style="color: var(--surface-fg-muted);">
+    <p class="text-xs mt-3 text-right text-surface-fg-muted">
         Window: @Model.From.ToLocalTime():yyyy-MM-dd HH:mm → @Model.To.ToLocalTime():HH:mm · range <span class="font-mono">@Model.Range</span>
     </p>
 }

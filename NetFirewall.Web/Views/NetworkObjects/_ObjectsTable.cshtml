@@ -3,8 +3,8 @@
 
 @if (Model.Count == 0)
 {
-    <p class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
-        No objects yet. Click <span class="font-medium" style="color: var(--surface-fg);">Add object</span> to create your first one.
+    <p class="text-sm py-10 text-center text-surface-fg-muted">
+        No objects yet. Click <span class="font-medium text-surface-fg">Add object</span> to create your first one.
     </p>
 }
 else
@@ -12,7 +12,7 @@ else
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">Name</th>
                     <th class="px-5 py-2 font-medium">Type</th>
                     <th class="px-5 py-2 font-medium">Value / members</th>
@@ -20,7 +20,7 @@ else
                     <th class="px-5 py-2 font-medium text-right">Actions</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @foreach (var o in Model)
                 {
                     var typeBg = o.Type switch
@@ -45,13 +45,13 @@ else
                         <td class="px-5 py-3 font-mono text-xs">
                             @if (o.Type == NetworkObjectTypes.Group)
                             {
-                                <span style="color: var(--surface-fg-muted);">
+                                <span class="text-surface-fg-muted">
                                     @(o.Members?.Count ?? 0) member@((o.Members?.Count ?? 0) == 1 ? "" : "s"):
                                 </span>
                                 @if (o.Members is { Count: > 0 })
                                 {
                                     @string.Join(", ", o.Members.Take(5).Select(m => m.Name))
-                                    @if (o.Members.Count > 5) { <span style="color: var(--surface-fg-muted);"> · +@(o.Members.Count - 5) more</span> }
+                                    @if (o.Members.Count > 5) { <span class="text-surface-fg-muted"> · +@(o.Members.Count - 5) more</span> }
                                 }
                             }
                             else
@@ -59,7 +59,7 @@ else
                                 @o.Value
                             }
                         </td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">@(o.Description ?? "—")</td>
+                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">@(o.Description ?? "—")</td>
                         <td class="px-5 py-3 text-right">
                             <div class="inline-flex items-center gap-1">
                                 <button type="button" class="btn btn-ghost text-xs"
@@ -67,7 +67,7 @@ else
                                         hx-target="#drawer-body" hx-swap="innerHTML"
                                         @@click="$store.drawer.openRaw('Edit @o.Name')">Edit</button>
                                 @{ var msg = $"Delete object '{o.Name}'? Any firewall rules referencing it by name will silently skip the reference at next apply (the resolver logs a warning)."; }
-                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
                                         hx-post="/Network/Objects/delete/@o.Id"
                                         hx-trigger="confirmed-del"
                                         data-msg="@msg"

@@ -6,9 +6,9 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">DHCP</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
         <h1 class="text-2xl font-semibold tracking-tight">Client classes</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Classify clients by vendor / user / MAC prefix / option to override TFTP server, boot file, and pool eligibility.
             Classic use case: PXE booting different architectures (BIOS vs UEFI).
         </p>
@@ -27,6 +27,6 @@
          hx-get="/Dhcp/Classes/table"
          hx-trigger="load, refreshClasses from:body"
          hx-swap="innerHTML">
-        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
     </div>
 </section>

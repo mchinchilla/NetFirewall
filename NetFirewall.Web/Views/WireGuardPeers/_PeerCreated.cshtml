@@ -1,10 +1,9 @@
 @model NetFirewall.Web.Models.Vpn.WgPeerCreatedViewModel
 
 <div class="space-y-4" x-data="{ copied: false, downloaded: false }">
-    <div class="rounded-md border-l-2 px-3 py-3 text-sm"
-         style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg); border-color: var(--feedback-success-bd);">
+    <div class="rounded-md border-l-2 px-3 py-3 text-sm bg-feedback-success-bg text-feedback-success-fg border-feedback-success-bd">
         <p class="font-semibold">Peer '@Model.PeerName' created.</p>
-        <p class="text-xs mt-0.5" style="color: var(--surface-fg);">
+        <p class="text-xs mt-0.5 text-surface-fg">
             Scan the QR with the WireGuard app or copy the config below. <span class="font-medium">This is the only time the private key is shown</span> — after closing this drawer it's gone.
         </p>
     </div>
@@ -17,7 +16,7 @@
 
     <div>
         <div class="flex items-baseline justify-between mb-1">
-            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Client config</p>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Client config</p>
             <div class="flex items-center gap-2">
                 <button type="button" class="btn btn-ghost text-xs"
                         @@click="navigator.clipboard.writeText($refs.cfg.value).then(() => { copied = true; setTimeout(() => copied = false, 1500); })"
@@ -40,7 +39,7 @@
                   style="resize: vertical;">@Model.ClientConfig</textarea>
     </div>
 
-    <div class="pt-3 border-t flex items-center justify-end gap-2" style="border-color: var(--surface-border);">
+    <div class="pt-3 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-primary" @@click="$store.drawer.close()">Done</button>
     </div>
 </div>

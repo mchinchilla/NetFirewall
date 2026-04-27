@@ -2,14 +2,14 @@
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">No audit entries match the current filters.</div>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">No audit entries match the current filters.</div>
 }
 else
 {
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">Time (UTC)</th>
                     <th class="px-5 py-2 font-medium">Table</th>
                     <th class="px-5 py-2 font-medium">Action</th>
@@ -18,7 +18,7 @@ else
                     <th class="px-5 py-2 font-medium text-right">Diff</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @foreach (var e in Model)
                 {
                     var actionColor = e.Action switch
@@ -35,8 +35,8 @@ else
                         <td class="px-5 py-3">
                             <span class="badge" style="background: color-mix(in srgb, @actionColor 14%, transparent); color: @actionColor;">@e.Action</span>
                         </td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@e.RecordId.ToString("N").Substring(0, 8)</td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs" style="color: var(--surface-fg-muted);">@(e.UserId ?? "—")</td>
+                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@e.RecordId.ToString("N").Substring(0, 8)</td>
+                        <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">@(e.UserId ?? "—")</td>
                         <td class="px-5 py-3 text-right">
                             <button type="button" class="btn btn-ghost text-xs"
                                     @@click="open = !open"
@@ -47,11 +47,11 @@ else
                         <td colspan="6" class="px-5 pb-4">
                             <div class="grid md:grid-cols-2 gap-3">
                                 <div>
-                                    <p class="text-xs uppercase tracking-wider font-semibold mb-1" style="color: var(--feedback-danger-fg);">Old</p>
+                                    <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-feedback-danger-fg">Old</p>
                                     <pre class="text-xs p-3 rounded overflow-x-auto" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent); color: var(--surface-fg);">@(e.OldValues ?? "—")</pre>
                                 </div>
                                 <div>
-                                    <p class="text-xs uppercase tracking-wider font-semibold mb-1" style="color: var(--feedback-success-fg);">New</p>
+                                    <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-feedback-success-fg">New</p>
                                     <pre class="text-xs p-3 rounded overflow-x-auto" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent); color: var(--surface-fg);">@(e.NewValues ?? "—")</pre>
                                 </div>
                             </div>

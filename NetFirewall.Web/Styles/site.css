@@ -559,6 +559,23 @@
     .input::placeholder { color: var(--surface-fg-muted); opacity: 0.7; }
     .input-error { border-color: var(--feedback-danger-bd); }
 
+    /* ----- Badges (status pills) -----
+     * Soft-tinted pill: background = color-mix(token, 14%, transparent),
+     * foreground = same token. Replaces every inline
+     *   style="background: color-mix(...); color: var(--token);"
+     * across the views. Use .badge as the layout primitive and add
+     * one of .badge-{accent,success,warning,danger,info,muted} for color.
+     */
+    .badge {
+        @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+    }
+    .badge-accent  { background: color-mix(in srgb, var(--accent) 14%, transparent);              color: var(--accent); }
+    .badge-success { background: color-mix(in srgb, var(--feedback-success-fg) 14%, transparent); color: var(--feedback-success-fg); }
+    .badge-warning { background: color-mix(in srgb, var(--feedback-warning-fg) 14%, transparent); color: var(--feedback-warning-fg); }
+    .badge-danger  { background: color-mix(in srgb, var(--feedback-danger-fg) 14%, transparent);  color: var(--feedback-danger-fg); }
+    .badge-info    { background: color-mix(in srgb, var(--feedback-info-fg) 14%, transparent);    color: var(--feedback-info-fg); }
+    .badge-muted   { background: color-mix(in srgb, var(--surface-fg-muted) 14%, transparent);    color: var(--surface-fg-muted); }
+
     .kpi {
         @apply rounded-xl border p-5 shadow-sm relative overflow-hidden
                transition duration-300 hover:-translate-y-0.5 hover:shadow-md;

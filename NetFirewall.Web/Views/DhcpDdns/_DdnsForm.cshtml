@@ -53,8 +53,8 @@
             })
         </div>
 
-        <div class="rounded-lg border p-4" style="border-color: var(--surface-border);">
-            <h3 class="text-xs uppercase tracking-wider font-semibold mb-3" style="color: var(--surface-fg-muted);">TSIG signing</h3>
+        <div class="rounded-lg border p-4 border-surface-border">
+            <h3 class="text-xs uppercase tracking-wider font-semibold mb-3 text-surface-fg-muted">TSIG signing</h3>
             <div class="grid grid-cols-2 gap-3">
                 @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                     Name = nameof(Model.TsigKeyName), Label = "TSIG key name", Value = Model.TsigKeyName,
@@ -78,8 +78,7 @@
             })
         </div>
 
-        <button type="button" class="text-xs font-medium hover:underline"
-                style="color: var(--accent);"
+        <button type="button" class="text-xs font-medium hover:underline text-accent"
                 @@click="showAdvanced = !showAdvanced">
             <span x-show="!showAdvanced">Show advanced (TTL, conflict resolution, client updates)</span>
             <span x-show="showAdvanced">Hide advanced</span>
@@ -126,8 +125,7 @@
         })
     </div>
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
         <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create config")</button>
     </div>

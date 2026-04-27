@@ -6,10 +6,10 @@
 
 <header class="mb-5">
     <h2 class="text-lg font-semibold">Step 5 — Review &amp; apply</h2>
-    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
-        Final preview. Apply writes to <code class="text-[11px] px-1 rounded" style="background-color: var(--surface-muted);">fw_interfaces</code>,
-        <code class="text-[11px] px-1 rounded" style="background-color: var(--surface-muted);">dhcp_subnets</code>,
-        <code class="text-[11px] px-1 rounded" style="background-color: var(--surface-muted);">fw_filter_rules</code>, etc.
+    <p class="text-sm mt-1 text-surface-fg-muted">
+        Final preview. Apply writes to <code class="text-[11px] px-1 rounded bg-surface-muted">fw_interfaces</code>,
+        <code class="text-[11px] px-1 rounded bg-surface-muted">dhcp_subnets</code>,
+        <code class="text-[11px] px-1 rounded bg-surface-muted">fw_filter_rules</code>, etc.
         Networking is NOT restarted automatically — you'll get a button after apply.
     </p>
 </header>
@@ -17,10 +17,10 @@
 <div class="space-y-5">
     @* ----- Interfaces ----- *@
     <section>
-        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">Interfaces</h3>
+        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Interfaces</h3>
         @if (roles.Count == 0)
         {
-            <p class="text-sm" style="color: var(--surface-fg-muted);">All interfaces disabled — nothing to apply.</p>
+            <p class="text-sm text-surface-fg-muted">All interfaces disabled — nothing to apply.</p>
         }
         else
         {
@@ -29,11 +29,10 @@
                 {
                     <li class="flex items-center gap-2">
                         <span class="font-mono text-xs">@i.Name</span>
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
-                              style="background-color: var(--accent-soft); color: var(--accent);">@i.Role</span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent">@i.Role</span>
                         @if (!string.IsNullOrEmpty(i.IpAddress))
                         {
-                            <span class="text-xs font-mono" style="color: var(--surface-fg-muted);">@i.IpAddress</span>
+                            <span class="text-xs font-mono text-surface-fg-muted">@i.IpAddress</span>
                         }
                     </li>
                 }
@@ -45,13 +44,13 @@
     @if (Model.Step2.Lans.Any(l => l.EnableDhcp))
     {
         <section>
-            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">DHCP scopes</h3>
+            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">DHCP scopes</h3>
             <ul class="text-sm space-y-1">
                 @foreach (var l in Model.Step2.Lans.Where(l => l.EnableDhcp))
                 {
                     <li class="font-mono text-xs">
                         @l.InterfaceName · @l.NetworkCidr · range @l.DhcpRangeStart–@l.DhcpRangeEnd
-                        <span style="color: var(--surface-fg-muted);"> · @(l.DomainName ?? "(no domain)") · @(l.LeaseTime / 3600)h</span>
+                        <span class="text-surface-fg-muted"> · @(l.DomainName ?? "(no domain)") · @(l.LeaseTime / 3600)h</span>
                     </li>
                 }
             </ul>
@@ -60,8 +59,8 @@
 
     @* ----- Firewall ----- *@
     <section>
-        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">Firewall</h3>
-        <p class="text-sm" style="color: var(--surface-fg-muted);">
+        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Firewall</h3>
+        <p class="text-sm text-surface-fg-muted">
             @{
                 var on = new List<string>();
                 if (Model.Step3.EnableNat)            on.Add("NAT");
@@ -81,8 +80,8 @@
     @if (Model.Step4.EnableDnsForwarder || Model.Step4.EnableWireGuard || Model.Step4.EnableQos)
     {
         <section>
-            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">Optional services</h3>
-            <ul class="text-sm space-y-1" style="color: var(--surface-fg-muted);">
+            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Optional services</h3>
+            <ul class="text-sm space-y-1 text-surface-fg-muted">
                 @if (Model.Step4.EnableDnsForwarder)
                 {
                     <li>DNS forwarder → @Model.Step4.UpstreamDns1@(string.IsNullOrEmpty(Model.Step4.UpstreamDns2) ? "" : $", {Model.Step4.UpstreamDns2}")</li>
@@ -100,8 +99,7 @@
     }
 </div>
 
-<div class="mt-6 pt-4 border-t flex items-center justify-between gap-2"
-     style="border-color: var(--surface-border);">
+<div class="mt-6 pt-4 border-t flex items-center justify-between gap-2 border-surface-border">
     <form method="post" action="/setup/wizard/back/5" class="inline">
         @Html.AntiForgeryToken()
         <button type="submit" class="btn btn-ghost">← Back</button>
@@ -144,8 +142,7 @@
 
 @if (Model.IsCompleted)
 {
-    <div class="mt-5 rounded-md border-l-2 px-3 py-3 text-sm flex items-start justify-between gap-3"
-         style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg); border-color: var(--feedback-success-bd);">
+    <div class="mt-5 rounded-md border-l-2 px-3 py-3 text-sm flex items-start justify-between gap-3 bg-feedback-success-bg text-feedback-success-fg border-feedback-success-bd">
         <div>
             <p class="font-semibold">Setup applied.</p>
             <p class="text-xs mt-0.5">Networking has not been restarted yet. Apply and reach out via the new IP after restart.</p>

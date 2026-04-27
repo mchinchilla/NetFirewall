@@ -11,7 +11,7 @@
 
 <div class="card max-w-lg mx-auto">
     <h1 class="text-xl font-semibold tracking-tight">Set up two-factor</h1>
-    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+    <p class="text-sm mt-1 text-surface-fg-muted">
         TOTP is required for every NetFirewall account. Scan the QR with any
         authenticator app (Aegis, Authy, Google Authenticator, 1Password, Bitwarden…).
     </p>
@@ -21,30 +21,28 @@
            literal-white intentionally and is the only place we depart from theme tokens. *@
         <div id="totp-qr" class="rounded-lg border p-3"
              style="background-color: #ffffff; border-color: var(--surface-border);"></div>
-        <details class="text-xs" style="color: var(--surface-fg-muted);">
+        <details class="text-xs text-surface-fg-muted">
             <summary class="cursor-pointer hover:underline">Can't scan? Show manual key</summary>
-            <code class="block mt-2 px-2 py-1 rounded font-mono text-[11px]"
-                  style="background-color: var(--surface-muted); color: var(--surface-fg);">@Model.SecretBase32</code>
+            <code class="block mt-2 px-2 py-1 rounded font-mono text-[11px] bg-surface-muted text-surface-fg">@Model.SecretBase32</code>
         </details>
     </div>
 
-    <div class="mt-6 rounded-lg border p-4"
-         style="border-color: var(--surface-border); background-color: var(--surface-muted);">
-        <p class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--surface-fg-muted);">
+    <div class="mt-6 rounded-lg border p-4 border-surface-border bg-surface-muted">
+        <p class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">
             Recovery codes — save these now
         </p>
         <div class="grid grid-cols-2 gap-1.5 font-mono text-xs">
             @* Loop variable name avoids `code` because Razor reserves @@code as a directive. *@
             @foreach (var rc in Model.RecoveryCodes)
             {
-                <span class="px-2 py-1 rounded" style="background-color: var(--surface-elevated);">@rc</span>
+                <span class="px-2 py-1 rounded bg-surface-elevated">@rc</span>
             }
         </div>
         <button type="button" class="btn btn-ghost text-xs mt-3 w-full"
                 @@click="NetFw.downloadRecoveryCodes(@Html.Raw(recoveryCodesJson))">
             Download as .txt
         </button>
-        <p class="text-[11px] mt-2" style="color: var(--surface-fg-muted);">
+        <p class="text-[11px] mt-2 text-surface-fg-muted">
             Each code works once. Anyone with one can sign in as you — treat them like passwords.
         </p>
     </div>
@@ -54,14 +52,14 @@
 
         <div class="space-y-1.5">
             <label for="f-Code" class="block text-xs font-medium">
-                Confirm with a 6-digit code from your app <span style="color: var(--feedback-danger-fg);">*</span>
+                Confirm with a 6-digit code from your app <span class="text-feedback-danger-fg">*</span>
             </label>
             <input id="f-Code" name="Code" required autofocus autocomplete="one-time-code"
                    inputmode="numeric" pattern="^\d{6}$" maxlength="6" placeholder="123456"
                    class="@(ViewData.ModelState[nameof(NetFirewall.Web.Models.Auth.TotpEnrollConfirmViewModel.Code)]?.Errors.Count > 0 ? "input input-error" : "input")" />
             @if (ViewData.ModelState[nameof(NetFirewall.Web.Models.Auth.TotpEnrollConfirmViewModel.Code)]?.Errors.FirstOrDefault() is { } err)
             {
-                <p class="text-xs" style="color: var(--feedback-danger-fg);">@err.ErrorMessage</p>
+                <p class="text-xs text-feedback-danger-fg">@err.ErrorMessage</p>
             }
         </div>
 

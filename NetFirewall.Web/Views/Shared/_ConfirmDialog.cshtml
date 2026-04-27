@@ -32,8 +32,7 @@
          style="background-color: rgba(0,0,0,0.45);"
          @@click="$store.confirm.cancel()"></div>
 
-    <div class="relative w-full max-w-md rounded-xl border shadow-xl"
-         style="background-color: var(--surface-elevated); border-color: var(--surface-border);"
+    <div class="relative w-full max-w-md rounded-xl border shadow-xl bg-surface-elevated border-surface-border"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100"
@@ -57,12 +56,11 @@
             </span>
             <div class="flex-1 min-w-0">
                 <h3 class="text-base font-semibold" x-text="$store.confirm.title"></h3>
-                <p class="mt-1 text-sm" style="color: var(--surface-fg-muted);" x-text="$store.confirm.message"></p>
+                <p class="mt-1 text-sm text-surface-fg-muted" x-text="$store.confirm.message"></p>
             </div>
         </div>
 
-        <div class="flex items-center justify-end gap-2 px-5 pb-4 pt-2 border-t"
-             style="border-color: var(--surface-border);">
+        <div class="flex items-center justify-end gap-2 px-5 pb-4 pt-2 border-t border-surface-border">
             <button type="button" class="btn btn-ghost"
                     @@click="$store.confirm.cancel()"
                     x-text="$store.confirm.cancelLabel"></button>

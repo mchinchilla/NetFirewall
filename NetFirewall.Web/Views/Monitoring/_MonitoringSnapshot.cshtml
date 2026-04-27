@@ -41,18 +41,18 @@
     <section class="card">
         <div class="flex items-baseline justify-between mb-3">
             <h2 class="text-base font-semibold">Disks</h2>
-            <span class="text-xs" style="color: var(--surface-fg-muted);">@Model.Disks.Count mounted</span>
+            <span class="text-xs text-surface-fg-muted">@Model.Disks.Count mounted</span>
         </div>
         @if (Model.Disks.Count == 0)
         {
-            <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">No disk metrics available.</p>
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No disk metrics available.</p>
         }
         else
         {
             <div class="overflow-x-auto -mx-5">
                 <table class="min-w-full text-sm">
                     <thead>
-                        <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                        <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                             <th class="px-5 py-2 font-medium">Mount</th>
                             <th class="px-5 py-2 font-medium hidden md:table-cell">Device</th>
                             <th class="px-5 py-2 font-medium">Used</th>
@@ -60,7 +60,7 @@
                             <th class="px-5 py-2 font-medium">Usage</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y" style="border-color: var(--surface-border);">
+                    <tbody class="divide-y border-surface-border">
                         @foreach (var d in Model.Disks.OrderByDescending(x => x.UsagePercent))
                         {
                             var pct = d.UsagePercent;
@@ -69,7 +69,7 @@
                                                      : "var(--accent)";
                             <tr>
                                 <td class="px-5 py-3 font-mono text-xs">@d.MountPoint</td>
-                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@d.Device</td>
+                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@d.Device</td>
                                 <td class="px-5 py-3 text-xs">@d.UsedFormatted</td>
                                 <td class="px-5 py-3 text-xs">@d.TotalFormatted</td>
                                 <td class="px-5 py-3 w-40">
@@ -91,18 +91,18 @@
     <section class="card">
         <div class="flex items-baseline justify-between mb-3">
             <h2 class="text-base font-semibold">Network interfaces</h2>
-            <span class="text-xs" style="color: var(--surface-fg-muted);">@Model.Network.Count up</span>
+            <span class="text-xs text-surface-fg-muted">@Model.Network.Count up</span>
         </div>
         @if (Model.Network.Count == 0)
         {
-            <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">No interface metrics available.</p>
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No interface metrics available.</p>
         }
         else
         {
             <div class="overflow-x-auto -mx-5">
                 <table class="min-w-full text-sm">
                     <thead>
-                        <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                        <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                             <th class="px-5 py-2 font-medium">Interface</th>
                             <th class="px-5 py-2 font-medium">RX rate</th>
                             <th class="px-5 py-2 font-medium">TX rate</th>
@@ -111,16 +111,16 @@
                             <th class="px-5 py-2 font-medium hidden lg:table-cell">Errs / Drops</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y" style="border-color: var(--surface-border);">
+                    <tbody class="divide-y border-surface-border">
                         @foreach (var n in Model.Network.OrderByDescending(x => x.BytesReceivedPerSecond + x.BytesSentPerSecond))
                         {
                             <tr>
                                 <td class="px-5 py-3 font-mono text-xs font-medium">@n.InterfaceName</td>
                                 <td class="px-5 py-3 font-mono text-xs">@FmtBytesPerSec(n.BytesReceivedPerSecond)</td>
                                 <td class="px-5 py-3 font-mono text-xs">@FmtBytesPerSec(n.BytesSentPerSecond)</td>
-                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@n.BytesReceivedFormatted</td>
-                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@n.BytesSentFormatted</td>
-                                <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">
+                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@n.BytesReceivedFormatted</td>
+                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@n.BytesSentFormatted</td>
+                                <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs text-surface-fg-muted">
                                     @(n.ErrorsReceived + n.ErrorsSent) / @(n.DropsReceived + n.DropsSent)
                                 </td>
                             </tr>
@@ -132,6 +132,6 @@
     </section>
 </div>
 
-<p class="text-xs mt-4 text-right" style="color: var(--surface-fg-muted);">
+<p class="text-xs mt-4 text-right text-surface-fg-muted">
     Last sample: @Model.Timestamp.ToLocalTime().ToString("HH:mm:ss") · host @Model.System.Hostname (@Model.System.OsName, kernel @Model.System.KernelVersion)
 </p>

@@ -8,15 +8,15 @@
     @* ---------- header + tabs ---------- *@
     <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">System</p>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">System</p>
             <h1 class="text-2xl font-semibold tracking-tight">Monitoring</h1>
-            <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            <p class="text-sm mt-1 text-surface-fg-muted">
                 <span x-show="tab === 'live'">Live snapshot from <span class="font-mono">/proc</span> · refreshes every 5s.</span>
                 <span x-show="tab === 'history'" x-cloak>Historical samples collected by the daemon every 5s.</span>
             </p>
         </div>
 
-        <div class="inline-flex p-1 rounded-md text-xs" style="background-color: var(--surface-muted);">
+        <div class="inline-flex p-1 rounded-md text-xs bg-surface-muted">
             <button class="px-3 py-1 rounded font-medium transition"
                     :class="tab === 'live'
                         ? 'shadow-sm'
@@ -40,14 +40,14 @@
             <button type="button" class="btn btn-ghost text-xs"
                     @@click="paused = !paused"
                     x-text="paused ? 'Resume' : 'Pause'"></button>
-            <span class="text-xs" style="color: var(--surface-fg-muted);"
+            <span class="text-xs text-surface-fg-muted"
                   x-text="paused ? '⏸ Polling paused' : '● Polling every 5s'"></span>
         </div>
         <div id="monitoring-snapshot"
              hx-get="/Monitoring/snapshot"
              :hx-trigger="paused ? 'load' : 'load, every 5s'"
              hx-swap="innerHTML">
-            <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+            <div class="text-sm py-10 text-center text-surface-fg-muted">Loading…</div>
         </div>
 
         @* ---------- WireGuard live status (polled at the same cadence) ---------- *@
@@ -55,17 +55,17 @@
             <header class="flex items-baseline justify-between mb-3">
                 <div>
                     <h2 class="text-base font-semibold">WireGuard peers</h2>
-                    <p class="text-xs" style="color: var(--surface-fg-muted);">
+                    <p class="text-xs text-surface-fg-muted">
                         From <span class="font-mono">wg show</span> via the daemon. Empty if no server is configured or the interface isn't up.
                     </p>
                 </div>
-                <a href="@Url.Action("Index", "WireGuard")" class="text-xs hover:underline" style="color: var(--accent);">Manage →</a>
+                <a href="@Url.Action("Index", "WireGuard")" class="text-xs hover:underline text-accent">Manage →</a>
             </header>
             <div id="monitoring-wg"
                  hx-get="/Vpn/WireGuard/status"
                  :hx-trigger="paused ? 'load' : 'load, every 10s'"
                  hx-swap="innerHTML">
-                <div class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+                <div class="text-sm py-6 text-center text-surface-fg-muted">Loading…</div>
             </div>
         </section>
 
@@ -74,17 +74,17 @@
             <header class="flex items-baseline justify-between mb-3">
                 <div>
                     <h2 class="text-base font-semibold">Active schedules</h2>
-                    <p class="text-xs" style="color: var(--surface-fg-muted);">
+                    <p class="text-xs text-surface-fg-muted">
                         The daemon's watcher re-applies the firewall the moment a schedule transitions. Polled every 30s here for visibility.
                     </p>
                 </div>
-                <a href="@Url.Action("Index", "FwSchedules")" class="text-xs hover:underline" style="color: var(--accent);">Manage →</a>
+                <a href="@Url.Action("Index", "FwSchedules")" class="text-xs hover:underline text-accent">Manage →</a>
             </header>
             <div id="monitoring-schedules"
                  hx-get="/Monitoring/schedules"
                  :hx-trigger="paused ? 'load' : 'load, every 30s'"
                  hx-swap="innerHTML">
-                <div class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+                <div class="text-sm py-6 text-center text-surface-fg-muted">Loading…</div>
             </div>
         </section>
     </div>
@@ -92,8 +92,8 @@
     @* ---------- History tab ---------- *@
     <div x-show="tab === 'history'" x-cloak>
         <div class="flex items-center justify-end gap-2 mb-2">
-            <span class="text-xs" style="color: var(--surface-fg-muted);">Range:</span>
-            <div class="inline-flex p-1 rounded-md text-xs" style="background-color: var(--surface-muted);">
+            <span class="text-xs text-surface-fg-muted">Range:</span>
+            <div class="inline-flex p-1 rounded-md text-xs bg-surface-muted">
                 <template x-for="r in ['1h','6h','24h','7d']" :key="r">
                     <button class="px-2.5 py-1 rounded font-medium transition"
                             :class="range === r ? 'shadow-sm' : ''"
@@ -110,7 +110,7 @@
              :hx-vals="JSON.stringify({ range })"
              hx-trigger="manual-refresh"
              hx-swap="innerHTML">
-            <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+            <div class="text-sm py-10 text-center text-surface-fg-muted">
                 Click the History tab to load.
             </div>
         </div>

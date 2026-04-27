@@ -97,7 +97,7 @@
         <a href="@Url.Action("Index", "FwQosConfigs")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwQosConfigs")!))">QoS</a>
         <a href="@Url.Action("Index", "FwSchedules")"    class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwSchedules")!))">Schedules</a>
         <a href="@Url.Action("Index", "FwAuditLog")"     class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwAuditLog")!))">Audit log</a>
-        <a href="@Url.Action("Index", "FwApply")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwApply")!))" style="color: var(--accent);">Apply / Live ruleset</a>
+        <a href="@Url.Action("Index", "FwApply")"        class="nav-link py-1.5 text-accent@(ActiveCls(Url.Action("Index", "FwApply")!))">Apply / Live ruleset</a>
     </div>
 </div>
 
@@ -146,7 +146,7 @@
     <span class="whitespace-nowrap" @Html.Raw(ShowLabel())>Setup wizard</span>
 </a>
 
-<div class="pt-3 mt-2 border-t" style="border-color: var(--sidebar-border);">
+<div class="pt-3 mt-2 border-t border-sidebar-border">
     <p class="nav-section-label" @Html.Raw(ShowLabel())>System</p>
     <a href="@Url.Action("Index", "BashScripts")" class="nav-link@(ActiveCls(Url.Action("Index", "BashScripts")!))">
         <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">

@@ -20,9 +20,9 @@
 }
 
 <div class="mb-6" style="animation: var(--animate-slide-up);">
-    <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Account</p>
+    <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Account</p>
     <h1 class="text-2xl font-semibold tracking-tight">Profile</h1>
-    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+    <p class="text-sm mt-1 text-surface-fg-muted">
         How you appear in the UI. Username is fixed; everything else is editable.
         Changes here only affect display — they don't grant or revoke access.
     </p>
@@ -30,8 +30,7 @@
 
 @if (!ViewData.ModelState.IsValid)
 {
-    <div class="mb-4 rounded-md border-l-2 px-3 py-2 text-sm"
-         style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg); border-color: var(--feedback-danger-bd);">
+    <div class="mb-4 rounded-md border-l-2 px-3 py-2 text-sm bg-feedback-danger-bg text-feedback-danger-fg border-feedback-danger-bd">
         @foreach (var err in ViewData.ModelState.Values.SelectMany(v => v.Errors))
         {
             <p>@err.ErrorMessage</p>
@@ -46,23 +45,23 @@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
         <header class="mb-4">
             <h2 class="text-base font-semibold">Identity</h2>
-            <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Display name takes precedence; if empty, "First Last" is used; if both empty, your username.</p>
+            <p class="text-xs mt-1 text-surface-fg-muted">Display name takes precedence; if empty, "First Last" is used; if both empty, your username.</p>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="space-y-1.5">
-                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Username</label>
+                <label class="block text-xs font-medium text-surface-fg">Username</label>
                 <input type="text" value="@Model.Username" disabled
                        class="input cursor-not-allowed font-mono"
                        style="opacity: 0.6;" />
-                <p class="text-xs" style="color: var(--surface-fg-muted);">Immutable — used for login.</p>
+                <p class="text-xs text-surface-fg-muted">Immutable — used for login.</p>
             </div>
             <div class="space-y-1.5">
-                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Role</label>
+                <label class="block text-xs font-medium text-surface-fg">Role</label>
                 <input type="text" value="@Model.Role" disabled
                        class="input cursor-not-allowed font-mono"
                        style="opacity: 0.6;" />
-                <p class="text-xs" style="color: var(--surface-fg-muted);">Set by an admin.</p>
+                <p class="text-xs text-surface-fg-muted">Set by an admin.</p>
             </div>
 
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
@@ -88,7 +87,7 @@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
         <header class="mb-4">
             <h2 class="text-base font-semibold">Contact</h2>
-            <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Used for notifications (future) and recovery contact.</p>
+            <p class="text-xs mt-1 text-surface-fg-muted">Used for notifications (future) and recovery contact.</p>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -107,12 +106,12 @@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
         <header class="mb-4">
             <h2 class="text-base font-semibold">Preferences</h2>
-            <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Display / regional defaults for this account.</p>
+            <p class="text-xs mt-1 text-surface-fg-muted">Display / regional defaults for this account.</p>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="space-y-1.5">
-                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Timezone</label>
+                <label class="block text-xs font-medium text-surface-fg">Timezone</label>
                 <input list="tz-list" name="@nameof(Model.Timezone)" value="@Model.Timezone"
                        class="input font-mono" placeholder="UTC" />
                 <datalist id="tz-list">
@@ -121,11 +120,11 @@
                         <option value="@tz" />
                     }
                 </datalist>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">Pick from the list or type any IANA timezone (e.g. America/Tegucigalpa).</p>
+                <p class="text-xs text-surface-fg-muted">Pick from the list or type any IANA timezone (e.g. America/Tegucigalpa).</p>
             </div>
 
             <div class="space-y-1.5">
-                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Locale</label>
+                <label class="block text-xs font-medium text-surface-fg">Locale</label>
                 <select name="@nameof(Model.Locale)" class="input">
                     @* Tuple element renamed from `code` to `loc` — `@code` is a reserved
                        Razor directive token (Blazor code blocks) and Razor MVC's parser
@@ -146,11 +145,11 @@
         </header>
         <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div>
-                <dt class="text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">Created</dt>
+                <dt class="text-xs uppercase tracking-wider text-surface-fg-muted">Created</dt>
                 <dd class="font-mono">@Model.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</dd>
             </div>
             <div>
-                <dt class="text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">Last login</dt>
+                <dt class="text-xs uppercase tracking-wider text-surface-fg-muted">Last login</dt>
                 <dd class="font-mono">@(Model.LastLoginAt?.LocalDateTime.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
             </div>
         </dl>

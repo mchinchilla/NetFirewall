@@ -56,8 +56,7 @@
             Help = "Authenticates failover messages between peers."
         })
 
-        <button type="button" class="text-xs font-medium hover:underline"
-                style="color: var(--accent);"
+        <button type="button" class="text-xs font-medium hover:underline text-accent"
                 @@click="showAdvanced = !showAdvanced">
             <span x-show="!showAdvanced">Show advanced (timing, MCLT, split, load-balance)</span>
             <span x-show="showAdvanced">Hide advanced</span>
@@ -100,8 +99,7 @@
         </div>
     </div>
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
         <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create peer")</button>
     </div>

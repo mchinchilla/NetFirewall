@@ -25,8 +25,8 @@
         })
 
         <div>
-            <label class="block text-xs font-medium mb-2" style="color: var(--surface-fg);">
-                Days of week <span style="color: var(--feedback-danger-fg);">*</span>
+            <label class="block text-xs font-medium mb-2 text-surface-fg">
+                Days of week <span class="text-feedback-danger-fg">*</span>
             </label>
             <div class="flex gap-1.5 flex-wrap">
                 @for (var d = 0; d < 7; d++)
@@ -47,23 +47,23 @@
 
         <div class="grid grid-cols-2 gap-3">
             <div class="space-y-1.5">
-                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Start time <span style="color: var(--feedback-danger-fg);">*</span></label>
+                <label class="block text-xs font-medium text-surface-fg">Start time <span class="text-feedback-danger-fg">*</span></label>
                 <input type="time" name="StartTime" value="@Model.StartTime.ToString(@"hh\:mm")" class="input font-mono" required />
             </div>
             <div class="space-y-1.5">
-                <label class="block text-xs font-medium" style="color: var(--surface-fg);">End time <span style="color: var(--feedback-danger-fg);">*</span></label>
+                <label class="block text-xs font-medium text-surface-fg">End time <span class="text-feedback-danger-fg">*</span></label>
                 <input type="time" name="EndTime" value="@Model.EndTime.ToString(@"hh\:mm")" class="input font-mono" required />
             </div>
         </div>
 
         <div class="space-y-1.5">
-            <label class="block text-xs font-medium" style="color: var(--surface-fg);">Timezone</label>
+            <label class="block text-xs font-medium text-surface-fg">Timezone</label>
             <input list="sched-tz-list" name="@nameof(Model.Timezone)" value="@Model.Timezone"
                    class="input font-mono" required />
             <datalist id="sched-tz-list">
                 @foreach (var tz in commonTz) { <option value="@tz" /> }
             </datalist>
-            <p class="text-xs" style="color: var(--surface-fg-muted);">Pick from the list or type any IANA timezone. Used to interpret start/end as local time.</p>
+            <p class="text-xs text-surface-fg-muted">Pick from the list or type any IANA timezone. Used to interpret start/end as local time.</p>
         </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
@@ -73,8 +73,7 @@
         })
     </div>
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
         <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create schedule")</button>
     </div>

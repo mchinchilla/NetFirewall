@@ -5,9 +5,9 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Firewall</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
         <h1 class="text-2xl font-semibold tracking-tight">Port forwards</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">DNAT — expose internal services on the WAN side.</p>
+        <p class="text-sm mt-1 text-surface-fg-muted">DNAT — expose internal services on the WAN side.</p>
     </div>
     <button type="button" class="btn btn-primary"
             hx-get="/Firewall/PortForwards/edit"
@@ -22,6 +22,6 @@
          hx-get="/Firewall/PortForwards/table"
          hx-trigger="load, refreshPortForwards from:body"
          hx-swap="innerHTML">
-        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
     </div>
 </section>

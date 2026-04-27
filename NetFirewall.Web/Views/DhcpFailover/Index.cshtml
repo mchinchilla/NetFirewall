@@ -7,9 +7,9 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">DHCP</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
         <h1 class="text-2xl font-semibold tracking-tight">Failover</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Active/passive HA with another NetFirewall (or any RFC-3074-style peer). Define the relationship below — the DHCP daemon picks it up on next start.
         </p>
     </div>
@@ -29,38 +29,36 @@
         <h2 class="text-sm font-semibold mb-3">Current state</h2>
         <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div>
-                <dt style="color: var(--surface-fg-muted);">Local state</dt>
+                <dt class="text-surface-fg-muted">Local state</dt>
                 <dd class="font-mono text-sm font-medium">@status.LocalState</dd>
             </div>
             <div>
-                <dt style="color: var(--surface-fg-muted);">Peer state</dt>
+                <dt class="text-surface-fg-muted">Peer state</dt>
                 <dd class="font-mono text-sm font-medium">@status.PeerState</dd>
             </div>
             <div>
-                <dt style="color: var(--surface-fg-muted);">Role</dt>
+                <dt class="text-surface-fg-muted">Role</dt>
                 <dd class="font-mono text-sm font-medium">@status.Role</dd>
             </div>
             <div>
-                <dt style="color: var(--surface-fg-muted);">Health</dt>
+                <dt class="text-surface-fg-muted">Health</dt>
                 <dd>
                     @if (status.IsHealthy)
                     {
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                              style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Healthy</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Healthy</span>
                     }
                     else
                     {
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                              style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Degraded</span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-warning-bg text-feedback-warning-fg">Degraded</span>
                     }
                 </dd>
             </div>
             <div class="col-span-2">
-                <dt style="color: var(--surface-fg-muted);">Peer address</dt>
+                <dt class="text-surface-fg-muted">Peer address</dt>
                 <dd class="font-mono text-sm">@status.PeerAddress</dd>
             </div>
             <div class="col-span-2">
-                <dt style="color: var(--surface-fg-muted);">Last contact</dt>
+                <dt class="text-surface-fg-muted">Last contact</dt>
                 <dd class="font-mono text-sm">@(status.LastContact?.ToLocalTime().ToString("g") ?? "(never)")</dd>
             </div>
         </dl>
@@ -73,6 +71,6 @@
          hx-get="/Dhcp/Failover/table"
          hx-trigger="load, refreshFailover from:body"
          hx-swap="innerHTML">
-        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
     </div>
 </section>

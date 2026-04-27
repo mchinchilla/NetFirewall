@@ -2,7 +2,7 @@
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
         No failover peers configured. The server runs standalone — add a peer to enable HA.
     </div>
 }
@@ -11,7 +11,7 @@ else
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">Name</th>
                     <th class="px-5 py-2 font-medium">Role</th>
                     <th class="px-5 py-2 font-medium">Peer</th>
@@ -20,29 +20,26 @@ else
                     <th class="px-5 py-2 font-medium text-right">Actions</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @foreach (var p in Model.OrderBy(x => x.Name))
                 {
                     <tr>
                         <td class="px-5 py-3 font-medium">@p.Name</td>
                         <td class="px-5 py-3">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium uppercase tracking-wider"
-                                  style="background-color: var(--accent-soft); color: var(--accent);">@p.Role</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium uppercase tracking-wider bg-accent-soft text-accent">@p.Role</span>
                         </td>
                         <td class="px-5 py-3 font-mono text-xs">@p.PeerAddress:@p.PeerPort</td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">
+                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">
                             split @p.Split · mclt @(p.Mclt / 60)m
                         </td>
                         <td class="px-5 py-3">
                             @if (p.Enabled)
                             {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Enabled</span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
                             }
                             else
                             {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">Disabled</span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
                             }
                         </td>
                         <td class="px-5 py-3 text-right">
@@ -52,7 +49,7 @@ else
                                         hx-target="#drawer-body" hx-swap="innerHTML"
                                         @@click="$store.drawer.openRaw('Edit @p.Name')">Edit</button>
                                 @{ var msg = $"Delete failover peer '{p.Name}'? The DHCP server will fall back to standalone on next start."; }
-                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
                                         hx-post="/Dhcp/Failover/delete/@p.Id"
                                         hx-trigger="confirmed-del"
                                         data-msg="@msg"

@@ -26,8 +26,7 @@
         @* ---------- LEFT: form column ---------- *@
         <main class="flex flex-col px-6 py-8 sm:px-10">
             <div class="flex items-center gap-2 mb-10">
-                <span class="inline-flex h-9 w-9 items-center justify-center rounded-lg"
-                      style="background-color: var(--accent); color: var(--accent-fg);">
+                <span class="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-fg">
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.25 4.5 5.25v6c0 4.97 3.5 9.25 7.5 10.5 4-1.25 7.5-5.53 7.5-10.5v-6L12 2.25Z" />
                     </svg>
@@ -41,7 +40,7 @@
                 </div>
             </div>
 
-            <footer class="mt-10 text-center text-xs" style="color: var(--surface-fg-muted);">
+            <footer class="mt-10 text-center text-xs text-surface-fg-muted">
                 NetFirewall &copy; @DateTime.UtcNow.Year · forward-only migrations · Argon2id · TOTP-gated
             </footer>
         </main>

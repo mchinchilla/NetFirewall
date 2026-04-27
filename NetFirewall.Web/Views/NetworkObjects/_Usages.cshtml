@@ -15,7 +15,7 @@
 {
     <div class="text-xs px-3 py-2 rounded"
          style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent); color: var(--surface-fg-muted);">
-        <span class="font-medium" style="color: var(--surface-fg);">@name</span> is not referenced by any rule or group. Safe to edit or delete.
+        <span class="font-medium text-surface-fg">@name</span> is not referenced by any rule or group. Safe to edit or delete.
     </div>
 }
 else
@@ -23,7 +23,7 @@ else
     <div class="rounded border-l-2 px-3 py-2 text-xs space-y-2"
          style="background: color-mix(in srgb, var(--feedback-warning-fg) 8%, transparent); border-color: var(--feedback-warning-bd);">
         <p>
-            <span class="font-semibold" style="color: var(--feedback-warning-fg);">@Model.TotalCount</span>
+            <span class="font-semibold text-feedback-warning-fg">@Model.TotalCount</span>
             reference@(Model.TotalCount == 1 ? "" : "s") to <span class="font-mono font-medium">@name</span>.
             Edits propagate at next apply; delete will silently break these.
         </p>
@@ -31,14 +31,14 @@ else
         @foreach (var (title, entries, listUrl) in sections.Where(s => s.Entries.Count > 0))
         {
             <details class="space-y-1">
-                <summary class="cursor-pointer font-medium hover:underline" style="color: var(--surface-fg);">
+                <summary class="cursor-pointer font-medium hover:underline text-surface-fg">
                     @title (@entries.Count)
                 </summary>
                 <ul class="space-y-0.5 ml-4 mt-1">
                     @foreach (var e in entries)
                     {
-                        <li style="color: var(--surface-fg-muted);">
-                            <a class="hover:underline" style="color: var(--accent);" href="@listUrl">@e.Description</a>
+                        <li class="text-surface-fg-muted">
+                            <a class="hover:underline text-accent" href="@listUrl">@e.Description</a>
                             <span class="font-mono"> · @e.Field</span>
                         </li>
                     }

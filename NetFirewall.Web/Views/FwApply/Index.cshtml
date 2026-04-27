@@ -6,11 +6,11 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Firewall</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
         <h1 class="text-2xl font-semibold tracking-tight">Apply nftables ruleset</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Generates <span class="font-mono">/etc/nftables.conf</span> from the rules in the database and reloads via <span class="font-mono">nft -f</span> through the daemon.
-            Click <span class="font-medium" style="color: var(--surface-fg);">Preview</span> first to inspect what's about to be applied.
+            Click <span class="font-medium text-surface-fg">Preview</span> first to inspect what's about to be applied.
         </p>
     </div>
     <div class="flex items-center gap-2">
@@ -48,8 +48,8 @@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
         <h2 class="text-base font-semibold mb-3">Generated config (preview)</h2>
         <div id="preview-area">
-            <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
-                Click <span class="font-medium" style="color: var(--surface-fg);">Generate preview</span> to see the ruleset that would be written.
+            <div class="text-sm py-10 text-center text-surface-fg-muted">
+                Click <span class="font-medium text-surface-fg">Generate preview</span> to see the ruleset that would be written.
             </div>
         </div>
     </section>
@@ -57,8 +57,8 @@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
         <h2 class="text-base font-semibold mb-3">Current live ruleset</h2>
         <div id="current-area">
-            <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
-                Click <span class="font-medium" style="color: var(--surface-fg);">Read live ruleset</span> to fetch the kernel's current state via the daemon.
+            <div class="text-sm py-10 text-center text-surface-fg-muted">
+                Click <span class="font-medium text-surface-fg">Read live ruleset</span> to fetch the kernel's current state via the daemon.
             </div>
         </div>
     </section>
@@ -67,9 +67,9 @@
 <div class="mt-6 flex flex-wrap items-end justify-between gap-3"
      style="animation: var(--animate-slide-up); animation-delay: 180ms;">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Firewall · QoS</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall · QoS</p>
         <h2 class="text-xl font-semibold tracking-tight">Apply tc / HTB hierarchy</h2>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             QoS classes don't apply via nftables — they need <span class="font-mono">iproute2's tc</span>. This rebuilds the HTB tree on every interface that has an enabled QoS config.
         </p>
     </div>
@@ -101,8 +101,8 @@
 <section class="card mt-3" style="animation: var(--animate-slide-up); animation-delay: 240ms;">
     <h2 class="text-base font-semibold mb-3">Generated tc script (preview)</h2>
     <div id="qos-preview-area">
-        <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
-            Click <span class="font-medium" style="color: var(--surface-fg);">Generate tc preview</span> to see the bash that would run.
+        <div class="text-sm py-10 text-center text-surface-fg-muted">
+            Click <span class="font-medium text-surface-fg">Generate tc preview</span> to see the bash that would run.
         </div>
     </div>
 </section>

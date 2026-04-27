@@ -15,9 +15,9 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">System</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">System</p>
         <h1 class="text-2xl font-semibold tracking-tight">Bash scripts</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Reference scripts the firewall is being modeled after. Read-only — execution is intentionally not exposed here.
         </p>
     </div>
@@ -27,8 +27,8 @@
     @if (Model.Count == 0)
     {
         <div class="text-center py-10">
-            <p class="text-sm font-medium" style="color: var(--surface-fg);">No files in the catalog directory.</p>
-            <p class="text-xs mt-2" style="color: var(--surface-fg-muted);">
+            <p class="text-sm font-medium text-surface-fg">No files in the catalog directory.</p>
+            <p class="text-xs mt-2 text-surface-fg-muted">
                 Configured root: <span class="font-mono">BashCatalog:Root</span> — point it at the directory holding your reference scripts.
             </p>
         </div>
@@ -38,7 +38,7 @@
         <div class="overflow-x-auto -mx-5">
             <table class="min-w-full text-sm">
                 <thead>
-                    <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                         <th class="px-5 py-2 font-medium">Name</th>
                         <th class="px-5 py-2 font-medium">Kind</th>
                         <th class="px-5 py-2 font-medium hidden md:table-cell">Size</th>
@@ -46,16 +46,16 @@
                         <th class="px-5 py-2 font-medium text-right">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y" style="border-color: var(--surface-border);">
+                <tbody class="divide-y border-surface-border">
                     @foreach (var f in Model)
                     {
                         <tr>
                             <td class="px-5 py-3 font-mono text-xs font-medium">@f.Name</td>
                             <td class="px-5 py-3">
-                                <span class="badge" style="background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);">@f.Kind</span>
+                                <span class="badge badge-accent">@f.Kind</span>
                             </td>
-                            <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">@FmtBytes(f.SizeBytes)</td>
-                            <td class="px-5 py-3 hidden lg:table-cell text-xs" style="color: var(--surface-fg-muted);">@f.LastModified:yyyy-MM-dd HH:mm:ss</td>
+                            <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">@FmtBytes(f.SizeBytes)</td>
+                            <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">@f.LastModified:yyyy-MM-dd HH:mm:ss</td>
                             <td class="px-5 py-3 text-right">
                                 <button type="button" class="btn btn-ghost text-xs"
                                         hx-get="/Admin/BashScripts/view/@f.Name"

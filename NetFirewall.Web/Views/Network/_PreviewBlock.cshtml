@@ -2,12 +2,11 @@
 @{
     var ifaceId = ViewContext.RouteData.Values["id"]?.ToString();
 }
-<div class="rounded-lg border" style="border-color: var(--surface-border);">
-    <header class="flex items-center justify-between px-4 py-2 border-b"
-            style="border-color: var(--surface-border); background-color: var(--surface-muted);">
+<div class="rounded-lg border border-surface-border">
+    <header class="flex items-center justify-between px-4 py-2 border-b border-surface-border bg-surface-muted">
         <div class="text-xs">
             <span class="font-semibold">@Model.Method</span>
-            <span style="color: var(--surface-fg-muted);"> · @Model.FilePath</span>
+            <span class="text-surface-fg-muted"> · @Model.FilePath</span>
         </div>
         <button type="button" class="btn btn-primary text-xs"
                 hx-post="/Network/Apply/@ifaceId"
@@ -24,5 +23,5 @@
             Apply
         </button>
     </header>
-    <pre class="text-xs p-4 overflow-x-auto font-mono" style="color: var(--surface-fg);"><code>@Model.Content</code></pre>
+    <pre class="text-xs p-4 overflow-x-auto font-mono text-surface-fg"><code>@Model.Content</code></pre>
 </div>

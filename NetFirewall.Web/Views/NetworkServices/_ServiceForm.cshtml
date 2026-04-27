@@ -37,8 +37,8 @@
         })
 
         <div class="space-y-1.5">
-            <label class="block text-xs font-medium" style="color: var(--surface-fg);">Mode</label>
-            <div class="inline-flex p-1 rounded text-xs" style="background-color: var(--surface-muted);">
+            <label class="block text-xs font-medium text-surface-fg">Mode</label>
+            <div class="inline-flex p-1 rounded text-xs bg-surface-muted">
                 <button type="button" class="px-3 py-1 rounded font-medium transition"
                         :style="!asGroup ? 'background: var(--surface-elevated); color: var(--surface-fg);' : 'color: var(--surface-fg-muted);'"
                         @@click="asGroup = false">Single port / range</button>
@@ -52,7 +52,7 @@
         <div x-show="!asGroup" class="space-y-3">
             <div class="grid grid-cols-3 gap-3">
                 <div class="space-y-1.5">
-                    <label class="block text-xs font-medium" style="color: var(--surface-fg);">Protocol <span style="color: var(--feedback-danger-fg);">*</span></label>
+                    <label class="block text-xs font-medium text-surface-fg">Protocol <span class="text-feedback-danger-fg">*</span></label>
                     <select name="Protocol" class="input">
                         @foreach (var p in NetworkServiceProtocols.All)
                         {
@@ -74,20 +74,19 @@
 
         @* ----- Group ----- *@
         <div x-show="asGroup" x-cloak class="space-y-1.5">
-            <label class="block text-xs font-medium" style="color: var(--surface-fg);">
-                Members <span style="color: var(--feedback-danger-fg);">*</span>
-                <span class="font-normal" style="color: var(--surface-fg-muted);">— click to toggle</span>
+            <label class="block text-xs font-medium text-surface-fg">
+                Members <span class="text-feedback-danger-fg">*</span>
+                <span class="font-normal text-surface-fg-muted">— click to toggle</span>
             </label>
             @if (availableMembers.Count == 0)
             {
-                <p class="text-sm py-4 text-center" style="color: var(--surface-fg-muted);">
+                <p class="text-sm py-4 text-center text-surface-fg-muted">
                     No other services exist. Create some single-port services first.
                 </p>
             }
             else
             {
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto p-2 rounded border"
-                     style="border-color: var(--surface-border);">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto p-2 rounded border border-surface-border">
                     @foreach (var c in availableMembers)
                     {
                         var isSelected = memberSet.Contains(c.Id);
@@ -99,12 +98,12 @@
                                    @@change="$event.target.checked ? selected.add('@c.Id') : selected.delete('@c.Id'); selected = new Set(selected)" />
                             <div class="flex-1 min-w-0">
                                 <p class="text-xs font-mono font-medium truncate">@c.Name</p>
-                                <p class="text-[10px] truncate" style="color: var(--surface-fg-muted);">@c.Protocol · @c.PortString @(c.Category != null ? $"· {c.Category}" : "")</p>
+                                <p class="text-[10px] truncate text-surface-fg-muted">@c.Protocol · @c.PortString @(c.Category != null ? $"· {c.Category}" : "")</p>
                             </div>
                         </label>
                     }
                 </div>
-                <p class="text-xs mt-2" style="color: var(--surface-fg-muted);">
+                <p class="text-xs mt-2 text-surface-fg-muted">
                     Selected: <span x-text="selected.size"></span> · Group expands to all member ports at apply time.
                 </p>
             }
@@ -116,8 +115,7 @@
         })
     </div>
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
         <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create service")</button>
     </div>

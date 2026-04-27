@@ -3,7 +3,7 @@
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">
+    <div class="text-sm py-8 text-center text-surface-fg-muted">
         No network interfaces detected. Re-detect, or check that the host has at least one NIC.
     </div>
 }
@@ -12,7 +12,7 @@ else
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">Interface</th>
                     <th class="px-5 py-2 font-medium">Status</th>
                     <th class="px-5 py-2 font-medium">Role</th>
@@ -21,7 +21,7 @@ else
                     <th class="px-5 py-2 font-medium text-right">Actions</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @foreach (var row in Model)
                 {
                     <tr>
@@ -30,26 +30,25 @@ else
                                 <span class="relative flex h-2 w-2">
                                     @if (row.IsUp)
                                     {
-                                        <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style="background-color: var(--feedback-success-bd);"></span>
-                                        <span class="relative inline-flex rounded-full h-2 w-2" style="background-color: var(--feedback-success-bd);"></span>
+                                        <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 bg-feedback-success-bd"></span>
+                                        <span class="relative inline-flex rounded-full h-2 w-2 bg-feedback-success-bd"></span>
                                     }
                                     else
                                     {
-                                        <span class="inline-flex rounded-full h-2 w-2" style="background-color: var(--surface-fg-muted);"></span>
+                                        <span class="inline-flex rounded-full h-2 w-2 bg-surface-fg-muted"></span>
                                     }
                                 </span>
                                 <span class="font-medium">@row.Name</span>
                                 @if (row.IsVirtual)
                                 {
-                                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
-                                          style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">virtual</span>
+                                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-surface-muted text-surface-fg-muted">virtual</span>
                                 }
                             </div>
                             @if (row.Configured == null)
                             {
-                                <p class="text-xs mt-0.5" style="color: var(--surface-fg-muted);">
+                                <p class="text-xs mt-0.5 text-surface-fg-muted">
                                     Suggested:
-                                    <span class="font-medium" style="color: var(--surface-fg);">@row.SuggestedType</span>
+                                    <span class="font-medium text-surface-fg">@row.SuggestedType</span>
                                     <span class="opacity-70">· @row.SuggestionConfidence% confidence</span>
                                 </p>
                             }
@@ -58,16 +57,13 @@ else
                             @switch (row.Status)
                             {
                                 case InterfaceRowStatus.Configured:
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                          style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Configured</span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Configured</span>
                                     break;
                                 case InterfaceRowStatus.Detected:
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                          style="background-color: var(--feedback-info-bg); color: var(--feedback-info-fg);">Detected</span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-info-bg text-feedback-info-fg">Detected</span>
                                     break;
                                 case InterfaceRowStatus.Missing:
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                          style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Missing</span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-warning-bg text-feedback-warning-fg">Missing</span>
                                     break;
                             }
                         </td>
@@ -77,12 +73,12 @@ else
                                 <span class="font-medium">@row.Configured.Type</span>
                                 @if (!string.IsNullOrEmpty(row.Configured.Role))
                                 {
-                                    <span class="text-xs ml-1" style="color: var(--surface-fg-muted);">/ @row.Configured.Role</span>
+                                    <span class="text-xs ml-1 text-surface-fg-muted">/ @row.Configured.Role</span>
                                 }
                             }
                             else
                             {
-                                <span style="color: var(--surface-fg-muted);">—</span>
+                                <span class="text-surface-fg-muted">—</span>
                             }
                         </td>
                         <td class="px-5 py-3 hidden md:table-cell align-top font-mono text-xs">
@@ -95,7 +91,7 @@ else
                                 @(row.CurrentIp ?? "—")
                             }
                         </td>
-                        <td class="px-5 py-3 hidden lg:table-cell align-top font-mono text-xs" style="color: var(--surface-fg-muted);">
+                        <td class="px-5 py-3 hidden lg:table-cell align-top font-mono text-xs text-surface-fg-muted">
                             @(row.MacAddress ?? "—")
                         </td>
                         <td class="px-5 py-3 align-top text-right">

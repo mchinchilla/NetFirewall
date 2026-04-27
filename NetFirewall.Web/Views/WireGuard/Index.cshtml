@@ -8,9 +8,9 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">VPN</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">VPN</p>
         <h1 class="text-2xl font-semibold tracking-tight">WireGuard</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Single-tunnel server. Peer keys are generated on-device by the daemon and the private half is shown <span class="font-medium">once</span> at peer creation — we never persist it.
         </p>
     </div>
@@ -53,10 +53,9 @@
             <h2 class="text-base font-semibold">Server</h2>
             @if (server is not null)
             {
-                <button type="button" class="btn btn-ghost text-xs"
+                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
                         hx-post="/Vpn/WireGuard/regenerate-keys"
                         hx-trigger="confirmed-regen"
-                        style="color: var(--feedback-danger-fg);"
                         @@click.prevent="(async () => {
                             const ok = await $store.confirm.ask({
                                 title: 'Rotate server keys?',
@@ -108,10 +107,10 @@
 
                 @if (server is not null)
                 {
-                    <div class="pt-3 border-t" style="border-color: var(--surface-border);">
-                        <p class="text-xs uppercase tracking-wider font-semibold mb-1" style="color: var(--surface-fg-muted);">Server public key</p>
+                    <div class="pt-3 border-t border-surface-border">
+                        <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-surface-fg-muted">Server public key</p>
                         <p class="text-xs font-mono break-all p-2 rounded" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent);">@server.PublicKey</p>
-                        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Share with peers. The private key never leaves the daemon.</p>
+                        <p class="text-xs mt-1 text-surface-fg-muted">Share with peers. The private key never leaves the daemon.</p>
                     </div>
                 }
             </div>
@@ -135,7 +134,7 @@
              hx-get="/Vpn/WireGuard/status"
              :hx-trigger="paused ? 'load, refreshWireGuard from:body' : 'load, every 10s, refreshWireGuard from:body'"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
         </div>
     </section>
 </div>
@@ -145,7 +144,7 @@
     <header class="flex items-baseline justify-between mb-4">
         <div>
             <h2 class="text-base font-semibold">Peers</h2>
-            <p class="text-xs" style="color: var(--surface-fg-muted);">Each peer = one client config (laptop, phone, etc).</p>
+            <p class="text-xs text-surface-fg-muted">Each peer = one client config (laptop, phone, etc).</p>
         </div>
         @if (server is not null)
         {
@@ -161,7 +160,7 @@
 
     @if (server is null)
     {
-        <p class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Save the server config first — peers need a server to attach to.</p>
+        <p class="text-sm py-8 text-center text-surface-fg-muted">Save the server config first — peers need a server to attach to.</p>
     }
     else
     {
@@ -169,7 +168,7 @@
              hx-get="/Vpn/WireGuard/Peers/table"
              hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
         </div>
     }
 </section>

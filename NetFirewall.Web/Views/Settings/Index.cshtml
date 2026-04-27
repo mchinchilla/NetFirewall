@@ -9,9 +9,9 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">System</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">System</p>
         <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm mt-1 text-surface-fg-muted">
             Runtime-tunable knobs. Changes take effect on the next read by the consuming service. Admin only — saving requires step-up TOTP.
         </p>
     </div>
@@ -22,10 +22,10 @@
     <section class="card mb-4" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
         <header class="mb-4">
             <h2 class="text-base font-semibold">@group.Key</h2>
-            <p class="text-xs" style="color: var(--surface-fg-muted);">@group.Count() setting@(group.Count() == 1 ? "" : "s")</p>
+            <p class="text-xs text-surface-fg-muted">@group.Count() setting@(group.Count() == 1 ? "" : "s")</p>
         </header>
 
-        <div class="divide-y" style="border-color: var(--surface-border);">
+        <div class="divide-y border-surface-border">
             @foreach (var s in group)
             {
                 var inputId = $"set-{s.Descriptor.Key.Replace('.', '-')}";
@@ -37,7 +37,7 @@
                     <div class="space-y-1">
                         <div class="flex items-baseline gap-2">
                             <label for="@inputId" class="text-sm font-medium">@s.Descriptor.Label</label>
-                            <span class="text-xs font-mono" style="color: var(--surface-fg-muted);">@s.Descriptor.Key</span>
+                            <span class="text-xs font-mono text-surface-fg-muted">@s.Descriptor.Key</span>
                             @if (s.IsDefault)
                             {
                                 <span class="text-xs px-1.5 py-0.5 rounded"
@@ -51,7 +51,7 @@
                         </div>
                         @if (!string.IsNullOrEmpty(s.Descriptor.Description))
                         {
-                            <p class="text-xs" style="color: var(--surface-fg-muted);">@s.Descriptor.Description</p>
+                            <p class="text-xs text-surface-fg-muted">@s.Descriptor.Description</p>
                         }
 
                         @switch (s.Descriptor.Type)
@@ -80,7 +80,7 @@
                                 break;
                         }
 
-                        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+                        <p class="text-xs mt-1 text-surface-fg-muted">
                             Default: <span class="font-mono">@(string.IsNullOrEmpty(s.Descriptor.DefaultValue) ? "(empty)" : s.Descriptor.DefaultValue)</span>
                         </p>
                     </div>

@@ -6,9 +6,9 @@
      style="animation: var(--animate-slide-up);"
      x-data="{ chain: '' }">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Firewall</p>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
         <h1 class="text-2xl font-semibold tracking-tight">Mangle rules</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">Mark traffic for QoS classes and policy routing tables. Marks are managed under <a href="/Firewall/TrafficMarks" class="hover:underline" style="color: var(--accent);">Traffic marks</a>.</p>
+        <p class="text-sm mt-1 text-surface-fg-muted">Mark traffic for QoS classes and policy routing tables. Marks are managed under <a href="/Firewall/TrafficMarks" class="hover:underline text-accent">Traffic marks</a>.</p>
     </div>
     <div class="flex items-center gap-2">
         <label class="text-xs flex items-center gap-2">
@@ -36,7 +36,7 @@
              :hx-vals="JSON.stringify({ chain })"
              hx-trigger="load, refreshMangleRules from:body, manual-refresh"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
         </div>
     </section>
 </div>

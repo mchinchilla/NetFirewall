@@ -2,7 +2,7 @@
 
 <header class="mb-5">
     <h2 class="text-lg font-semibold">Step 1 — Network interfaces</h2>
-    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+    <p class="text-sm mt-1 text-surface-fg-muted">
         Assign each detected NIC a role. Disabled interfaces won't be touched by NetFirewall.
         WAN secondary lets the WAN Monitor fail over automatically.
     </p>
@@ -14,7 +14,7 @@
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
                     <th class="px-5 py-2 font-medium">Interface</th>
                     <th class="px-5 py-2 font-medium hidden md:table-cell">MAC</th>
                     <th class="px-5 py-2 font-medium hidden lg:table-cell">Current IP</th>
@@ -22,7 +22,7 @@
                     <th class="px-5 py-2 font-medium">Role</th>
                 </tr>
             </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
+            <tbody class="divide-y border-surface-border">
                 @for (var i = 0; i < Model.Interfaces.Count; i++)
                 {
                     var row = Model.Interfaces[i];
@@ -35,11 +35,10 @@
                                 <span class="font-medium font-mono text-xs">@row.Name</span>
                             </div>
                         </td>
-                        <td class="px-5 py-3 align-top hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@(row.MacAddress ?? "—")</td>
-                        <td class="px-5 py-3 align-top hidden lg:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@(row.CurrentIp ?? "—")</td>
+                        <td class="px-5 py-3 align-top hidden md:table-cell font-mono text-xs text-surface-fg-muted">@(row.MacAddress ?? "—")</td>
+                        <td class="px-5 py-3 align-top hidden lg:table-cell font-mono text-xs text-surface-fg-muted">@(row.CurrentIp ?? "—")</td>
                         <td class="px-5 py-3 align-top">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
-                                  style="background-color: var(--accent-soft); color: var(--accent);">@(row.SuggestedRole ?? "—")</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent">@(row.SuggestedRole ?? "—")</span>
                         </td>
                         <td class="px-5 py-3 align-top w-44">
                             <select name="Interfaces[@i].Role" class="input py-1.5 text-sm">
@@ -58,13 +57,12 @@
 
     @if (Model.Interfaces.Count == 0)
     {
-        <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+        <div class="text-sm py-10 text-center text-surface-fg-muted">
             No network interfaces detected. Plug in a NIC and reload.
         </div>
     }
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
-         style="border-color: var(--surface-border);">
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <a href="/" class="btn btn-ghost">Cancel</a>
         <button type="submit" class="btn btn-primary">
             Continue

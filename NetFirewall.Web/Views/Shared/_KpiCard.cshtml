@@ -10,8 +10,7 @@
 <article class="kpi">
     <div class="flex items-start justify-between">
         <p class="kpi-label">@Model.Label</p>
-        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg"
-              style="background-color: var(--accent-soft); color: var(--accent);">
+        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-accent">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="@Model.IconPath" />
             </svg>
@@ -21,7 +20,7 @@
         @Model.Value
         @if (!string.IsNullOrEmpty(Model.ValueSuffix))
         {
-            <span class="text-base font-normal" style="color: var(--surface-fg-muted);">@Model.ValueSuffix</span>
+            <span class="text-base font-normal text-surface-fg-muted">@Model.ValueSuffix</span>
         }
     </p>
     @if (!string.IsNullOrEmpty(Model.Delta) || !string.IsNullOrEmpty(Model.DeltaContext))
@@ -33,7 +32,7 @@
             }
             @if (!string.IsNullOrEmpty(Model.DeltaContext))
             {
-                <span style="color: var(--surface-fg-muted);">@Model.DeltaContext</span>
+                <span class="text-surface-fg-muted">@Model.DeltaContext</span>
             }
         </p>
     }

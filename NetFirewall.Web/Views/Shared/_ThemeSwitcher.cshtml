@@ -14,14 +14,12 @@
 
     <div x-cloak x-show="open" @@click.outside="open = false"
          x-transition.opacity.duration.150ms
-         class="absolute right-0 mt-2 w-[420px] origin-top-right rounded-xl border shadow-lg overflow-hidden"
-         style="background-color: var(--surface-elevated); border-color: var(--surface-border);">
+         class="absolute right-0 mt-2 w-[420px] origin-top-right rounded-xl border shadow-lg overflow-hidden bg-surface-elevated border-surface-border">
 
         @* Mode row *@
         <div class="px-4 pt-4">
-            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Mode</p>
-            <div class="mt-2 grid grid-cols-3 gap-1.5 p-1 rounded-lg"
-                 style="background-color: var(--surface-muted);">
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Mode</p>
+            <div class="mt-2 grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-surface-muted">
                 <template x-for="m in ['light', 'dark']" :key="m">
                     <button type="button"
                             class="px-3 py-1.5 rounded-md text-xs font-medium capitalize transition"
@@ -46,7 +44,7 @@
 
         @* Palette grid *@
         <div class="px-4 pt-4 pb-4">
-            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Palette</p>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Palette</p>
             <div class="mt-2 grid grid-cols-2 gap-2">
                 <template x-for="p in $store.ui.palettes" :key="p.id">
                     <button type="button"
@@ -58,8 +56,7 @@
                             @@click="$store.ui.setTheme(p.id)">
 
                         @* Mini preview: top header bar + sidebar + content using palette swatches *@
-                        <div class="flex h-12 overflow-hidden rounded-md border"
-                             style="border-color: var(--surface-border);">
+                        <div class="flex h-12 overflow-hidden rounded-md border border-surface-border">
                             <div class="w-3" :style="`background-color: var(--${p.id}-1500);`"></div>
                             <div class="flex-1 flex flex-col">
                                 <div class="h-2.5" :style="`background-color: var(--${p.id}-200);`"></div>
