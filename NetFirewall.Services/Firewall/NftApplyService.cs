@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NetFirewall.Services.Processes;
 
 namespace NetFirewall.Services.Firewall;
 
@@ -23,15 +23,18 @@ public class NftApplyOptions
 public sealed class NftApplyService : INftApplyService
 {
     private readonly IFirewallService _firewallService;
+    private readonly IProcessRunner _runner;
     private readonly ILogger<NftApplyService> _logger;
     private readonly NftApplyOptions _options;
 
     public NftApplyService(
         IFirewallService firewallService,
+        IProcessRunner runner,
         ILogger<NftApplyService> logger,
         IOptions<NftApplyOptions>? options = null)
     {
         _firewallService = firewallService;
+        _runner = runner;
         _logger = logger;
         _options = options?.Value ?? new NftApplyOptions();
     }
@@ -196,50 +199,20 @@ public sealed class NftApplyService : INftApplyService
 
     private async Task<NftApplyResult> ExecuteNftCommandAsync(string arguments, CancellationToken ct)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = _options.NftPath,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
         try
         {
-            using var process = new Process { StartInfo = startInfo };
-
-            process.Start();
-
-            var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-            var errorTask = process.StandardError.ReadToEndAsync(ct);
-
-            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(_options.CommandTimeoutSeconds), ct);
-            var processTask = process.WaitForExitAsync(ct);
-
-            var completedTask = await Task.WhenAny(processTask, timeoutTask);
-
-            if (completedTask == timeoutTask)
-            {
-                try { process.Kill(); } catch { /* ignore */ }
-                return new NftApplyResult
-                {
-                    Success = false,
-                    Error = $"Command timed out after {_options.CommandTimeoutSeconds} seconds",
-                    ExitCode = -1
-                };
-            }
-
-            var output = await outputTask;
-            var error = await errorTask;
+            var proc = await _runner.RunAsync(
+                _options.NftPath,
+                arguments,
+                TimeSpan.FromSeconds(_options.CommandTimeoutSeconds),
+                ct);
 
             return new NftApplyResult
             {
-                Success = process.ExitCode == 0,
-                Output = output,
-                Error = string.IsNullOrEmpty(error) ? null : error,
-                ExitCode = process.ExitCode
+                Success = proc.Success,
+                Output = proc.Output,
+                Error = string.IsNullOrEmpty(proc.Error) ? null : proc.Error,
+                ExitCode = proc.ExitCode
             };
         }
         catch (Exception ex)

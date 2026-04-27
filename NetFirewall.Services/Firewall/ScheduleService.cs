@@ -116,8 +116,10 @@ public sealed class ScheduleService : IScheduleService
                 Name        = reader.GetString(reader.GetOrdinal("name")),
                 Description = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString(reader.GetOrdinal("description")),
                 DaysOfWeek  = (int[])reader["days_of_week"],
-                StartTime   = (TimeSpan)reader["start_time"],
-                EndTime     = (TimeSpan)reader["end_time"],
+                // Npgsql 10 maps `time` to TimeOnly; the model uses TimeSpan, so
+                // we convert. (Pre-Npgsql-8 used to cast directly to TimeSpan.)
+                StartTime   = ((TimeOnly)reader["start_time"]).ToTimeSpan(),
+                EndTime     = ((TimeOnly)reader["end_time"]).ToTimeSpan(),
                 Timezone    = reader.GetString(reader.GetOrdinal("timezone")),
                 Enabled     = reader.GetBoolean(reader.GetOrdinal("enabled")),
                 CreatedAt   = reader.GetDateTime(reader.GetOrdinal("created_at")),

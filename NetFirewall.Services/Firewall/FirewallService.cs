@@ -683,7 +683,12 @@ public sealed class FirewallService : IFirewallService
     public async Task<IReadOnlyList<FwNatRule>> GetNatRulesAsync(CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        const string sql = "SELECT * FROM fw_nat_rules ORDER BY priority, type";
+        // Cast cidr → text so Npgsql 10 hands us a System.String for source_network
+        // (the model is string). Without the cast, GetString throws.
+        const string sql = @"
+            SELECT id, type, description, source_network::text AS source_network, output_interface_id,
+                   snat_address, enabled, priority, created_at
+            FROM fw_nat_rules ORDER BY priority, type";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         return await ReadNatRulesAsync(cmd, ct);
@@ -692,7 +697,10 @@ public sealed class FirewallService : IFirewallService
     public async Task<FwNatRule?> GetNatRuleByIdAsync(Guid id, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        const string sql = "SELECT * FROM fw_nat_rules WHERE id = @id";
+        const string sql = @"
+            SELECT id, type, description, source_network::text AS source_network, output_interface_id,
+                   snat_address, enabled, priority, created_at
+            FROM fw_nat_rules WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", id);
@@ -708,9 +716,11 @@ public sealed class FirewallService : IFirewallService
         rule.Id = Guid.NewGuid();
         rule.CreatedAt = DateTime.UtcNow;
 
+        // Postgres won't auto-cast text → cidr, so we cast inside the SQL.
+        // Same shape used in UpdateNatRuleAsync below.
         const string sql = @"
             INSERT INTO fw_nat_rules (id, type, description, source_network, output_interface_id, snat_address, enabled, priority, created_at)
-            VALUES (@id, @type, @desc, @src, @iface, @snat, @enabled, @priority, @created)";
+            VALUES (@id, @type, @desc, @src::cidr, @iface, @snat, @enabled, @priority, @created)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddNatRuleParams(cmd, rule);
@@ -731,7 +741,7 @@ public sealed class FirewallService : IFirewallService
 
         const string sql = @"
             UPDATE fw_nat_rules
-            SET type = @type, description = @desc, source_network = @src, output_interface_id = @iface,
+            SET type = @type, description = @desc, source_network = @src::cidr, output_interface_id = @iface,
                 snat_address = @snat, enabled = @enabled, priority = @priority
             WHERE id = @id";
 
@@ -1972,8 +1982,9 @@ public sealed class FirewallService : IFirewallService
                     Id          = reader.GetGuid(reader.GetOrdinal("id")),
                     Name        = reader.GetString(reader.GetOrdinal("name")),
                     DaysOfWeek  = (int[])reader["days_of_week"],
-                    StartTime   = (TimeSpan)reader["start_time"],
-                    EndTime     = (TimeSpan)reader["end_time"],
+                    // Npgsql 10 maps `time` to TimeOnly; convert to TimeSpan to match the model.
+                    StartTime   = ((TimeOnly)reader["start_time"]).ToTimeSpan(),
+                    EndTime     = ((TimeOnly)reader["end_time"]).ToTimeSpan(),
                     Timezone    = reader.GetString(reader.GetOrdinal("timezone")),
                     Enabled     = reader.GetBoolean(reader.GetOrdinal("enabled"))
                 });

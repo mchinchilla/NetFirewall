@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Testing" Version="13.2.4" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.7.0" />
     <PackageReference Include="coverlet.collector" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -27,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="..\NetFirewall.AppHost\NetFirewall.AppHost.csproj" />
     <ProjectReference Include="..\NetFirewall.DhcpServer\NetFirewall.DhcpServer.csproj" />
+    <ProjectReference Include="..\NetFirewall.Migrations\NetFirewall.Migrations.csproj" />
     <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
     <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
   </ItemGroup>
@@ -41,6 +43,15 @@
 
   <ItemGroup>
     <Folder Include="Dhcp\" />
+  </ItemGroup>
+
+  <!-- Production migrations get copied next to the test binaries so
+       PostgresFixture.BootstrapApplicationSchemaAsync() can apply them
+       against the testcontainer. -->
+  <ItemGroup>
+    <None Include="..\NetFirewall.Services\sql\migrations\*.sql"
+          Link="sql\migrations\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
