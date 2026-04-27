@@ -26,7 +26,7 @@
         return $"{(int)d.TotalDays} d ago";
     }
 
-    var kpis = new[]
+    var kpis = new List<KpiCardViewModel>
     {
         new KpiCardViewModel
         {
@@ -62,6 +62,19 @@
             IconPath = "M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"
         }
     };
+
+    if (Model.WireGuardConfigured)
+    {
+        kpis.Add(new KpiCardViewModel
+        {
+            Label = "VPN clients",
+            Value = Model.WireGuardActivePeerCount.ToString(),
+            ValueSuffix = $" / {Model.WireGuardPeerCount}",
+            DeltaContext = Model.WireGuardActivePeerCount > 0 ? "active · last 3 min" : "no active peers",
+            Trend = DeltaTrend.Neutral,
+            IconPath = "M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z"
+        });
+    }
 }
 
 @* Page header *@
@@ -84,7 +97,8 @@
 </div>
 
 @* KPI cards *@
-<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 mb-6"
+@{ var kpiGridCls = Model.WireGuardConfigured ? "xl:grid-cols-5" : "xl:grid-cols-4"; }
+<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 @kpiGridCls mb-6"
      style="animation: var(--animate-slide-up); animation-delay: 60ms;">
     @foreach (var kpi in kpis)
     {

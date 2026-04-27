@@ -7,6 +7,8 @@ using NetFirewall.Models.Firewall;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
+using NetFirewall.Services.Vpn;
+using NetFirewall.Web.Daemon;
 using NetFirewall.Web.Models;
 
 namespace NetFirewall.Web.Controllers;
@@ -17,6 +19,8 @@ public class HomeController : Controller
     private readonly IFirewallService _firewall;
     private readonly ISystemMonitorService _monitor;
     private readonly IMetricsQueryService _query;
+    private readonly IWireGuardService _wg;
+    private readonly IDaemonClient _daemon;
     private readonly ILogger<HomeController> _logger;
 
     public HomeController(
@@ -24,12 +28,16 @@ public class HomeController : Controller
         IFirewallService firewall,
         ISystemMonitorService monitor,
         IMetricsQueryService query,
+        IWireGuardService wg,
+        IDaemonClient daemon,
         ILogger<HomeController> logger)
     {
         _dhcp = dhcp;
         _firewall = firewall;
         _monitor = monitor;
         _query = query;
+        _wg = wg;
+        _daemon = daemon;
         _logger = logger;
     }
 
@@ -44,9 +52,10 @@ public class HomeController : Controller
         var snapshotTask   = _monitor.GetSnapshotAsync(ct);
         var auditTask      = _firewall.GetAuditLogsAsync(limit: 6, offset: 0, ct);
         var historyTask    = SafeQueryHistoryAsync(ct);
+        var wgTask         = SafeQueryWireGuardAsync(ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
-                           filterTask, snapshotTask, auditTask, historyTask);
+                           filterTask, snapshotTask, auditTask, historyTask, wgTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -56,6 +65,7 @@ public class HomeController : Controller
         var snapshot  = snapshotTask.Result;
         var audit     = auditTask.Result;
         var history   = historyTask.Result;
+        var wg        = wgTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
         var totalBytesPerSec = snapshot.Network
@@ -74,6 +84,10 @@ public class HomeController : Controller
             EnabledFilterRuleCount = filters.Count(r => r.Enabled),
             TotalFilterRuleCount = filters.Count,
             CurrentThroughputMbps = currentThroughputMbps,
+
+            WireGuardConfigured = wg.Configured,
+            WireGuardPeerCount = wg.PeerCount,
+            WireGuardActivePeerCount = wg.ActivePeerCount,
 
             TrafficLabels   = history.Labels,
             TrafficRxMbps   = history.RxMbps,
@@ -99,6 +113,36 @@ public class HomeController : Controller
     }
 
     // ----- helpers --------------------------------------------------------
+
+    private async Task<WireGuardSnapshot> SafeQueryWireGuardAsync(CancellationToken ct)
+    {
+        // wg_servers may not exist (no migration yet) or daemon may be down.
+        try
+        {
+            var server = await _wg.GetServerAsync(ct);
+            if (server is null)
+                return WireGuardSnapshot.Empty;
+
+            var peers = await _wg.GetPeersAsync(server.Id, ct);
+            // Try live status; if daemon is unreachable we still report configured peers.
+            var statusEnvelope = await _daemon.GetWireGuardStatusAsync(ct);
+            var threshold = DateTime.UtcNow - TimeSpan.FromMinutes(3);
+            var active = statusEnvelope.Success && statusEnvelope.Data is not null
+                ? statusEnvelope.Data.Count(s => s.LastHandshakeAt is { } h && h >= threshold)
+                : 0;
+            return new WireGuardSnapshot(Configured: true, PeerCount: peers.Count, ActivePeerCount: active);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "WireGuard summary unavailable — likely no migration or daemon down");
+            return WireGuardSnapshot.Empty;
+        }
+    }
+
+    private sealed record WireGuardSnapshot(bool Configured, int PeerCount, int ActivePeerCount)
+    {
+        public static readonly WireGuardSnapshot Empty = new(false, 0, 0);
+    }
 
     private async Task<TrafficHistory> SafeQueryHistoryAsync(CancellationToken ct)
     {

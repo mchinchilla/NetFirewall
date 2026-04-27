@@ -14,6 +14,13 @@ public sealed class HomeDashboardViewModel
     public int TotalFilterRuleCount { get; init; }
     public double CurrentThroughputMbps { get; init; }
 
+    /// <summary>Total configured WireGuard peers (including disabled).</summary>
+    public int WireGuardPeerCount { get; init; }
+    /// <summary>Peers whose last handshake is within the last 3 minutes.</summary>
+    public int WireGuardActivePeerCount { get; init; }
+    /// <summary>True when a wg server row exists (controls whether the KPI shows).</summary>
+    public bool WireGuardConfigured { get; init; }
+
     /// <summary>Last 24h network bandwidth — labels + RX/TX series for Chart.js.</summary>
     public string[] TrafficLabels { get; init; } = [];
     public double[] TrafficRxMbps { get; init; } = [];
