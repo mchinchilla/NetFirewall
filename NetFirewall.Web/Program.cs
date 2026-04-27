@@ -100,8 +100,21 @@ else
 // ----- Auth services (rule #8: every process is DI-registered) -----
 builder.Services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddSingleton<ITotpService, TotpService>();
-builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
 builder.Services.AddSingleton<IRecoveryCodeGenerator, RecoveryCodeGenerator>();
+
+// TOTP cipher: Daemon-backed by default — the master key lives in the daemon
+// process, the Web only ships ciphertext. Set Daemon:UseForTotp=false (or the
+// whole Daemon:Enabled=false) to fall back to the in-process AES cipher with
+// the key in the Web's env (legacy / dev-without-daemon mode).
+var useDaemonForTotp = daemonOpts.Enabled && daemonOpts.UseForTotp;
+if (useDaemonForTotp)
+{
+    builder.Services.AddSingleton<ITotpSecretCipher, NetFirewall.Web.Auth.DaemonTotpSecretCipher>();
+}
+else
+{
+    builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
+}
 
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISessionService, SessionService>();

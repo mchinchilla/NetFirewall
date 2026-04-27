@@ -53,7 +53,7 @@ public sealed class AesGcmTotpSecretCipher : ITotpSecretCipher
             "Set NETFIREWALL_MASTER_KEY=$(openssl rand -base64 32) to persist.");
     }
 
-    public byte[] Encrypt(ReadOnlySpan<byte> plaintext)
+    public Task<byte[]> EncryptAsync(byte[] plaintext, CancellationToken ct = default)
     {
         var nonce = RandomNumberGenerator.GetBytes(NonceSize);
         var ciphertext = new byte[plaintext.Length];
@@ -67,22 +67,22 @@ public sealed class AesGcmTotpSecretCipher : ITotpSecretCipher
         Buffer.BlockCopy(nonce, 0, result, 0, NonceSize);
         Buffer.BlockCopy(tag, 0, result, NonceSize, TagSize);
         Buffer.BlockCopy(ciphertext, 0, result, NonceSize + TagSize, ciphertext.Length);
-        return result;
+        return Task.FromResult(result);
     }
 
-    public byte[] Decrypt(ReadOnlySpan<byte> blob)
+    public Task<byte[]> DecryptAsync(byte[] blob, CancellationToken ct = default)
     {
         if (blob.Length < NonceSize + TagSize)
             throw new CryptographicException("TOTP ciphertext is too short to contain nonce+tag.");
 
-        var nonce = blob.Slice(0, NonceSize);
-        var tag = blob.Slice(NonceSize, TagSize);
-        var ciphertext = blob.Slice(NonceSize + TagSize);
+        var nonce = blob.AsSpan(0, NonceSize);
+        var tag = blob.AsSpan(NonceSize, TagSize);
+        var ciphertext = blob.AsSpan(NonceSize + TagSize);
         var plaintext = new byte[ciphertext.Length];
 
         using var gcm = new AesGcm(_key, TagSize);
         gcm.Decrypt(nonce, ciphertext, tag, plaintext); // throws on tampering / wrong key
-        return plaintext;
+        return Task.FromResult(plaintext);
     }
 }
 

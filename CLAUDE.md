@@ -84,10 +84,21 @@ installs and enables both unit files.
   JIT. Switch to `dotnet publish --publish-ready-to-run` or NativeAOT to
   enable it; documented as future work.
 
-**Master key (TOTP secrets cipher)** lives in `/etc/netfirewall/web.env`
-mode 0640 root:netfirewall-web. The Web reads it via `EnvironmentFile=`.
-Phase 2.3 will move this to the daemon so the Web doesn't hold the key —
-meanwhile, a Web-process compromise can decrypt TOTP secrets.
+**Master key (TOTP secrets cipher)** lives in `/etc/netfirewall/daemon.env`
+(NETFIREWALL_MASTER_KEY=base64key, mode 0600 root:root) and is loaded only
+into the **netfirewall-daemon** process. The Web never sees the key — it
+calls `POST /v1/crypto/{encrypt,decrypt}` over the Unix socket whenever it
+needs to enroll or verify a TOTP secret (`DaemonTotpSecretCipher`). A
+Web-process compromise can no longer decrypt stored TOTP secrets.
+
+Toggle via `Daemon:UseForTotp` in the Web's appsettings (default `true`):
+- `true` (prod default): Web ↔ daemon for crypto.
+- `false` (dev without daemon): Web holds the key in `NETFIREWALL_MASTER_KEY`
+  — same as before. Useful when running the Web standalone.
+
+Failure mode: if `UseForTotp=true` but the daemon is unreachable, TOTP
+enrollment and verification both fail loudly (visible toast / inline error)
+and the user can't complete login. Bring the daemon back up to recover.
 
 **Upgrading**: re-run `sudo deploy/install.sh`. Idempotent — preserves
 master key + connection password, re-publishes binaries, applies pending

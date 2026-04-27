@@ -94,6 +94,32 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         }
     }
 
+    public async Task<byte[]> EncryptTotpAsync(byte[] plaintext, CancellationToken ct = default)
+        => await CryptoCallAsync("/v1/crypto/encrypt", plaintext, ct);
+
+    public async Task<byte[]> DecryptTotpAsync(byte[] ciphertext, CancellationToken ct = default)
+        => await CryptoCallAsync("/v1/crypto/decrypt", ciphertext, ct);
+
+    private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(new { Data = Convert.ToBase64String(data) }, options: JsonOpts)
+        };
+        AttachSessionHeader(req);
+
+        using var resp = await _http.SendAsync(req, ct);
+        var envelope = await ReadEnvelopeAsync<CryptoCallResult>(resp, ct);
+        if (!envelope.Success || envelope.Data is null || string.IsNullOrEmpty(envelope.Data.Data))
+        {
+            throw new InvalidOperationException(
+                $"Daemon crypto call to {path} failed: {envelope.Message ?? "(no message)"}");
+        }
+        return Convert.FromBase64String(envelope.Data.Data);
+    }
+
+    private sealed record CryptoCallResult(string Data);
+
     /// <summary>
     /// Send a POST, forward the session token from the inbound request's cookie,
     /// and translate non-2xx responses into a meaningful <see cref="ServiceResponse{T}"/>.

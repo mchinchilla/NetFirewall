@@ -77,6 +77,11 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISessionService, SessionService>();
 builder.Services.AddScoped<IAuthAuditService, AuthAuditService>();
 
+// TOTP cipher — the master key now lives HERE, not in the Web. The Web
+// proxies encrypt/decrypt over the Unix socket via /v1/crypto/*. Singleton
+// because the AES-256-GCM key never changes during process lifetime.
+builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
+
 // ----- Authentication: validate X-NetFw-Session header -----
 builder.Services
     .AddAuthentication(DaemonSessionAuthHandler.SchemeName)
@@ -104,6 +109,7 @@ app.MapGet("/health", () => Results.Json(new { status = "ok", version = ThisVers
 app.MapNetworkEndpoints();
 app.MapRouteEndpoints();
 app.MapFirewallEndpoints();
+app.MapCryptoEndpoints();
 
 ApplySocketMode(daemonOpts);
 Log.Information("NetFirewall daemon listening on Unix socket {Socket}", ResolveSocketPath(daemonOpts.SocketPath));

@@ -51,7 +51,7 @@ public sealed class UserTotpService : IUserTotpService
 
     public async Task EnrollAsync(Guid userId, byte[] rawSecret, CancellationToken ct = default)
     {
-        var encrypted = _cipher.Encrypt(rawSecret);
+        var encrypted = await _cipher.EncryptAsync(rawSecret, ct);
 
         // INSERT … ON CONFLICT lets re-enrollment overwrite cleanly without a separate delete.
         const string sql = @"
@@ -76,10 +76,10 @@ public sealed class UserTotpService : IUserTotpService
         if (stored == null) return false;
 
         byte[] plain;
-        try { plain = _cipher.Decrypt(stored.SecretEncrypted); }
+        try { plain = await _cipher.DecryptAsync(stored.SecretEncrypted, ct); }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "TOTP secret decryption failed for user {UserId} — wrong master key?", userId);
+            _logger.LogError(ex, "TOTP secret decryption failed for user {UserId} — daemon down or wrong master key?", userId);
             return false;
         }
 

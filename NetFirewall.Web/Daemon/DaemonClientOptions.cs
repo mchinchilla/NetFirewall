@@ -23,4 +23,12 @@ public sealed class DaemonClientOptions
 
     /// <summary>Per-request timeout. Apply ops can take a few seconds (ifup waits).</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// When true (default) the Web proxies TOTP encrypt/decrypt to the daemon so
+    /// the master key never lives in this process. Set to false only if you're
+    /// running without a daemon (dev) — then the key has to live in the Web's env
+    /// and a Web compromise can decrypt all stored TOTP secrets.
+    /// </summary>
+    public bool UseForTotp { get; set; } = true;
 }

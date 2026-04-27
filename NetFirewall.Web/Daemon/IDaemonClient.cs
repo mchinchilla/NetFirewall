@@ -33,6 +33,12 @@ public interface IDaemonClient
 
     /// <summary>Lightweight health probe (no auth on the daemon side).</summary>
     Task<bool> IsAliveAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/crypto/encrypt</c> — daemon holds the master key, returns ciphertext.</summary>
+    Task<byte[]> EncryptTotpAsync(byte[] plaintext, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/crypto/decrypt</c> — daemon holds the master key, returns plaintext. Throws on failure.</summary>
+    Task<byte[]> DecryptTotpAsync(byte[] ciphertext, CancellationToken ct = default);
 }
 
 public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string? Output, string? Error);
