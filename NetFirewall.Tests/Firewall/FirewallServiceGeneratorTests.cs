@@ -132,7 +132,11 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
 
         var cfg = await _svc.GenerateNftablesConfigAsync();
 
-        Assert.DoesNotContain("23", cfg);
+        // Match the actual emitted form ("tcp dport 23"), not just "23",
+        // because the header timestamp may legitimately contain "23"
+        // (e.g. "Generated: 2026-04-27T23:21:25Z").
+        Assert.DoesNotContain("dport 23", cfg);
+        Assert.DoesNotContain("telnet drop", cfg);
     }
 
     [Fact]

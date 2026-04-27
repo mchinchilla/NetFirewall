@@ -30,6 +30,10 @@
         <None Include="Styles/**" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="NetFirewall.Tests" />
+    </ItemGroup>
+
     <Target Name="BuildTailwindCss" BeforeTargets="BeforeBuild;AssignTargetPaths"
             Inputs="$(TailwindInput);@(Content);@(None)"
             Outputs="$(TailwindOutput)">

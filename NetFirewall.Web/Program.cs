@@ -80,46 +80,15 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<DaemonClientOptions>(builder.Configuration.GetSection(DaemonClientOptions.SectionName));
 var daemonOpts = builder.Configuration.GetSection(DaemonClientOptions.SectionName).Get<DaemonClientOptions>() ?? new DaemonClientOptions();
 
-if (daemonOpts.Enabled)
-{
-    // Daemon owns OS mutations. The Web's INetworkConfigResolver returns a
-    // wrapper that proxies write ops over the Unix socket while keeping read
-    // ops (preview / file path / validate) local — controllers stay unchanged.
-    builder.Services.AddSingleton<IDaemonClient, DaemonClient>();
-    builder.Services.AddScoped<IStaticRouteApplicator, DaemonStaticRouteApplicator>();
-    builder.Services.AddSingleton<INetworkConfigResolver>(sp =>
-        new DaemonResolverDecorator(sp.GetRequiredService<NetworkConfigResolver>(), sp));
-}
-else
-{
-    // Legacy / dev path — Web shells out directly. Controllers still take
-    // IDaemonClient as a dependency (apply buttons, WireGuard status), so we
-    // hand them a stub that returns "daemon disabled" failures cleanly.
-    // Without this, every controller that touches the daemon would crash at
-    // DI activation with a confusing "service not registered" error.
-    builder.Services.AddSingleton<IDaemonClient, NullDaemonClient>();
-    builder.Services.AddSingleton<INetworkConfigResolver>(sp => sp.GetRequiredService<NetworkConfigResolver>());
-    builder.Services.AddScoped<IStaticRouteApplicator, StaticRouteApplicator>();
-}
+// All four daemon-vs-local DI swaps live in one extension method. Pinned by
+// DaemonServiceCollectionExtensionsTests in the Tests project — modify both
+// when adding a new daemon-aware service.
+builder.Services.AddDaemonClientAndCiphers(daemonOpts);
 
 // ----- Auth services (rule #8: every process is DI-registered) -----
 builder.Services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddSingleton<ITotpService, TotpService>();
 builder.Services.AddSingleton<IRecoveryCodeGenerator, RecoveryCodeGenerator>();
-
-// TOTP cipher: Daemon-backed by default — the master key lives in the daemon
-// process, the Web only ships ciphertext. Set Daemon:UseForTotp=false (or the
-// whole Daemon:Enabled=false) to fall back to the in-process AES cipher with
-// the key in the Web's env (legacy / dev-without-daemon mode).
-var useDaemonForTotp = daemonOpts.Enabled && daemonOpts.UseForTotp;
-if (useDaemonForTotp)
-{
-    builder.Services.AddSingleton<ITotpSecretCipher, NetFirewall.Web.Auth.DaemonTotpSecretCipher>();
-}
-else
-{
-    builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
-}
 
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISessionService, SessionService>();
