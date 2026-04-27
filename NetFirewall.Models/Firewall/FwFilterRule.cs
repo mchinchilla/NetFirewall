@@ -52,7 +52,16 @@ public class FwFilterRule
     [Map("created_at")]
     public DateTime CreatedAt { get; set; }
 
+    /// <summary>
+    /// Optional FK to fw_schedules — when set, the rule only applies while its
+    /// schedule is "active now" (in the schedule's timezone). Null = always.
+    /// The watcher in the daemon re-applies whenever any schedule transitions.
+    /// </summary>
+    [Map("schedule_id")]
+    public Guid? ScheduleId { get; set; }
+
     // Navigation properties (not mapped)
     public FwInterface? InterfaceIn { get; set; }
     public FwInterface? InterfaceOut { get; set; }
+    public FwSchedule? Schedule { get; set; }
 }

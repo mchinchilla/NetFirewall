@@ -506,6 +506,102 @@ document.addEventListener("alpine:init", () => {
         }
     }));
 
+    /* ---------- portPicker ---------- mirror of addressPicker but L4-aware.
+     * Used in firewall rule destination_ports fields. Tags are either literal
+     * numeric ports / "start-end" ranges, or service names from /Network/Services.
+     * Same hidden-input pattern so server-side parsing stays unchanged.
+     */
+    Alpine.data("portPicker", (initialCsv) => ({
+        tags: [],
+        input: "",
+        suggestions: [],
+        open: false,
+        active: -1,
+        _searchTimer: null,
+
+        init() {
+            this.tags = (initialCsv || "")
+                .split(",")
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+        },
+
+        get csv() { return this.tags.join(", "); },
+
+        looksLikeLiteral(v) {
+            // Pure number, or "start-end" with both halves numeric
+            if (/^\d+$/.test(v)) return true;
+            const dash = v.indexOf("-");
+            if (dash > 0 && dash < v.length - 1) {
+                const left = v.slice(0, dash).trim();
+                const right = v.slice(dash + 1).trim();
+                return /^\d+$/.test(left) && /^\d+$/.test(right);
+            }
+            return false;
+        },
+
+        addTag(value) {
+            const v = (value || "").trim();
+            if (!v) return;
+            if (!this.tags.includes(v)) this.tags.push(v);
+            this.input = "";
+            this.suggestions = [];
+            this.open = false;
+            this.active = -1;
+            this.$nextTick(() => this.$refs.hidden && (this.$refs.hidden.value = this.csv));
+        },
+
+        removeTag(idx) {
+            this.tags.splice(idx, 1);
+            this.$nextTick(() => this.$refs.hidden && (this.$refs.hidden.value = this.csv));
+        },
+
+        async search() {
+            if (this._searchTimer) clearTimeout(this._searchTimer);
+            const q = this.input.trim();
+            if (!q) { this.suggestions = []; this.open = false; return; }
+
+            this._searchTimer = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`/Network/Services/autocomplete?q=${encodeURIComponent(q)}`, {
+                        headers: { "Accept": "application/json" }
+                    });
+                    if (!resp.ok) { this.suggestions = []; return; }
+                    this.suggestions = await resp.json();
+                    this.open = this.suggestions.length > 0;
+                    this.active = this.suggestions.length > 0 ? 0 : -1;
+                } catch {
+                    this.suggestions = [];
+                    this.open = false;
+                }
+            }, 150);
+        },
+
+        onKey(e) {
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                if (this.suggestions.length === 0) return;
+                this.active = (this.active + 1) % this.suggestions.length;
+                this.open = true;
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                if (this.suggestions.length === 0) return;
+                this.active = (this.active - 1 + this.suggestions.length) % this.suggestions.length;
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (this.open && this.active >= 0) this.addTag(this.suggestions[this.active].name);
+                else if (this.input.trim()) this.addTag(this.input);
+            } else if (e.key === "," || e.key === " ") {
+                if (this.input.trim()) { e.preventDefault(); this.addTag(this.input); }
+            } else if (e.key === "Backspace" && !this.input && this.tags.length > 0) {
+                this.removeTag(this.tags.length - 1);
+            } else if (e.key === "Escape") {
+                this.open = false;
+                this.active = -1;
+            }
+        }
+    }));
+
     Alpine.store("ui", {
         ...DEFAULT_STATE,
         palettes: PALETTES,

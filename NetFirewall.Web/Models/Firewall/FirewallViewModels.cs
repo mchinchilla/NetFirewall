@@ -48,6 +48,9 @@ public sealed class FilterRuleFormViewModel
 
     [Range(0, 10000)] public int Priority { get; set; } = 100;
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Optional time-window gating (FK to fw_schedules). Null = always-on.</summary>
+    public Guid? ScheduleId { get; set; }
 }
 
 // =====================================================================

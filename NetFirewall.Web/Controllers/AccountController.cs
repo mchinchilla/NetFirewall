@@ -128,6 +128,45 @@ public sealed class AccountController : Controller
         return View();
     }
 
+    // -------------------------------------------------- /account/profile
+
+    [HttpGet("/account/profile")]
+    public async Task<IActionResult> Profile(CancellationToken ct)
+    {
+        var uid = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var user = await _users.GetByIdAsync(uid, ct);
+        if (user is null) return RedirectToAction("Login", "Auth");
+        return View(NetFirewall.Web.Models.Auth.ProfileFormViewModel.FromUser(user));
+    }
+
+    [HttpPost("/account/profile"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> UpdateProfile(NetFirewall.Web.Models.Auth.ProfileFormViewModel form, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return View("Profile", form);
+
+        var uid = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        try
+        {
+            var update = new UserProfileUpdate(
+                FirstName:   form.FirstName,
+                LastName:    form.LastName,
+                DisplayName: form.DisplayName,
+                Email:       form.Email,
+                Phone:       form.Phone,
+                Timezone:    form.Timezone,
+                Locale:      form.Locale);
+            var saved = await _users.UpdateProfileAsync(uid, update, ct);
+            await _audit.LogAsync(AuthAuditEvents.ProfileUpdated, saved.Id, saved.Username,
+                HttpContext.Connection.RemoteIpAddress, Request.Headers.UserAgent.ToString(), ct: ct);
+            return View("Profile", NetFirewall.Web.Models.Auth.ProfileFormViewModel.FromUser(saved));
+        }
+        catch (Exception ex)
+        {
+            ModelState.AddModelError(string.Empty, $"Save failed: {ex.Message}");
+            return View("Profile", form);
+        }
+    }
+
     [HttpPost("/account/security/revoke/{sessionId:guid}"), ValidateAntiForgeryToken]
     public async Task<IActionResult> RevokeSession(Guid sessionId, CancellationToken ct)
     {

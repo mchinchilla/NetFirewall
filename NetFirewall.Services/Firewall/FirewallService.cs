@@ -15,15 +15,18 @@ public sealed class FirewallService : IFirewallService
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly INetworkObjectResolver _objectResolver;
+    private readonly INetworkServiceResolver _serviceResolver;
     private readonly ILogger<FirewallService> _logger;
 
     public FirewallService(
         NpgsqlDataSource dataSource,
         INetworkObjectResolver objectResolver,
+        INetworkServiceResolver serviceResolver,
         ILogger<FirewallService> logger)
     {
         _dataSource = dataSource;
         _objectResolver = objectResolver;
+        _serviceResolver = serviceResolver;
         _logger = logger;
     }
 
@@ -425,8 +428,8 @@ public sealed class FirewallService : IFirewallService
         const string sql = @"
             INSERT INTO fw_filter_rules (id, chain, description, action, protocol, interface_in_id, interface_out_id,
                 source_addresses, destination_addresses, destination_ports, connection_state, rate_limit, log_prefix,
-                enabled, priority, created_at)
-            VALUES (@id, @chain, @desc, @action, @proto, @ifin, @ifout, @src, @dst, @ports, @state, @rate, @log, @enabled, @priority, @created)";
+                enabled, priority, schedule_id, created_at)
+            VALUES (@id, @chain, @desc, @action, @proto, @ifin, @ifout, @src, @dst, @ports, @state, @rate, @log, @enabled, @priority, @sched, @created)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddFilterRuleParams(cmd, rule);
@@ -450,7 +453,8 @@ public sealed class FirewallService : IFirewallService
             SET chain = @chain, description = @desc, action = @action, protocol = @proto,
                 interface_in_id = @ifin, interface_out_id = @ifout, source_addresses = @src,
                 destination_addresses = @dst, destination_ports = @ports, connection_state = @state,
-                rate_limit = @rate, log_prefix = @log, enabled = @enabled, priority = @priority
+                rate_limit = @rate, log_prefix = @log, enabled = @enabled, priority = @priority,
+                schedule_id = @sched
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -501,6 +505,7 @@ public sealed class FirewallService : IFirewallService
         cmd.Parameters.AddWithValue("log", rule.LogPrefix ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", rule.Enabled);
         cmd.Parameters.AddWithValue("priority", rule.Priority);
+        cmd.Parameters.AddWithValue("sched", (object?)rule.ScheduleId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("created", rule.CreatedAt);
     }
 
@@ -528,6 +533,7 @@ public sealed class FirewallService : IFirewallService
                 LogPrefix = reader.IsDBNull(reader.GetOrdinal("log_prefix")) ? null : reader.GetString(reader.GetOrdinal("log_prefix")),
                 Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
                 Priority = reader.GetInt32(reader.GetOrdinal("priority")),
+                ScheduleId = SafeNullableGuid(reader, "schedule_id"),
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
             });
         }
@@ -1440,16 +1446,30 @@ public sealed class FirewallService : IFirewallService
         var natRules = await GetNatRulesAsync(ct);
         var mangleRules = await GetMangleRulesAsync(null, ct);
         var trafficMarks = await GetTrafficMarksAsync(ct);
+        var schedules = await GetSchedulesForGenerationAsync(ct);
 
         // Create interface name lookup
         var ifaceMap = interfaces.ToDictionary(i => i.Id, i => i.Name);
         var markMap = trafficMarks.ToDictionary(m => m.Id, m => m);
+        var scheduleMap = schedules.ToDictionary(s => s.Id, s => s);
+
+        // Schedule predicate: a null ScheduleId is always-on; otherwise the
+        // referenced schedule must be active right now (in its own timezone).
+        // This is what makes time-based rules work — the daemon's watcher
+        // re-applies on transition so the snapshot stays fresh.
+        var nowUtc = DateTimeOffset.UtcNow;
+        bool RuleActiveNow(FwFilterRule r)
+        {
+            if (!r.ScheduleId.HasValue) return true;
+            return scheduleMap.TryGetValue(r.ScheduleId.Value, out var s) && s.IsActiveAt(nowUtc);
+        }
 
         // Resolve named network objects in source/destination of every rule
         // BEFORE generators stringify them. We mutate the in-memory copies
         // (these are throwaway DTOs from this read, never persisted back).
         await ResolveAddressesAsync(filterRules,  ct);
         await ResolveAddressesAsync(portForwards, ct);
+        await ResolveAddressesAsync(mangleRules,  ct);
 
         // NAT resolution returns a per-rule list because a single SourceNetwork
         // referencing a group can expand to N CIDRs, and SNAT/MASQUERADE in
@@ -1499,7 +1519,7 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("        type filter hook input priority filter; policy drop;");
         sb.AppendLine("        iif lo accept");
 
-        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "input").OrderBy(r => r.Priority))
+        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "input" && RuleActiveNow(r)).OrderBy(r => r.Priority))
         {
             sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
         }
@@ -1511,7 +1531,7 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("    chain forward {");
         sb.AppendLine("        type filter hook forward priority filter; policy drop;");
 
-        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "forward").OrderBy(r => r.Priority))
+        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "forward" && RuleActiveNow(r)).OrderBy(r => r.Priority))
         {
             sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
         }
@@ -1523,7 +1543,7 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("    chain output {");
         sb.AppendLine("        type filter hook output priority filter; policy accept;");
 
-        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "output").OrderBy(r => r.Priority))
+        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "output" && RuleActiveNow(r)).OrderBy(r => r.Priority))
         {
             sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
         }
@@ -1648,6 +1668,9 @@ public sealed class FirewallService : IFirewallService
                 r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
             if (r.DestinationAddresses is { Length: > 0 } dst)
                 r.DestinationAddresses = (await _objectResolver.ResolveAsync(dst, ct)).ToArray();
+            // L4: expand service names (SSH, HTTP, RTP, …) to numeric ports.
+            if (r.DestinationPorts is { Length: > 0 } dp)
+                r.DestinationPorts = (await _serviceResolver.ResolveAsync(dp, ct)).ToArray();
         }
     }
 
@@ -1657,6 +1680,23 @@ public sealed class FirewallService : IFirewallService
         {
             if (r.SourceAddresses is { Length: > 0 } src)
                 r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Mangle rules: resolve named source/destination addresses + named ports
+    /// in destination_ports. Same in-place mutation pattern as filter rules.
+    /// </summary>
+    private async Task ResolveAddressesAsync(IReadOnlyList<FwMangleRule> rules, CancellationToken ct)
+    {
+        foreach (var r in rules)
+        {
+            if (r.SourceAddresses is { Length: > 0 } src)
+                r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+            if (r.DestinationAddresses is { Length: > 0 } dst)
+                r.DestinationAddresses = (await _objectResolver.ResolveAsync(dst, ct)).ToArray();
+            if (r.DestinationPorts is { Length: > 0 } dp)
+                r.DestinationPorts = (await _serviceResolver.ResolveAsync(dp, ct)).ToArray();
         }
     }
 
@@ -1909,6 +1949,59 @@ public sealed class FirewallService : IFirewallService
     private static string EscapeComment(string comment)
     {
         return comment.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+    }
+
+    /// <summary>
+    /// Load all enabled schedules for use during nft generation. Tolerant of
+    /// the table being absent (migration 19 not applied yet) — returns empty
+    /// so all rules effectively "always-on" until the operator runs the migration.
+    /// </summary>
+    private async Task<IReadOnlyList<FwSchedule>> GetSchedulesForGenerationAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(
+                "SELECT * FROM fw_schedules WHERE enabled = true", conn);
+            var list = new List<FwSchedule>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                list.Add(new FwSchedule
+                {
+                    Id          = reader.GetGuid(reader.GetOrdinal("id")),
+                    Name        = reader.GetString(reader.GetOrdinal("name")),
+                    DaysOfWeek  = (int[])reader["days_of_week"],
+                    StartTime   = (TimeSpan)reader["start_time"],
+                    EndTime     = (TimeSpan)reader["end_time"],
+                    Timezone    = reader.GetString(reader.GetOrdinal("timezone")),
+                    Enabled     = reader.GetBoolean(reader.GetOrdinal("enabled"))
+                });
+            }
+            return list;
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42P01")
+        {
+            _logger.LogDebug("fw_schedules missing — schedule gating disabled, all rules treated as always-on.");
+            return Array.Empty<FwSchedule>();
+        }
+    }
+
+    /// <summary>
+    /// Read a nullable uuid column without exploding when the column doesn't
+    /// exist yet (e.g. <c>schedule_id</c> on a DB where migration 19 hasn't run).
+    /// </summary>
+    private static Guid? SafeNullableGuid(NpgsqlDataReader r, string col)
+    {
+        try
+        {
+            var ord = r.GetOrdinal(col);
+            return r.IsDBNull(ord) ? null : r.GetGuid(ord);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     #endregion

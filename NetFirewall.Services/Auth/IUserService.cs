@@ -26,4 +26,20 @@ public interface IUserService
     /// </summary>
     /// <returns>True iff the user is now locked.</returns>
     Task<bool> RecordLoginFailureAsync(Guid id, IPAddress? ip, int threshold, TimeSpan lockDuration, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update the user's profile fields (everything that's NOT auth/role state:
+    /// names, email, phone, timezone, locale). Returns the refreshed user.
+    /// </summary>
+    Task<User> UpdateProfileAsync(Guid id, UserProfileUpdate update, CancellationToken ct = default);
 }
+
+/// <summary>Mutable subset of user fields owned by the profile page.</summary>
+public sealed record UserProfileUpdate(
+    string? FirstName,
+    string? LastName,
+    string? DisplayName,
+    string? Email,
+    string? Phone,
+    string? Timezone,
+    string? Locale);

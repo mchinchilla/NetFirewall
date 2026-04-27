@@ -81,10 +81,11 @@
         </div>
 
         <div class="grid grid-cols-2 gap-3">
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            @await Html.PartialAsync("_PortPicker", new AddressPickerViewModel {
                 Name = nameof(Model.DestinationPorts), Label = "Destination ports",
                 Value = Model.DestinationPorts,
-                Placeholder = "22, 80, 443, 8000-9000"
+                Placeholder = "Type port or pick a service…",
+                Help = "Literal ports (22, 80, 8000-9000) or Network Service names (SSH, HTTP, RTP). Empty = any port."
             })
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = nameof(Model.ConnectionStates), Label = "Connection states",
@@ -106,6 +107,23 @@
                 Help = "Used when action = log."
             })
         </div>
+
+        @{
+            var schedules = (IReadOnlyList<NetFirewall.Models.Firewall.FwSchedule>)(ViewBag.Schedules
+                ?? Array.Empty<NetFirewall.Models.Firewall.FwSchedule>());
+            var schedOptions = new List<FormFieldViewModel.SelectOption> {
+                new("", "Always-on (no schedule)")
+            };
+            foreach (var s in schedules)
+                schedOptions.Add(new(s.Id.ToString(),
+                    $"{s.Name} · {s.StartTime:hh\\:mm}-{s.EndTime:hh\\:mm} {s.Timezone}"));
+        }
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.ScheduleId), Label = "Schedule", Kind = FormFieldKind.Select,
+            Value = Model.ScheduleId?.ToString(), Options = schedOptions,
+            Help = "Time-window gate. The daemon re-applies the firewall when the schedule transitions active/inactive. Manage under Firewall → Schedules."
+        })
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,

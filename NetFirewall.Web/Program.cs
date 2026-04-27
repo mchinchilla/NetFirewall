@@ -142,6 +142,22 @@ builder.Services.AddScoped<NetFirewall.Services.Network.INetworkObjectService,
 builder.Services.AddScoped<NetFirewall.Services.Network.INetworkObjectResolver,
                            NetFirewall.Services.Network.NetworkObjectResolver>();
 
+// Network services — named L4 catalog (SSH=tcp/22, RTP=udp/10000-20000, …).
+// Filter/mangle/PF generators resolve service names → port specs at apply time.
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceService,
+                           NetFirewall.Services.Network.NetworkServiceService>();
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceResolver,
+                           NetFirewall.Services.Network.NetworkServiceResolver>();
+
+// Full-text search — Postgres tsvector + GIN, fed by per-source triggers.
+builder.Services.AddScoped<NetFirewall.Services.Search.ISearchService,
+                           NetFirewall.Services.Search.SearchService>();
+
+// Time-based filter rules — schedules attach to filter rules; daemon's
+// watcher service (registered in daemon) triggers nft re-apply on transition.
+builder.Services.AddScoped<NetFirewall.Services.Firewall.IScheduleService,
+                           NetFirewall.Services.Firewall.ScheduleService>();
+
 // DHCP services. Subnet service is the cached singleton used by both the
 // setup wizard and the DHCP admin pages. Admin facade is what controllers
 // inject for full CRUD over subnets / pools / leases / reservations.

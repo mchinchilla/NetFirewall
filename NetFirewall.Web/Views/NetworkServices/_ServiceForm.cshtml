@@ -1,0 +1,124 @@
+@model NetFirewall.Web.Models.Network.NetworkServiceFormViewModel
+@using NetFirewall.Models.Network
+@using NetFirewall.Web.Models
+@{
+    var catalog = (IReadOnlyList<NetworkService>)(ViewBag.Catalog ?? Array.Empty<NetworkService>());
+    var availableMembers = catalog
+        .Where(c => Model.Id is null || c.Id != Model.Id)
+        .OrderBy(c => c.Category).ThenBy(c => c.Name)
+        .ToList();
+    var memberSet = new HashSet<Guid>(Model.MemberIds);
+    var memberSetJson = System.Text.Json.JsonSerializer.Serialize(Model.MemberIds);
+}
+
+<form id="network-service-form"
+      hx-post="/Network/Services/save" hx-target="this" hx-swap="outerHTML"
+      x-data="{ asGroup: @(Model.IsGroup ? "true" : "false"), selected: new Set(@Html.Raw(memberSetJson)) }">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    @if (Model.IsBuiltin)
+    {
+        <div class="mb-4 rounded-md border-l-2 px-3 py-2 text-xs"
+             style="background: color-mix(in srgb, var(--accent) 8%, transparent); border-color: var(--accent); color: var(--surface-fg);">
+            This is a <strong>builtin</strong> service from the seed catalog. Edits are allowed but be careful — rules across the firewall reference it by name.
+        </div>
+    }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Name", Required = true, Value = Model.Name,
+            Placeholder = "MY_SERVICE", Help = "UPPER_SNAKE convention to be visually distinct from literals."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Category), Label = "Category", Value = Model.Category,
+            Placeholder = "Web · Mail · VoIP · Database…"
+        })
+
+        <div class="space-y-1.5">
+            <label class="block text-xs font-medium" style="color: var(--surface-fg);">Mode</label>
+            <div class="inline-flex p-1 rounded text-xs" style="background-color: var(--surface-muted);">
+                <button type="button" class="px-3 py-1 rounded font-medium transition"
+                        :style="!asGroup ? 'background: var(--surface-elevated); color: var(--surface-fg);' : 'color: var(--surface-fg-muted);'"
+                        @@click="asGroup = false">Single port / range</button>
+                <button type="button" class="px-3 py-1 rounded font-medium transition"
+                        :style="asGroup ? 'background: var(--surface-elevated); color: var(--surface-fg);' : 'color: var(--surface-fg-muted);'"
+                        @@click="asGroup = true">Group of services</button>
+            </div>
+        </div>
+
+        @* ----- Single / range ----- *@
+        <div x-show="!asGroup" class="space-y-3">
+            <div class="grid grid-cols-3 gap-3">
+                <div class="space-y-1.5">
+                    <label class="block text-xs font-medium" style="color: var(--surface-fg);">Protocol <span style="color: var(--feedback-danger-fg);">*</span></label>
+                    <select name="Protocol" class="input">
+                        @foreach (var p in NetworkServiceProtocols.All)
+                        {
+                            <option value="@p" selected="@(p == Model.Protocol)">@p</option>
+                        }
+                    </select>
+                </div>
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.PortStart), Label = "Port (or start)", Kind = FormFieldKind.Number, Required = true,
+                    Value = Model.PortStart.ToString(), Min = "0", Max = "65535"
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.PortEnd), Label = "Port end (range only)", Kind = FormFieldKind.Number,
+                    Value = Model.PortEnd?.ToString(), Min = "0", Max = "65535",
+                    Help = "Leave empty for single ports."
+                })
+            </div>
+        </div>
+
+        @* ----- Group ----- *@
+        <div x-show="asGroup" x-cloak class="space-y-1.5">
+            <label class="block text-xs font-medium" style="color: var(--surface-fg);">
+                Members <span style="color: var(--feedback-danger-fg);">*</span>
+                <span class="font-normal" style="color: var(--surface-fg-muted);">— click to toggle</span>
+            </label>
+            @if (availableMembers.Count == 0)
+            {
+                <p class="text-sm py-4 text-center" style="color: var(--surface-fg-muted);">
+                    No other services exist. Create some single-port services first.
+                </p>
+            }
+            else
+            {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto p-2 rounded border"
+                     style="border-color: var(--surface-border);">
+                    @foreach (var c in availableMembers)
+                    {
+                        var isSelected = memberSet.Contains(c.Id);
+                        <label class="flex items-start gap-2 p-2 rounded cursor-pointer transition"
+                               :class="selected.has('@c.Id') ? '' : 'hover:bg-[color:var(--surface-muted)]'"
+                               :style="selected.has('@c.Id') ? 'background-color: var(--accent-soft);' : ''">
+                            <input type="checkbox" name="MemberIds" value="@c.Id" class="mt-0.5"
+                                   @(isSelected ? "checked" : "")
+                                   @@change="$event.target.checked ? selected.add('@c.Id') : selected.delete('@c.Id'); selected = new Set(selected)" />
+                            <div class="flex-1 min-w-0">
+                                <p class="text-xs font-mono font-medium truncate">@c.Name</p>
+                                <p class="text-[10px] truncate" style="color: var(--surface-fg-muted);">@c.Protocol · @c.PortString @(c.Category != null ? $"· {c.Category}" : "")</p>
+                            </div>
+                        </label>
+                    }
+                </div>
+                <p class="text-xs mt-2" style="color: var(--surface-fg-muted);">
+                    Selected: <span x-text="selected.size"></span> · Group expands to all member ports at apply time.
+                </p>
+            }
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
+            Value = Model.Description
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create service")</button>
+    </div>
+</form>

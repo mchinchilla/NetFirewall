@@ -88,6 +88,39 @@ public sealed class UserService : IUserService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<User> UpdateProfileAsync(Guid id, UserProfileUpdate update, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = @"
+            UPDATE users SET
+                first_name   = @first,
+                last_name    = @last,
+                display_name = @display,
+                email        = @email,
+                phone        = @phone,
+                timezone     = COALESCE(@tz,     timezone),
+                locale       = COALESCE(@locale, locale),
+                updated_at   = now()
+            WHERE id = @id
+            RETURNING *";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("first",   (object?)Trim(update.FirstName)   ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("last",    (object?)Trim(update.LastName)    ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("display", (object?)Trim(update.DisplayName) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("email",   (object?)Trim(update.Email)       ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("phone",   (object?)Trim(update.Phone)       ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tz",      (object?)Trim(update.Timezone)    ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("locale",  (object?)Trim(update.Locale)      ?? DBNull.Value);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            throw new InvalidOperationException($"User {id} not found.");
+        return Hydrate(reader);
+    }
+
+    private static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
     public async Task SetActiveAsync(Guid id, bool active, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -170,6 +203,26 @@ public sealed class UserService : IUserService
         LastLoginAt = r.IsDBNull(r.GetOrdinal("last_login_at")) ? null : r.GetFieldValue<DateTimeOffset>(r.GetOrdinal("last_login_at")),
         LastLoginIp = r.IsDBNull(r.GetOrdinal("last_login_ip")) ? null : (IPAddress)r.GetValue(r.GetOrdinal("last_login_ip")),
         CreatedAt = r.GetFieldValue<DateTimeOffset>(r.GetOrdinal("created_at")),
-        UpdatedAt = r.GetFieldValue<DateTimeOffset>(r.GetOrdinal("updated_at"))
+        UpdatedAt = r.GetFieldValue<DateTimeOffset>(r.GetOrdinal("updated_at")),
+        FirstName    = SafeStr(r, "first_name"),
+        LastName     = SafeStr(r, "last_name"),
+        DisplayName  = SafeStr(r, "display_name"),
+        Phone        = SafeStr(r, "phone"),
+        Timezone     = SafeStr(r, "timezone") ?? "UTC",
+        Locale       = SafeStr(r, "locale")   ?? "en"
     };
+
+    /// <summary>Tolerant of pre-migration DBs where the column doesn't exist yet.</summary>
+    private static string? SafeStr(NpgsqlDataReader r, string col)
+    {
+        try
+        {
+            var ord = r.GetOrdinal(col);
+            return r.IsDBNull(ord) ? null : r.GetString(ord);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            return null;
+        }
+    }
 }

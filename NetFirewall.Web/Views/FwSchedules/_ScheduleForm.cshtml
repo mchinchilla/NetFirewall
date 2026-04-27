@@ -1,0 +1,81 @@
+@model NetFirewall.Web.Models.Firewall.ScheduleFormViewModel
+@using NetFirewall.Web.Models
+@{
+    var dayNames = new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    var commonTz = new[] {
+        "UTC", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
+        "America/Mexico_City", "America/Sao_Paulo", "Europe/London", "Europe/Madrid",
+        "Europe/Berlin", "Europe/Paris", "Asia/Dubai", "Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney"
+    };
+}
+
+<form id="schedule-form" hx-post="/Firewall/Schedules/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Name", Required = true, Value = Model.Name,
+            Placeholder = "WORK_HOURS"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
+            Value = Model.Description
+        })
+
+        <div>
+            <label class="block text-xs font-medium mb-2" style="color: var(--surface-fg);">
+                Days of week <span style="color: var(--feedback-danger-fg);">*</span>
+            </label>
+            <div class="flex gap-1.5 flex-wrap">
+                @for (var d = 0; d < 7; d++)
+                {
+                    var isOn = Model.DaysOfWeek.Contains(d);
+                    <label class="cursor-pointer">
+                        <input type="checkbox" name="DaysOfWeek" value="@d" @(isOn ? "checked" : "") class="peer sr-only" />
+                        <span class="inline-flex items-center justify-center h-9 w-12 rounded-md text-xs font-medium border transition peer-checked:font-semibold"
+                              style="@(isOn
+                                  ? "background: var(--accent); color: var(--accent-fg); border-color: var(--accent);"
+                                  : "background: var(--surface-elevated); color: var(--surface-fg-muted); border-color: var(--surface-border);")">
+                            @dayNames[d]
+                        </span>
+                    </label>
+                }
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Start time <span style="color: var(--feedback-danger-fg);">*</span></label>
+                <input type="time" name="StartTime" value="@Model.StartTime.ToString(@"hh\:mm")" class="input font-mono" required />
+            </div>
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">End time <span style="color: var(--feedback-danger-fg);">*</span></label>
+                <input type="time" name="EndTime" value="@Model.EndTime.ToString(@"hh\:mm")" class="input font-mono" required />
+            </div>
+        </div>
+
+        <div class="space-y-1.5">
+            <label class="block text-xs font-medium" style="color: var(--surface-fg);">Timezone</label>
+            <input list="sched-tz-list" name="@nameof(Model.Timezone)" value="@Model.Timezone"
+                   class="input font-mono" required />
+            <datalist id="sched-tz-list">
+                @foreach (var tz in commonTz) { <option value="@tz" /> }
+            </datalist>
+            <p class="text-xs" style="color: var(--surface-fg-muted);">Pick from the list or type any IANA timezone. Used to interpret start/end as local time.</p>
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false",
+            Help = "Disabling a schedule turns OFF every rule attached to it (regardless of time)."
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create schedule")</button>
+    </div>
+</form>

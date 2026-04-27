@@ -1,0 +1,67 @@
+@model IReadOnlyList<NetFirewall.Services.Search.SearchHit>
+@{
+    var query = ViewBag.Query as string;
+    // Pretty labels for the entity_type discriminators stored in search_index.
+    static string TypeLabel(string t) => t switch
+    {
+        "filter_rule"     => "Filter rule",
+        "nat_rule"        => "NAT rule",
+        "port_forward"    => "Port forward",
+        "mangle_rule"     => "Mangle rule",
+        "network_object"  => "Network object",
+        "dhcp_subnet"     => "DHCP subnet",
+        "wg_peer"         => "WireGuard peer",
+        _                 => t
+    };
+    static string TypeColor(string t) => t switch
+    {
+        "filter_rule" or "nat_rule" or "port_forward" or "mangle_rule" => "var(--accent)",
+        "network_object" => "var(--feedback-info-fg)",
+        "dhcp_subnet"    => "var(--feedback-success-fg)",
+        "wg_peer"        => "var(--feedback-warning-fg)",
+        _                => "var(--surface-fg-muted)"
+    };
+    var grouped = Model.GroupBy(h => h.EntityType).OrderByDescending(g => g.First().Rank).ToList();
+}
+
+@if (string.IsNullOrWhiteSpace(query))
+{
+    <div class="px-4 py-3 text-xs" style="color: var(--surface-fg-muted);">Type at least 2 characters to search.</div>
+}
+else if (Model.Count == 0)
+{
+    <div class="px-4 py-6 text-center">
+        <p class="text-sm font-medium" style="color: var(--surface-fg);">No results for "<span class="font-mono">@query</span>"</p>
+        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+            Try a single keyword, or check the entity exists. The index updates on insert/update — fresh data is searchable immediately.
+        </p>
+    </div>
+}
+else
+{
+    <div class="max-h-[60vh] overflow-y-auto">
+        @foreach (var group in grouped)
+        {
+            <div class="border-t first:border-t-0" style="border-color: var(--surface-border);">
+                <p class="px-4 pt-3 pb-1 text-[10px] uppercase tracking-wider font-semibold"
+                   style="color: @TypeColor(group.Key);">
+                    @TypeLabel(group.Key) <span style="color: var(--surface-fg-muted);">· @group.Count()</span>
+                </p>
+                @foreach (var h in group)
+                {
+                    <a href="@h.Url"
+                       class="block px-4 py-2 text-sm transition hover:bg-[color:var(--surface-muted)]">
+                        <p class="font-medium truncate">@h.Title</p>
+                        @if (!string.IsNullOrEmpty(h.Subtitle))
+                        {
+                            <p class="text-xs font-mono truncate" style="color: var(--surface-fg-muted);">@h.Subtitle</p>
+                        }
+                    </a>
+                }
+            </div>
+        }
+    </div>
+    <div class="px-4 py-2 border-t text-[10px]" style="border-color: var(--surface-border); color: var(--surface-fg-muted);">
+        @Model.Count result@(Model.Count == 1 ? "" : "s") · Tip: use <span class="font-mono">"exact phrase"</span>, <span class="font-mono">term1 OR term2</span>, <span class="font-mono">-exclude</span>
+    </div>
+}

@@ -36,9 +36,10 @@ public sealed class FwFilterRulesController : Controller
     }
 
     [HttpGet("edit/{id:guid?}")]
-    public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
+    public async Task<IActionResult> Edit(Guid? id, [FromServices] IScheduleService schedules, CancellationToken ct)
     {
         ViewBag.Interfaces = await _firewall.GetInterfacesAsync(ct);
+        ViewBag.Schedules  = await schedules.GetAllAsync(ct);
         if (id is null) return PartialView("_FilterRuleForm", new FilterRuleFormViewModel());
         var r = await _firewall.GetFilterRuleByIdAsync(id.Value, ct);
         return r is null ? NotFound() : PartialView("_FilterRuleForm", FromEntity(r));
@@ -94,7 +95,8 @@ public sealed class FwFilterRulesController : Controller
         DestinationPorts = FwArrayHelpers.Join(r.DestinationPorts),
         ConnectionStates = FwArrayHelpers.Join(r.ConnectionState),
         RateLimit = r.RateLimit, LogPrefix = r.LogPrefix,
-        Priority = r.Priority, Enabled = r.Enabled
+        Priority = r.Priority, Enabled = r.Enabled,
+        ScheduleId = r.ScheduleId
     };
 
     private static FwFilterRule ToEntity(FilterRuleFormViewModel f) => new()
@@ -108,6 +110,7 @@ public sealed class FwFilterRulesController : Controller
         ConnectionState = FwArrayHelpers.Split(f.ConnectionStates),
         RateLimit = string.IsNullOrWhiteSpace(f.RateLimit) ? null : f.RateLimit,
         LogPrefix = f.LogPrefix,
-        Priority = f.Priority, Enabled = f.Enabled
+        Priority = f.Priority, Enabled = f.Enabled,
+        ScheduleId = f.ScheduleId
     };
 }

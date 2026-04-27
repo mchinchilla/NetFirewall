@@ -1,0 +1,91 @@
+@model IReadOnlyList<NetFirewall.Models.Firewall.FwSchedule>
+@{
+    static string FormatDays(int[] dows)
+    {
+        if (dows.Length == 7) return "Daily";
+        if (dows.SequenceEqual(new[] { 1, 2, 3, 4, 5 })) return "Weekdays";
+        if (dows.SequenceEqual(new[] { 0, 6 })) return "Weekends";
+        var names = new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+        return string.Join(" ", dows.OrderBy(d => d).Select(d => names[d]));
+    }
+    var nowUtc = DateTimeOffset.UtcNow;
+}
+
+@if (Model.Count == 0)
+{
+    <p class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+        No schedules yet. Click <span class="font-medium" style="color: var(--surface-fg);">Add schedule</span> to create one.
+    </p>
+}
+else
+{
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                    <th class="px-5 py-2 font-medium">Name</th>
+                    <th class="px-5 py-2 font-medium">Window</th>
+                    <th class="px-5 py-2 font-medium hidden md:table-cell">Days</th>
+                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Timezone</th>
+                    <th class="px-5 py-2 font-medium">Status</th>
+                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y" style="border-color: var(--surface-border);">
+                @foreach (var s in Model)
+                {
+                    var active = s.IsActiveAt(nowUtc);
+                    <tr>
+                        <td class="px-5 py-3 font-medium">
+                            @s.Name
+                            @if (!string.IsNullOrEmpty(s.Description))
+                            {
+                                <p class="text-xs font-normal" style="color: var(--surface-fg-muted);">@s.Description</p>
+                            }
+                        </td>
+                        <td class="px-5 py-3 font-mono text-xs">@s.StartTime.ToString(@"hh\:mm") – @s.EndTime.ToString(@"hh\:mm")</td>
+                        <td class="px-5 py-3 hidden md:table-cell text-xs" style="color: var(--surface-fg-muted);">@FormatDays(s.DaysOfWeek)</td>
+                        <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@s.Timezone</td>
+                        <td class="px-5 py-3">
+                            @if (!s.Enabled)
+                            {
+                                <span class="badge" style="background: color-mix(in srgb, var(--surface-fg-muted) 14%, transparent); color: var(--surface-fg-muted);">Disabled</span>
+                            }
+                            else if (active)
+                            {
+                                <span class="inline-flex items-center gap-1.5 badge" style="background: color-mix(in srgb, var(--feedback-success-fg) 14%, transparent); color: var(--feedback-success-fg);">
+                                    <span class="inline-block h-1.5 w-1.5 rounded-full" style="background: var(--feedback-success-fg);"></span>
+                                    Active now
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge" style="background: color-mix(in srgb, var(--surface-fg-muted) 10%, transparent); color: var(--surface-fg-muted);">Idle</span>
+                            }
+                        </td>
+                        <td class="px-5 py-3 text-right">
+                            <div class="inline-flex items-center gap-1">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Firewall/Schedules/edit/@s.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Edit @s.Name')">Edit</button>
+                                @{ var msg = $"Delete schedule '{s.Name}'? Filter rules currently attached will become unconditional (always-on)."; }
+                                <button type="button" class="btn btn-ghost text-xs" style="color: var(--feedback-danger-fg);"
+                                        hx-post="/Firewall/Schedules/delete/@s.Id"
+                                        hx-trigger="confirmed-del"
+                                        data-msg="@msg"
+                                        @@click.prevent="(async () => {
+                                            const ok = await $store.confirm.ask({
+                                                title: 'Delete schedule?', message: $event.currentTarget.dataset.msg,
+                                                confirmLabel: 'Delete', level: 'danger'
+                                            });
+                                            if (ok) htmx.trigger($el, 'confirmed-del');
+                                        })()">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

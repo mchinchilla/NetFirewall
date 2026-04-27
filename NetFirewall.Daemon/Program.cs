@@ -52,8 +52,22 @@ builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
 builder.Services.AddScoped<INftApplyService, NftApplyService>();
 builder.Services.AddScoped<ITcApplyService, TcApplyService>();
+builder.Services.AddScoped<IScheduleService, ScheduleService>();
 builder.Services.Configure<NftApplyOptions>(builder.Configuration.GetSection("Nft"));
 builder.Services.Configure<TcApplyOptions>(builder.Configuration.GetSection("Tc"));
+
+// Network objects + resolver — needed by FirewallService for nft generation
+// (resolves named source/destination references → flat CIDRs).
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkObjectService,
+                           NetFirewall.Services.Network.NetworkObjectService>();
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkObjectResolver,
+                           NetFirewall.Services.Network.NetworkObjectResolver>();
+
+// Network services + resolver — same idea but L4 (port/protocol catalog).
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceService,
+                           NetFirewall.Services.Network.NetworkServiceService>();
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceResolver,
+                           NetFirewall.Services.Network.NetworkServiceResolver>();
 
 builder.Services.AddKeyedSingleton<INetworkConfigService, DebianInterfacesConfigService>(NetworkConfigMethod.Interfaces);
 builder.Services.AddKeyedSingleton<INetworkConfigService, NetplanConfigService>(NetworkConfigMethod.Netplan);
@@ -77,6 +91,9 @@ builder.Services.Configure<NetFirewall.Services.Monitoring.MetricsCollectorOptio
     builder.Configuration.GetSection("Metrics"));
 builder.Services.AddHostedService<NetFirewall.Services.Monitoring.MetricsCollectorService>();
 builder.Services.AddHostedService<NetFirewall.Services.Firewall.AuditPrunerService>();
+// Schedule watcher — re-applies nft when any time-based filter rule
+// transitions active/inactive. Ticks every 60s, no-op when nothing changed.
+builder.Services.AddHostedService<NetFirewall.Services.Firewall.ScheduleWatcherService>();
 
 // ----- Auth services (sessions read from same Postgres as Web) -----
 builder.Services.AddScoped<IUserService, UserService>();

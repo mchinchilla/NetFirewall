@@ -1,0 +1,163 @@
+@model NetFirewall.Web.Models.Auth.ProfileFormViewModel
+@using NetFirewall.Web.Models
+@{
+    ViewData["Title"] = "Account profile";
+
+    // Common timezones — operator can also type a custom one. The list keeps
+    // the dropdown manageable without a heavy timezone picker.
+    var commonTimezones = new[]
+    {
+        "UTC", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
+        "America/Mexico_City", "America/Sao_Paulo", "Europe/London", "Europe/Madrid",
+        "Europe/Berlin", "Europe/Paris", "Europe/Athens", "Asia/Dubai", "Asia/Kolkata",
+        "Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney"
+    };
+    var locales = new[]
+    {
+        ("en", "English"), ("es", "Español"), ("pt", "Português"), ("fr", "Français"),
+        ("de", "Deutsch"), ("it", "Italiano"), ("ja", "日本語"), ("zh", "中文")
+    };
+}
+
+<div class="mb-6" style="animation: var(--animate-slide-up);">
+    <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Account</p>
+    <h1 class="text-2xl font-semibold tracking-tight">Profile</h1>
+    <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+        How you appear in the UI. Username is fixed; everything else is editable.
+        Changes here only affect display — they don't grant or revoke access.
+    </p>
+</div>
+
+@if (!ViewData.ModelState.IsValid)
+{
+    <div class="mb-4 rounded-md border-l-2 px-3 py-2 text-sm"
+         style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg); border-color: var(--feedback-danger-bd);">
+        @foreach (var err in ViewData.ModelState.Values.SelectMany(v => v.Errors))
+        {
+            <p>@err.ErrorMessage</p>
+        }
+    </div>
+}
+
+<form method="post" action="/account/profile" class="space-y-6">
+    @Html.AntiForgeryToken()
+
+    @* ---------- Identity ---------- *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <header class="mb-4">
+            <h2 class="text-base font-semibold">Identity</h2>
+            <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Display name takes precedence; if empty, "First Last" is used; if both empty, your username.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Username</label>
+                <input type="text" value="@Model.Username" disabled
+                       class="input cursor-not-allowed font-mono"
+                       style="opacity: 0.6;" />
+                <p class="text-xs" style="color: var(--surface-fg-muted);">Immutable — used for login.</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Role</label>
+                <input type="text" value="@Model.Role" disabled
+                       class="input cursor-not-allowed font-mono"
+                       style="opacity: 0.6;" />
+                <p class="text-xs" style="color: var(--surface-fg-muted);">Set by an admin.</p>
+            </div>
+
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.FirstName), Label = "First name", Value = Model.FirstName,
+                Placeholder = "Marvin"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.LastName), Label = "Last name", Value = Model.LastName,
+                Placeholder = "Chinchilla"
+            })
+        </div>
+
+        <div class="mt-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.DisplayName), Label = "Display name (optional)", Value = Model.DisplayName,
+                Placeholder = "auto-derived from First + Last if empty",
+                Help = "Shown in the top header avatar and across the UI."
+            })
+        </div>
+    </section>
+
+    @* ---------- Contact ---------- *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
+        <header class="mb-4">
+            <h2 class="text-base font-semibold">Contact</h2>
+            <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Used for notifications (future) and recovery contact.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Email), Label = "Email", Kind = FormFieldKind.Email,
+                Value = Model.Email, Placeholder = "you@example.com"
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Phone), Label = "Phone (optional)", Value = Model.Phone,
+                Placeholder = "+1 555 0100"
+            })
+        </div>
+    </section>
+
+    @* ---------- Preferences ---------- *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
+        <header class="mb-4">
+            <h2 class="text-base font-semibold">Preferences</h2>
+            <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Display / regional defaults for this account.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Timezone</label>
+                <input list="tz-list" name="@nameof(Model.Timezone)" value="@Model.Timezone"
+                       class="input font-mono" placeholder="UTC" />
+                <datalist id="tz-list">
+                    @foreach (var tz in commonTimezones)
+                    {
+                        <option value="@tz" />
+                    }
+                </datalist>
+                <p class="text-xs" style="color: var(--surface-fg-muted);">Pick from the list or type any IANA timezone (e.g. America/Tegucigalpa).</p>
+            </div>
+
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Locale</label>
+                <select name="@nameof(Model.Locale)" class="input">
+                    @foreach (var (code, label) in locales)
+                    {
+                        <option value="@code" selected="@(code == Model.Locale)">@label (@code)</option>
+                    }
+                </select>
+            </div>
+        </div>
+    </section>
+
+    @* ---------- Audit ---------- *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 240ms;">
+        <header class="mb-4">
+            <h2 class="text-base font-semibold">Account history</h2>
+        </header>
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div>
+                <dt class="text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">Created</dt>
+                <dd class="font-mono">@Model.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</dd>
+            </div>
+            <div>
+                <dt class="text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">Last login</dt>
+                <dd class="font-mono">@(Model.LastLoginAt?.LocalDateTime.ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+            </div>
+        </dl>
+    </section>
+
+    <div class="flex items-center justify-end gap-2">
+        <a href="@Url.Action("Security")" class="btn btn-ghost">Cancel</a>
+        <button type="submit" class="btn btn-primary">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            Save profile
+        </button>
+    </div>
+</form>

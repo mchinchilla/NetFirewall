@@ -36,12 +36,12 @@
         Url.Action("Index", "FwFilterRules")!,
         Url.Action("Index", "FwNatRules")!, Url.Action("Index", "FwPortForwards")!,
         Url.Action("Index", "FwTrafficMarks")!, Url.Action("Index", "FwMangleRules")!,
-        Url.Action("Index", "FwQosConfigs")!,
+        Url.Action("Index", "FwQosConfigs")!, Url.Action("Index", "FwSchedules")!,
         Url.Action("Index", "FwAuditLog")!, Url.Action("Index", "FwApply")!
     };
     var netHrefs = new[] {
         Url.Action("Interfaces", "Network")!, Url.Action("Index", "StaticRoutes")!,
-        Url.Action("Index", "NetworkObjects")!
+        Url.Action("Index", "NetworkObjects")!, Url.Action("Index", "NetworkServices")!
     };
 
     var dhcpOpen = AnyActive(dhcpHrefs) ? "true" : "false";
@@ -95,6 +95,7 @@
         <a href="@Url.Action("Index", "FwTrafficMarks")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwTrafficMarks")!))">Traffic marks</a>
         <a href="@Url.Action("Index", "FwMangleRules")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwMangleRules")!))">Mangle rules</a>
         <a href="@Url.Action("Index", "FwQosConfigs")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwQosConfigs")!))">QoS</a>
+        <a href="@Url.Action("Index", "FwSchedules")"    class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwSchedules")!))">Schedules</a>
         <a href="@Url.Action("Index", "FwAuditLog")"     class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwAuditLog")!))">Audit log</a>
         <a href="@Url.Action("Index", "FwApply")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwApply")!))" style="color: var(--accent);">Apply / Live ruleset</a>
     </div>
@@ -114,7 +115,8 @@
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
         <a href="@Url.Action("Interfaces", "Network")" class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Network")!))">Interfaces</a>
         <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
-        <a href="@Url.Action("Index", "NetworkObjects")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkObjects")!))">Objects</a>
+        <a href="@Url.Action("Index", "NetworkObjects")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkObjects")!))">Objects</a>
+        <a href="@Url.Action("Index", "NetworkServices")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkServices")!))">Services</a>
     </div>
 </div>
 

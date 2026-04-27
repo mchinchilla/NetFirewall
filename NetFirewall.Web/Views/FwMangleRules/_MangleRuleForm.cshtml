@@ -59,10 +59,11 @@
             })
         </div>
 
-        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+        @await Html.PartialAsync("_PortPicker", new AddressPickerViewModel {
             Name = nameof(Model.DestinationPorts), Label = "Destination ports",
             Value = Model.DestinationPorts,
-            Placeholder = "5060, 5061, 10000-20000"
+            Placeholder = "Type port or pick a service…",
+            Help = "Literal ports (5060, 10000-20000) or Network Service names (SIP, RTP)."
         })
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {

@@ -38,4 +38,5 @@ public static class AuthAuditEvents
     public const string BootstrapUsed    = "bootstrap.used";
     public const string UserCreated      = "user.created";
     public const string UserDisabled     = "user.disabled";
+    public const string ProfileUpdated   = "profile.updated";
 }
