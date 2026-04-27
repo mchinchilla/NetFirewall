@@ -1,26 +1,64 @@
+@model NetFirewall.Web.Models.HomeDashboardViewModel
 @using NetFirewall.Web.Models
 @{
     ViewData["Title"] = "Dashboard";
+    var trafficJson = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        labels = Model.TrafficLabels,
+        inSeries = Model.TrafficRxMbps,
+        outSeries = Model.TrafficTxMbps,
+    });
 
-    var kpis = new[] {
-        new KpiCardViewModel {
-            Label = "Active leases", Value = "147",
-            Delta = "+12", DeltaContext = "since yesterday", Trend = DeltaTrend.Up,
+    static string FmtBytes(long bytes)
+    {
+        string[] u = ["B", "KB", "MB", "GB", "TB", "PB"];
+        var i = 0; var x = (double)bytes;
+        while (x >= 1024 && i < u.Length - 1) { x /= 1024; i++; }
+        return $"{x:0.##} {u[i]}";
+    }
+
+    static string AgoFromNow(DateTime ts)
+    {
+        var d = DateTime.UtcNow - ts.ToUniversalTime();
+        if (d.TotalMinutes < 1) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes} min ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours} h ago";
+        return $"{(int)d.TotalDays} d ago";
+    }
+
+    var kpis = new[]
+    {
+        new KpiCardViewModel
+        {
+            Label = "Active leases",
+            Value = Model.ActiveLeaseCount.ToString("N0"),
+            DeltaContext = Model.Subnets.Count > 0 ? $"across {Model.Subnets.Count} subnets" : "no subnets configured",
+            Trend = DeltaTrend.Neutral,
             IconPath = "M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3v4.5a3 3 0 0 1-3 3"
         },
-        new KpiCardViewModel {
-            Label = "WAN status", Value = "Primary",
-            Delta = "●", DeltaContext = "ens192 · 14ms", Trend = DeltaTrend.Up,
+        new KpiCardViewModel
+        {
+            Label = "Interfaces",
+            Value = Model.InterfaceCount.ToString(),
+            DeltaContext = $"{Model.WanInterfaceCount} WAN · {Model.InterfaceCount - Model.WanInterfaceCount} LAN/other",
+            Trend = DeltaTrend.Neutral,
             IconPath = "M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z"
         },
-        new KpiCardViewModel {
-            Label = "Blocked / hr", Value = "3,284",
-            Delta = "+18%", DeltaContext = "vs. last hour", Trend = DeltaTrend.Down,
-            IconPath = "M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"
+        new KpiCardViewModel
+        {
+            Label = "Filter rules",
+            Value = Model.EnabledFilterRuleCount.ToString("N0"),
+            DeltaContext = $"of {Model.TotalFilterRuleCount:N0} total enabled",
+            Trend = DeltaTrend.Neutral,
+            IconPath = "M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z"
         },
-        new KpiCardViewModel {
-            Label = "Throughput", Value = "428", ValueSuffix = "Mbps",
-            Delta = "+24 Mbps", DeltaContext = "peak today", Trend = DeltaTrend.Up,
+        new KpiCardViewModel
+        {
+            Label = "Throughput",
+            Value = Model.CurrentThroughputMbps.ToString("0.#"),
+            ValueSuffix = "Mbps",
+            DeltaContext = "live · all NICs combined",
+            Trend = DeltaTrend.Neutral,
             IconPath = "M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"
         }
     };
@@ -34,28 +72,18 @@
         <h1 class="text-2xl font-semibold tracking-tight">Network at a glance</h1>
     </div>
     <div class="flex items-center gap-2">
-        <button type="button" class="btn btn-ghost"
-                @@click="$store.toasts.info('Refreshed network metrics.', 'Sync')">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
-            Refresh
-        </button>
-        <button type="button" class="btn btn-primary"
-                @@click="(async () => {
-                    const ok = await $store.confirm.ask({
-                        title: 'Create snapshot?',
-                        message: 'Persists current DHCP/firewall state to /var/lib/netfirewall/snapshots.',
-                        confirmLabel: 'Create snapshot',
-                        level: 'default'
-                    });
-                    if (ok) { $store.toasts.success('Snapshot saved.', 'Snapshot created'); }
-                })()">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"/></svg>
-            Snapshot
-        </button>
+        <a href="@Url.Action("Index", "Monitoring")" class="btn btn-ghost">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"/></svg>
+            Live monitoring
+        </a>
+        <a href="@Url.Action("Index", "FwApply")" class="btn btn-primary">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+            Apply firewall
+        </a>
     </div>
 </div>
 
-@* KPI cards — reused via _KpiCard partial *@
+@* KPI cards *@
 <div class="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 mb-6"
      style="animation: var(--animate-slide-up); animation-delay: 60ms;">
     @foreach (var kpi in kpis)
@@ -70,58 +98,67 @@
         <header class="flex items-center justify-between mb-4">
             <div>
                 <h2 class="text-base font-semibold">Traffic — last 24h</h2>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">Bandwidth across both WAN interfaces</p>
+                <p class="text-xs" style="color: var(--surface-fg-muted);">Hourly aggregate from <span class="font-mono">system_metrics_hourly</span></p>
             </div>
-            <div class="flex gap-1 p-1 rounded-md text-xs" style="background-color: var(--surface-muted);">
-                <button class="px-2.5 py-1 rounded shadow-sm" style="background-color: var(--surface-elevated);">24h</button>
-                <button class="px-2.5 py-1 rounded" style="color: var(--surface-fg-muted);">7d</button>
-                <button class="px-2.5 py-1 rounded" style="color: var(--surface-fg-muted);">30d</button>
-            </div>
+            <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline" style="color: var(--accent);">Open in monitoring →</a>
         </header>
 
-        <div class="relative h-56">
-            <canvas x-data
-                    x-init="$nextTick(() => NetFw.charts.makeTraffic($el, {
-                        labels: ['00:00','03:00','06:00','09:00','12:00','15:00','18:00','21:00'],
-                        inSeries:  [120, 180, 95, 240, 380, 410, 460, 320],
-                        outSeries: [80,  140, 60, 180, 290, 330, 360, 240]
-                    }))"></canvas>
-        </div>
+        @if (Model.TrafficLabels.Length == 0)
+        {
+            <div class="h-56 flex flex-col items-center justify-center text-center">
+                <p class="text-sm font-medium" style="color: var(--surface-fg);">No traffic samples yet.</p>
+                <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+                    The collector aggregates hourly. Wait ~1 hour after the daemon starts, or check
+                    <a class="hover:underline" style="color: var(--accent);" href="@Url.Action("Index", "Monitoring")">live monitoring</a>.
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="relative h-56">
+                <canvas x-data='{ data: @Html.Raw(trafficJson) }'
+                        x-init="$nextTick(() => NetFw.charts.makeTraffic($el, data))"></canvas>
+            </div>
 
-        <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
-            <div><p class="font-semibold text-sm">428 Mbps</p><p style="color: var(--surface-fg-muted);">Avg in</p></div>
-            <div><p class="font-semibold text-sm">312 Mbps</p><p style="color: var(--surface-fg-muted);">Avg out</p></div>
-            <div><p class="font-semibold text-sm">8.2 TB</p><p style="color: var(--surface-fg-muted);">Today total</p></div>
-        </div>
+            <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
+                <div><p class="font-semibold text-sm">@Model.TrafficAvgInMbps.ToString("0.#") Mbps</p><p style="color: var(--surface-fg-muted);">Avg in</p></div>
+                <div><p class="font-semibold text-sm">@Model.TrafficAvgOutMbps.ToString("0.#") Mbps</p><p style="color: var(--surface-fg-muted);">Avg out</p></div>
+                <div><p class="font-semibold text-sm">@FmtBytes(Model.TrafficTotalBytes)</p><p style="color: var(--surface-fg-muted);">24h total</p></div>
+            </div>
+        }
     </section>
 
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
         <header class="flex items-center justify-between mb-3">
             <h2 class="text-base font-semibold">Recent activity</h2>
-            <a href="#" class="text-xs hover:underline" style="color: var(--accent);">View all</a>
+            <a href="@Url.Action("Index", "FwAuditLog")" class="text-xs hover:underline" style="color: var(--accent);">View all</a>
         </header>
-        <ol class="relative space-y-4 pl-5">
-            <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--feedback-success-bd); --tw-ring-color: var(--surface-elevated);"></span>
-                <p class="text-sm font-medium">DHCP DDNS sync completed</p>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">42 records · 3 min ago</p>
-            </li>
-            <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--feedback-info-bd); --tw-ring-color: var(--surface-elevated);"></span>
-                <p class="text-sm font-medium">Filter rule #87 added</p>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">forward · drop · 14 min ago</p>
-            </li>
-            <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--feedback-warning-bd); --tw-ring-color: var(--surface-elevated);"></span>
-                <p class="text-sm font-medium">WAN failover: primary → secondary</p>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">15.4s downtime · 27 min ago</p>
-            </li>
-            <li class="relative">
-                <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4" style="background-color: var(--accent); --tw-ring-color: var(--surface-elevated);"></span>
-                <p class="text-sm font-medium">Lease renewed</p>
-                <p class="text-xs" style="color: var(--surface-fg-muted);">192.168.10.42 · b8:27:eb:… · 1 h ago</p>
-            </li>
-        </ol>
+        @if (Model.RecentActivity.Count == 0)
+        {
+            <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">No firewall activity logged yet.</p>
+        }
+        else
+        {
+            <ol class="relative space-y-4 pl-5">
+                @foreach (var a in Model.RecentActivity)
+                {
+                    var dotColor = a.Severity switch
+                    {
+                        ActivitySeverity.Success => "var(--feedback-success-bd)",
+                        ActivitySeverity.Info    => "var(--feedback-info-bd)",
+                        ActivitySeverity.Warning => "var(--feedback-warning-bd)",
+                        ActivitySeverity.Danger  => "var(--feedback-danger-bd)",
+                        _                        => "var(--surface-fg-muted)"
+                    };
+                    <li class="relative">
+                        <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4"
+                              style="background-color: @dotColor; --tw-ring-color: var(--surface-elevated);"></span>
+                        <p class="text-sm font-medium">@a.Title</p>
+                        <p class="text-xs" style="color: var(--surface-fg-muted);">@a.Detail · @AgoFromNow(a.Timestamp)</p>
+                    </li>
+                }
+            </ol>
+        }
     </section>
 </div>
 
@@ -132,66 +169,72 @@
             <h2 class="text-base font-semibold">Subnets &amp; pools</h2>
             <p class="text-xs" style="color: var(--surface-fg-muted);">Lease utilisation per subnet</p>
         </div>
-        <button type="button" class="btn btn-ghost text-xs"
-                @@click="(async () => {
-                    const ok = await $store.confirm.ask({
-                        title: 'Release expired leases?',
-                        message: 'This will release 12 leases past their end_time. Active clients will renew on next DHCPREQUEST.',
-                        confirmLabel: 'Release leases',
-                        level: 'warning'
-                    });
-                    if (ok) { $store.toasts.warning('12 leases released.', 'Cleanup'); }
-                })()">
-            Release expired
-        </button>
+        <a href="@Url.Action("Index", "DhcpSubnets")" class="btn btn-ghost text-xs">Manage subnets</a>
     </header>
-    <div class="overflow-x-auto -mx-5">
-        <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
-                    <th class="px-5 py-2 font-medium">Subnet</th>
-                    <th class="px-5 py-2 font-medium">Range</th>
-                    <th class="px-5 py-2 font-medium">Used</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Utilisation</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y" style="border-color: var(--surface-border);">
-                @foreach (var (cidr, range, used, total, pct, status) in new[] {
-                    ("192.168.10.0/24", ".10–.250", 87, 240, 36, "ok"),
-                    ("192.168.20.0/24", ".10–.200", 154, 190, 81, "warn"),
-                    ("10.0.5.0/24",     ".50–.150", 42, 100, 42, "ok"),
-                    ("172.16.0.0/22",   ".10–.500", 12, 490, 2,  "ok")
-                })
-                {
-                    <tr class="hover:bg-[color:var(--surface-muted)] transition">
-                        <td class="px-5 py-3 font-medium">@cidr</td>
-                        <td class="px-5 py-3" style="color: var(--surface-fg-muted);">@range</td>
-                        <td class="px-5 py-3">@used / @total</td>
-                        <td class="px-5 py-3 hidden md:table-cell">
-                            <div class="flex items-center gap-2">
-                                <div class="h-1.5 w-32 rounded-full overflow-hidden" style="background-color: var(--surface-muted);">
-                                    <div class="h-full rounded-full"
-                                         style="width: @(pct)%; background-color: @(status == "warn" ? "var(--feedback-warning-bd)" : "var(--accent)");"></div>
-                                </div>
-                                <span class="text-xs" style="color: var(--surface-fg-muted);">@(pct)%</span>
-                            </div>
-                        </td>
-                        <td class="px-5 py-3">
-                            @if (status == "warn")
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Near full</span>
-                            }
-                            else
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                                      style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Healthy</span>
-                            }
-                        </td>
+    @if (Model.Subnets.Count == 0)
+    {
+        <p class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">
+            No subnets configured. <a class="hover:underline" style="color: var(--accent);" href="@Url.Action("Index", "SetupWizard")">Run the setup wizard</a> to get started.
+        </p>
+    }
+    else
+    {
+        <div class="overflow-x-auto -mx-5">
+            <table class="min-w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                        <th class="px-5 py-2 font-medium">Subnet</th>
+                        <th class="px-5 py-2 font-medium">Pool range</th>
+                        <th class="px-5 py-2 font-medium">Used</th>
+                        <th class="px-5 py-2 font-medium hidden md:table-cell">Utilisation</th>
+                        <th class="px-5 py-2 font-medium">Status</th>
                     </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+                </thead>
+                <tbody class="divide-y" style="border-color: var(--surface-border);">
+                    @foreach (var s in Model.Subnets)
+                    {
+                        var barColor = s.Status switch
+                        {
+                            "danger" => "var(--feedback-danger-fg)",
+                            "warn"   => "var(--feedback-warning-bd)",
+                            _        => "var(--accent)"
+                        };
+                        <tr>
+                            <td class="px-5 py-3">
+                                <p class="font-medium">@s.Name</p>
+                                <p class="text-xs font-mono" style="color: var(--surface-fg-muted);">@s.Cidr</p>
+                            </td>
+                            <td class="px-5 py-3 font-mono text-xs" style="color: var(--surface-fg-muted);">@(s.PoolRange ?? "—")</td>
+                            <td class="px-5 py-3">@s.UsedLeases / @s.Capacity</td>
+                            <td class="px-5 py-3 hidden md:table-cell">
+                                <div class="flex items-center gap-2">
+                                    <div class="h-1.5 w-32 rounded-full overflow-hidden" style="background-color: var(--surface-muted);">
+                                        <div class="h-full rounded-full" style="width: @(s.UsagePercent.ToString("0.#"))%; background-color: @barColor;"></div>
+                                    </div>
+                                    <span class="text-xs" style="color: var(--surface-fg-muted);">@s.UsagePercent.ToString("0.#")%</span>
+                                </div>
+                            </td>
+                            <td class="px-5 py-3">
+                                @switch (s.Status)
+                                {
+                                    case "danger":
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                              style="background-color: var(--feedback-danger-bg); color: var(--feedback-danger-fg);">Saturated</span>
+                                        break;
+                                    case "warn":
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                              style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Near full</span>
+                                        break;
+                                    default:
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                              style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg);">Healthy</span>
+                                        break;
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 </section>

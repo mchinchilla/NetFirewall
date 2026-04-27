@@ -62,6 +62,16 @@ builder.Services.AddKeyedSingleton<INetworkConfigService, NoOpNetworkConfigServi
 builder.Services.AddSingleton<INetworkConfigResolver, NetworkConfigResolver>();
 builder.Services.AddScoped<IStaticRouteApplicator, StaticRouteApplicator>();
 
+// ----- Monitoring (collector runs HERE, not in Web — daemon is long-lived
+//        and stays running across Web restarts so we don't lose samples). -----
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorService,
+                              NetFirewall.Services.Monitoring.SystemMonitorService>();
+builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
+                           NetFirewall.Services.Monitoring.MetricsQueryService>();
+builder.Services.Configure<NetFirewall.Services.Monitoring.MetricsCollectorOptions>(
+    builder.Configuration.GetSection("Metrics"));
+builder.Services.AddHostedService<NetFirewall.Services.Monitoring.MetricsCollectorService>();
+
 // ----- Auth services (sessions read from same Postgres as Web) -----
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISessionService, SessionService>();

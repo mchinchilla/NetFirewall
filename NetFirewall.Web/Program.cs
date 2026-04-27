@@ -128,9 +128,13 @@ builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFi
 builder.Services.AddSingleton<IAppInfoService, AppInfoService>();
 
 // System monitoring: singleton because the implementation caches per-CPU
-// jiffies between calls to compute usage% deltas correctly.
+// jiffies between calls to compute usage% deltas correctly. The Web only
+// READS metrics (live snapshot + historical query); the daemon is what
+// runs the collector and writes samples to system_metrics_*.
 builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorService,
                               NetFirewall.Services.Monitoring.SystemMonitorService>();
+builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
+                           NetFirewall.Services.Monitoring.MetricsQueryService>();
 
 var app = builder.Build();
 

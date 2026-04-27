@@ -247,6 +247,116 @@ window.NetFw.charts = {
         });
 
         return chart;
+    },
+
+    /**
+     * System resource history — CPU%, Memory%, Load avg (×10 for visibility) on a 0-100 scale.
+     * data = { labels: string[], cpu: number[], memory: number[], load: number[] }
+     */
+    makeSystemHistory(canvasEl, data) {
+        const accent = this.readColor("accent");
+        const warn   = this.readColor("feedback-warning-fg");
+        const ok     = this.readColor("feedback-success-fg");
+        const fgMuted = this.readColor("surface-fg-muted");
+        const border = this.readColor("surface-border");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [
+                    { label: "CPU %",    data: data.cpu,    borderColor: accent, backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                    { label: "Memory %", data: data.memory, borderColor: ok,     backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                    { label: "Load×10",  data: data.load.map(v => v * 10), borderColor: warn, backgroundColor: "transparent", borderDash: [4, 4], tension: 0.3, pointRadius: 0, borderWidth: 2 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: { display: true, position: "bottom", labels: { color: fgMuted, boxWidth: 10, boxHeight: 10, padding: 14, font: { size: 11 } } },
+                    tooltip: { backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted, borderColor: border, borderWidth: 1, padding: 10 }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: fgMuted, maxTicksLimit: 8, font: { size: 10 } } },
+                    y: { grid: { color: border, drawTicks: false }, ticks: { color: fgMuted, font: { size: 10 } }, beginAtZero: true }
+                }
+            }
+        });
+        this.register(chart, () => {
+            chart.data.datasets[0].borderColor = this.readColor("accent");
+            chart.data.datasets[1].borderColor = this.readColor("feedback-success-fg");
+            chart.data.datasets[2].borderColor = this.readColor("feedback-warning-fg");
+            const fm = this.readColor("surface-fg-muted");
+            const bd = this.readColor("surface-border");
+            chart.options.plugins.legend.labels.color = fm;
+            chart.options.scales.x.ticks.color = fm;
+            chart.options.scales.y.ticks.color = fm;
+            chart.options.scales.y.grid.color = bd;
+        });
+        return chart;
+    },
+
+    /**
+     * Network bandwidth history — RX + TX rates (bytes/sec). Y-axis labels auto-scale to KB/MB/GB.
+     * data = { labels: string[], rx: number[], tx: number[] }
+     */
+    makeNetworkHistory(canvasEl, data) {
+        const ctx = canvasEl.getContext("2d");
+        const accent = this.readColor("accent");
+        const secondary = this.readColor("jordy-blue-500");
+        const fgMuted = this.readColor("surface-fg-muted");
+        const border = this.readColor("surface-border");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+
+        const fmtBps = (v) => {
+            const u = ["B/s", "KB/s", "MB/s", "GB/s"];
+            let i = 0; let x = v;
+            while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+            return `${x.toFixed(1)} ${u[i]}`;
+        };
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [
+                    { label: "RX", data: data.rx, borderColor: accent,    backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, accent), fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                    { label: "TX", data: data.tx, borderColor: secondary, backgroundColor: "transparent", borderDash: [4, 4], tension: 0.3, pointRadius: 0, borderWidth: 2 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: { display: true, position: "bottom", labels: { color: fgMuted, boxWidth: 10, boxHeight: 10, padding: 14, font: { size: 11 } } },
+                    tooltip: { backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted, borderColor: border, borderWidth: 1, padding: 10, callbacks: { label: (it) => `${it.dataset.label}: ${fmtBps(it.parsed.y)}` } }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: fgMuted, maxTicksLimit: 8, font: { size: 10 } } },
+                    y: { grid: { color: border, drawTicks: false }, ticks: { color: fgMuted, font: { size: 10 }, callback: fmtBps }, beginAtZero: true }
+                }
+            }
+        });
+        this.register(chart, () => {
+            const a = this.readColor("accent");
+            const s = this.readColor("jordy-blue-500");
+            const fm = this.readColor("surface-fg-muted");
+            const bd = this.readColor("surface-border");
+            chart.data.datasets[0].borderColor = a;
+            chart.data.datasets[0].backgroundColor = this._verticalGradient(ctx, canvasEl.clientHeight, a);
+            chart.data.datasets[1].borderColor = s;
+            chart.options.plugins.legend.labels.color = fm;
+            chart.options.scales.x.ticks.color = fm;
+            chart.options.scales.y.ticks.color = fm;
+            chart.options.scales.y.grid.color = bd;
+        });
+        return chart;
     }
 };
 

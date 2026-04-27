@@ -2,26 +2,79 @@
     ViewData["Title"] = "Monitoring";
     Layout = "_Layout";
 }
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);"
-     x-data="{ paused: false }">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">System</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Live monitoring</h1>
-        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">Sampled directly from <span class="font-mono">/proc</span> on the host every 5 seconds.</p>
-    </div>
-    <div class="flex items-center gap-2">
-        <button type="button" class="btn btn-ghost text-xs"
-                @@click="paused = !paused"
-                x-text="paused ? 'Resume' : 'Pause'"></button>
-        <span class="text-xs" style="color: var(--surface-fg-muted);"
-              x-text="paused ? '⏸ Polling paused' : '● Polling every 5s'"></span>
+<div x-data="{ tab: 'live', range: '24h', paused: false }" class="space-y-4"
+     style="animation: var(--animate-slide-up);">
+
+    @* ---------- header + tabs ---------- *@
+    <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">System</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Monitoring</h1>
+            <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+                <span x-show="tab === 'live'">Live snapshot from <span class="font-mono">/proc</span> · refreshes every 5s.</span>
+                <span x-show="tab === 'history'" x-cloak>Historical samples collected by the daemon every 5s.</span>
+            </p>
+        </div>
+
+        <div class="inline-flex p-1 rounded-md text-xs" style="background-color: var(--surface-muted);">
+            <button class="px-3 py-1 rounded font-medium transition"
+                    :class="tab === 'live'
+                        ? 'shadow-sm'
+                        : ''"
+                    :style="tab === 'live'
+                        ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
+                        : 'color: var(--surface-fg-muted);'"
+                    @@click="tab = 'live'">Live</button>
+            <button class="px-3 py-1 rounded font-medium transition"
+                    :class="tab === 'history' ? 'shadow-sm' : ''"
+                    :style="tab === 'history'
+                        ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
+                        : 'color: var(--surface-fg-muted);'"
+                    @@click="tab = 'history'; $nextTick(() => htmx.trigger(document.getElementById('monitoring-history'), 'manual-refresh'))">History</button>
+        </div>
     </div>
 
-    <div id="monitoring-snapshot" class="w-full mt-3"
-         hx-get="/Monitoring/snapshot"
-         :hx-trigger="paused ? 'load' : 'load, every 5s'"
-         hx-swap="innerHTML">
-        <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+    @* ---------- Live tab ---------- *@
+    <div x-show="tab === 'live'">
+        <div class="flex items-center justify-end gap-2 mb-2">
+            <button type="button" class="btn btn-ghost text-xs"
+                    @@click="paused = !paused"
+                    x-text="paused ? 'Resume' : 'Pause'"></button>
+            <span class="text-xs" style="color: var(--surface-fg-muted);"
+                  x-text="paused ? '⏸ Polling paused' : '● Polling every 5s'"></span>
+        </div>
+        <div id="monitoring-snapshot"
+             hx-get="/Monitoring/snapshot"
+             :hx-trigger="paused ? 'load' : 'load, every 5s'"
+             hx-swap="innerHTML">
+            <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        </div>
+    </div>
+
+    @* ---------- History tab ---------- *@
+    <div x-show="tab === 'history'" x-cloak>
+        <div class="flex items-center justify-end gap-2 mb-2">
+            <span class="text-xs" style="color: var(--surface-fg-muted);">Range:</span>
+            <div class="inline-flex p-1 rounded-md text-xs" style="background-color: var(--surface-muted);">
+                <template x-for="r in ['1h','6h','24h','7d']" :key="r">
+                    <button class="px-2.5 py-1 rounded font-medium transition"
+                            :class="range === r ? 'shadow-sm' : ''"
+                            :style="range === r
+                                ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
+                                : 'color: var(--surface-fg-muted);'"
+                            @@click="range = r; htmx.trigger(document.getElementById('monitoring-history'), 'manual-refresh')"
+                            x-text="r"></button>
+                </template>
+            </div>
+        </div>
+        <div id="monitoring-history"
+             hx-get="/Monitoring/history"
+             :hx-vals="JSON.stringify({ range })"
+             hx-trigger="manual-refresh"
+             hx-swap="innerHTML">
+            <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+                Click the History tab to load.
+            </div>
+        </div>
     </div>
 </div>
