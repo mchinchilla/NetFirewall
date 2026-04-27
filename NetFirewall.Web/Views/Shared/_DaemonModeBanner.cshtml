@@ -1,0 +1,35 @@
+@inject Microsoft.Extensions.Options.IOptions<NetFirewall.Web.Daemon.DaemonClientOptions> DaemonOpts
+@*
+    Dev/legacy-mode banner. Renders only when Daemon:Enabled=false (typically
+    appsettings.Development.json overriding the production default of true).
+
+    Why bother: in dev the Web hands controllers a NullDaemonClient so apply
+    operations return ServiceResponse.Fail("daemon disabled") instead of
+    actually mutating nftables / network / wireguard. Without this banner that
+    "nothing happened" silence is easy to mistake for a successful apply on a
+    no-op state — multiple debugging sessions started with "apply doesn't work"
+    when the real cause was "you're running locally, there's no daemon".
+
+    Banner intentionally has no dismiss: in dev we want the reminder *always*
+    on screen. In prod the conditional below evaluates to false and the
+    partial renders nothing.
+*@
+@if (!DaemonOpts.Value.Enabled)
+{
+    <div role="status" aria-live="polite"
+         class="px-4 sm:px-6 lg:px-8 py-2 border-y flex items-center gap-3 text-xs
+                bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+        <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+            <span class="font-semibold uppercase tracking-wider">Dev mode</span>
+            <span class="opacity-80">— daemon is disabled. Apply operations
+                (firewall, network, WireGuard) return without mutating the host.
+                Set <code class="px-1 py-0.5 rounded font-mono bg-surface-muted">Daemon.Enabled = true</code>
+                in <code class="px-1 py-0.5 rounded font-mono bg-surface-muted">appsettings.json</code>
+                and run the daemon to enable real apply.</span>
+        </div>
+    </div>
+}
