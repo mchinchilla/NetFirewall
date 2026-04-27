@@ -33,10 +33,10 @@
         Url.Action("Index", "DhcpDdns")!, Url.Action("Index", "DhcpFailover")!
     };
     var fwHrefs = new[] {
-        Url.Action("Interfaces", "Network")!, Url.Action("Index", "FwFilterRules")!,
+        Url.Action("Index", "FwFilterRules")!,
         Url.Action("Index", "FwNatRules")!, Url.Action("Index", "FwPortForwards")!,
         Url.Action("Index", "FwTrafficMarks")!, Url.Action("Index", "FwMangleRules")!,
-        Url.Action("Index", "FwQosConfigs")!, Url.Action("Index", "StaticRoutes")!,
+        Url.Action("Index", "FwQosConfigs")!,
         Url.Action("Index", "FwAuditLog")!, Url.Action("Index", "FwApply")!
     };
     var netHrefs = new[] {
@@ -88,14 +88,12 @@
         </svg>
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
-        <a href="@Url.Action("Interfaces", "Network")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Network")!))">Interfaces</a>
         <a href="@Url.Action("Index", "FwFilterRules")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwFilterRules")!))">Filter rules</a>
         <a href="@Url.Action("Index", "FwNatRules")"    class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwNatRules")!))">NAT rules</a>
         <a href="@Url.Action("Index", "FwPortForwards")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwPortForwards")!))">Port forwards</a>
         <a href="@Url.Action("Index", "FwTrafficMarks")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwTrafficMarks")!))">Traffic marks</a>
         <a href="@Url.Action("Index", "FwMangleRules")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwMangleRules")!))">Mangle rules</a>
         <a href="@Url.Action("Index", "FwQosConfigs")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwQosConfigs")!))">QoS</a>
-        <a href="@Url.Action("Index", "StaticRoutes")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
         <a href="@Url.Action("Index", "FwAuditLog")"     class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwAuditLog")!))">Audit log</a>
         <a href="@Url.Action("Index", "FwApply")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "FwApply")!))" style="color: var(--accent);">Apply / Live ruleset</a>
     </div>

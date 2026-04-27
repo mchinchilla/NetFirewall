@@ -67,4 +67,28 @@ public sealed class FwApplyController : Controller
         Response.Headers["HX-Trigger"] = "firewallApplied";
         return this.ToHtmxResponse(envelope);
     }
+
+    [HttpGet("qos-preview")]
+    public async Task<IActionResult> QosPreview(CancellationToken ct)
+    {
+        try
+        {
+            var script = await _firewall.GenerateTcScriptAsync(ct);
+            return PartialView("_PreviewBlock", script);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate tc script");
+            return this.ToHtmxResponse(ServiceResponse<string>.Fail($"Preview failed: {ex.Message}"));
+        }
+    }
+
+    [HttpPost("qos-execute"), ValidateAntiForgeryToken]
+    [Filters.RequireElevated]
+    public async Task<IActionResult> QosExecute(CancellationToken ct)
+    {
+        var envelope = await _daemon.ApplyQosAsync(ct);
+        Response.Headers["HX-Trigger"] = "qosApplied";
+        return this.ToHtmxResponse(envelope);
+    }
 }

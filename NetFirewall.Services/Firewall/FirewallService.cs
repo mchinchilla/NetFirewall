@@ -1535,6 +1535,79 @@ public sealed class FirewallService : IFirewallService
         return sb.ToString();
     }
 
+    public async Task<string> GenerateTcScriptAsync(CancellationToken ct = default)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("#!/usr/bin/env bash");
+        sb.AppendLine("# NetFirewall tc (HTB) configuration");
+        sb.AppendLine($"# Generated: {DateTime.UtcNow:O}");
+        sb.AppendLine("set -u  # do NOT set -e: tc qdisc del fails when no qdisc is present, that's fine");
+        sb.AppendLine();
+
+        var configs = (await GetQosConfigsAsync(ct)).Where(c => c.Enabled && c.InterfaceId.HasValue).ToList();
+        if (configs.Count == 0)
+        {
+            sb.AppendLine("echo 'No QoS configs enabled — nothing to apply.'");
+            return sb.ToString();
+        }
+
+        var interfaces = await GetInterfacesAsync(ct);
+        var ifaceMap = interfaces.ToDictionary(i => i.Id, i => i.Name);
+        var marks = await GetTrafficMarksAsync(ct);
+        var markMap = marks.ToDictionary(m => m.Id, m => m);
+
+        foreach (var cfg in configs)
+        {
+            if (!ifaceMap.TryGetValue(cfg.InterfaceId!.Value, out var ifname))
+            {
+                sb.AppendLine($"# Config {cfg.Id} skipped — interface {cfg.InterfaceId} not found.");
+                continue;
+            }
+
+            var classes = (await GetQosClassesAsync(cfg.Id, ct)).OrderBy(c => c.Priority).ThenBy(c => c.Name).ToList();
+
+            sb.AppendLine($"# ─── {ifname} — total {cfg.TotalBandwidthMbps} Mbps ───");
+            // Reset existing root qdisc on this interface (suppressed if absent).
+            sb.AppendLine($"tc qdisc del dev {ifname} root 2>/dev/null || true");
+
+            // HTB root with default class id 1:999 — un-marked traffic falls through to it.
+            sb.AppendLine($"tc qdisc add dev {ifname} root handle 1: htb default 999");
+            sb.AppendLine($"tc class  add dev {ifname} parent 1: classid 1:1 htb rate {cfg.TotalBandwidthMbps}mbit ceil {cfg.TotalBandwidthMbps}mbit");
+
+            // Each class gets a sequential minor id starting at 10. The default
+            // class gets minor 999 with the leftover bandwidth.
+            var minor = 10;
+            var sumGuaranteed = 0;
+            foreach (var c in classes)
+            {
+                var markName = c.MarkId.HasValue && markMap.TryGetValue(c.MarkId.Value, out var m)
+                    ? $"{m.Name} (0x{m.MarkValue:X})"
+                    : "(no mark)";
+                sb.AppendLine($"# class '{c.Name}' prio {c.Priority} guarantee {c.GuaranteedMbps}mbit ceil {c.CeilingMbps}mbit ← {markName}");
+                sb.AppendLine($"tc class  add dev {ifname} parent 1:1 classid 1:{minor} htb rate {c.GuaranteedMbps}mbit ceil {c.CeilingMbps}mbit prio {c.Priority}");
+                // Fair queueing inside each class so flows don't starve each other.
+                sb.AppendLine($"tc qdisc  add dev {ifname} parent 1:{minor} handle {minor}: fq_codel");
+
+                if (c.MarkId.HasValue && markMap.TryGetValue(c.MarkId.Value, out var mark))
+                {
+                    sb.AppendLine($"tc filter add dev {ifname} parent 1: protocol ip handle {mark.MarkValue} fw classid 1:{minor}");
+                }
+                sumGuaranteed += c.GuaranteedMbps;
+                minor++;
+            }
+
+            // Default class: leftover bandwidth, lowest priority.
+            var leftover = Math.Max(1, cfg.TotalBandwidthMbps - sumGuaranteed);
+            sb.AppendLine($"# default class — {leftover}mbit leftover for un-marked traffic");
+            sb.AppendLine($"tc class  add dev {ifname} parent 1:1 classid 1:999 htb rate {leftover}mbit ceil {cfg.TotalBandwidthMbps}mbit prio 7");
+            sb.AppendLine($"tc qdisc  add dev {ifname} parent 1:999 handle 999: fq_codel");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("echo 'tc apply complete.'");
+        return sb.ToString();
+    }
+
     private static string GenerateFilterRule(FwFilterRule rule, Dictionary<Guid, string> ifaceMap)
     {
         var sb = new StringBuilder("        ");

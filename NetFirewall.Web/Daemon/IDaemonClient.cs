@@ -25,6 +25,9 @@ public interface IDaemonClient
     /// <summary><c>POST /v1/firewall/apply</c> — generate nftables.conf and run <c>nft -f</c>.</summary>
     Task<ServiceResponse<NftApplyResultDto>> ApplyFirewallAsync(CancellationToken ct = default);
 
+    /// <summary><c>POST /v1/firewall/apply-qos</c> — generate the tc/HTB script and execute it via bash.</summary>
+    Task<ServiceResponse<NftApplyResultDto>> ApplyQosAsync(CancellationToken ct = default);
+
     /// <summary><c>GET /v1/firewall/current-ruleset</c> — read live <c>nft list ruleset</c>.</summary>
     Task<string?> GetCurrentRulesetAsync(CancellationToken ct = default);
 

@@ -89,6 +89,13 @@ public interface IFirewallService
     Task<string> GenerateNftablesConfigAsync(CancellationToken ct = default);
     Task<string> GenerateNftablesConfigPreviewAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Generates a bash script that resets and rebuilds the Linux <c>tc</c>
+    /// (traffic control) HTB hierarchy from every enabled QoS config + classes.
+    /// The script is what the daemon runs via <c>bash -c</c> on apply.
+    /// </summary>
+    Task<string> GenerateTcScriptAsync(CancellationToken ct = default);
+
     // Statistics
     Task<FirewallStats> GetStatsAsync(CancellationToken ct = default);
 }

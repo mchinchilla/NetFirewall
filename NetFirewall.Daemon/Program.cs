@@ -50,6 +50,10 @@ builder.Services.AddSingleton(dataSourceBuilder.Build());
 builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
+builder.Services.AddScoped<INftApplyService, NftApplyService>();
+builder.Services.AddScoped<ITcApplyService, TcApplyService>();
+builder.Services.Configure<NftApplyOptions>(builder.Configuration.GetSection("Nft"));
+builder.Services.Configure<TcApplyOptions>(builder.Configuration.GetSection("Tc"));
 
 builder.Services.AddKeyedSingleton<INetworkConfigService, DebianInterfacesConfigService>(NetworkConfigMethod.Interfaces);
 builder.Services.AddKeyedSingleton<INetworkConfigService, NetplanConfigService>(NetworkConfigMethod.Netplan);
@@ -89,6 +93,7 @@ app.MapGet("/health", () => Results.Json(new { status = "ok", version = ThisVers
 // Protected v1 endpoints.
 app.MapNetworkEndpoints();
 app.MapRouteEndpoints();
+app.MapFirewallEndpoints();
 
 ApplySocketMode(daemonOpts);
 Log.Information("NetFirewall daemon listening on Unix socket {Socket}", ResolveSocketPath(daemonOpts.SocketPath));

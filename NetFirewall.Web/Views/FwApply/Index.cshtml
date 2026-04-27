@@ -63,3 +63,46 @@
         </div>
     </section>
 </div>
+
+<div class="mt-6 flex flex-wrap items-end justify-between gap-3"
+     style="animation: var(--animate-slide-up); animation-delay: 180ms;">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Firewall · QoS</p>
+        <h2 class="text-xl font-semibold tracking-tight">Apply tc / HTB hierarchy</h2>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            QoS classes don't apply via nftables — they need <span class="font-mono">iproute2's tc</span>. This rebuilds the HTB tree on every interface that has an enabled QoS config.
+        </p>
+    </div>
+    <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost"
+                hx-get="/Firewall/Apply/qos-preview"
+                hx-target="#qos-preview-area" hx-swap="innerHTML">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+            Generate tc preview
+        </button>
+        <button type="button" class="btn btn-primary"
+                hx-post="/Firewall/Apply/qos-execute"
+                hx-trigger="confirmed-qos-apply"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Apply QoS shaping?',
+                        message: 'Resets and rebuilds the tc HTB tree on every interface with an enabled QoS config. Active flows on those interfaces may briefly stall while qdiscs swap.',
+                        confirmLabel: 'Apply now',
+                        level: 'danger'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed-qos-apply');
+                })()">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+            Apply QoS
+        </button>
+    </div>
+</div>
+
+<section class="card mt-3" style="animation: var(--animate-slide-up); animation-delay: 240ms;">
+    <h2 class="text-base font-semibold mb-3">Generated tc script (preview)</h2>
+    <div id="qos-preview-area">
+        <div class="text-sm py-10 text-center" style="color: var(--surface-fg-muted);">
+            Click <span class="font-medium" style="color: var(--surface-fg);">Generate tc preview</span> to see the bash that would run.
+        </div>
+    </div>
+</section>

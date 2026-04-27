@@ -80,6 +80,33 @@ public static class FirewallEndpoints
             return Results.Json(ServiceResponse<string>.Ok(path, "Ruleset backed up."));
         })
         .WithMetadata(new DaemonRequireElevatedAttribute());
+
+        grp.MapPost("/apply-qos", async (
+                ITcApplyService tc,
+                IAuthAuditService audit,
+                ClaimsPrincipal user,
+                HttpContext ctx,
+                CancellationToken ct) =>
+        {
+            var result = await tc.ApplyAsync(ct);
+            var msg = result.Success
+                ? $"tc/HTB hierarchy applied (exit {result.ExitCode})"
+                : (string.IsNullOrEmpty(result.Error) ? $"tc apply failed (exit {result.ExitCode})" : result.Error.Trim());
+
+            await audit.LogAsync(
+                "firewall.apply-qos",
+                userId: TryUid(user),
+                username: user.Identity?.Name,
+                ip: ctx.Connection.RemoteIpAddress,
+                userAgent: ctx.Request.Headers.UserAgent.ToString(),
+                detail: new { success = result.Success, exit = result.ExitCode, error = result.Error },
+                ct: ct);
+
+            return result.Success
+                ? Results.Json(ServiceResponse<NftApplyDto>.Ok(NftApplyDto.From(result), msg))
+                : Results.Json(ServiceResponse<NftApplyDto>.Fail(msg), statusCode: 500);
+        })
+        .WithMetadata(new DaemonRequireElevatedAttribute());
     }
 
     private static Guid? TryUid(ClaimsPrincipal user)

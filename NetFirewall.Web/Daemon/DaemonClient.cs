@@ -61,6 +61,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<NftApplyResultDto>> ApplyFirewallAsync(CancellationToken ct = default)
         => PostAsync<NftApplyResultDto>("/v1/firewall/apply", ct);
 
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyQosAsync(CancellationToken ct = default)
+        => PostAsync<NftApplyResultDto>("/v1/firewall/apply-qos", ct);
+
     public async Task<string?> GetCurrentRulesetAsync(CancellationToken ct = default)
     {
         try
