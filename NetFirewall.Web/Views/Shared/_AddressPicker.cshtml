@@ -1,0 +1,83 @@
+@model NetFirewall.Web.Models.AddressPickerViewModel
+@*
+    Tag-input with autocomplete for firewall rule address fields.
+    Each tag is either a literal CIDR/IP/range OR a network-object name (the
+    server-side resolver disambiguates at apply time, so we just pass strings).
+
+    Backing store is a hidden <input> so server-side parsing of comma-separated
+    values stays unchanged — no controller changes required to swap _FormField
+    for _AddressPicker.
+*@
+@{
+    var fieldId = $"addr-{Model.Name.Replace(".", "-")}";
+}
+
+<div class="space-y-1.5"
+     x-data="addressPicker(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Value ?? string.Empty)))"
+     x-init="$nextTick(() => $refs.hidden.value = csv)">
+    <label for="@fieldId" class="block text-xs font-medium" style="color: var(--surface-fg);">
+        @Model.Label
+        @if (Model.Required)
+        {
+            <span style="color: var(--feedback-danger-fg);">*</span>
+        }
+    </label>
+
+    @* Hidden input — what the server actually receives. *@
+    <input type="hidden" name="@Model.Name" :value="csv" x-ref="hidden" />
+
+    <div class="relative">
+        <div class="input flex flex-wrap items-center gap-1.5 min-h-9 cursor-text"
+             style="padding: 0.375rem 0.5rem;"
+             @@click="$refs.text.focus()">
+            <template x-for="(tag, i) in tags" :key="`${tag}-${i}`">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
+                      :style="looksLikeLiteral(tag)
+                          ? 'background: color-mix(in srgb, var(--surface-fg-muted) 14%, transparent); color: var(--surface-fg);'
+                          : 'background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);'">
+                    <svg x-show="!looksLikeLiteral(tag)" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068"/></svg>
+                    <span class="font-mono" x-text="tag"></span>
+                    <button type="button" class="-mr-0.5 opacity-60 hover:opacity-100"
+                            @@click.stop="removeTag(i)" tabindex="-1"
+                            aria-label="Remove">
+                        <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                    </button>
+                </span>
+            </template>
+            <input type="text" id="@fieldId" x-ref="text"
+                   x-model="input"
+                   @@input="search()"
+                   @@keydown="onKey($event)"
+                   @@blur="setTimeout(() => open = false, 150)"
+                   @@focus="if (suggestions.length > 0) open = true"
+                   class="flex-1 min-w-32 outline-none bg-transparent text-sm"
+                   placeholder="@(Model.Placeholder ?? "Type CIDR or object name…")" />
+        </div>
+
+        @* Suggestion dropdown. *@
+        <div x-show="open && suggestions.length > 0" x-cloak
+             x-transition.opacity.duration.100ms
+             class="absolute z-20 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md shadow-lg border"
+             style="background: var(--surface-elevated); border-color: var(--surface-border);">
+            <template x-for="(s, i) in suggestions" :key="s.id">
+                <button type="button"
+                        @@mousedown.prevent="addTag(s.name)"
+                        @@mouseenter="active = i"
+                        class="w-full text-left px-3 py-2 text-sm flex items-baseline justify-between gap-3"
+                        :style="i === active
+                            ? 'background: color-mix(in srgb, var(--accent) 12%, transparent);'
+                            : ''">
+                    <span class="font-mono font-medium" x-text="s.name"></span>
+                    <span class="text-xs" style="color: var(--surface-fg-muted);">
+                        <span x-text="s.type"></span><span x-show="s.value"> · <span x-text="s.value" class="font-mono"></span></span>
+                    </span>
+                </button>
+            </template>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Model.Help))
+    {
+        <p class="text-xs" style="color: var(--surface-fg-muted);">@Model.Help</p>
+    }
+</div>

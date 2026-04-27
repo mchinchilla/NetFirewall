@@ -87,6 +87,82 @@ public sealed class NetworkObjectService : INetworkObjectService
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
+    public async Task<NetworkObjectUsage> FindUsagesAsync(string objectName, CancellationToken ct = default)
+    {
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+
+        async Task<List<UsageEntry>> ScanArrayCols(string table, string[] cols)
+        {
+            var entries = new List<UsageEntry>();
+            foreach (var col in cols)
+            {
+                var sql = $"SELECT id, COALESCE(description, '(no description)') AS d, '{col}' AS field " +
+                          $"FROM {table} WHERE @n = ANY({col})";
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("n", objectName);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    entries.Add(new UsageEntry(
+                        reader.GetGuid(0),
+                        reader.GetString(1),
+                        reader.GetString(2)));
+                }
+            }
+            return entries;
+        }
+
+        async Task<List<UsageEntry>> ScanScalarCol(string table, string col)
+        {
+            var sql = $"SELECT id, COALESCE(description, '(no description)') AS d, '{col}' AS field " +
+                      $"FROM {table} WHERE {col} = @n";
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("n", objectName);
+            var entries = new List<UsageEntry>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                entries.Add(new UsageEntry(reader.GetGuid(0), reader.GetString(1), reader.GetString(2)));
+            }
+            return entries;
+        }
+
+        async Task<List<UsageEntry>> FindParentGroups()
+        {
+            const string sql = @"
+                SELECT p.id, p.name
+                  FROM network_object_members m
+                  JOIN network_objects p ON p.id = m.parent_id
+                  JOIN network_objects c ON c.id = m.child_id
+                 WHERE c.name = @n";
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("n", objectName);
+            var entries = new List<UsageEntry>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                entries.Add(new UsageEntry(reader.GetGuid(0), reader.GetString(1), "members"));
+            return entries;
+        }
+
+        // Tables may not exist yet (partial install). Catch undefined_table per scan.
+        var filter  = await Safe(() => ScanArrayCols("fw_filter_rules",  new[] { "source_addresses", "destination_addresses" }));
+        var pf      = await Safe(() => ScanArrayCols("fw_port_forwards", new[] { "source_addresses" }));
+        var mangle  = await Safe(() => ScanArrayCols("fw_mangle_rules",  new[] { "source_addresses", "destination_addresses" }));
+        var nat     = await Safe(() => ScanScalarCol("fw_nat_rules",     "source_network"));
+        var parents = await Safe(FindParentGroups);
+
+        return new NetworkObjectUsage(filter, pf, nat, mangle, parents);
+    }
+
+    private static async Task<List<UsageEntry>> Safe(Func<Task<List<UsageEntry>>> fn)
+    {
+        try { return await fn(); }
+        catch (PostgresException ex) when (ex.SqlState == "42P01") // undefined_table
+        {
+            return new List<UsageEntry>();
+        }
+    }
+
     public async Task SetGroupMembersAsync(Guid parentId, IEnumerable<Guid> childIds, CancellationToken ct = default)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);

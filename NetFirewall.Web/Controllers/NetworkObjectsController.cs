@@ -59,6 +59,20 @@ public sealed class NetworkObjectsController : Controller
         return Json(filtered.Select(o => new { o.Id, o.Name, o.Type, o.Value }).Take(20));
     }
 
+    /// <summary>
+    /// Where-used panel — consumed by the Edit drawer (top of form) so the
+    /// operator sees what depends on this object before changing/deleting it.
+    /// </summary>
+    [HttpGet("usages/{id:guid}")]
+    public async Task<IActionResult> Usages(Guid id, CancellationToken ct)
+    {
+        var obj = await _objects.GetByIdAsync(id, includeMembers: false, ct);
+        if (obj is null) return NotFound();
+        var usages = await _objects.FindUsagesAsync(obj.Name, ct);
+        ViewBag.ObjectName = obj.Name;
+        return PartialView("_Usages", usages);
+    }
+
     [HttpPost("save"), ValidateAntiForgeryToken]
     public async Task<IActionResult> Save(NetworkObjectFormViewModel form, CancellationToken ct)
     {

@@ -64,6 +64,13 @@ public sealed class NetworkObjectFormViewModel : IValidatableObject
                         !System.Net.IPAddress.TryParse(parts[1].Trim(), out _))
                         yield return new ValidationResult("Range must be 'start-end' IPs (e.g. 10.0.0.10-10.0.0.50).", new[] { nameof(Value) });
                     break;
+                case NetworkObjectTypes.Fqdn:
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(v,
+                            @"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"))
+                        yield return new ValidationResult(
+                            "FQDN must be a valid hostname (e.g. slack.com, api.example.org).",
+                            new[] { nameof(Value) });
+                    break;
             }
         }
     }

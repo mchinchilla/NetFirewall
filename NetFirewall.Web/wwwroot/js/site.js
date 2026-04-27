@@ -407,6 +407,105 @@ document.addEventListener("alpine:init", () => {
         get uptime() { return window.NetFw.formatUptime(this.nowMs - this.startedAtMs); }
     }));
 
+    /* ---------- addressPicker ---------- tag input with object autocomplete.
+     * Used in firewall rule editors (filter/NAT/port forward/mangle) for
+     * source/destination address fields. Stores the comma-separated value in
+     * a hidden input so server-side parsing stays unchanged.
+     *
+     * Backing store: <input type="hidden" name="..." x-ref="hidden">
+     * Visible UI: tag chips + text input + dropdown of suggestions.
+     *
+     * Each tag is either a literal CIDR/IP or an object name (the resolver
+     * disambiguates server-side, so we only need to pass the strings through).
+     *
+     *   <div x-data="addressPicker('192.168.1.0/24, DB_SERVERS')">
+     *     <input type="hidden" x-ref="hidden" name="SourceAddresses" :value="csv">
+     *     ...template...
+     *   </div>
+     */
+    Alpine.data("addressPicker", (initialCsv) => ({
+        tags: [],            // current chips
+        input: "",           // text the user is typing
+        suggestions: [],     // current dropdown rows
+        open: false,         // dropdown open?
+        active: -1,          // keyboard-highlighted suggestion index
+        _searchTimer: null,
+
+        init() {
+            this.tags = (initialCsv || "")
+                .split(",")
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+        },
+
+        get csv() { return this.tags.join(", "); },
+
+        looksLikeLiteral(v) {
+            return v.includes("/") || v.includes("-") || /^\d+\.\d+\.\d+\.\d+$/.test(v);
+        },
+
+        addTag(value) {
+            const v = (value || "").trim();
+            if (!v) return;
+            if (!this.tags.includes(v)) this.tags.push(v);
+            this.input = "";
+            this.suggestions = [];
+            this.open = false;
+            this.active = -1;
+            this.$nextTick(() => this.$refs.hidden && (this.$refs.hidden.value = this.csv));
+        },
+
+        removeTag(idx) {
+            this.tags.splice(idx, 1);
+            this.$nextTick(() => this.$refs.hidden && (this.$refs.hidden.value = this.csv));
+        },
+
+        async search() {
+            if (this._searchTimer) clearTimeout(this._searchTimer);
+            const q = this.input.trim();
+            if (!q) { this.suggestions = []; this.open = false; return; }
+
+            this._searchTimer = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`/Network/Objects/autocomplete?q=${encodeURIComponent(q)}`, {
+                        headers: { "Accept": "application/json" }
+                    });
+                    if (!resp.ok) { this.suggestions = []; return; }
+                    this.suggestions = await resp.json();
+                    this.open = this.suggestions.length > 0;
+                    this.active = this.suggestions.length > 0 ? 0 : -1;
+                } catch {
+                    this.suggestions = [];
+                    this.open = false;
+                }
+            }, 150); // debounce
+        },
+
+        onKey(e) {
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                if (this.suggestions.length === 0) return;
+                this.active = (this.active + 1) % this.suggestions.length;
+                this.open = true;
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                if (this.suggestions.length === 0) return;
+                this.active = (this.active - 1 + this.suggestions.length) % this.suggestions.length;
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (this.open && this.active >= 0) this.addTag(this.suggestions[this.active].name);
+                else if (this.input.trim()) this.addTag(this.input);
+            } else if (e.key === "," || e.key === " ") {
+                if (this.input.trim()) { e.preventDefault(); this.addTag(this.input); }
+            } else if (e.key === "Backspace" && !this.input && this.tags.length > 0) {
+                this.removeTag(this.tags.length - 1);
+            } else if (e.key === "Escape") {
+                this.open = false;
+                this.active = -1;
+            }
+        }
+    }));
+
     Alpine.store("ui", {
         ...DEFAULT_STATE,
         palettes: PALETTES,

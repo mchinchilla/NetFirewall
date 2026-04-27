@@ -17,6 +17,17 @@
     @Html.AntiForgeryToken()
     @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
 
+    @* Where-used panel — surfaces what depends on this object before edits/deletes. *@
+    @if (Model.Id.HasValue)
+    {
+        <div class="mb-4"
+             hx-get="/Network/Objects/usages/@Model.Id"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="text-xs py-2 text-center" style="color: var(--surface-fg-muted);">Checking usages…</div>
+        </div>
+    }
+
     <div class="space-y-4">
         <div class="grid grid-cols-2 gap-3">
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
@@ -45,6 +56,7 @@
                 <p x-show="type === 'host'">Single IPv4 address: <span class="font-mono">10.0.0.5</span> (we add /32 automatically).</p>
                 <p x-show="type === 'network'">CIDR: <span class="font-mono">10.0.0.0/24</span>, <span class="font-mono">192.168.1.0/27</span>, etc.</p>
                 <p x-show="type === 'range'">Inclusive range: <span class="font-mono">10.0.0.10-10.0.0.50</span>.</p>
+                <p x-show="type === 'fqdn'">Hostname: <span class="font-mono">slack.com</span>, <span class="font-mono">api.example.org</span>. Resolved via DNS at every nft apply, cached per <code>network_objects.fqdn_ttl_seconds</code> (default 5 min).</p>
             </div>
         </div>
 

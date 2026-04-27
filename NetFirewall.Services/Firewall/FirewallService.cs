@@ -1450,7 +1450,11 @@ public sealed class FirewallService : IFirewallService
         // (these are throwaway DTOs from this read, never persisted back).
         await ResolveAddressesAsync(filterRules,  ct);
         await ResolveAddressesAsync(portForwards, ct);
-        await ResolveAddressesAsync(natRules,     ct);
+
+        // NAT resolution returns a per-rule list because a single SourceNetwork
+        // referencing a group can expand to N CIDRs, and SNAT/MASQUERADE in
+        // nft only accepts one saddr per rule — we emit N rules.
+        var natSources = await ResolveNatSourcesAsync(natRules, ct);
 
         // NAT table (for port forwards and masquerade/snat)
         sb.AppendLine("table ip nat {");
@@ -1468,10 +1472,19 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("    chain postrouting {");
         sb.AppendLine("        type nat hook postrouting priority srcnat; policy accept;");
 
-        // NAT rules (masquerade/snat)
+        // NAT rules (masquerade/snat) — emit one nft rule per resolved source CIDR.
         foreach (var nat in natRules.Where(n => n.Enabled))
         {
-            sb.AppendLine(GenerateNatRule(nat, ifaceMap));
+            if (!natSources.TryGetValue(nat.Id, out var sources) || sources.Count == 0)
+            {
+                // Unresolvable source — skip with a comment so apply diff is honest.
+                sb.AppendLine($"        # SKIP nat {nat.Id} — source '{nat.SourceNetwork}' could not be resolved");
+                continue;
+            }
+            foreach (var src in sources)
+            {
+                sb.AppendLine(GenerateNatRule(nat, src, ifaceMap));
+            }
         }
 
         sb.AppendLine("    }");
@@ -1648,20 +1661,30 @@ public sealed class FirewallService : IFirewallService
     }
 
     /// <summary>
-    /// NAT rules use a single <c>SourceNetwork</c> string (not an array). If
-    /// the value matches a network-object name, we resolve it down to its
-    /// first member CIDR. For groups with multiple members we currently take
-    /// the first only — multi-source NAT needs a richer field shape, future
-    /// iteration.
+    /// NAT rules use a single <c>SourceNetwork</c> string. When that value
+    /// resolves to N CIDRs (e.g. it referenced a group with multiple members,
+    /// or the operator typed a comma-separated list of literals + names),
+    /// we'll emit N nft rules — one per resolved source. Returns a map keyed
+    /// by rule id so the caller can fan out the loop.
     /// </summary>
-    private async Task ResolveAddressesAsync(IReadOnlyList<FwNatRule> rules, CancellationToken ct)
+    private async Task<Dictionary<Guid, IReadOnlyList<string>>> ResolveNatSourcesAsync(
+        IReadOnlyList<FwNatRule> rules, CancellationToken ct)
     {
+        var dict = new Dictionary<Guid, IReadOnlyList<string>>(rules.Count);
         foreach (var r in rules)
         {
-            if (string.IsNullOrWhiteSpace(r.SourceNetwork)) continue;
-            var resolved = await _objectResolver.ResolveAsync(new[] { r.SourceNetwork }, ct);
-            if (resolved.Count > 0) r.SourceNetwork = resolved[0];
+            if (string.IsNullOrWhiteSpace(r.SourceNetwork))
+            {
+                dict[r.Id] = Array.Empty<string>();
+                continue;
+            }
+            // Allow comma-separated values in the field too — same UX as
+            // filter/PF where multi-source typing is natural.
+            var inputs = r.SourceNetwork
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            dict[r.Id] = await _objectResolver.ResolveAsync(inputs, ct);
         }
+        return dict;
     }
 
     private static string GenerateFilterRule(FwFilterRule rule, Dictionary<Guid, string> ifaceMap)
@@ -1794,12 +1817,17 @@ public sealed class FirewallService : IFirewallService
         return sb.ToString();
     }
 
-    private static string GenerateNatRule(FwNatRule nat, Dictionary<Guid, string> ifaceMap)
+    /// <summary>
+    /// Emit one NAT rule. <paramref name="sourceCidr"/> is the resolved value
+    /// from <see cref="ResolveNatSourcesAsync"/> — this generator is called
+    /// once per resolved source, so a group of N members produces N rules.
+    /// </summary>
+    private static string GenerateNatRule(FwNatRule nat, string sourceCidr, Dictionary<Guid, string> ifaceMap)
     {
         var sb = new StringBuilder("        ");
 
-        // Source network
-        sb.Append($"ip saddr {nat.SourceNetwork} ");
+        // Source network (resolved — could be a literal CIDR or one of N from a group)
+        sb.Append($"ip saddr {sourceCidr} ");
 
         // Output interface
         if (nat.OutputInterfaceId.HasValue && ifaceMap.TryGetValue(nat.OutputInterfaceId.Value, out var iface))

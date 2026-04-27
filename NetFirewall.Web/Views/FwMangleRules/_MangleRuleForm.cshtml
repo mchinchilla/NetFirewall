@@ -49,11 +49,11 @@
         })
 
         <div class="grid grid-cols-2 gap-3">
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            @await Html.PartialAsync("_AddressPicker", new AddressPickerViewModel {
                 Name = nameof(Model.SourceAddresses), Label = "Source addresses",
                 Value = Model.SourceAddresses, Placeholder = "(any)"
             })
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            @await Html.PartialAsync("_AddressPicker", new AddressPickerViewModel {
                 Name = nameof(Model.DestinationAddresses), Label = "Destination addresses",
                 Value = Model.DestinationAddresses, Placeholder = "(any)"
             })

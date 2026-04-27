@@ -67,13 +67,13 @@
         </div>
 
         <div class="grid grid-cols-2 gap-3">
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            @await Html.PartialAsync("_AddressPicker", new AddressPickerViewModel {
                 Name = nameof(Model.SourceAddresses), Label = "Source addresses",
                 Value = Model.SourceAddresses,
-                Placeholder = "192.168.10.0/24, 10.0.0.0/8",
-                Help = "Comma-separated IPs / CIDRs. Empty = any."
+                Placeholder = "Type CIDR or object…",
+                Help = "Type literal CIDRs (e.g. 192.168.1.0/24) or pick a Network Object by name. Empty = any."
             })
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            @await Html.PartialAsync("_AddressPicker", new AddressPickerViewModel {
                 Name = nameof(Model.DestinationAddresses), Label = "Destination addresses",
                 Value = Model.DestinationAddresses,
                 Placeholder = "(any)"

@@ -28,7 +28,14 @@ public static class NetworkObjectTypes
     public const string Range   = "range";
     public const string Group   = "group";
 
-    public static readonly string[] All = [Host, Network, Range, Group];
+    /// <summary>
+    /// Hostname resolved via DNS at apply time. Result cached in-process with
+    /// a configurable TTL — the resolver does the lookup, so callers don't
+    /// need to know the difference between fqdn and a literal CIDR.
+    /// </summary>
+    public const string Fqdn    = "fqdn";
+
+    public static readonly string[] All = [Host, Network, Range, Group, Fqdn];
 
     public static bool IsValid(string t) => Array.IndexOf(All, t) >= 0;
 }

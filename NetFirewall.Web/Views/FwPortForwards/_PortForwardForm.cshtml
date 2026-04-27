@@ -36,11 +36,11 @@
             })
         </div>
 
-        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+        @await Html.PartialAsync("_AddressPicker", new AddressPickerViewModel {
             Name = nameof(Model.SourceAddresses), Label = "Allowed source addresses",
             Value = Model.SourceAddresses,
             Placeholder = "(any)",
-            Help = "Comma-separated IPs / CIDRs. Empty = open to internet."
+            Help = "Type literal CIDRs or pick a Network Object. Empty = open to the internet."
         })
 
         <div class="grid grid-cols-2 gap-3">

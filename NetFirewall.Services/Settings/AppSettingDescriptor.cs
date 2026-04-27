@@ -82,6 +82,12 @@ public static class AppSettingDescriptors
             "Client DNS server",
             "DNS pushed into client configs. Leave empty to skip the DNS line. Useful when split-tunneling so clients still resolve internal names.",
             AppSettingType.String, ""),
+
+        // ===== Network objects =====
+        new("network_objects.fqdn_ttl_seconds", "Network objects",
+            "FQDN DNS cache TTL (seconds)",
+            "How long resolved FQDN-type objects stay in the in-process cache before re-resolving. Lower = fresher updates when DNS records change, higher = fewer DNS queries on every nft apply. Default 300 (5 min).",
+            AppSettingType.Int, "300"),
     };
 
     public static AppSettingDescriptor? Find(string key) =>
