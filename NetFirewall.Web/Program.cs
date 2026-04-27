@@ -127,6 +127,12 @@ builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFi
 // Runtime metadata for the login system-info card.
 builder.Services.AddSingleton<IAppInfoService, AppInfoService>();
 
+// Read-only catalog of /Bash reference scripts (nftables conf, rt_tables, etc).
+builder.Services.Configure<NetFirewall.Web.Services.BashScriptCatalogOptions>(
+    builder.Configuration.GetSection("BashCatalog"));
+builder.Services.AddSingleton<NetFirewall.Web.Services.IBashScriptCatalog,
+                              NetFirewall.Web.Services.BashScriptCatalog>();
+
 // System monitoring: singleton because the implementation caches per-CPU
 // jiffies between calls to compute usage% deltas correctly. The Web only
 // READS metrics (live snapshot + historical query); the daemon is what
