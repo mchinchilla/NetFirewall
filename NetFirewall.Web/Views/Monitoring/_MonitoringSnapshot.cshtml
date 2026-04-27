@@ -1,0 +1,137 @@
+@model NetFirewall.Services.Monitoring.SystemMetricsSnapshot
+@using NetFirewall.Web.Models
+@{
+    string Pct(double v) => $"{v:0.0}";
+    string FmtBytesPerSec(double bps)
+    {
+        string[] u = ["B/s", "KB/s", "MB/s", "GB/s"];
+        var i = 0; var x = bps;
+        while (x >= 1024 && i < u.Length - 1) { x /= 1024; i++; }
+        return $"{x:0.##} {u[i]}";
+    }
+    string FmtUptime(TimeSpan t) =>
+        t.TotalDays >= 1 ? $"{(int)t.TotalDays}d {t.Hours:D2}h {t.Minutes:D2}m"
+                         : $"{t.Hours:D2}h {t.Minutes:D2}m {t.Seconds:D2}s";
+}
+
+<section class="grid gap-3 grid-cols-2 lg:grid-cols-4 mb-4">
+    @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
+        Label = "CPU usage", Value = Pct(Model.Cpu.UsagePercent), ValueSuffix = "%",
+        DeltaContext = $"{Model.Cpu.CoreCount} cores · idle {Pct(Model.Cpu.IdlePercent)}%",
+        IconPath = "M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"
+    })
+    @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
+        Label = "Memory", Value = Pct(Model.Memory.UsagePercent), ValueSuffix = "%",
+        DeltaContext = $"{Model.Memory.UsedFormatted} / {Model.Memory.TotalFormatted}",
+        IconPath = "M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3v4.5a3 3 0 0 1-3 3m-13.5 0a3 3 0 0 0-3 3v3a3 3 0 0 0 3 3h13.5a3 3 0 0 0 3-3v-3a3 3 0 0 0-3-3"
+    })
+    @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
+        Label = "Load avg", Value = $"{Model.System.LoadAverage1Min:0.00}",
+        DeltaContext = $"5m {Model.System.LoadAverage5Min:0.00} · 15m {Model.System.LoadAverage15Min:0.00}",
+        IconPath = "M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"
+    })
+    @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
+        Label = "Uptime", Value = FmtUptime(Model.System.Uptime),
+        DeltaContext = $"{Model.System.ProcessCount} procs · booted {Model.System.BootTime:yyyy-MM-dd HH:mm}",
+        IconPath = "M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+    })
+</section>
+
+<div class="grid gap-3 grid-cols-1 lg:grid-cols-2">
+    <section class="card">
+        <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-base font-semibold">Disks</h2>
+            <span class="text-xs" style="color: var(--surface-fg-muted);">@Model.Disks.Count mounted</span>
+        </div>
+        @if (Model.Disks.Count == 0)
+        {
+            <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">No disk metrics available.</p>
+        }
+        else
+        {
+            <div class="overflow-x-auto -mx-5">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                            <th class="px-5 py-2 font-medium">Mount</th>
+                            <th class="px-5 py-2 font-medium hidden md:table-cell">Device</th>
+                            <th class="px-5 py-2 font-medium">Used</th>
+                            <th class="px-5 py-2 font-medium">Total</th>
+                            <th class="px-5 py-2 font-medium">Usage</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y" style="border-color: var(--surface-border);">
+                        @foreach (var d in Model.Disks.OrderByDescending(x => x.UsagePercent))
+                        {
+                            var pct = d.UsagePercent;
+                            var barColor = pct >= 90 ? "var(--feedback-danger-fg)"
+                                         : pct >= 75 ? "var(--feedback-warning-fg)"
+                                                     : "var(--accent)";
+                            <tr>
+                                <td class="px-5 py-3 font-mono text-xs">@d.MountPoint</td>
+                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@d.Device</td>
+                                <td class="px-5 py-3 text-xs">@d.UsedFormatted</td>
+                                <td class="px-5 py-3 text-xs">@d.TotalFormatted</td>
+                                <td class="px-5 py-3 w-40">
+                                    <div class="flex items-center gap-2">
+                                        <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: color-mix(in srgb, @barColor 18%, transparent);">
+                                            <div class="h-full rounded-full" style="width: @($"{pct:0.0}")%; background: @barColor;"></div>
+                                        </div>
+                                        <span class="text-xs font-mono w-10 text-right" style="color: @barColor;">@Pct(pct)%</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="card">
+        <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-base font-semibold">Network interfaces</h2>
+            <span class="text-xs" style="color: var(--surface-fg-muted);">@Model.Network.Count up</span>
+        </div>
+        @if (Model.Network.Count == 0)
+        {
+            <p class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">No interface metrics available.</p>
+        }
+        else
+        {
+            <div class="overflow-x-auto -mx-5">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs uppercase tracking-wider" style="color: var(--surface-fg-muted);">
+                            <th class="px-5 py-2 font-medium">Interface</th>
+                            <th class="px-5 py-2 font-medium">RX rate</th>
+                            <th class="px-5 py-2 font-medium">TX rate</th>
+                            <th class="px-5 py-2 font-medium hidden md:table-cell">RX total</th>
+                            <th class="px-5 py-2 font-medium hidden md:table-cell">TX total</th>
+                            <th class="px-5 py-2 font-medium hidden lg:table-cell">Errs / Drops</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y" style="border-color: var(--surface-border);">
+                        @foreach (var n in Model.Network.OrderByDescending(x => x.BytesReceivedPerSecond + x.BytesSentPerSecond))
+                        {
+                            <tr>
+                                <td class="px-5 py-3 font-mono text-xs font-medium">@n.InterfaceName</td>
+                                <td class="px-5 py-3 font-mono text-xs">@FmtBytesPerSec(n.BytesReceivedPerSecond)</td>
+                                <td class="px-5 py-3 font-mono text-xs">@FmtBytesPerSec(n.BytesSentPerSecond)</td>
+                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@n.BytesReceivedFormatted</td>
+                                <td class="px-5 py-3 hidden md:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">@n.BytesSentFormatted</td>
+                                <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs" style="color: var(--surface-fg-muted);">
+                                    @(n.ErrorsReceived + n.ErrorsSent) / @(n.DropsReceived + n.DropsSent)
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+<p class="text-xs mt-4 text-right" style="color: var(--surface-fg-muted);">
+    Last sample: @Model.Timestamp.ToLocalTime().ToString("HH:mm:ss") · host @Model.System.Hostname (@Model.System.OsName, kernel @Model.System.KernelVersion)
+</p>

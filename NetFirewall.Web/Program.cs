@@ -127,6 +127,11 @@ builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFi
 // Runtime metadata for the login system-info card.
 builder.Services.AddSingleton<IAppInfoService, AppInfoService>();
 
+// System monitoring: singleton because the implementation caches per-CPU
+// jiffies between calls to compute usage% deltas correctly.
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorService,
+                              NetFirewall.Services.Monitoring.SystemMonitorService>();
+
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
