@@ -1,4 +1,4 @@
-@model int
+@model NetFirewall.Web.Models.Setup.WizardPageViewModel
 @{
     var steps = new[] {
         ("Network",     "M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3"),
@@ -7,6 +7,7 @@
         ("Services",    "M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87"),
         ("Review",      "m4.5 12.75 6 6 9-13.5")
     };
+    var force = Model.IsCompleted ? "&force=true" : "";
 }
 
 <nav aria-label="Wizard progress" class="mb-8">
@@ -15,14 +16,17 @@
         {
             var n = i + 1;
             var (label, iconPath) = steps[i];
-            var done = n < Model;
-            var current = n == Model;
+            var done = n < Model.CurrentStep;
+            var current = n == Model.CurrentStep;
+            // Reachable when the wizard service has unlocked it AND it's not the current step.
+            var clickable = n <= Model.MaxUnlockedStep && !current;
             var bg = done ? "background-color: var(--accent); color: var(--accent-fg);"
                   : current ? "background-color: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);"
                   : "background-color: var(--surface-muted); color: var(--surface-fg-muted);";
             var labelStyle = current ? "color: var(--surface-fg);"
                           : done ? "color: var(--accent);"
                           : "color: var(--surface-fg-muted);";
+            var hoverCls = clickable ? " hover:opacity-80 cursor-pointer transition" : "";
             <li class="flex-1 flex flex-col items-center text-center gap-2 min-w-0">
                 <div class="flex items-center w-full">
                     @if (i > 0)
@@ -33,19 +37,34 @@
                     {
                         <div class="flex-1"></div>
                     }
-                    <span class="inline-flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition"
-                          style="@bg">
-                        @if (done)
-                        {
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
-                        }
-                        else
-                        {
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="@iconPath" />
-                            </svg>
-                        }
-                    </span>
+                    @if (clickable)
+                    {
+                        <a href="?step=@n@force"
+                           class="inline-flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold@hoverCls"
+                           style="@bg" aria-label="Jump to step @n: @label">
+                            @if (done)
+                            {
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                            }
+                            else
+                            {
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="@iconPath" /></svg>
+                            }
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="inline-flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition" style="@bg">
+                            @if (done)
+                            {
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                            }
+                            else
+                            {
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="@iconPath" /></svg>
+                            }
+                        </span>
+                    }
                     @if (i < steps.Length - 1)
                     {
                         <div class="flex-1 h-px" style="background-color: @(done ? "var(--accent)" : "var(--surface-border)");"></div>
@@ -55,10 +74,20 @@
                         <div class="flex-1"></div>
                     }
                 </div>
-                <span class="text-xs font-medium truncate w-full" style="@labelStyle">
-                    <span class="hidden sm:inline">@label</span>
-                    <span class="sm:hidden">@n</span>
-                </span>
+                @if (clickable)
+                {
+                    <a href="?step=@n@force" class="text-xs font-medium truncate w-full hover:underline" style="@labelStyle">
+                        <span class="hidden sm:inline">@label</span>
+                        <span class="sm:hidden">@n</span>
+                    </a>
+                }
+                else
+                {
+                    <span class="text-xs font-medium truncate w-full" style="@labelStyle">
+                        <span class="hidden sm:inline">@label</span>
+                        <span class="sm:hidden">@n</span>
+                    </span>
+                }
             </li>
         }
     </ol>

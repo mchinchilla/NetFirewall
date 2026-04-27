@@ -40,13 +40,25 @@ public sealed class SetupWizardController : Controller
     // ----- entry point -----
 
     [HttpGet("")]
-    public async Task<IActionResult> Index([FromQuery] bool force = false, CancellationToken ct = default)
+    public async Task<IActionResult> Index(
+        [FromQuery] int? step = null,
+        [FromQuery] bool force = false,
+        CancellationToken ct = default)
     {
         var state = await _wizard.GetOrCreateWizardStateAsync(ct);
         if (state.IsCompleted && !force)
             return RedirectToAction("Index", "Home");
 
-        var vm = await BuildPageAsync(state.CurrentStep, ct);
+        // ?step=N lets the user jump back to an already-visited step (the
+        // Stepper renders previous steps as links). Forward jumps are clamped
+        // to whatever the wizard service has actually unlocked so the user
+        // can't skip past unsaved data.
+        var requested = step ?? state.CurrentStep;
+        var maxAllowed = Math.Max(state.CurrentStep, 1);
+        var resolved = Math.Clamp(requested, 1, Math.Min(5, maxAllowed));
+
+        ViewBag.IsRerun = state.IsCompleted && force;
+        var vm = await BuildPageAsync(resolved, ct);
         return View(vm);
     }
 
@@ -172,6 +184,7 @@ public sealed class SetupWizardController : Controller
         return new WizardPageViewModel
         {
             CurrentStep = Math.Clamp(step, 1, 5),
+            MaxUnlockedStep = Math.Clamp(state.CurrentStep, 1, 5),
             IsCompleted = state.IsCompleted,
             Detected = detected,
             Step1 = step1,

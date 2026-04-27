@@ -8,7 +8,12 @@ namespace NetFirewall.Web.Models.Setup;
 /// <summary>Top-level model for the wizard page (step + saved state + detected interfaces).</summary>
 public sealed class WizardPageViewModel
 {
+    /// <summary>Step currently rendered. May be earlier than <see cref="MaxUnlockedStep"/> if the user jumped back.</summary>
     public required int CurrentStep { get; init; }
+
+    /// <summary>Highest step the wizard service has unlocked. The Stepper renders steps &lt;= this as clickable.</summary>
+    public required int MaxUnlockedStep { get; init; }
+
     public required bool IsCompleted { get; init; }
     public required IReadOnlyList<DetectedNetworkInterface> Detected { get; init; }
     public required Step1ViewModel Step1 { get; init; }
