@@ -193,12 +193,15 @@ public sealed class AuthController : Controller
         await _audit.LogAsync(AuthAuditEvents.ElevationGranted, userId, user.Username, ip, ua,
             new { duration = ElevationDuration.TotalMinutes, retry = new { url = retryUrl, method = retryMethod } }, ct);
 
-        // Tell the modal to close + replay the original action.
-        Response.Headers["HX-Trigger"] = System.Text.Json.JsonSerializer.Serialize(new
-        {
-            elevationGranted = new { url = retryUrl, method = retryMethod }
-        });
-        return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, "Elevation granted."));
+        // Tell the modal to close + replay the original action. Order matters
+        // (subtly): ToHtmxResponse adds a showToast event to HX-Trigger; then
+        // AttachHxEvent merges elevationGranted alongside it. Setting raw
+        // Response.Headers["HX-Trigger"] either before OR after used to clobber
+        // the other value — visible as "Elevation granted" toast but the
+        // original action never replayed. AttachHxEvent does a JSON merge.
+        var resp = this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, "Elevation granted."));
+        this.AttachHxEvent("elevationGranted", new { url = retryUrl, method = retryMethod });
+        return resp;
     }
 
     // ----------------------------------------------------------- /logout

@@ -49,6 +49,8 @@ public static class HtmxResultExtensions
     /// <summary>
     /// Attaches an <c>HX-Trigger</c> header that fires a <c>showToast</c> event in the browser.
     /// Skips when the response has no message AND no errors (silent success on a partial swap).
+    /// Merges into any existing HX-Trigger payload so callers that have already
+    /// emitted a custom event (e.g. <c>elevationGranted</c>) don't get clobbered.
     /// </summary>
     public static void AttachToastTrigger<T>(this Controller controller, ServiceResponse<T> response)
     {
@@ -63,12 +65,42 @@ public static class HtmxResultExtensions
                           ? string.Join(", ", response.Errors.Select(kv => $"{kv.Key}: {string.Join(", ", kv.Value)}"))
                           : string.Empty);
 
-        var payload = new Dictionary<string, object>
-        {
-            ["showToast"] = new { level, message }
-        };
+        controller.AttachHxEvent("showToast", new { level, message });
+    }
 
-        controller.Response.Headers["HX-Trigger"] = JsonSerializer.Serialize(payload, JsonOpts);
+    /// <summary>
+    /// Adds a single named event to the response's <c>HX-Trigger</c> header,
+    /// merging with any events already attached to it. Without merging, the
+    /// last writer wins and earlier events vanish silently — that bit
+    /// <c>elevationGranted</c> for a release: the toast trigger overwrote the
+    /// "replay original action" event, so step-up TOTP looked like it worked
+    /// but never re-fired the user's original button click.
+    /// </summary>
+    public static void AttachHxEvent(this Controller controller, string eventName, object payload)
+    {
+        var existing = controller.Response.Headers["HX-Trigger"].ToString();
+        Dictionary<string, object> events;
+        if (string.IsNullOrEmpty(existing))
+        {
+            events = new Dictionary<string, object>();
+        }
+        else
+        {
+            try
+            {
+                events = JsonSerializer.Deserialize<Dictionary<string, object>>(existing, JsonOpts)
+                         ?? new Dictionary<string, object>();
+            }
+            catch (JsonException)
+            {
+                // Existing header isn't a JSON object — start fresh rather than
+                // crash the response. Caller retains the new event; the legacy
+                // value is dropped.
+                events = new Dictionary<string, object>();
+            }
+        }
+        events[eventName] = payload;
+        controller.Response.Headers["HX-Trigger"] = JsonSerializer.Serialize(events, JsonOpts);
     }
 
     /// <summary>True when the current request was issued by HTMX.</summary>
