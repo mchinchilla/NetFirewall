@@ -1,120 +1,296 @@
 # NetFirewall
 
-> Desde hace algun tiempo habia tenido la idea de hacer mi propio firewall para mi casa, he usado muchos buenos productos entre ellos, pfsense, opnsense, ipcop, zenthyal, clearos, vyos, ipfire, endian, todos con sus pro y contras.
-Para este 2025 he dicidido poner en marcha el desarrollo de mi propio firewall, hecho desde cero utilizando C# (y todo el ecosistema de dotnet) y como base de datos Postgresql.
-En esta primera etapa, estaré desarrollando el DHCP.
-Si te interesa colaborar con este proyecto desde ya eres bienvenido.
+> Firewall personal para uso doméstico y SOHO, hecho desde cero con **C# / .NET 10** y **PostgreSQL**.
+> Personal home/SOHO firewall, built from scratch with **C# / .NET 10** and **PostgreSQL**.
 
-> For some time I had the idea of making my own firewall for my home, I have used many good products including pfsense, opnsense, ipcop, zenthyal, clearos, vyos, ipfire, all with their pros and cons.
-For this 2025 I have decided to start developing my own firewall, made from scratch using C# (and the entire dotnet ecosystem) and Postgresql as a database.
-In this first stage, I will be developing the DHCP.
-If you are interested in collaborating with this project, you are welcome.
+He usado durante años pfSense, OPNsense, IPCop, Zentyal, ClearOS, VyOS, IPFire, Endian — cada uno con sus pros y contras. NetFirewall es el intento de tener exactamente lo que quiero, en un stack que conozco a fondo, sin dependencias de plataformas históricas (PHP / FreeBSD) y con una WebUI moderna.
 
----
+I've used pfSense, OPNsense, IPCop, Zentyal, ClearOS, VyOS, IPFire, Endian for years — each with its pros and cons. NetFirewall is an attempt to get exactly what I want, on a stack I know deeply, without legacy platform dependencies and with a modern WebUI.
 
-> En el directorio raiz he agregado un directorio llamado Bash, en el cual pueden encontrar el firewall que ya está funcionando en mi casa y el cual es la meta a crear a partir de un WebUI e interactuar con el core y/o bash del servidor.
-El WanMonitor esta funcionando perfectamente el Dhcp Server es un trabajo en progreso aun.
- 
-> In the root directory I have added a directory called Bash, in which you can find the firewall that is already running at my house and which is the goal to create from a WebUI and interact with the core and/or bash of the server.
-The WanMonitor is working perfectly and the Dhcp Server is still a work in progress.
----
-
-# DHCP Server [ In Progress ... ]
-RFC 2131 outlines the Dynamic Host Configuration Protocol (DHCP), which is used by hosts to obtain network configuration parameters like IP addresses, subnet masks, default gateways, and DNS servers. Here's how the dialog between a DHCP client and server generally unfolds according to RFC 2131:
-### 1. DHCPDISCOVER
-Client Action: When a client (like a new device on the network) wants to join the network, it broadcasts a DHCPDISCOVER message. This is sent to the local subnet's broadcast address (255.255.255.255) or to the limited broadcast address (0.0.0.0) if the client doesn't have an IP yet.
-Packet Details:
-Message Type: Option 53 set to Discover (1).
-Client Identifier: Option 61, often the client's MAC address, for uniquely identifying the client.
-Parameter Request List: Option 55, listing which options the client wants from the server.
-
-### 2. DHCPOFFER
-Server Action: Multiple DHCP servers might respond to the DISCOVER message. Each server that can offer an IP address will send back a DHCPOFFER message.
-Packet Details:
-Message Type: Option 53 set to Offer (2).
-Your (client) IP address (YiAddr): The IP address being offered.
-Server Identifier: Option 54, the server's IP address.
-Subnet Mask, Router, DNS Servers, Lease Time, etc., are included as options.
-
-### 3. DHCPREQUEST
-Client Action: After receiving one or more offers, the client selects one and sends a DHCPREQUEST to the chosen server. This message can be broadcast or unicast depending on whether the client knows the server's address:
-If broadcast, it informs all servers of the selection.
-If unicast, it's directly to the chosen server.
-Packet Details:
-Message Type: Option 53 set to Request (3).
-Server Identifier: Identifies which server's offer was accepted.
-Requested IP Address: Option 50, the IP address the client wants (from an offer).
-If this is a renewal or rebinding, different server identifiers might be used based on the client's state.
-
-### 4. DHCPACK
-Server Action: The server that offered the selected IP address responds with DHCPACK (Acknowledgment) if the IP is still available.
-Packet Details:
-Message Type: Option 53 set to Ack (5).
-YiAddr: Confirms the IP address assignment.
-Server Identifier: Option 54, reaffirming the server's identity.
-Lease Time, Renewal (T1), Rebinding (T2) Times: Option 51, 58, and 59 respectively, setting the lease terms.
-
-### 5. DHCPNAK
-Server Action: If the requested IP address is no longer available or not valid, the server responds with DHCPNAK (Negative Acknowledgment).
-Packet Details:
-Message Type: Option 53 set to Nak (6).
-
-Additional Messages:
-### DHCPDECLINE:
-If a client detects that the IP address offered is already in use, it sends DHCPDECLINE to inform the server to not re-offer that IP.
-### DHCPRELEASE:
-When a client no longer requires the IP address, it sends DHCPRELEASE to the server, which then frees up that IP for others.
-### DHCPINFORM:
-Clients with statically assigned addresses can use this to request just configuration parameters like DNS servers without asking for an IP address.
-
-### Lease Management:
-Renewal: Clients attempt to renew their lease when T1 time has passed, sending a DHCPREQUEST directly to the server that issued the lease.
-Rebinding: If renewal fails, at T2, clients broadcast DHCPREQUEST messages to any DHCP server to try and extend their lease.
-
-### Considerations:
-Timers: DHCP uses timers like T1 (renewal) and T2 (rebind) to manage lease lifecycle.
-Broadcast vs. Unicast: Early messages are broadcast, but after an IP is assigned, unicast communication can occur for efficiency.
-Relay Agents: In networks with multiple subnets, DHCP relay agents can be used to forward requests between subnets.
-
-This interaction ensures that clients can dynamically acquire network configurations in a standardized manner, enhancing network manageability and client mobility.
+> **Estado / Status:** alpha. Apto para experimentar y co-desarrollar; **no** apto aún para reemplazar tu firewall de producción.
 
 ---
 
-# NetFirewall.WanMonitor
-> Esta pequeña aplicación monitorea la conexión a internet de cada interface WAN, si la conexión se pierde en la interface WAN primaria hace el cambio a la secundaria y viceversa.
----
-> This small application monitors the internet connection of each WAN interface, if the connection is lost on the primary WAN interface, it switches to the secondary and vice versa.
+## Tabla de contenidos
 
-### Instrucciones básicas de implementación / Deployment Basic Instructions:
+- [Estado por subsistema](#estado-por-subsistema)
+- [Stack técnico](#stack-técnico)
+- [Reglas del proyecto (no negociables)](#reglas-del-proyecto-no-negociables)
+- [Arquitectura](#arquitectura)
+- [Base de datos y migraciones](#base-de-datos-y-migraciones)
+- [Build y desarrollo](#build-y-desarrollo)
+- [Tests y cobertura](#tests-y-cobertura)
+- [Despliegue en producción](#despliegue-en-producción)
+- [DHCP — notas RFC 2131](#dhcp--notas-rfc-2131)
+- [Contribuir](#contribuir)
+
+---
+
+## Estado por subsistema
+
+| Subsistema | Estado | Notas |
+|---|---|---|
+| **WAN Monitor** | Producción | Failover dual-WAN funcional, corre en mi casa hace meses bajo systemd. |
+| **DHCP Server** | Beta | Pipeline RFC 2131 + opciones + clases + reservaciones + DDNS + failover básico (RFC 3074-style). Hot-path zero-allocation (Span/stackalloc/ArrayPool). |
+| **Firewall (nftables)** | Beta | CRUD de filter rules, NAT, port forwards, mangle/marks, QoS (HTB), static routes, audit log. Apply real con backup/rollback. |
+| **Schedules** | Beta | Reglas con ventanas horarias y timezone; daemon watcher re-aplica al cambiar estado. |
+| **VPN (WireGuard)** | Alpha | Peers + config render + apply. |
+| **Network Objects / Services** | Beta | Aliases reusables (host/CIDR/range/FQDN/grupo) y catálogo de ~70 servicios well-known. |
+| **Auth (sesión + TOTP)** | Beta | Argon2id + sesiones server-side + MFA TOTP + códigos de recuperación + bootstrap token de primer arranque. |
+| **Setup wizard** | Beta | 5 pasos guiados, persistencia por paso, re-run. |
+| **Búsqueda full-text** | Beta | tsvector + GIN, sync por triggers, autocomplete debounced en el header. |
+| **Monitoreo** | Alpha | Métricas de sistema + dashboards live (HTMX polling). |
+| **WebUI** | Beta | ASP.NET Core MVC + Tailwind 4 + HTMX + Alpine, sin npm. Tema con tokens semánticos. |
+
+---
+
+## Stack técnico
+
+- **Backend:** C# / .NET 10, ASP.NET Core MVC + Minimal APIs, .NET Aspire (orquestación dev), Serilog.
+- **Datos:** PostgreSQL 14+, Npgsql, RepoDb (micro-ORM), tsvector + GIN para búsqueda.
+- **Frontend:** Tailwind CSS 4 (binario standalone, **sin Node**), HTMX, Alpine.js — todo vendoreado bajo `wwwroot/lib/`.
+- **Sistema:** nftables, iproute2, tc (HTB), Linux raw sockets para DHCP, WireGuard CLI.
+- **Tests:** xUnit + Moq + `Aspire.Hosting.Testing`.
+- **Despliegue:** systemd (dos units: `netfirewall-daemon` con caps mínimas, `netfirewall-web` sin caps), nginx con TLS, instalador idempotente.
+
+---
+
+## Reglas del proyecto (no negociables)
+
+Reglas duras del repo, documentadas en [`CLAUDE.md`](./CLAUDE.md). Resumen:
+
+1. **Nada de npm / Node.** Tailwind se compila con el binario standalone, dependencias JS vendoreadas.
+2. **Async/await en todo I/O** (server y browser). Cero `.Result`, `.Wait()`, `.then()` chains.
+3. **Un solo CSS y un solo JS:** `Styles/site.css` → `wwwroot/css/site.css`, y `wwwroot/js/site.js`. Sin `<style>` inline ni scoped CSS.
+4. **Validación en ambos lados** (cliente con Tailwind + HTML5 + Alpine; servidor con DataAnnotations / FluentValidation).
+5. **Contratos tipados** con `ServiceResponse<T>` y genéricos.
+6. **Feedback visible siempre** — toast, banner o inline error tras cada operación, éxito y error.
+7. **Decomponer en partials/componentes** — `_Layout.cshtml` solo compone, no contiene markup de negocio.
+8. **Cada proceso es un servicio DI-registrado** detrás de una interfaz. Cero estáticos "manager"/"helper" con lógica.
+9. **Estilos vía tokens semánticos** del theme (`bg-surface`, `text-accent`, `var(--feedback-*)`...). Cero hex literales ni `bg-red-500`.
+10. **Sin SQL ni acceso a datos en controllers.** Controllers componen; services hacen.
+
+---
+
+## Arquitectura
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  NetFirewall.AppHost (Aspire)                   │
+│   orquesta dev: ApiService + Web + DhcpServer                   │
+└─────────────────────────────────────────────────────────────────┘
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
+│ ApiService   │   │ Web (MVC)    │   │ DhcpServer       │
+│ Minimal APIs │   │ HTMX+Alpine  │   │ UDP/67, RFC 2131 │
+│ + OpenAPI    │   │ + Tailwind   │   │ Channel pipeline │
+└──────────────┘   └──────────────┘   └──────────────────┘
+        │                  │                  │
+        └──────────────────┴──────────────────┘
+                           │
+                           ▼
+              ┌──────────────────────────┐
+              │ NetFirewall.Services     │  ← lógica de negocio + acceso a datos
+              │ (Auth, Dhcp, Firewall,   │     (Npgsql + RepoDb)
+              │  Network, Vpn, Search,   │
+              │  Monitoring, Setup, ...) │
+              └──────────────────────────┘
+                           │
+                           ▼
+                   ┌──────────────┐
+                   │ PostgreSQL   │
+                   └──────────────┘
+
+Aparte (no bajo Aspire):
+  • NetFirewall.WanMonitor  → systemd worker, dual-WAN failover
+  • NetFirewall.Migrations  → console runner, schema forward-only
 ```
 
-1. Install .NET 9.0 SDK / Runtime
-2. Clone this repository
-3. Open a terminal and navigate to the project folder
-4. Run the following command:
-   dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/wanmonitor
-5. Create a service file in /etc/systemd/system/netfirewall-wanmonitor.service with the following content:
-[Unit]
-Description=NetFirewall WAN Monitor Service
-After=network.target
+### Proyectos
 
-[Service]
-WorkingDirectory=/opt/netfirewall/wanmonitor
-ExecStart=/usr/bin/nice -n -20 /opt/netfirewall/wanmonitor/NetFirewall.WanMonitor
-Restart=always
-RestartSec=10
-SyslogIdentifier=wanmonitor
-KillSignal=SIGINT
-Environment=ASPNETCORE_ENVIRONMENT=Production
-Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+| Proyecto | Rol |
+|---|---|
+| `NetFirewall.AppHost` | Orquestador Aspire (dev). |
+| `NetFirewall.Web` | WebUI MVC. Tailwind, HTMX, Alpine. Sin npm. |
+| `NetFirewall.ApiService` | Minimal APIs + OpenAPI (consumido por la UI). |
+| `NetFirewall.DhcpServer` | Servidor DHCP standalone (Host genérico + systemd). |
+| `NetFirewall.WanMonitor` | Background worker de failover dual-WAN. |
+| `NetFirewall.Services` | Lógica de negocio + acceso a datos (Npgsql + RepoDb). |
+| `NetFirewall.Models` | POCOs/DTOs por dominio + `ServiceResponse<T>`. |
+| `NetFirewall.Migrations` | Runner forward-only con SHA-256 drift detection. |
+| `NetFirewall.ServiceDefaults` | Aspire-shared OpenTelemetry, service discovery, resilience. |
+| `NetFirewall.Tests` | xUnit + Moq + `Aspire.Hosting.Testing`. |
 
-[Install]
-WantedBy=multi-user.target
-6. Change the appsettings.json file to match your network configuration 
-   
-7. Run the following commands:
-    sudo systemctl daemon-reload
-    sudo systemctl enable netfirewall-wanmonitor
-    sudo systemctl start netfirewall-wanmonitor
+---
+
+## Base de datos y migraciones
+
+Schema gestionado por **`NetFirewall.Migrations`** — runner que aplica archivos de `NetFirewall.Services/sql/migrations/` (formato `NNNNN_descripcion.sql`) y los registra en `__migrations` con checksum SHA-256 para detectar drift.
+
+```bash
+bin/db.sh status      # listar aplicadas / pendientes / con drift
+bin/db.sh up          # aplicar pendientes (cada una en su propia transacción)
+bin/db.sh reset       # DROP SCHEMA + up — DEV ONLY, pide confirmación
+bin/db.sh seed        # seed idempotente (demo_interfaces.sql)
 ```
 
+Resolución del connection string:
+
+1. Flag `--connection "Host=..."`.
+2. Variable `NETFIREWALL_CONN`.
+3. `ConnectionStrings:DefaultConnection` de `NetFirewall.Web/appsettings.json`.
+
+> **Forward-only por diseño.** Para revertir un cambio, escribe una migración nueva. Editar una ya aplicada hace que el runner detecte drift y rechace continuar.
+
+---
+
+## Build y desarrollo
+
+### Prerrequisitos
+
+- .NET 10 SDK
+- PostgreSQL 14+
+- Binario standalone de **`tailwindcss`** en `PATH` (descarga desde https://github.com/tailwindlabs/tailwindcss/releases — pin a v4.x)
+- Linux para correr el daemon DHCP / firewall en serio (UDP/67, nftables, raw sockets). En macOS/Windows la WebUI funciona bien para desarrollo pero las apply-ops son no-op.
+
+### Build & test
+
+```bash
+dotnet build
+dotnet build -c Release
+dotnet test
+dotnet test --filter "FullyQualifiedName~DhcpLeasesServiceTests"
+```
+
+El target MSBuild `BuildTailwindCss` invoca el CLI standalone en cada `dotnet build` y produce `wwwroot/css/site.css` (gitignored). Para watch:
+
+```bash
+tailwindcss -i NetFirewall.Web/Styles/site.css -o NetFirewall.Web/wwwroot/css/site.css --watch
+```
+
+### Correr el entorno orquestado (Aspire)
+
+```bash
+dotnet run --project NetFirewall.AppHost
+```
+
+Aspire levanta el dashboard, ApiService, Web y DhcpServer. El primer login lo guía el setup wizard (bootstrap token impreso en consola).
+
+> **Nota:** `NetFirewall.WanMonitor` **no** está registrado en AppHost — corre como systemd worker independiente.
+
+---
+
+## Tests y cobertura
+
+Estado actual: **2 archivos de test, ~11 métodos, ~99% del código de negocio sin cobertura.** El proyecto necesita una inversión seria aquí.
+
+### Lo que ya está cubierto
+
+```
+NetFirewall.Tests/Dhcp/
+├── DhcpLeasesServiceTests.cs     ← lifecycle de leases
+└── DhcpServerServiceTests.cs     ← discover/offer/request/ack
+```
+
+### Gaps prioritarios (resumen)
+
+| Prioridad | Áreas | Por qué importa |
+|---|---|---|
+| **P0 — crítico** | `DhcpSubnetService` (asignación IP, races), `LeaseCache`, `FailoverService`, `FirewallService` + `NftApplyService` (apply real con rollback), `TcApplyService`, `Argon2PasswordHasher`, `AesGcmTotpSecretCipher`, `TotpService`, `SessionService`, `SessionCookieAuthHandler`, `BootstrapTokenIssuer`, `DhcpWorker` (hot-path packet parsing), `LinuxRawSocket`, `MigrationRunner` | Seguridad, integridad de leases, integridad de schema, race conditions con consecuencias visibles para el usuario. |
+| **P1 — importante** | `DdnsService`, `DhcpAdminService`, `DhcpCacheNotifier`, `ScheduleService`, `ScheduleWatcherService`, `LinuxDistroService`, `DebianInterfacesConfigService`, `NetplanConfigService`, `NetworkManagerConfigService`, `NetworkObjectResolver` (recursión + ciclos), `NetworkServiceResolver`, `StaticRouteApplicator`, `SystemMonitorService`, `MetricsCollectorService`, `MetricsQueryService`, `SearchService`, `SetupWizardService`, `AppSettingsService`, `ProcessRunner`, `WireGuardConfigService` + `WireGuardApplyService`, `UserService`, `UserTotpService`, `RecoveryCodeService`, `AuthAuditService`, `DaemonClient` + decorators del Web | Lógica de negocio, parsing distro-aware, máquinas de estado, generación de configs. |
+| **P2 — nice to have** | Controllers (la mayoría son thin orchestrators, pero `FwApplyController`, `SetupWizardController`, `AuthController`, `DhcpSubnetsController` tienen lógica que vale la pena), `AuditPrunerService`, helpers de view, utilidades de modelo (`User.EffectiveDisplayName`, `Initials`, etc.), `RequireElevatedAttribute`, `ValidationToServiceResponseFilter`. | Comportamiento UI, formateo, validación de inputs. |
+
+### Inventario aproximado de unidades testeable
+
+```
+NetFirewall.Services       →  ~57 servicios (Auth: 9, Dhcp: 8, Firewall: 6,
+                              Network: 10, Monitoring: 4, Setup: 1,
+                              Search: 1, Settings: 1, Vpn: 3, Processes: 1)
+NetFirewall.Web            →  34 controllers + 7 auth helpers + 5 daemon
+                              clients + 2 filters + 1 helper extension
+NetFirewall.DhcpServer     →  DhcpWorker + LinuxRawSocket
+NetFirewall.WanMonitor     →  WanMonitorService
+NetFirewall.Migrations     →  MigrationRunner
+NetFirewall.Models         →  ~varios métodos con lógica (display name,
+                              initials, validación de roles/tipos)
+─────────────────────────────────────────────────────────────────
+Total estimado             →  ~120-170 unidades testeables
+Cubiertas                  →  2 (DhcpLeasesService, DhcpServerService)
+Gap                        →  >98 %
+```
+
+### Estrategia sugerida (fases)
+
+1. **Fase 1 — P0 in-memory** (rápido, sin infra): `Argon2PasswordHasher`, `AesGcmTotpSecretCipher`, `TotpService`, `SessionService` (con `INpgsqlDataSource` mockeado), `RecoveryCodeGenerator`, `NetworkObjectResolver` (recursión), `NetworkServiceResolver`. Win rápido, gran cobertura por LOC.
+2. **Fase 2 — P0 con Postgres real** (testcontainers): `DhcpSubnetService` (asignación IP + exclusiones + cache coherence), `LeaseCache`, `MigrationRunner` (drift detection + rollback en transacción).
+3. **Fase 3 — Apply-pipelines** (mock de `IProcessRunner`): `FirewallService` + `NftApplyService` (generación + backup/rollback), `TcApplyService`, `WireGuardApplyService`, `StaticRouteApplicator`, `DebianInterfacesConfigService` / `NetplanConfigService` (file I/O contra `tmpfs`).
+4. **Fase 4 — Hot-path DHCP**: `DhcpWorker` (parser/serializer zero-alloc — propiedad: `Parse(Serialize(x)) == x` para todos los message types), tests de presión sobre el `Channel` bounded.
+5. **Fase 5 — Integración WebUI** (`Aspire.Hosting.Testing`): flow MFA completo, setup wizard end-to-end, apply de regla con rollback observable en UI.
+
+> Si arrancas por aquí: **`Argon2PasswordHasher` + `AesGcmTotpSecretCipher` + `TotpService`** son los tres mejores wins iniciales — pura CPU, sin infra, alto valor de seguridad, y guían el shape de los demás.
+
+---
+
+## Despliegue en producción
+
+Producción son **dos units systemd** (`netfirewall-daemon` con `CAP_NET_ADMIN`/`CAP_DAC_OVERRIDE`/`CAP_NET_RAW` y nada más; `netfirewall-web` con cero capabilities) detrás de **nginx con TLS**. Toda la plomería vive bajo `deploy/`:
+
+```
+deploy/
+  systemd/                              units endurecidos
+  config/{daemon,web}.json.template     appsettings (modo 0640)
+  env/{daemon,web}.env.template         secretos — modo 0600/0640
+  nginx/netfirewall.conf                proxy reverso TLS
+  install.sh                            instalador idempotente
+  uninstall.sh                          inverso (--purge limpia datos)
+  README.txt                            handbook operacional
+```
+
+Instalar en Debian/Ubuntu/Rocky/Alma/openSUSE con .NET 10 SDK + PostgreSQL 14+ + systemd 250+:
+
+```bash
+sudo deploy/install.sh
+```
+
+Para detalles de hardening (capabilities, `ProtectSystem`, `SystemCallFilter`, manejo de la master key AES-256 para cifrado de secretos TOTP, modelo de privilegios Web ↔ Daemon vía Unix socket): ver [`deploy/README.txt`](./deploy/README.txt) y [`CLAUDE.md`](./CLAUDE.md).
+
+> **Nota sobre el ciclo Web/Daemon:** la master key vive **solo** en el proceso del daemon. El Web nunca la ve — para enrolar/verificar TOTP llama a `POST /v1/crypto/{encrypt,decrypt}` sobre el Unix socket. Un compromiso del Web ya no puede descifrar secretos TOTP almacenados.
+
+---
+
+## DHCP — notas RFC 2131
+
+Resumen rápido del diálogo cliente↔servidor que el `DhcpServer` implementa:
+
+1. **DHCPDISCOVER** — cliente broadcast (Option 53 = 1) con su MAC en Option 61.
+2. **DHCPOFFER** — servidor responde (Option 53 = 2) con `yiaddr`, server identifier (Option 54), subnet/router/DNS/lease time.
+3. **DHCPREQUEST** — cliente elige una offer (Option 53 = 3) e identifica al server elegido (Option 54).
+4. **DHCPACK** — server confirma (Option 53 = 5) con lease time + T1 (renew) + T2 (rebind).
+5. **DHCPNAK** — server niega si la IP ya no está disponible (Option 53 = 6).
+
+Mensajes adicionales: **DHCPDECLINE** (cliente detecta IP duplicada), **DHCPRELEASE** (libera el lease), **DHCPINFORM** (cliente con IP estática pide solo opciones).
+
+**Lease management:** los timers T1 y T2 controlan el renew y rebind. T1 → unicast al server original; T2 → broadcast a cualquiera.
+
+**Antes de tocar el hot-path:** lee [`NetFirewall.Services/Dhcp/PerformanceAnalysis.md`](./NetFirewall.Services/Dhcp/PerformanceAnalysis.md). Las reglas zero-allocation (Span/stackalloc/ArrayPool) son obligatorias en el parser y serializer.
+
+---
+
+## Contribuir
+
+Si te interesa colaborar, eres bienvenido. Antes de abrir un PR:
+
+1. Lee [`CLAUDE.md`](./CLAUDE.md) — las 10 reglas no negociables aplican a todo el código.
+2. Asegúrate de que `dotnet build` y `dotnet test` pasen verde.
+3. Para cambios de schema: nueva migración, **nunca** edites una ya aplicada.
+4. Para cambios de UI: usa los tokens semánticos del theme; cero hex literales, cero `<style>` inline.
+5. Si tu cambio afecta la pipeline DHCP: corre el bench/profile manualmente y nota el impacto.
+
+Issues, ideas y discusión: usa la pestaña Issues del repo. Para PRs grandes, abre primero un issue describiendo el approach.
+
+---
+
+## Licencia
+
+Por definir. Hasta entonces, considera "todos los derechos reservados" pero siéntete libre de leer, fork-ear para experimentar, y abrir issues / PRs.
