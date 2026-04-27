@@ -121,6 +121,11 @@ builder.Services.AddHostedService<BootstrapTokenIssuer>();
 builder.Services.AddSingleton<NetFirewall.Services.Dhcp.IDhcpSubnetService, NetFirewall.Services.Dhcp.DhcpSubnetService>();
 builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpAdminService, NetFirewall.Services.Dhcp.DhcpAdminService>();
 
+// Cache invalidation notifier — Web emits NOTIFY on subnet/pool/exclusion writes
+// so the DhcpServer process can drop its in-process cache immediately instead of
+// waiting up to 5 minutes for TTL.
+builder.Services.AddSingleton<NetFirewall.Services.Dhcp.IDhcpCacheNotifier, NetFirewall.Services.Dhcp.DhcpCacheNotifier>();
+
 // Setup wizard.
 builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFirewall.Services.Setup.SetupWizardService>();
 

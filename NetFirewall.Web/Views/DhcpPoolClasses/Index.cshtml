@@ -1,0 +1,31 @@
+@{
+    ViewData["Title"] = "DHCP — Pool / classes";
+    Layout = "_Layout";
+    var pool = (NetFirewall.Models.Dhcp.DhcpPool)ViewBag.Pool;
+    var subnetName = (string)ViewBag.SubnetName;
+    var subnetId = (Guid)ViewBag.SubnetId;
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">
+            <a href="@Url.Action("Index", "DhcpSubnets")" class="hover:underline" style="color: var(--accent);">DHCP · Subnets</a>
+            <span> / </span>
+            <a href="/Dhcp/Subnets/@subnetId/Pools" class="hover:underline" style="color: var(--accent);">@subnetName</a>
+        </p>
+        <h1 class="text-2xl font-semibold tracking-tight">Pool ↔ Classes</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Pool <span class="font-mono">@pool.RangeStart – @pool.RangeEnd</span>. Toggle each class to allow or deny — unbound classes are evaluated by the global match rules.
+        </p>
+    </div>
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <div id="pool-classes-table"
+         hx-get="/Dhcp/Subnets/@subnetId/Pools/@pool.Id/Classes/table"
+         hx-trigger="load, refreshPoolClasses from:body"
+         hx-swap="innerHTML">
+        <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+    </div>
+</section>

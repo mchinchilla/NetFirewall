@@ -14,12 +14,17 @@ public sealed class DhcpAdminService : IDhcpAdminService
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<DhcpAdminService> _logger;
+    private readonly IDhcpCacheNotifier _notifier;
 
-    public DhcpAdminService(NpgsqlDataSource dataSource, ILogger<DhcpAdminService> logger)
+    public DhcpAdminService(NpgsqlDataSource dataSource, ILogger<DhcpAdminService> logger, IDhcpCacheNotifier notifier)
     {
         _dataSource = dataSource;
         _logger = logger;
+        _notifier = notifier;
     }
+
+    /// <summary>Convenience: emit a NOTIFY so the DhcpServer drops its cache.</summary>
+    private Task NotifyAsync(string reason, CancellationToken ct) => _notifier.NotifySubnetChangedAsync(reason, ct);
 
     #region Subnet Operations
 
@@ -67,6 +72,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Created subnet {Name} ({Network})", subnet.Name, subnet.Network);
 
+        await NotifyAsync($"subnet.create:{subnet.Id}", ct);
         return subnet;
     }
 
@@ -92,6 +98,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Updated subnet {Name}", subnet.Name);
 
+        await NotifyAsync($"subnet.update:{subnet.Id}", ct);
         return subnet;
     }
 
@@ -104,7 +111,11 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("id", id);
 
         var rows = await cmd.ExecuteNonQueryAsync(ct);
-        if (rows > 0) _logger.LogInformation("Deleted subnet {Id}", id);
+        if (rows > 0)
+        {
+            _logger.LogInformation("Deleted subnet {Id}", id);
+            await NotifyAsync($"subnet.delete:{id}", ct);
+        }
 
         return rows > 0;
     }
@@ -241,6 +252,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("created", pool.CreatedAt);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await NotifyAsync($"pool.create:{pool.Id}", ct);
         return pool;
     }
 
@@ -268,6 +280,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("enabled", pool.Enabled);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await NotifyAsync($"pool.update:{pool.Id}", ct);
         return pool;
     }
 
@@ -279,7 +292,9 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", id);
 
-        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        var rows = await cmd.ExecuteNonQueryAsync(ct);
+        if (rows > 0) await NotifyAsync($"pool.delete:{id}", ct);
+        return rows > 0;
     }
 
     #endregion
@@ -458,6 +473,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Created reservation {Mac} -> {Ip}", reservation.MacAddress, reservation.ReservedIp);
 
+        await NotifyAsync($"reservation.create:{reservation.Id}", ct);
         return reservation;
     }
 
@@ -509,6 +525,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await NotifyAsync($"reservation.update:{reservation.Id}", ct);
         return reservation;
     }
 
@@ -521,7 +538,11 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("id", id);
 
         var rows = await cmd.ExecuteNonQueryAsync(ct);
-        if (rows > 0) _logger.LogInformation("Deleted reservation {Id}", id);
+        if (rows > 0)
+        {
+            _logger.LogInformation("Deleted reservation {Id}", id);
+            await NotifyAsync($"reservation.delete:{id}", ct);
+        }
 
         return rows > 0;
     }
@@ -567,6 +588,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Created client class {Name}", dhcpClass.Name);
+        await NotifyAsync($"class.create:{dhcpClass.Id}", ct);
 
         return dhcpClass;
     }
@@ -586,6 +608,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Updated client class {Name}", dhcpClass.Name);
+        await NotifyAsync($"class.update:{dhcpClass.Id}", ct);
 
         return dhcpClass;
     }
@@ -599,8 +622,76 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("id", id);
 
         var rows = await cmd.ExecuteNonQueryAsync(ct);
-        if (rows > 0) _logger.LogInformation("Deleted client class {Id}", id);
+        if (rows > 0)
+        {
+            _logger.LogInformation("Deleted client class {Id}", id);
+            await NotifyAsync($"class.delete:{id}", ct);
+        }
 
+        return rows > 0;
+    }
+
+    public async Task<IReadOnlyList<PoolClassBinding>> GetPoolClassesAsync(Guid poolId, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = @"
+            SELECT pc.allow,
+                   c.id, c.name, c.match_type, c.match_value, c.options, c.next_server,
+                   c.boot_filename, c.priority, c.enabled, c.created_at
+            FROM dhcp_pool_classes pc
+            JOIN dhcp_classes c ON c.id = pc.class_id
+            WHERE pc.pool_id = @pid
+            ORDER BY c.priority, c.name";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("pid", poolId);
+
+        var list = new List<PoolClassBinding>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var allow = reader.GetBoolean(0);
+            var c = new DhcpClass
+            {
+                Id = reader.GetGuid(1),
+                Name = reader.GetString(2),
+                MatchType = reader.GetString(3),
+                MatchValue = reader.GetString(4),
+                Options = reader.IsDBNull(5) ? null : reader.GetString(5),
+                NextServer = reader.IsDBNull(6) ? null : reader.GetFieldValue<IPAddress>(6),
+                BootFilename = reader.IsDBNull(7) ? null : reader.GetString(7),
+                Priority = reader.GetInt32(8),
+                Enabled = reader.GetBoolean(9),
+                CreatedAt = reader.GetDateTime(10)
+            };
+            list.Add(new PoolClassBinding(poolId, c, allow));
+        }
+        return list;
+    }
+
+    public async Task SetPoolClassAsync(Guid poolId, Guid classId, bool allow, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = @"
+            INSERT INTO dhcp_pool_classes (pool_id, class_id, allow)
+            VALUES (@p, @c, @a)
+            ON CONFLICT (pool_id, class_id) DO UPDATE SET allow = EXCLUDED.allow";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("p", poolId);
+        cmd.Parameters.AddWithValue("c", classId);
+        cmd.Parameters.AddWithValue("a", allow);
+        await cmd.ExecuteNonQueryAsync(ct);
+        await NotifyAsync($"pool_class.set:{poolId}/{classId}", ct);
+    }
+
+    public async Task<bool> RemovePoolClassAsync(Guid poolId, Guid classId, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        const string sql = "DELETE FROM dhcp_pool_classes WHERE pool_id = @p AND class_id = @c";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("p", poolId);
+        cmd.Parameters.AddWithValue("c", classId);
+        var rows = await cmd.ExecuteNonQueryAsync(ct);
+        if (rows > 0) await NotifyAsync($"pool_class.remove:{poolId}/{classId}", ct);
         return rows > 0;
     }
 
@@ -699,6 +790,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Created exclusion {Start} in subnet {Subnet}", exclusion.IpStart, exclusion.SubnetId);
 
+        await NotifyAsync($"exclusion.create:{exclusion.Id}", ct);
         return exclusion;
     }
 
@@ -721,6 +813,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Updated exclusion {Id}", exclusion.Id);
 
+        await NotifyAsync($"exclusion.update:{exclusion.Id}", ct);
         return exclusion;
     }
 
@@ -733,7 +826,11 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("id", id);
 
         var rows = await cmd.ExecuteNonQueryAsync(ct);
-        if (rows > 0) _logger.LogInformation("Deleted exclusion {Id}", id);
+        if (rows > 0)
+        {
+            _logger.LogInformation("Deleted exclusion {Id}", id);
+            await NotifyAsync($"exclusion.delete:{id}", ct);
+        }
 
         return rows > 0;
     }

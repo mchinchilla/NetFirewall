@@ -3,6 +3,9 @@ using NetFirewall.Models.Dhcp;
 
 namespace NetFirewall.Services.Dhcp;
 
+/// <summary>One row in dhcp_pool_classes joined with the referenced class.</summary>
+public sealed record PoolClassBinding(Guid PoolId, DhcpClass Class, bool Allow);
+
 /// <summary>
 /// Administration service for DHCP server - used by the web UI.
 /// </summary>
@@ -41,6 +44,11 @@ public interface IDhcpAdminService
     Task<DhcpClass> CreateClassAsync(DhcpClass dhcpClass, CancellationToken ct = default);
     Task<DhcpClass> UpdateClassAsync(DhcpClass dhcpClass, CancellationToken ct = default);
     Task<bool> DeleteClassAsync(Guid id, CancellationToken ct = default);
+
+    // Pool ↔ Class associations (dhcp_pool_classes — defines which classes a pool allows or denies)
+    Task<IReadOnlyList<PoolClassBinding>> GetPoolClassesAsync(Guid poolId, CancellationToken ct = default);
+    Task SetPoolClassAsync(Guid poolId, Guid classId, bool allow, CancellationToken ct = default);
+    Task<bool> RemovePoolClassAsync(Guid poolId, Guid classId, CancellationToken ct = default);
 
     // Exclusion operations
     Task<IReadOnlyList<DhcpExclusion>> GetExclusionsAsync(Guid? subnetId = null, CancellationToken ct = default);

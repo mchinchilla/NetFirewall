@@ -66,6 +66,11 @@ class Program
                     /* Subnet Service - Singleton to maintain cache across requests */
                     services.AddSingleton<IDhcpSubnetService, DhcpSubnetService>();
 
+                    /* Cache invalidation listener - LISTENs on Postgres channel
+                     * for NOTIFYs sent by the Web on subnet/pool/exclusion writes,
+                     * drops the in-process subnet cache so the next lookup refetches. */
+                    services.AddHostedService<DhcpCacheRefreshListener>();
+
                     /* Failover - Singleton for persistent connection to peer */
                     services.AddSingleton<IFailoverService, FailoverService>();
 

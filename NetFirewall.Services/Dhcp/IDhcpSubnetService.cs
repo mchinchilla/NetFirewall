@@ -72,4 +72,10 @@ public interface IDhcpSubnetService
 
     Task<DhcpPool> CreatePoolAsync(DhcpPool pool, CancellationToken cancellationToken = default);
     Task<bool> DeletePoolAsync(Guid poolId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Force the next read to refetch from the DB. Called by the LISTEN listener
+    /// in the DhcpServer when the Web mutates a subnet/pool/exclusion.
+    /// </summary>
+    void InvalidateCache();
 }

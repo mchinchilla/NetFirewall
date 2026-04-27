@@ -604,6 +604,14 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         }
     }
 
+    /// <inheritdoc/>
+    public void InvalidateCache()
+    {
+        // Mark cache as stale; next read triggers RefreshCacheAsync.
+        _lastCacheRefresh = DateTime.MinValue;
+        _logger.LogInformation("[SUBNET] Cache invalidated by external NOTIFY");
+    }
+
     private async Task RefreshCacheAsync(CancellationToken cancellationToken)
     {
         _logger.LogDebug("[SUBNET] Refreshing cache from database...");

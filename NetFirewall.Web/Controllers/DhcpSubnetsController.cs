@@ -40,8 +40,20 @@ public sealed class DhcpSubnetsController : Controller
     [HttpGet("table")]
     public async Task<IActionResult> Table(CancellationToken ct)
     {
-        var subnets = await _admin.GetSubnetsAsync(ct);
-        return PartialView("_SubnetsTable", subnets);
+        var subnetsTask    = _admin.GetSubnetsAsync(ct);
+        var exclusionsTask = _admin.GetExclusionsAsync(null, ct);
+        var poolsTask      = _admin.GetPoolsAsync(null, ct);
+        await Task.WhenAll(subnetsTask, exclusionsTask, poolsTask);
+
+        ViewBag.ExclusionCounts = exclusionsTask.Result
+            .GroupBy(e => e.SubnetId)
+            .ToDictionary(g => g.Key, g => g.Count());
+        ViewBag.PoolCounts = poolsTask.Result
+            .Where(p => p.SubnetId.HasValue)
+            .GroupBy(p => p.SubnetId!.Value)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return PartialView("_SubnetsTable", subnetsTask.Result);
     }
 
     [HttpGet("edit/{id:guid?}")]

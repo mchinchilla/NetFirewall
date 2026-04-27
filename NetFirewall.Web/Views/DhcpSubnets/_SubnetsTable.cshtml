@@ -1,4 +1,8 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpSubnet>
+@{
+    var exclusions = (Dictionary<Guid, int>)(ViewBag.ExclusionCounts ?? new Dictionary<Guid, int>());
+    var pools      = (Dictionary<Guid, int>)(ViewBag.PoolCounts      ?? new Dictionary<Guid, int>());
+}
 
 @if (Model.Count == 0)
 {
@@ -45,7 +49,25 @@ else
                         </td>
                         <td class="px-5 py-3 text-right">
                             <div class="inline-flex items-center gap-1">
-                                <a href="/Dhcp/Subnets/@s.Id/Pools" class="btn btn-ghost text-xs">Pools →</a>
+                                @{ var poolCount = pools.GetValueOrDefault(s.Id, 0); var exclCount = exclusions.GetValueOrDefault(s.Id, 0); }
+                                <a href="/Dhcp/Subnets/@s.Id/Pools" class="btn btn-ghost text-xs inline-flex items-center gap-1.5">
+                                    Pools
+                                    @if (poolCount > 0)
+                                    {
+                                        <span class="px-1.5 rounded text-[10px]"
+                                              style="background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);">@poolCount</span>
+                                    }
+                                    →
+                                </a>
+                                <a href="/Dhcp/Subnets/@s.Id/Exclusions" class="btn btn-ghost text-xs inline-flex items-center gap-1.5">
+                                    Exclusions
+                                    @if (exclCount > 0)
+                                    {
+                                        <span class="px-1.5 rounded text-[10px]"
+                                              style="background: color-mix(in srgb, var(--feedback-warning-fg) 14%, transparent); color: var(--feedback-warning-fg);">@exclCount</span>
+                                    }
+                                    →
+                                </a>
                                 <button type="button" class="btn btn-ghost text-xs"
                                         hx-get="/Dhcp/Subnets/edit/@s.Id"
                                         hx-target="#drawer-body" hx-swap="innerHTML"
