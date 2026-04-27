@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models.Auth;
+using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
 using NetFirewall.Web.Models.Monitoring;
+using Npgsql;
 
 namespace NetFirewall.Web.Controllers;
 
@@ -16,11 +18,19 @@ public sealed class MonitoringController : Controller
 {
     private readonly ISystemMonitorService _monitor;
     private readonly IMetricsQueryService _query;
+    private readonly IScheduleService _schedules;
+    private readonly NpgsqlDataSource _ds;
 
-    public MonitoringController(ISystemMonitorService monitor, IMetricsQueryService query)
+    public MonitoringController(
+        ISystemMonitorService monitor,
+        IMetricsQueryService query,
+        IScheduleService schedules,
+        NpgsqlDataSource ds)
     {
         _monitor = monitor;
         _query = query;
+        _schedules = schedules;
+        _ds = ds;
     }
 
     [HttpGet("")]
@@ -63,6 +73,32 @@ public sealed class MonitoringController : Controller
         }
 
         return PartialView("_MonitoringHistory", vm);
+    }
+
+    [HttpGet("schedules")]
+    public async Task<IActionResult> Schedules(CancellationToken ct)
+    {
+        var all = await _schedules.GetAllAsync(ct);
+
+        // Count attached filter rules per schedule. One small SQL beats N round-trips.
+        var attached = new Dictionary<Guid, int>();
+        try
+        {
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(
+                "SELECT schedule_id, COUNT(*) FROM fw_filter_rules WHERE schedule_id IS NOT NULL GROUP BY schedule_id",
+                conn);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                attached[reader.GetGuid(0)] = reader.GetInt32(1);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42P01" || ex.SqlState == "42703")
+        {
+            // fw_filter_rules.schedule_id may not exist yet — degrade to zeros.
+        }
+
+        ViewBag.Attached = attached;
+        return PartialView("_SchedulesLive", all);
     }
 
     private static (DateTime From, DateTime To, bool UseHourly) ResolveRange(string? range)

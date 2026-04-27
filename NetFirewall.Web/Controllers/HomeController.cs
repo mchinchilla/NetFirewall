@@ -21,6 +21,7 @@ public class HomeController : Controller
     private readonly IMetricsQueryService _query;
     private readonly IWireGuardService _wg;
     private readonly IDaemonClient _daemon;
+    private readonly IScheduleService _schedules;
     private readonly ILogger<HomeController> _logger;
 
     public HomeController(
@@ -30,6 +31,7 @@ public class HomeController : Controller
         IMetricsQueryService query,
         IWireGuardService wg,
         IDaemonClient daemon,
+        IScheduleService schedules,
         ILogger<HomeController> logger)
     {
         _dhcp = dhcp;
@@ -38,6 +40,7 @@ public class HomeController : Controller
         _query = query;
         _wg = wg;
         _daemon = daemon;
+        _schedules = schedules;
         _logger = logger;
     }
 
@@ -53,9 +56,10 @@ public class HomeController : Controller
         var auditTask      = _firewall.GetAuditLogsAsync(limit: 6, offset: 0, ct);
         var historyTask    = SafeQueryHistoryAsync(ct);
         var wgTask         = SafeQueryWireGuardAsync(ct);
+        var schedulesTask  = SafeQuerySchedulesAsync(ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
-                           filterTask, snapshotTask, auditTask, historyTask, wgTask);
+                           filterTask, snapshotTask, auditTask, historyTask, wgTask, schedulesTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -66,6 +70,7 @@ public class HomeController : Controller
         var audit     = auditTask.Result;
         var history   = historyTask.Result;
         var wg        = wgTask.Result;
+        var sched     = schedulesTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
         var totalBytesPerSec = snapshot.Network
@@ -88,6 +93,9 @@ public class HomeController : Controller
             WireGuardConfigured = wg.Configured,
             WireGuardPeerCount = wg.PeerCount,
             WireGuardActivePeerCount = wg.ActivePeerCount,
+
+            ScheduleCount = sched.Total,
+            ActiveScheduleCount = sched.ActiveNow,
 
             TrafficLabels   = history.Labels,
             TrafficRxMbps   = history.RxMbps,
@@ -113,6 +121,28 @@ public class HomeController : Controller
     }
 
     // ----- helpers --------------------------------------------------------
+
+    private async Task<ScheduleSnapshot> SafeQuerySchedulesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var all = await _schedules.GetAllAsync(ct);
+            if (all.Count == 0) return ScheduleSnapshot.Empty;
+            var now = DateTimeOffset.UtcNow;
+            var active = all.Count(s => s.IsActiveAt(now));
+            return new ScheduleSnapshot(Total: all.Count, ActiveNow: active);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Schedule summary unavailable — likely no migration");
+            return ScheduleSnapshot.Empty;
+        }
+    }
+
+    private sealed record ScheduleSnapshot(int Total, int ActiveNow)
+    {
+        public static readonly ScheduleSnapshot Empty = new(0, 0);
+    }
 
     private async Task<WireGuardSnapshot> SafeQueryWireGuardAsync(CancellationToken ct)
     {

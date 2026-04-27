@@ -68,6 +68,25 @@
                 <div class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
             </div>
         </section>
+
+        @* ---------- Time-based rules (schedules) ---------- *@
+        <section class="card mt-4">
+            <header class="flex items-baseline justify-between mb-3">
+                <div>
+                    <h2 class="text-base font-semibold">Active schedules</h2>
+                    <p class="text-xs" style="color: var(--surface-fg-muted);">
+                        The daemon's watcher re-applies the firewall the moment a schedule transitions. Polled every 30s here for visibility.
+                    </p>
+                </div>
+                <a href="@Url.Action("Index", "FwSchedules")" class="text-xs hover:underline" style="color: var(--accent);">Manage →</a>
+            </header>
+            <div id="monitoring-schedules"
+                 hx-get="/Monitoring/schedules"
+                 :hx-trigger="paused ? 'load' : 'load, every 30s'"
+                 hx-swap="innerHTML">
+                <div class="text-sm py-6 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+            </div>
+        </section>
     </div>
 
     @* ---------- History tab ---------- *@

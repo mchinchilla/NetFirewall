@@ -21,6 +21,11 @@ public sealed class HomeDashboardViewModel
     /// <summary>True when a wg server row exists (controls whether the KPI shows).</summary>
     public bool WireGuardConfigured { get; init; }
 
+    /// <summary>Total configured schedules (incl. disabled). 0 = no schedules feature in use.</summary>
+    public int ScheduleCount { get; init; }
+    /// <summary>How many schedules are currently active (in their timezone, day-of-week + window).</summary>
+    public int ActiveScheduleCount { get; init; }
+
     /// <summary>Last 24h network bandwidth — labels + RX/TX series for Chart.js.</summary>
     public string[] TrafficLabels { get; init; } = [];
     public double[] TrafficRxMbps { get; init; } = [];
