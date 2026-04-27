@@ -1,0 +1,100 @@
+@model NetFirewall.Web.Models.Network.NetworkObjectFormViewModel
+@using NetFirewall.Models.Network
+@using NetFirewall.Web.Models
+@{
+    var catalog = (IReadOnlyList<NetworkObject>)(ViewBag.Catalog ?? Array.Empty<NetworkObject>());
+    var availableMembers = catalog
+        .Where(c => Model.Id is null || c.Id != Model.Id) // can't include self
+        .OrderBy(c => c.Type).ThenBy(c => c.Name)
+        .ToList();
+    var memberSet = new HashSet<Guid>(Model.MemberIds);
+    var memberSetJson = System.Text.Json.JsonSerializer.Serialize(Model.MemberIds);
+}
+
+<form id="network-object-form"
+      hx-post="/Network/Objects/save" hx-target="this" hx-swap="outerHTML"
+      x-data="{ type: '@Model.Type', selected: new Set(@Html.Raw(memberSetJson)) }">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Name), Label = "Name", Required = true, Value = Model.Name,
+                Placeholder = "DB_SERVERS",
+                Help = "Convention: UPPER_SNAKE_CASE so it's distinct from literal IPs in rule editors."
+            })
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium" style="color: var(--surface-fg);">Type <span style="color: var(--feedback-danger-fg);">*</span></label>
+                <select name="Type" class="input" x-model="type">
+                    @foreach (var t in NetworkObjectTypes.All)
+                    {
+                        <option value="@t" selected="@(t == Model.Type)">@t</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        @* ----- value (host/network/range) ----- *@
+        <div x-show="type !== 'group'">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Value), Label = "Value", Value = Model.Value,
+                Placeholder = "depends on type — see help below"
+            })
+            <div class="text-xs mt-1 space-y-0.5" style="color: var(--surface-fg-muted);">
+                <p x-show="type === 'host'">Single IPv4 address: <span class="font-mono">10.0.0.5</span> (we add /32 automatically).</p>
+                <p x-show="type === 'network'">CIDR: <span class="font-mono">10.0.0.0/24</span>, <span class="font-mono">192.168.1.0/27</span>, etc.</p>
+                <p x-show="type === 'range'">Inclusive range: <span class="font-mono">10.0.0.10-10.0.0.50</span>.</p>
+            </div>
+        </div>
+
+        @* ----- members (group) ----- *@
+        <div x-show="type === 'group'" x-cloak>
+            <label class="block text-xs font-medium mb-2" style="color: var(--surface-fg);">
+                Members <span style="color: var(--feedback-danger-fg);">*</span>
+                <span class="font-normal" style="color: var(--surface-fg-muted);">— click to toggle</span>
+            </label>
+            @if (availableMembers.Count == 0)
+            {
+                <p class="text-sm py-4 text-center" style="color: var(--surface-fg-muted);">
+                    No other objects exist. Create some host/network/range objects first.
+                </p>
+            }
+            else
+            {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto p-2 rounded border"
+                     style="border-color: var(--surface-border);">
+                    @foreach (var c in availableMembers)
+                    {
+                        var isSelected = memberSet.Contains(c.Id);
+                        <label class="flex items-start gap-2 p-2 rounded cursor-pointer transition"
+                               :class="selected.has('@c.Id') ? '' : 'hover:bg-[color:var(--surface-muted)]'"
+                               :style="selected.has('@c.Id') ? 'background-color: var(--accent-soft);' : ''">
+                            <input type="checkbox" name="MemberIds" value="@c.Id" class="mt-0.5"
+                                   @(isSelected ? "checked" : "")
+                                   @@change="$event.target.checked ? selected.add('@c.Id') : selected.delete('@c.Id'); selected = new Set(selected)" />
+                            <div class="flex-1 min-w-0">
+                                <p class="text-xs font-mono font-medium truncate">@c.Name</p>
+                                <p class="text-[10px] truncate" style="color: var(--surface-fg-muted);">@c.Type · @c.Value</p>
+                            </div>
+                        </label>
+                    }
+                </div>
+                <p class="text-xs mt-2" style="color: var(--surface-fg-muted);">
+                    Selected: <span x-text="selected.size"></span> · groups can include other groups (the resolver flattens recursively with cycle detection).
+                </p>
+            }
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
+            Value = Model.Description
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create object")</button>
+    </div>
+</form>

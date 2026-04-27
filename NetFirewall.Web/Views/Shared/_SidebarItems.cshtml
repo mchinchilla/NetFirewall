@@ -40,7 +40,8 @@
         Url.Action("Index", "FwAuditLog")!, Url.Action("Index", "FwApply")!
     };
     var netHrefs = new[] {
-        Url.Action("Interfaces", "Network")!, Url.Action("Index", "StaticRoutes")!
+        Url.Action("Interfaces", "Network")!, Url.Action("Index", "StaticRoutes")!,
+        Url.Action("Index", "NetworkObjects")!
     };
 
     var dhcpOpen = AnyActive(dhcpHrefs) ? "true" : "false";
@@ -113,6 +114,7 @@
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
         <a href="@Url.Action("Interfaces", "Network")" class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Network")!))">Interfaces</a>
         <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
+        <a href="@Url.Action("Index", "NetworkObjects")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkObjects")!))">Objects</a>
     </div>
 </div>
 

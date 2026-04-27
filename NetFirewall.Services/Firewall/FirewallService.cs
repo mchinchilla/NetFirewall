@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Services.Network;
 using Npgsql;
 
 namespace NetFirewall.Services.Firewall;
@@ -13,11 +14,16 @@ namespace NetFirewall.Services.Firewall;
 public sealed class FirewallService : IFirewallService
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly INetworkObjectResolver _objectResolver;
     private readonly ILogger<FirewallService> _logger;
 
-    public FirewallService(NpgsqlDataSource dataSource, ILogger<FirewallService> logger)
+    public FirewallService(
+        NpgsqlDataSource dataSource,
+        INetworkObjectResolver objectResolver,
+        ILogger<FirewallService> logger)
     {
         _dataSource = dataSource;
+        _objectResolver = objectResolver;
         _logger = logger;
     }
 
@@ -1439,6 +1445,13 @@ public sealed class FirewallService : IFirewallService
         var ifaceMap = interfaces.ToDictionary(i => i.Id, i => i.Name);
         var markMap = trafficMarks.ToDictionary(m => m.Id, m => m);
 
+        // Resolve named network objects in source/destination of every rule
+        // BEFORE generators stringify them. We mutate the in-memory copies
+        // (these are throwaway DTOs from this read, never persisted back).
+        await ResolveAddressesAsync(filterRules,  ct);
+        await ResolveAddressesAsync(portForwards, ct);
+        await ResolveAddressesAsync(natRules,     ct);
+
         // NAT table (for port forwards and masquerade/snat)
         sb.AppendLine("table ip nat {");
         sb.AppendLine("    chain prerouting {");
@@ -1606,6 +1619,49 @@ public sealed class FirewallService : IFirewallService
 
         sb.AppendLine("echo 'tc apply complete.'");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// In-place: replace each rule's SourceAddresses + DestinationAddresses with
+    /// the resolver's flattened CIDR list. Idempotent — pure literals pass through
+    /// unchanged. Mutating is safe here because these rule objects are throwaway
+    /// (loaded from DB just for this generation pass).
+    /// </summary>
+    private async Task ResolveAddressesAsync(IReadOnlyList<FwFilterRule> rules, CancellationToken ct)
+    {
+        foreach (var r in rules)
+        {
+            if (r.SourceAddresses is { Length: > 0 } src)
+                r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+            if (r.DestinationAddresses is { Length: > 0 } dst)
+                r.DestinationAddresses = (await _objectResolver.ResolveAsync(dst, ct)).ToArray();
+        }
+    }
+
+    private async Task ResolveAddressesAsync(IReadOnlyList<FwPortForward> rules, CancellationToken ct)
+    {
+        foreach (var r in rules)
+        {
+            if (r.SourceAddresses is { Length: > 0 } src)
+                r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// NAT rules use a single <c>SourceNetwork</c> string (not an array). If
+    /// the value matches a network-object name, we resolve it down to its
+    /// first member CIDR. For groups with multiple members we currently take
+    /// the first only — multi-source NAT needs a richer field shape, future
+    /// iteration.
+    /// </summary>
+    private async Task ResolveAddressesAsync(IReadOnlyList<FwNatRule> rules, CancellationToken ct)
+    {
+        foreach (var r in rules)
+        {
+            if (string.IsNullOrWhiteSpace(r.SourceNetwork)) continue;
+            var resolved = await _objectResolver.ResolveAsync(new[] { r.SourceNetwork }, ct);
+            if (resolved.Count > 0) r.SourceNetwork = resolved[0];
+        }
     }
 
     private static string GenerateFilterRule(FwFilterRule rule, Dictionary<Guid, string> ifaceMap)

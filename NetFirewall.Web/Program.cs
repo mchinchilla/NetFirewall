@@ -135,6 +135,13 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardService,
 builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
                               NetFirewall.Services.Vpn.WireGuardConfigService>();
 
+// Network objects — alias-style address objects. Filter / NAT / mangle
+// generators resolve names → flat CIDRs through INetworkObjectResolver.
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkObjectService,
+                           NetFirewall.Services.Network.NetworkObjectService>();
+builder.Services.AddScoped<NetFirewall.Services.Network.INetworkObjectResolver,
+                           NetFirewall.Services.Network.NetworkObjectResolver>();
+
 // DHCP services. Subnet service is the cached singleton used by both the
 // setup wizard and the DHCP admin pages. Admin facade is what controllers
 // inject for full CRUD over subnets / pools / leases / reservations.
