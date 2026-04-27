@@ -556,7 +556,7 @@ public sealed class DhcpWorker : BackgroundService
             interfaceName ?? "default");
     }
 
-    private static DhcpMessageType ParseResponseMessageType(byte[] response)
+    internal static DhcpMessageType ParseResponseMessageType(byte[] response)
     {
         // DHCP message type is in options, after magic cookie (offset 240)
         // Look for option 53 (message type)
@@ -585,7 +585,7 @@ public sealed class DhcpWorker : BackgroundService
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static IPEndPoint DetermineDestinationEndPoint(DhcpRequest request, IPEndPoint originalEndPoint)
+    internal static IPEndPoint DetermineDestinationEndPoint(DhcpRequest request, IPEndPoint originalEndPoint)
     {
         // RFC 2131: Broadcast if flag set or client has no IP
         bool broadcastFlagSet = (request.Flags & 0x8000) != 0;
@@ -598,7 +598,7 @@ public sealed class DhcpWorker : BackgroundService
         return new IPEndPoint(request.CiAddr, 68);
     }
 
-    private bool TryParseDhcpRequest(ReadOnlySpan<byte> buffer, IPEndPoint remoteEndPoint, out DhcpRequest request)
+    internal bool TryParseDhcpRequest(ReadOnlySpan<byte> buffer, IPEndPoint remoteEndPoint, out DhcpRequest request)
     {
         request = default!;
 
@@ -670,7 +670,7 @@ public sealed class DhcpWorker : BackgroundService
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string FormatMacAddress(ReadOnlySpan<byte> bytes)
+    internal static string FormatMacAddress(ReadOnlySpan<byte> bytes)
     {
         // Pre-sized string builder equivalent using stackalloc
         Span<char> chars = stackalloc char[17]; // XX:XX:XX:XX:XX:XX

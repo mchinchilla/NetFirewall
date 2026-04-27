@@ -100,7 +100,12 @@ public sealed class LeaseCache : IDisposable
             var count = 0;
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                var mac = reader.GetValue(0).ToString() ?? "";
+                // Postgres macaddr → PhysicalAddress; its default ToString is
+                // unseparated uppercase ("AABBCC000001"). Callers index by the
+                // colon-lowercase form the worker parses out of the packet, so
+                // we normalize here to keep the cache consistent across a
+                // process restart.
+                var mac = FormatMac((PhysicalAddress)reader.GetValue(0));
                 var ip = (IPAddress)reader.GetValue(1);
                 var hostname = reader.IsDBNull(2) ? null : reader.GetString(2);
                 var startTime = reader.GetDateTime(3);
@@ -130,6 +135,17 @@ public sealed class LeaseCache : IDisposable
         {
             _logger.LogError(ex, "Failed to warm up lease cache");
         }
+    }
+
+    /// <summary>
+    /// Render a <see cref="PhysicalAddress"/> as <c>aa:bb:cc:dd:ee:ff</c> (colon-
+    /// separated, lowercase) — the canonical form the rest of the DHCP stack
+    /// uses. <c>PhysicalAddress.ToString()</c> default omits separators.
+    /// </summary>
+    private static string FormatMac(PhysicalAddress pa)
+    {
+        var bytes = pa.GetAddressBytes();
+        return string.Join(":", bytes.Select(b => b.ToString("x2")));
     }
 
     #region Read Operations (Cache-first)

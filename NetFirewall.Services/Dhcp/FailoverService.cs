@@ -332,17 +332,23 @@ public sealed class FailoverService : IFailoverService, IDisposable
             await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            // Postgres has no generate_series(inet, inet); offset from range_start
+            // by an integer series, same shape used in DhcpSubnetService.
             const string sql = @"
-                SELECT
-                    p.id,
-                    COUNT(DISTINCT ip) as total,
-                    COUNT(DISTINCT ip) FILTER (WHERE l.id IS NULL) as free,
-                    COUNT(DISTINCT l.id) FILTER (WHERE l.end_time > NOW()) as active
-                FROM dhcp_pools p
-                CROSS JOIN generate_series(p.range_start::inet, p.range_end::inet) AS ip
-                LEFT JOIN dhcp_leases l ON l.ip_address = ip AND l.end_time > NOW()
-                WHERE p.enabled = true
-                GROUP BY p.id";
+                WITH pool_ips AS (
+                    SELECT p.id AS pool_id,
+                           (p.range_start::inet + gs)::inet AS ip
+                    FROM dhcp_pools p
+                    CROSS JOIN generate_series(0, (p.range_end::inet - p.range_start::inet)::int) AS gs
+                    WHERE p.enabled = true
+                )
+                SELECT pi.pool_id,
+                       COUNT(DISTINCT pi.ip)                                                AS total,
+                       COUNT(DISTINCT pi.ip) FILTER (WHERE l.id IS NULL)                    AS free,
+                       COUNT(DISTINCT l.id)  FILTER (WHERE l.end_time > NOW())              AS active
+                FROM pool_ips pi
+                LEFT JOIN dhcp_leases l ON l.ip_address = pi.ip AND l.end_time > NOW()
+                GROUP BY pi.pool_id";
 
             await using var cmd = new NpgsqlCommand(sql, connection);
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);

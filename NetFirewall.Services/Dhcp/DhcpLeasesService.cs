@@ -796,10 +796,12 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
         try
         {
+            // Column name is reserved_ip, not ip_address — alias so any reader
+            // that wants the canonical name still works.
             const string sql = @"
-                SELECT id, mac_address, ip_address
+                SELECT id, mac_address, reserved_ip
                 FROM dhcp_mac_reservations
-                ORDER BY ip_address";
+                ORDER BY reserved_ip";
 
             await using var cmd = new NpgsqlCommand(sql, connection);
 

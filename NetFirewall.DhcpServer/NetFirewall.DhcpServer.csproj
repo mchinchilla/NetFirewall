@@ -35,4 +35,8 @@
   <ItemGroup>
     <Folder Include="logs\" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetFirewall.Tests" />
+  </ItemGroup>
 </Project>
