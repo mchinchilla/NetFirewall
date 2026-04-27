@@ -152,8 +152,8 @@ builder.Services.AddSingleton<NetFirewall.Web.Services.IBashScriptCatalog,
                               NetFirewall.Web.Services.BashScriptCatalog>();
 
 // Runtime-tunable settings (key/value backed by app_settings, in-memory cached).
-builder.Services.AddSingleton<NetFirewall.Web.Services.IAppSettingsService,
-                              NetFirewall.Web.Services.AppSettingsService>();
+builder.Services.AddSingleton<NetFirewall.Services.Settings.IAppSettingsService,
+                              NetFirewall.Services.Settings.AppSettingsService>();
 
 // System monitoring: singleton because the implementation caches per-CPU
 // jiffies between calls to compute usage% deltas correctly. The Web only

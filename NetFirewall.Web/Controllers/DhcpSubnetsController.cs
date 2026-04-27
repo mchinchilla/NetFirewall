@@ -6,6 +6,7 @@ using NetFirewall.Models.Auth;
 using NetFirewall.Models.Dhcp;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
+using NetFirewall.Services.Settings;
 using NetFirewall.Web.Helpers;
 using NetFirewall.Web.Models.Dhcp;
 
@@ -22,15 +23,18 @@ public sealed class DhcpSubnetsController : Controller
 {
     private readonly IDhcpAdminService _admin;
     private readonly IFirewallService _firewall;
+    private readonly IAppSettingsService _settings;
     private readonly ILogger<DhcpSubnetsController> _logger;
 
     public DhcpSubnetsController(
         IDhcpAdminService admin,
         IFirewallService firewall,
+        IAppSettingsService settings,
         ILogger<DhcpSubnetsController> logger)
     {
         _admin = admin;
         _firewall = firewall;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -60,7 +64,18 @@ public sealed class DhcpSubnetsController : Controller
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {
         ViewBag.Interfaces = await _firewall.GetInterfacesAsync(ct);
-        if (id is null) return PartialView("_SubnetForm", new SubnetFormViewModel());
+        if (id is null)
+        {
+            // Pre-fill new subnet with the operator's defaults from app_settings.
+            var leaseSec = await _settings.GetIntAsync("dhcp.default_lease_seconds", ct);
+            var dnsRaw   = await _settings.GetStringAsync("dhcp.default_dns_servers", ct);
+            return PartialView("_SubnetForm", new SubnetFormViewModel
+            {
+                DefaultLeaseTime = leaseSec > 0 ? leaseSec : 86400,
+                MaxLeaseTime     = leaseSec > 0 ? leaseSec * 2 : 172800,
+                DnsServersRaw    = dnsRaw,
+            });
+        }
 
         var subnet = await _admin.GetSubnetByIdAsync(id.Value, ct);
         return subnet is null ? NotFound() : PartialView("_SubnetForm", FromEntity(subnet));

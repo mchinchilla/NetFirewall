@@ -1,4 +1,4 @@
-namespace NetFirewall.Web.Services;
+namespace NetFirewall.Services.Settings;
 
 public enum AppSettingType { String, Int, Bool, Enum }
 

@@ -1,9 +1,12 @@
-namespace NetFirewall.Web.Services;
+namespace NetFirewall.Services.Settings;
 
 /// <summary>
 /// Read/write façade over the app_settings table. Settings are keyed by string
 /// (matching <see cref="AppSettingDescriptor.Key"/>) and typed at the call site.
 /// Reads are cached in-memory; <see cref="SetAsync"/> invalidates.
+///
+/// Lives in NetFirewall.Services so the daemon (collector + audit pruner) can
+/// read settings the same way the Web does.
 /// </summary>
 public interface IAppSettingsService
 {

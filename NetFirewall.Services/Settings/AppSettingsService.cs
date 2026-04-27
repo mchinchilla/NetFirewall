@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
-namespace NetFirewall.Web.Services;
+namespace NetFirewall.Services.Settings;
 
 public sealed class AppSettingsService : IAppSettingsService
 {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NetFirewall.Services.Settings;
 using Npgsql;
 
 namespace NetFirewall.Services.Monitoring;
@@ -50,6 +51,7 @@ public sealed class MetricsCollectorService : BackgroundService
 {
     private readonly ISystemMonitorService _monitor;
     private readonly NpgsqlDataSource _dataSource;
+    private readonly IAppSettingsService _settings;
     private readonly ILogger<MetricsCollectorService> _logger;
     private readonly MetricsCollectorOptions _options;
 
@@ -60,11 +62,13 @@ public sealed class MetricsCollectorService : BackgroundService
     public MetricsCollectorService(
         ISystemMonitorService monitor,
         NpgsqlDataSource dataSource,
+        IAppSettingsService settings,
         IOptions<MetricsCollectorOptions> options,
         ILogger<MetricsCollectorService> logger)
     {
         _monitor = monitor;
         _dataSource = dataSource;
+        _settings = settings;
         _options = options.Value;
         _logger = logger;
     }
@@ -335,27 +339,34 @@ public sealed class MetricsCollectorService : BackgroundService
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
+        // Read retention from app_settings — operator-tunable from the Settings page.
+        // Falls back to the IOptions defaults if the setting is unset / out of range.
+        var rawHours = await _settings.GetIntAsync("monitoring.raw_retention_hours", ct);
+        if (rawHours <= 0) rawHours = (int)_options.RawDataRetention.TotalHours;
+        var hourlyDays = await _settings.GetIntAsync("monitoring.hourly_retention_days", ct);
+        if (hourlyDays <= 0) hourlyDays = (int)_options.HourlyDataRetention.TotalDays;
+
         // Delete old raw data
-        var rawCutoff = DateTime.UtcNow - _options.RawDataRetention;
+        var rawCutoff = DateTime.UtcNow - TimeSpan.FromHours(rawHours);
         await using (var cmd = new NpgsqlCommand(
             "DELETE FROM system_metrics WHERE timestamp < @cutoff", conn))
         {
             cmd.Parameters.AddWithValue("cutoff", rawCutoff);
             var deleted = await cmd.ExecuteNonQueryAsync(ct);
             if (deleted > 0)
-                _logger.LogInformation("Cleaned up {Count} raw metrics older than {Cutoff}",
-                    deleted, rawCutoff);
+                _logger.LogInformation("Cleaned up {Count} raw metrics older than {Cutoff} ({Hours}h retention)",
+                    deleted, rawCutoff, rawHours);
         }
 
         // Delete old hourly data
-        var hourlyCutoff = DateTime.UtcNow - _options.HourlyDataRetention;
+        var hourlyCutoff = DateTime.UtcNow - TimeSpan.FromDays(hourlyDays);
         await using (var cmd = new NpgsqlCommand(
             "DELETE FROM system_metrics_hourly WHERE hour_bucket < @cutoff", conn))
         {
             cmd.Parameters.AddWithValue("cutoff", hourlyCutoff);
             var deleted = await cmd.ExecuteNonQueryAsync(ct);
             if (deleted > 0)
-                _logger.LogInformation("Cleaned up {Count} hourly metrics", deleted);
+                _logger.LogInformation("Cleaned up {Count} hourly metrics ({Days}d retention)", deleted, hourlyDays);
         }
 
         // Delete old daily data

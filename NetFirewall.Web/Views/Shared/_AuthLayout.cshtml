@@ -1,10 +1,17 @@
 <!DOCTYPE html>
+@inject NetFirewall.Services.Settings.IAppSettingsService AppSettings
 @*
     Auth shell — two-column on lg+, single column stacked on smaller.
     Left: form (centered, capped at max-w-md). Right: brand panel (theme-tinted).
     No sidebar / topheader / drawer / confirm — those need an authenticated session.
 *@
-<html lang="en" class="h-full" data-theme="boulder" data-mode="light">
+@{
+    var authTheme = await AppSettings.GetStringAsync("appearance.default_theme");
+    var authMode  = await AppSettings.GetStringAsync("appearance.default_mode");
+    if (string.IsNullOrEmpty(authTheme)) authTheme = "boulder";
+    if (string.IsNullOrEmpty(authMode))  authMode  = "light";
+}
+<html lang="en" class="h-full" data-theme="@authTheme" data-mode="@authMode">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

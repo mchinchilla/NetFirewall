@@ -1,9 +1,20 @@
 <!DOCTYPE html>
+@inject NetFirewall.Services.Settings.IAppSettingsService AppSettings
 @*
     Dashboard shell — composes partials only. Each visual concern lives in
     its own _Partial under Views/Shared/ per project rule #7.
+
+    data-theme/data-mode reflect the configured appearance.* defaults; the
+    pre-paint hydrator in site.js overrides them with the user's localStorage
+    preference when present.
 *@
-<html lang="en" class="h-full" data-theme="boulder" data-mode="light">
+@{
+    var defaultTheme = await AppSettings.GetStringAsync("appearance.default_theme");
+    var defaultMode  = await AppSettings.GetStringAsync("appearance.default_mode");
+    if (string.IsNullOrEmpty(defaultTheme)) defaultTheme = "boulder";
+    if (string.IsNullOrEmpty(defaultMode))  defaultMode  = "light";
+}
+<html lang="en" class="h-full" data-theme="@defaultTheme" data-mode="@defaultMode">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
