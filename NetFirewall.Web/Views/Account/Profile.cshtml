@@ -127,9 +127,12 @@
             <div class="space-y-1.5">
                 <label class="block text-xs font-medium" style="color: var(--surface-fg);">Locale</label>
                 <select name="@nameof(Model.Locale)" class="input">
-                    @foreach (var (code, label) in locales)
+                    @* Tuple element renamed from `code` to `loc` — `@code` is a reserved
+                       Razor directive token (Blazor code blocks) and Razor MVC's parser
+                       trips on it even when the variable is in scope. *@
+                    @foreach (var (loc, label) in locales)
                     {
-                        <option value="@code" selected="@(code == Model.Locale)">@label (@code)</option>
+                        <option value="@loc" selected="@(loc == Model.Locale)">@label (@loc)</option>
                     }
                 </select>
             </div>

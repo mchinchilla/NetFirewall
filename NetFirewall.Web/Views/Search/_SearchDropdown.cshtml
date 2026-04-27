@@ -9,30 +9,37 @@
         "port_forward"    => "Port forward",
         "mangle_rule"     => "Mangle rule",
         "network_object"  => "Network object",
-        "dhcp_subnet"     => "DHCP subnet",
-        "wg_peer"         => "WireGuard peer",
+        "network_service" => "Network service",
+        "dhcp_subnet"    => "DHCP subnet",
+        "wg_peer"        => "WireGuard peer",
         _                 => t
     };
-    static string TypeColor(string t) => t switch
+    // Tailwind utility class for the section header tint — keeps every color
+    // reference in this view rooted in the theme system (rule #9) without
+    // any inline style="..." escape hatches.
+    static string TypeTextCls(string t) => t switch
     {
-        "filter_rule" or "nat_rule" or "port_forward" or "mangle_rule" => "var(--accent)",
-        "network_object" => "var(--feedback-info-fg)",
-        "dhcp_subnet"    => "var(--feedback-success-fg)",
-        "wg_peer"        => "var(--feedback-warning-fg)",
-        _                => "var(--surface-fg-muted)"
+        "filter_rule" or "nat_rule" or "port_forward" or "mangle_rule" => "text-accent",
+        "network_object"  => "text-feedback-info-fg",
+        "network_service" => "text-feedback-info-fg",
+        "dhcp_subnet"     => "text-feedback-success-fg",
+        "wg_peer"         => "text-feedback-warning-fg",
+        _                 => "text-surface-fg-muted"
     };
     var grouped = Model.GroupBy(h => h.EntityType).OrderByDescending(g => g.First().Rank).ToList();
 }
 
 @if (string.IsNullOrWhiteSpace(query))
 {
-    <div class="px-4 py-3 text-xs" style="color: var(--surface-fg-muted);">Type at least 2 characters to search.</div>
+    <div class="px-4 py-3 text-xs text-surface-fg-muted">Type at least 2 characters to search.</div>
 }
 else if (Model.Count == 0)
 {
+    @* Razor's HTML parser gets confused by literal `"` next to a style="..." attribute on
+       the same element — use &quot; for the literal quotes and Tailwind utilities for color. *@
     <div class="px-4 py-6 text-center">
-        <p class="text-sm font-medium" style="color: var(--surface-fg);">No results for "<span class="font-mono">@query</span>"</p>
-        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">
+        <p class="text-sm font-medium text-surface-fg">No results for &quot;<span class="font-mono">@query</span>&quot;</p>
+        <p class="text-xs mt-1 text-surface-fg-muted">
             Try a single keyword, or check the entity exists. The index updates on insert/update — fresh data is searchable immediately.
         </p>
     </div>
@@ -42,26 +49,24 @@ else
     <div class="max-h-[60vh] overflow-y-auto">
         @foreach (var group in grouped)
         {
-            <div class="border-t first:border-t-0" style="border-color: var(--surface-border);">
-                <p class="px-4 pt-3 pb-1 text-[10px] uppercase tracking-wider font-semibold"
-                   style="color: @TypeColor(group.Key);">
-                    @TypeLabel(group.Key) <span style="color: var(--surface-fg-muted);">· @group.Count()</span>
+            <div class="border-t first:border-t-0 border-surface-border">
+                <p class="px-4 pt-3 pb-1 text-[10px] uppercase tracking-wider font-semibold @TypeTextCls(group.Key)">
+                    @TypeLabel(group.Key) <span class="text-surface-fg-muted">· @group.Count()</span>
                 </p>
                 @foreach (var h in group)
                 {
-                    <a href="@h.Url"
-                       class="block px-4 py-2 text-sm transition hover:bg-[color:var(--surface-muted)]">
+                    <a href="@h.Url" class="block px-4 py-2 text-sm transition hover:bg-surface-muted">
                         <p class="font-medium truncate">@h.Title</p>
                         @if (!string.IsNullOrEmpty(h.Subtitle))
                         {
-                            <p class="text-xs font-mono truncate" style="color: var(--surface-fg-muted);">@h.Subtitle</p>
+                            <p class="text-xs font-mono truncate text-surface-fg-muted">@h.Subtitle</p>
                         }
                     </a>
                 }
             </div>
         }
     </div>
-    <div class="px-4 py-2 border-t text-[10px]" style="border-color: var(--surface-border); color: var(--surface-fg-muted);">
-        @Model.Count result@(Model.Count == 1 ? "" : "s") · Tip: use <span class="font-mono">"exact phrase"</span>, <span class="font-mono">term1 OR term2</span>, <span class="font-mono">-exclude</span>
+    <div class="px-4 py-2 border-t border-surface-border text-[10px] text-surface-fg-muted">
+        @Model.Count result@(Model.Count == 1 ? "" : "s") · Tip: use <span class="font-mono">&quot;exact phrase&quot;</span>, <span class="font-mono">term1 OR term2</span>, <span class="font-mono">-exclude</span>
     </div>
 }
