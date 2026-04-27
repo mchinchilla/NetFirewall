@@ -264,7 +264,10 @@ public sealed class FirewallService : IFirewallService
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
-        var sql = "SELECT * FROM fw_static_routes";
+        // Cast cidr → text so the reader hands us a System.String for destination.
+        var sql = @"SELECT id, interface_id, destination::text AS destination, gateway,
+                           metric, description, enabled, created_at
+                    FROM fw_static_routes";
         if (interfaceId.HasValue) sql += " WHERE interface_id = @ifaceId";
         sql += " ORDER BY metric, created_at";
 
@@ -277,7 +280,9 @@ public sealed class FirewallService : IFirewallService
     public async Task<FwStaticRoute?> GetStaticRouteByIdAsync(Guid id, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        const string sql = "SELECT * FROM fw_static_routes WHERE id = @id";
+        const string sql = @"SELECT id, interface_id, destination::text AS destination, gateway,
+                                    metric, description, enabled, created_at
+                             FROM fw_static_routes WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", id);

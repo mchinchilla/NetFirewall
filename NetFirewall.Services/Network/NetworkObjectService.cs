@@ -114,8 +114,10 @@ public sealed class NetworkObjectService : INetworkObjectService
 
         async Task<List<UsageEntry>> ScanScalarCol(string table, string col)
         {
+            // Cast the column to text so cidr/inet columns compare cleanly against
+            // an object name string. Names that aren't valid CIDRs won't match.
             var sql = $"SELECT id, COALESCE(description, '(no description)') AS d, '{col}' AS field " +
-                      $"FROM {table} WHERE {col} = @n";
+                      $"FROM {table} WHERE {col}::text = @n";
             await using var cmd = new NpgsqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("n", objectName);
             var entries = new List<UsageEntry>();
