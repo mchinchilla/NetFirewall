@@ -88,6 +88,18 @@ builder.Services.AddScoped<IAuthAuditService, AuthAuditService>();
 // because the AES-256-GCM key never changes during process lifetime.
 builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
 
+// WireGuard — daemon owns key generation + apply (needs CAP_NET_ADMIN to
+// bring the wg interface up). Web reads/writes the catalog over the same
+// IWireGuardService and posts to /v1/wireguard/* for privileged ops.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardService,
+                           NetFirewall.Services.Vpn.WireGuardService>();
+builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
+                              NetFirewall.Services.Vpn.WireGuardConfigService>();
+builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardApplyService,
+                              NetFirewall.Services.Vpn.WireGuardApplyService>();
+builder.Services.Configure<NetFirewall.Services.Vpn.WireGuardApplyOptions>(
+    builder.Configuration.GetSection("WireGuard"));
+
 // ----- Authentication: validate X-NetFw-Session header -----
 builder.Services
     .AddAuthentication(DaemonSessionAuthHandler.SchemeName)
@@ -116,6 +128,7 @@ app.MapNetworkEndpoints();
 app.MapRouteEndpoints();
 app.MapFirewallEndpoints();
 app.MapCryptoEndpoints();
+app.MapWireGuardEndpoints();
 
 ApplySocketMode(daemonOpts);
 Log.Information("NetFirewall daemon listening on Unix socket {Socket}", ResolveSocketPath(daemonOpts.SocketPath));

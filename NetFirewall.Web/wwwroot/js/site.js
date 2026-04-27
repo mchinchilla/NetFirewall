@@ -70,6 +70,29 @@ window.NetFw.hydrateBeforePaint = async function () {
 window.NetFw._pad2 = (n) => String(n).padStart(2, "0");
 
 /**
+ * QR-code rendering helper. Centralized so per-page views never construct
+ * qrcode() inline (rule #3 — single JS file). Replaces the target's HTML
+ * with an inline SVG. Pass cellSize 4-6 for scannable from a phone camera.
+ */
+window.NetFw.qrcode = {
+    render(target, text, opts = {}) {
+        if (typeof qrcode !== "function") {
+            console.warn("qrcode lib missing");
+            return;
+        }
+        const el = typeof target === "string" ? document.getElementById(target) : target;
+        if (!el) return;
+        const qr = qrcode(0, opts.errorCorrection || "M");
+        qr.addData(text);
+        qr.make();
+        el.innerHTML = qr.createSvgTag({
+            cellSize: opts.cellSize || 5,
+            margin: opts.margin ?? 0
+        });
+    }
+};
+
+/**
  * Format a millisecond duration as `Nd HH:MM:SS` (or `HH:MM:SS` for under a day).
  */
 window.NetFw.formatUptime = function (ms) {

@@ -1,0 +1,175 @@
+@{
+    ViewData["Title"] = "VPN — WireGuard";
+    Layout = "_Layout";
+    var server = (NetFirewall.Models.Vpn.WgServer?)ViewBag.Server;
+    var form = (NetFirewall.Web.Models.Vpn.WgServerFormViewModel)ViewBag.Form;
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">VPN</p>
+        <h1 class="text-2xl font-semibold tracking-tight">WireGuard</h1>
+        <p class="text-sm mt-1" style="color: var(--surface-fg-muted);">
+            Single-tunnel server. Peer keys are generated on-device by the daemon and the private half is shown <span class="font-medium">once</span> at peer creation — we never persist it.
+        </p>
+    </div>
+    @if (server is not null)
+    {
+        <div class="flex items-center gap-2">
+            <button type="button" class="btn btn-ghost"
+                    hx-post="/Vpn/WireGuard/stop" hx-trigger="confirmed-stop"
+                    @@click.prevent="(async () => {
+                        const ok = await $store.confirm.ask({
+                            title: 'Stop WireGuard?',
+                            message: 'Brings down @server.Name. Active client sessions will drop until you bring it back up.',
+                            confirmLabel: 'Stop now',
+                            level: 'warning'
+                        });
+                        if (ok) htmx.trigger($el, 'confirmed-stop');
+                    })()">Stop</button>
+            <button type="button" class="btn btn-primary"
+                    hx-post="/Vpn/WireGuard/apply" hx-trigger="confirmed-apply"
+                    @@click.prevent="(async () => {
+                        const ok = await $store.confirm.ask({
+                            title: 'Apply WireGuard config?',
+                            message: 'Writes /etc/wireguard/@(server.Name).conf and brings the interface up (or hot-reloads peers via wg syncconf if it is already up).',
+                            confirmLabel: 'Apply now',
+                            level: 'default'
+                        });
+                        if (ok) htmx.trigger($el, 'confirmed-apply');
+                    })()">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                Apply
+            </button>
+        </div>
+    }
+</div>
+
+<div class="grid gap-4 grid-cols-1 xl:grid-cols-2">
+    @* ----- Server config ----- *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <header class="flex items-baseline justify-between mb-4">
+            <h2 class="text-base font-semibold">Server</h2>
+            @if (server is not null)
+            {
+                <button type="button" class="btn btn-ghost text-xs"
+                        hx-post="/Vpn/WireGuard/regenerate-keys"
+                        hx-trigger="confirmed-regen"
+                        style="color: var(--feedback-danger-fg);"
+                        @@click.prevent="(async () => {
+                            const ok = await $store.confirm.ask({
+                                title: 'Rotate server keys?',
+                                message: 'EVERY existing client config will stop working. You will need to re-issue every peer config.',
+                                confirmLabel: 'Rotate keys',
+                                level: 'danger'
+                            });
+                            if (ok) htmx.trigger($el, 'confirmed-regen');
+                        })()">Rotate keys</button>
+            }
+        </header>
+
+        <form hx-post="/Vpn/WireGuard/save" hx-swap="none">
+            @Html.AntiForgeryToken()
+            @if (form.Id.HasValue) { <input type="hidden" name="Id" value="@form.Id" /> }
+
+            <div class="space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                        Name = nameof(form.Name), Label = "Interface name", Required = true, Value = form.Name,
+                        Placeholder = "wg0"
+                    })
+                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                        Name = nameof(form.ListenPort), Label = "UDP listen port", Kind = NetFirewall.Web.Models.FormFieldKind.Number,
+                        Required = true, Value = form.ListenPort.ToString(), Min = "1", Max = "65535"
+                    })
+                </div>
+
+                @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                    Name = nameof(form.AddressCidr), Label = "Server address (CIDR inside tunnel)", Required = true,
+                    Value = form.AddressCidr, Placeholder = "10.10.0.1/24",
+                    Help = "Server's IP inside the WireGuard subnet. Peers default to .2/.3/... in the same /24."
+                })
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                        Name = nameof(form.PostUp), Label = "PostUp (optional)", Value = form.PostUp,
+                        Placeholder = "iptables -A FORWARD -i wg0 -j ACCEPT"
+                    })
+                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                        Name = nameof(form.PostDown), Label = "PostDown (optional)", Value = form.PostDown
+                    })
+                </div>
+
+                @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                    Name = nameof(form.Enabled), Label = "Enabled", Kind = NetFirewall.Web.Models.FormFieldKind.Checkbox,
+                    Value = form.Enabled ? "true" : "false"
+                })
+
+                @if (server is not null)
+                {
+                    <div class="pt-3 border-t" style="border-color: var(--surface-border);">
+                        <p class="text-xs uppercase tracking-wider font-semibold mb-1" style="color: var(--surface-fg-muted);">Server public key</p>
+                        <p class="text-xs font-mono break-all p-2 rounded" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent);">@server.PublicKey</p>
+                        <p class="text-xs mt-1" style="color: var(--surface-fg-muted);">Share with peers. The private key never leaves the daemon.</p>
+                    </div>
+                }
+            </div>
+
+            <div class="mt-4 flex items-center justify-end">
+                <button type="submit" class="btn btn-primary">@(server is null ? "Create server (generates keys)" : "Save")</button>
+            </div>
+        </form>
+    </section>
+
+    @* ----- Live status ----- *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 120ms;"
+             x-data="{ paused: false }">
+        <header class="flex items-baseline justify-between mb-4">
+            <h2 class="text-base font-semibold">Live status</h2>
+            <button type="button" class="btn btn-ghost text-xs"
+                    @@click="paused = !paused"
+                    x-text="paused ? 'Resume polling' : 'Pause polling'"></button>
+        </header>
+        <div id="wg-status"
+             hx-get="/Vpn/WireGuard/status"
+             :hx-trigger="paused ? 'load, refreshWireGuard from:body' : 'load, every 10s, refreshWireGuard from:body'"
+             hx-swap="innerHTML">
+            <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        </div>
+    </section>
+</div>
+
+@* ----- Peers ----- *@
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
+    <header class="flex items-baseline justify-between mb-4">
+        <div>
+            <h2 class="text-base font-semibold">Peers</h2>
+            <p class="text-xs" style="color: var(--surface-fg-muted);">Each peer = one client config (laptop, phone, etc).</p>
+        </div>
+        @if (server is not null)
+        {
+            <button type="button" class="btn btn-primary text-xs"
+                    hx-get="/Vpn/WireGuard/Peers/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add peer')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add peer
+            </button>
+        }
+    </header>
+
+    @if (server is null)
+    {
+        <p class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Save the server config first — peers need a server to attach to.</p>
+    }
+    else
+    {
+        <div id="wg-peers-table"
+             hx-get="/Vpn/WireGuard/Peers/table"
+             hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
+             hx-swap="innerHTML">
+            <div class="text-sm py-8 text-center" style="color: var(--surface-fg-muted);">Loading…</div>
+        </div>
+    }
+</section>

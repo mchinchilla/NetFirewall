@@ -100,6 +100,34 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public async Task<byte[]> DecryptTotpAsync(byte[] ciphertext, CancellationToken ct = default)
         => await CryptoCallAsync("/v1/crypto/decrypt", ciphertext, ct);
 
+    public Task<ServiceResponse<WireGuardKeyPairDto>> GenerateWireGuardKeyPairAsync(CancellationToken ct = default)
+        => PostAsync<WireGuardKeyPairDto>("/v1/wireguard/genkey", ct);
+
+    public Task<ServiceResponse<WireGuardPskDto>> GenerateWireGuardPskAsync(CancellationToken ct = default)
+        => PostAsync<WireGuardPskDto>("/v1/wireguard/genpsk", ct);
+
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(CancellationToken ct = default)
+        => PostAsync<NftApplyResultDto>("/v1/wireguard/apply", ct);
+
+    public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default)
+        => PostAsync<NftApplyResultDto>("/v1/wireguard/stop", ct);
+
+    public async Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/v1/wireguard/status");
+        AttachSessionHeader(req);
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            return await ReadEnvelopeAsync<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>(resp, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "WireGuard status fetch failed");
+            return ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>.Fail($"Daemon unreachable: {ex.Message}");
+        }
+    }
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

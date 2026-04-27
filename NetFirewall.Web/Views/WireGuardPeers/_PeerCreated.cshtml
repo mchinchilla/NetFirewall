@@ -1,0 +1,46 @@
+@model NetFirewall.Web.Models.Vpn.WgPeerCreatedViewModel
+
+<div class="space-y-4" x-data="{ copied: false, downloaded: false }">
+    <div class="rounded-md border-l-2 px-3 py-3 text-sm"
+         style="background-color: var(--feedback-success-bg); color: var(--feedback-success-fg); border-color: var(--feedback-success-bd);">
+        <p class="font-semibold">Peer '@Model.PeerName' created.</p>
+        <p class="text-xs mt-0.5" style="color: var(--surface-fg);">
+            Scan the QR with the WireGuard app or copy the config below. <span class="font-medium">This is the only time the private key is shown</span> — after closing this drawer it's gone.
+        </p>
+    </div>
+
+    @* QR — rendered by NetFw.qrcode (centralized in site.js, rule #3). *@
+    <div class="flex justify-center p-4 rounded"
+         style="background-color: white;">
+        <div id="wg-peer-qr" x-init="$nextTick(() => NetFw.qrcode.render($el, $refs.cfg.value, { cellSize: 4 }))"></div>
+    </div>
+
+    <div>
+        <div class="flex items-baseline justify-between mb-1">
+            <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--surface-fg-muted);">Client config</p>
+            <div class="flex items-center gap-2">
+                <button type="button" class="btn btn-ghost text-xs"
+                        @@click="navigator.clipboard.writeText($refs.cfg.value).then(() => { copied = true; setTimeout(() => copied = false, 1500); })"
+                        x-text="copied ? 'Copied!' : 'Copy'"></button>
+                <button type="button" class="btn btn-ghost text-xs"
+                        @@click="(() => {
+                            const blob = new Blob([$refs.cfg.value], { type: 'text/plain' });
+                            const a = document.createElement('a');
+                            a.href = URL.createObjectURL(blob);
+                            a.download = '@(Model.PeerName.Replace(" ", "_")).conf';
+                            a.click();
+                            URL.revokeObjectURL(a.href);
+                            downloaded = true; setTimeout(() => downloaded = false, 1500);
+                        })()"
+                        x-text="downloaded ? 'Saved!' : 'Download .conf'"></button>
+            </div>
+        </div>
+        <textarea x-ref="cfg" readonly rows="14"
+                  class="input font-mono text-xs"
+                  style="resize: vertical;">@Model.ClientConfig</textarea>
+    </div>
+
+    <div class="pt-3 border-t flex items-center justify-end gap-2" style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-primary" @@click="$store.drawer.close()">Done</button>
+    </div>
+</div>

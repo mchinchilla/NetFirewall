@@ -71,6 +71,17 @@ public static class AppSettingDescriptors
             "Firewall audit retention (days)",
             "Older entries are pruned by the next maintenance pass. 0 = keep forever.",
             AppSettingType.Int, "365"),
+
+        // ===== VPN — used by client config generation =====
+        new("vpn.public_endpoint", "VPN",
+            "WireGuard public endpoint",
+            "Hostname or public IP that WireGuard clients should connect to (e.g. vpn.example.com or 203.0.113.10). Pre-filled into every generated client config.",
+            AppSettingType.String, ""),
+
+        new("vpn.client_dns", "VPN",
+            "Client DNS server",
+            "DNS pushed into client configs. Leave empty to skip the DNS line. Useful when split-tunneling so clients still resolve internal names.",
+            AppSettingType.String, ""),
     };
 
     public static AppSettingDescriptor? Find(string key) =>

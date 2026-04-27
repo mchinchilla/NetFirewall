@@ -1,0 +1,61 @@
+@model NetFirewall.Web.Models.Vpn.WgPeerFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="wg-peer-form" hx-post="/Vpn/WireGuard/Peers/save" hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="ServerId" value="@Model.ServerId" />
+    @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Name), Label = "Peer name", Required = true, Value = Model.Name,
+            Placeholder = "Marvin's iPhone"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.AllowedIpsRaw), Label = "Allowed IPs (server-side)", Required = true,
+            Value = Model.AllowedIpsRaw,
+            Help = "Comma-separated CIDRs the server will route TO this peer (typically just one /32, e.g. 10.10.0.5/32).",
+            Placeholder = "10.10.0.5/32"
+        })
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.PersistentKeepalive), Label = "Persistent keepalive (s)", Kind = FormFieldKind.Number,
+                Value = Model.PersistentKeepalive?.ToString(), Min = "0", Max = "65535",
+                Help = "0/empty = off. 25 is a sensible default for NAT traversal."
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+                Value = Model.Enabled ? "true" : "false"
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
+            Value = Model.Description
+        })
+
+        @if (Model.Id.HasValue)
+        {
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.PresharedKey), Label = "Preshared key (optional)", Value = Model.PresharedKey,
+                Help = "Edit-only field. New peers don't get one unless you paste it here. Leave empty for no PSK."
+            })
+        }
+        else
+        {
+            <div class="rounded-md border-l-2 px-3 py-2 text-xs"
+                 style="background-color: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--surface-fg); border-color: var(--accent);">
+                <p class="font-semibold mb-0.5">First-time peer creation</p>
+                <p>The daemon will generate a fresh keypair on save. The PRIVATE key is shown <span class="font-medium">once</span> in the next view — copy it or scan the QR before closing the drawer.</p>
+            </div>
+        }
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2"
+         style="border-color: var(--surface-border);">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create peer")</button>
+    </div>
+</form>

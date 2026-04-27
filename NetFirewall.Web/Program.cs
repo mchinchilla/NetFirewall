@@ -128,6 +128,13 @@ builder.Services.AddScoped<IPendingAuthTicket, PendingAuthTicket>();
 builder.Services.AddSingleton<IBootstrapTokenStore, BootstrapTokenStore>();
 builder.Services.AddHostedService<BootstrapTokenIssuer>();
 
+// WireGuard — Web reads/writes catalog, posts privileged ops to daemon
+// (key gen + apply + status all live behind /v1/wireguard/*).
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardService,
+                           NetFirewall.Services.Vpn.WireGuardService>();
+builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
+                              NetFirewall.Services.Vpn.WireGuardConfigService>();
+
 // DHCP services. Subnet service is the cached singleton used by both the
 // setup wizard and the DHCP admin pages. Admin facade is what controllers
 // inject for full CRUD over subnets / pools / leases / reservations.

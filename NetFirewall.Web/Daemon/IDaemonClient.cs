@@ -39,6 +39,24 @@ public interface IDaemonClient
 
     /// <summary><c>POST /v1/crypto/decrypt</c> — daemon holds the master key, returns plaintext. Throws on failure.</summary>
     Task<byte[]> DecryptTotpAsync(byte[] ciphertext, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/wireguard/genkey</c> — returns a fresh X25519 keypair. Used when adding a new peer.</summary>
+    Task<ServiceResponse<WireGuardKeyPairDto>> GenerateWireGuardKeyPairAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/wireguard/genpsk</c> — returns a fresh preshared key.</summary>
+    Task<ServiceResponse<WireGuardPskDto>> GenerateWireGuardPskAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/wireguard/apply</c> — write wg0.conf and bring it up (or hot-reload via wg syncconf).</summary>
+    Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/wireguard/stop</c> — wg-quick down.</summary>
+    Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/wireguard/status</c> — wg show dump parsed into per-peer stats.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default);
 }
+
+public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);
+public sealed record WireGuardPskDto(string PresharedKey);
 
 public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string? Output, string? Error);
