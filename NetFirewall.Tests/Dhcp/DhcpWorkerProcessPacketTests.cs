@@ -345,4 +345,109 @@ public class DhcpWorkerProcessPacketTests
 
         Assert.Equal(5, worker.DiscoverCount);
     }
+
+    // ── Response-side counters (Offer / Ack / Nak) ─────────────────────
+    //
+    // These counters live AFTER the IDhcpServerService call but BEFORE the
+    // socket send. To exercise them we override SendResponseAsync via the
+    // RecordingDhcpWorker subclass — the production send path is the only
+    // thing not running in these tests, everything else (response-type parse,
+    // Interlocked.Increment, log line) runs unchanged.
+
+    /// <summary>Build a minimal valid DHCP response with a given message type
+    /// in option 53. Mirrors what DhcpServerService would emit just enough for
+    /// ParseResponseMessageType to pick out the type.</summary>
+    private static byte[] BuildResponse(DhcpMessageType type)
+    {
+        var resp = new byte[260];
+        resp[236] = 99; resp[237] = 130; resp[238] = 83; resp[239] = 99; // magic cookie
+        resp[240] = 53; resp[241] = 1; resp[242] = (byte)type;
+        resp[243] = 0xFF;
+        return resp;
+    }
+
+    /// <summary>Subclass that captures sent payloads instead of touching a
+    /// socket. Built once per test, so each instance starts with empty state.</summary>
+    private sealed class RecordingDhcpWorker : DhcpWorker
+    {
+        public List<byte[]> Sent { get; } = new();
+
+        public RecordingDhcpWorker(IServiceScopeFactory scopeFactory)
+            : base(NullLogger<DhcpWorker>.Instance, scopeFactory, new ConfigurationBuilder().Build())
+        {
+        }
+
+        internal override ValueTask<int> SendResponseAsync(byte[] response, IPEndPoint destination, string? interfaceName, CancellationToken cancellationToken)
+        {
+            // Copy the buffer — the caller may pool/recycle it after we return.
+            var copy = new byte[response.Length];
+            Array.Copy(response, copy, response.Length);
+            Sent.Add(copy);
+            return ValueTask.FromResult(response.Length);
+        }
+    }
+
+    private static RecordingDhcpWorker CreateRecordingWorker(byte[] serviceResponse)
+    {
+        var service = new Mock<IDhcpServerService>(MockBehavior.Strict);
+        service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(serviceResponse);
+
+        var sp = new ServiceCollection().AddScoped(_ => service.Object).BuildServiceProvider();
+        return new RecordingDhcpWorker(sp.GetRequiredService<IServiceScopeFactory>());
+    }
+
+    [Theory]
+    [InlineData(DhcpMessageType.Offer)]
+    [InlineData(DhcpMessageType.Ack)]
+    [InlineData(DhcpMessageType.Nak)]
+    public async Task ProcessSinglePacket_BumpsExactlyOneResponseCounter_PerResponseType(DhcpMessageType respType)
+    {
+        var worker = CreateRecordingWorker(BuildResponse(respType));
+        using var ctx = WrapPacket(BuildValidDiscover(), interfaceName: "eth0");
+
+        await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+
+        Assert.Single(worker.Sent); // send was invoked exactly once
+        Assert.Equal(respType == DhcpMessageType.Offer ? 1 : 0, worker.OffersCount);
+        Assert.Equal(respType == DhcpMessageType.Ack   ? 1 : 0, worker.AcksCount);
+        Assert.Equal(respType == DhcpMessageType.Nak   ? 1 : 0, worker.NaksCount);
+    }
+
+    [Fact]
+    public async Task ProcessSinglePacket_EmptyServiceResponse_NoSend_NoResponseCounters()
+    {
+        // The "no response generated" branch (e.g. failover declined). Pin
+        // that nothing reaches the socket and no Offer/Ack/Nak counter advances
+        // — otherwise misconfigured failover would silently inflate stats.
+        var worker = CreateRecordingWorker(Array.Empty<byte>());
+        using var ctx = WrapPacket(BuildValidDiscover(), interfaceName: "eth0");
+
+        await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+
+        Assert.Empty(worker.Sent);
+        Assert.Equal(0, worker.OffersCount);
+        Assert.Equal(0, worker.AcksCount);
+        Assert.Equal(0, worker.NaksCount);
+    }
+
+    [Fact]
+    public async Task ProcessSinglePacket_UnknownResponseType_SendsButNoCounterAdvances()
+    {
+        // ParseResponseMessageType returns 0 (Unknown) when option 53 is
+        // missing or the response is too short. The send still happens (we
+        // emitted SOMETHING), but no per-type counter should fire — the switch
+        // arms are explicit (Offer/Ack/Nak only).
+        var resp = new byte[260];
+        resp[236] = 99; resp[237] = 130; resp[238] = 83; resp[239] = 99;
+        resp[240] = 0xFF; // End immediately, no option 53
+        var worker = CreateRecordingWorker(resp);
+        using var ctx = WrapPacket(BuildValidDiscover(), interfaceName: "eth0");
+
+        await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+
+        Assert.Single(worker.Sent);
+        Assert.Equal(0, worker.OffersCount);
+        Assert.Equal(0, worker.AcksCount);
+        Assert.Equal(0, worker.NaksCount);
+    }
 }

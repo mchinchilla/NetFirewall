@@ -592,8 +592,7 @@ public sealed class DhcpServerService : IDhcpServerService
         // Time Offset (Option 2) - Seconds offset from UTC
         if (subnet?.TimeOffset.HasValue == true)
         {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.TimeOffset,
-                GetNetworkOrderInt32Bytes(subnet.TimeOffset.Value));
+            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.TimeOffset, subnet.TimeOffset.Value);
         }
 
         // POSIX Timezone (Option 100)
@@ -639,12 +638,9 @@ public sealed class DhcpServerService : IDhcpServerService
         // Lease timing options
         if (includeLeaseTime)
         {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.IPAddressLeaseTime,
-                GetNetworkOrderInt32Bytes(leaseTime));
-            offset = WriteOption(buffer, offset, DhcpOptionCode.RenewalTimeValue,
-                GetNetworkOrderInt32Bytes(leaseTime / 2));
-            offset = WriteOption(buffer, offset, DhcpOptionCode.RebindingTimeValue,
-                GetNetworkOrderInt32Bytes((leaseTime * 7) / 8));
+            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.IPAddressLeaseTime, leaseTime);
+            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RenewalTimeValue, leaseTime / 2);
+            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RebindingTimeValue, (leaseTime * 7) / 8);
         }
 
         // PXE/BOOTP options
@@ -688,18 +684,23 @@ public sealed class DhcpServerService : IDhcpServerService
         return offset + data.Length;
     }
 
+    /// <summary>
+    /// Writes a DHCP option whose payload is a single big-endian Int32 (lease
+    /// time, renewal time, time offset, etc.) directly into the response buffer
+    /// — no intermediate <c>byte[4]</c> allocation. Each OFFER/ACK invokes this
+    /// 3+ times; the previous <c>GetNetworkOrderInt32Bytes</c> helper allocated
+    /// a 4-byte array per call (~60 KB/s GC pressure at 5k req/s sustained).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static byte[] GetNetworkOrderInt32Bytes(int value)
+    private static int WriteInt32Option(byte[] buffer, int offset, DhcpOptionCode code, int value)
     {
-        // Convert to network byte order (big-endian) by extracting bytes from MSB to LSB
-        // DO NOT use IPAddress.HostToNetworkOrder here - manual extraction is clearer and correct
-        return
-        [
-            (byte)((value >> 24) & 0xFF),
-            (byte)((value >> 16) & 0xFF),
-            (byte)((value >> 8) & 0xFF),
-            (byte)(value & 0xFF)
-        ];
+        buffer[offset++] = (byte)code;
+        buffer[offset++] = 4;
+        buffer[offset++] = (byte)((value >> 24) & 0xFF);
+        buffer[offset++] = (byte)((value >> 16) & 0xFF);
+        buffer[offset++] = (byte)((value >> 8) & 0xFF);
+        buffer[offset++] = (byte)(value & 0xFF);
+        return offset;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -14,7 +14,7 @@ namespace NetFirewall.DhcpServer;
 /// <summary>
 /// High-performance DHCP worker using channels and ArrayPool for zero-allocation packet processing.
 /// </summary>
-public sealed class DhcpWorker : BackgroundService
+public class DhcpWorker : BackgroundService
 {
     private const int MaxDhcpPacketSize = 576; // RFC 2131 minimum
     private const int MinDhcpPacketSize = 236; // Minimum valid DHCP packet
@@ -487,9 +487,7 @@ public sealed class DhcpWorker : BackgroundService
                     break;
             }
 
-            // Send response through the correct interface socket
-            var sendSocket = GetSendSocketForInterface(context.InterfaceName);
-            await sendSocket.SendToAsync(response, SocketFlags.None, destination, stoppingToken).ConfigureAwait(false);
+            await SendResponseAsync(response, destination, context.InterfaceName, stoppingToken).ConfigureAwait(false);
 
             _logger.LogDebug("[SEND] Sent {Length} bytes to {Destination} via {Interface}",
                 response.Length, destination, context.InterfaceName ?? "default");
@@ -500,6 +498,20 @@ public sealed class DhcpWorker : BackgroundService
                 "[PROC] No response generated for {MessageType} from {Mac} - check subnet/pool configuration",
                 request.MessageType, request.ClientMac);
         }
+    }
+
+    /// <summary>
+    /// Test seam for the response send-path. Production: looks up the per-
+    /// interface socket and dispatches via UDP. Tests can override to record
+    /// sent payloads without needing a real socket — that lets us exercise the
+    /// OFFER/ACK/NAK counter increments which sit in the same branch.
+    /// Vtable lookup cost (~1ns/packet) is negligible vs the DB round-trip
+    /// (100-500µs) that dominates each request.
+    /// </summary>
+    internal virtual ValueTask<int> SendResponseAsync(byte[] response, IPEndPoint destination, string? interfaceName, CancellationToken cancellationToken)
+    {
+        var sendSocket = GetSendSocketForInterface(interfaceName);
+        return sendSocket.SendToAsync(response, SocketFlags.None, destination, cancellationToken);
     }
 
     private Socket GetSendSocketForInterface(string? interfaceName)
@@ -707,9 +719,14 @@ public sealed class DhcpWorker : BackgroundService
 
     private void ParseDhcpOptions(ReadOnlySpan<byte> optionsSpan, DhcpRequest request)
     {
-        int i = 0;
-        var parsedOptions = new List<string>();
+        // Trace logging path used to allocate List<string> + per-option string
+        // interpolation on every packet, even when TRACE was disabled. We now
+        // build the names list only when the sink is hot (~5k packets/s × 100B
+        // per packet = 500 KB/s GC pressure eliminated under default INFO level).
+        bool traceEnabled = _logger.IsEnabled(LogLevel.Trace);
+        List<string>? parsedOptions = traceEnabled ? new List<string>() : null;
 
+        int i = 0;
         while (i < optionsSpan.Length)
         {
             byte optionCode = optionsSpan[i++];
@@ -732,12 +749,12 @@ public sealed class DhcpWorker : BackgroundService
             i += optionLength;
 
             ParseSingleOption((DhcpOptionCode)optionCode, optionData, request);
-            parsedOptions.Add($"{(DhcpOptionCode)optionCode}({optionCode})");
+            parsedOptions?.Add($"{(DhcpOptionCode)optionCode}({optionCode})");
         }
 
-        if (_logger.IsEnabled(LogLevel.Trace))
+        if (traceEnabled)
         {
-            _logger.LogTrace("[PARSE OPTIONS] Found: {Options}", string.Join(", ", parsedOptions));
+            _logger.LogTrace("[PARSE OPTIONS] Found: {Options}", string.Join(", ", parsedOptions!));
         }
     }
 
