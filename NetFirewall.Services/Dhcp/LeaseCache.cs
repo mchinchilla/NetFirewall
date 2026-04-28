@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
@@ -19,12 +20,18 @@ public sealed class LeaseCache : IDisposable
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<LeaseCache> _logger;
 
-    // Primary indexes - O(1) lookups
+    // Primary indexes - O(1) lookups. _byIp is keyed by the big-endian uint
+    // representation of the IPv4 address so FindAvailableIp can iterate
+    // (cur++) without allocating an IPAddress per probe — the previous
+    // IPAddress key forced ~24B/iteration alloc and a per-iteration hash on a
+    // boxed reference type. The public API still takes IPAddress; we convert
+    // at the boundary via IpToUInt (one stackalloc + BinaryPrimitives, free).
     private readonly ConcurrentDictionary<string, LeaseEntry> _byMac = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<IPAddress, LeaseEntry> _byIp = new();
+    private readonly ConcurrentDictionary<uint, LeaseEntry> _byIp = new();
 
-    // Declined IPs - temporarily excluded from allocation (TTL: 1 hour by default)
-    private readonly ConcurrentDictionary<IPAddress, DateTime> _declinedIps = new();
+    // Declined IPs - temporarily excluded from allocation (TTL: 1 hour by default).
+    // Same uint-key motivation as _byIp.
+    private readonly ConcurrentDictionary<uint, DateTime> _declinedIps = new();
     private readonly TimeSpan _declinedIpTtl = TimeSpan.FromHours(1);
 
     // Write-through queue for async database persistence
@@ -122,7 +129,7 @@ public sealed class LeaseCache : IDisposable
                 };
 
                 _byMac[mac] = entry;
-                _byIp[ip] = entry;
+                _byIp[IpToUInt(ip)] = entry;
                 count++;
             }
 
@@ -146,6 +153,25 @@ public sealed class LeaseCache : IDisposable
     {
         var bytes = pa.GetAddressBytes();
         return string.Join(":", bytes.Select(b => b.ToString("x2")));
+    }
+
+    /// <summary>IPv4 → big-endian uint. Stackalloc + BinaryPrimitives = no GC.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static uint IpToUInt(IPAddress ip)
+    {
+        Span<byte> bytes = stackalloc byte[4];
+        if (!ip.TryWriteBytes(bytes, out var written) || written != 4)
+            throw new ArgumentException($"Expected an IPv4 address, got {ip.AddressFamily}", nameof(ip));
+        return BinaryPrimitives.ReadUInt32BigEndian(bytes);
+    }
+
+    /// <summary>uint → IPv4 IPAddress. Allocates one IPAddress (cannot avoid; consumer-facing).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static IPAddress UIntToIp(uint value)
+    {
+        Span<byte> bytes = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, value);
+        return new IPAddress(bytes);
     }
 
     #region Read Operations (Cache-first)
@@ -172,7 +198,7 @@ public sealed class LeaseCache : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public LeaseEntry? GetByIp(IPAddress ipAddress)
     {
-        if (_byIp.TryGetValue(ipAddress, out var entry) && !entry.IsExpired)
+        if (_byIp.TryGetValue(IpToUInt(ipAddress), out var entry) && !entry.IsExpired)
         {
             Interlocked.Increment(ref _cacheHits);
             return entry;
@@ -197,7 +223,7 @@ public sealed class LeaseCache : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsIpLeased(IPAddress ipAddress)
     {
-        return _byIp.TryGetValue(ipAddress, out var entry) && !entry.IsExpired;
+        return _byIp.TryGetValue(IpToUInt(ipAddress), out var entry) && !entry.IsExpired;
     }
 
     /// <summary>
@@ -206,14 +232,15 @@ public sealed class LeaseCache : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsIpDeclined(IPAddress ipAddress)
     {
-        if (_declinedIps.TryGetValue(ipAddress, out var expiresAt))
+        var key = IpToUInt(ipAddress);
+        if (_declinedIps.TryGetValue(key, out var expiresAt))
         {
             if (DateTime.UtcNow < expiresAt)
             {
                 return true;
             }
             // Expired, remove it
-            _declinedIps.TryRemove(ipAddress, out _);
+            _declinedIps.TryRemove(key, out _);
         }
         return false;
     }
@@ -225,7 +252,7 @@ public sealed class LeaseCache : IDisposable
     public void MarkIpAsDeclined(IPAddress ipAddress)
     {
         var expiresAt = DateTime.UtcNow.Add(_declinedIpTtl);
-        _declinedIps[ipAddress] = expiresAt;
+        _declinedIps[IpToUInt(ipAddress)] = expiresAt;
         _logger.LogWarning("[CACHE] IP {Ip} marked as declined until {ExpiresAt}", ipAddress, expiresAt);
     }
 
@@ -253,7 +280,7 @@ public sealed class LeaseCache : IDisposable
         }
 
         // Check if IP is available (not leased to someone else)
-        if (_byIp.TryGetValue(ipAddress, out var ipEntry) && !ipEntry.IsExpired)
+        if (_byIp.TryGetValue(IpToUInt(ipAddress), out var ipEntry) && !ipEntry.IsExpired)
         {
             return ipEntry.MacAddress.Equals(macAddress, StringComparison.OrdinalIgnoreCase);
         }
@@ -263,55 +290,45 @@ public sealed class LeaseCache : IDisposable
 
     /// <summary>
     /// Find first available IP in range (not leased, not declined, not excluded).
+    /// Iterates the range as a uint counter (cur++) and probes the cache via
+    /// uint keys — zero IPAddress allocation per iteration. Only the returned
+    /// match (if any) is materialised back to <see cref="IPAddress"/>.
+    /// For a fully-leased /24 the old design allocated ~6 KB scanning every
+    /// slot before returning null; this design allocates 0 bytes in that path.
     /// </summary>
     public IPAddress? FindAvailableIp(IPAddress rangeStart, IPAddress rangeEnd, HashSet<IPAddress>? exclusions = null)
     {
-        var startBytes = rangeStart.GetAddressBytes();
-        var endBytes = rangeEnd.GetAddressBytes();
+        uint start = IpToUInt(rangeStart);
+        uint end = IpToUInt(rangeEnd);
 
-        var current = new byte[4];
-        Array.Copy(startBytes, current, 4);
-
-        while (CompareIpBytes(current, endBytes) <= 0)
+        // Project exclusions to uint once so the inner loop is a hash lookup
+        // on a value type instead of an IPAddress reference comparison. Cost
+        // is amortised across the whole range scan.
+        HashSet<uint>? exclUInt = null;
+        if (exclusions is { Count: > 0 })
         {
-            var ip = new IPAddress(current);
+            exclUInt = new HashSet<uint>(exclusions.Count);
+            foreach (var x in exclusions) exclUInt.Add(IpToUInt(x));
+        }
 
-            // Check: not excluded, not leased, not declined
-            if (exclusions?.Contains(ip) != true && IsIpAvailable(ip))
-            {
-                return ip;
-            }
+        var now = DateTime.UtcNow; // single timestamp avoids redundant UtcNow calls
+        for (uint cur = start; cur <= end; cur++)
+        {
+            if (exclUInt is not null && exclUInt.Contains(cur))
+                continue;
 
-            // Increment IP
-            IncrementIpBytes(current);
+            // Inlined IsIpAvailable to avoid the IPAddress allocation that the
+            // public overload would force. Same semantics: not leased AND not
+            // declined.
+            if (_byIp.TryGetValue(cur, out var entry) && now < entry.EndTime)
+                continue;
+            if (_declinedIps.TryGetValue(cur, out var declinedUntil) && now < declinedUntil)
+                continue;
+
+            return UIntToIp(cur);
         }
 
         return null;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int CompareIpBytes(byte[] a, byte[] b)
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            if (a[i] < b[i]) return -1;
-            if (a[i] > b[i]) return 1;
-        }
-        return 0;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void IncrementIpBytes(byte[] bytes)
-    {
-        for (int i = 3; i >= 0; i--)
-        {
-            if (bytes[i] < 255)
-            {
-                bytes[i]++;
-                return;
-            }
-            bytes[i] = 0;
-        }
     }
 
     #endregion
@@ -331,10 +348,12 @@ public sealed class LeaseCache : IDisposable
         var now = DateTime.UtcNow;
         var endTime = now.AddSeconds(leaseTimeSeconds);
 
+        var newKey = IpToUInt(ipAddress);
+
         // Remove old IP mapping if MAC is getting a new IP
         if (_byMac.TryGetValue(macAddress, out var oldEntry) && !oldEntry.IpAddress.Equals(ipAddress))
         {
-            _byIp.TryRemove(oldEntry.IpAddress, out _);
+            _byIp.TryRemove(IpToUInt(oldEntry.IpAddress), out _);
         }
 
         // Create new entry
@@ -350,7 +369,7 @@ public sealed class LeaseCache : IDisposable
 
         // Update both indexes atomically
         _byMac[macAddress] = entry;
-        _byIp[ipAddress] = entry;
+        _byIp[newKey] = entry;
 
         // Queue for database persistence
         var operation = new LeaseWriteOperation
@@ -376,7 +395,7 @@ public sealed class LeaseCache : IDisposable
     {
         if (_byMac.TryRemove(macAddress, out var entry))
         {
-            _byIp.TryRemove(entry.IpAddress, out _);
+            _byIp.TryRemove(IpToUInt(entry.IpAddress), out _);
 
             var operation = new LeaseWriteOperation
             {
@@ -398,7 +417,7 @@ public sealed class LeaseCache : IDisposable
         IPAddress ipAddress,
         CancellationToken cancellationToken = default)
     {
-        if (_byIp.TryRemove(ipAddress, out var entry))
+        if (_byIp.TryRemove(IpToUInt(ipAddress), out var entry))
         {
             _byMac.TryRemove(entry.MacAddress, out _);
 
@@ -582,7 +601,7 @@ public sealed class LeaseCache : IDisposable
             {
                 if (_byMac.TryRemove(kvp.Key, out var entry))
                 {
-                    _byIp.TryRemove(entry.IpAddress, out _);
+                    _byIp.TryRemove(IpToUInt(entry.IpAddress), out _);
                     expiredLeaseCount++;
                 }
             }

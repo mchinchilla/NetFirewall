@@ -38,5 +38,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="NetFirewall.Tests" />
+    <InternalsVisibleTo Include="NetFirewall.Benchmarks" />
   </ItemGroup>
 </Project>

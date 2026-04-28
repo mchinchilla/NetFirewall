@@ -183,9 +183,9 @@ Table groupings (current):
 
 ## DHCP Server internals
 
-Read `docs/PerformanceAnalysis.md` before changing the hot path — it documents the per-stage latency budget and the explicit no-allocation rules (Span/stackalloc/ArrayPool) for packet parsing and serialization.
+Read `docs/PerformanceAnalysis.md` before changing the hot path — it documents the per-stage latency budget and the explicit no-allocation rules (Span/stackalloc/ArrayPool) for packet parsing and serialization. Validate empirically with `dotnet run --project NetFirewall.Benchmarks -c Release` (see `NetFirewall.Benchmarks/README.md` — `Allocated: -` is the regression gate).
 
-- **Packet pipeline**: `DhcpWorker` uses a bounded `System.Threading.Channels.Channel<DhcpPacketContext>` (capacity 100), not TPL Dataflow. Producer is the UDP receive loop; consumer(s) parse, dispatch, and reply.
+- **Packet pipeline**: `DhcpWorker` uses a bounded `System.Threading.Channels.Channel<DhcpPacketContext>` (capacity 1024, `DropOldest` on overflow), not TPL Dataflow. Producer is the UDP receive loop; consumer(s) parse, dispatch, and reply. Backpressure surfaces via `PendingPacketCount` (also in the periodic stats log) — sustained values near capacity mean inbound packets are being dropped silently and clients are timing out.
 - **Lease cache**: `LeaseCache` is a singleton, warmed on startup before `DhcpWorker` starts (`await leaseCache.WarmupAsync()` in `Program.cs`). Treat it as the source of truth for hot reads; writes go through it (write-through to PostgreSQL).
 - **Subnet service**: `IDhcpSubnetService` is a singleton specifically to keep the subnet/pool cache alive across scoped requests. Don't switch it to scoped.
 - **Failover**: `IFailoverService` is a singleton; `await failoverService.StartAsync()` runs in `Program.cs` *before* `host.RunAsync()` — it must be reachable on the peer for failover state to converge.

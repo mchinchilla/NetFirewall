@@ -431,6 +431,18 @@ public class DhcpWorkerProcessPacketTests
         Assert.Equal(0, worker.NaksCount);
     }
 
+    // ── Backpressure indicator ─────────────────────────────────────────
+
+    [Fact]
+    public void PendingPacketCount_FreshWorker_IsZero()
+    {
+        // Channel starts empty. The accessor reads Reader.Count directly so a
+        // wrong wire-up (e.g. forgetting to expose the writer's view) would
+        // surface as a constant-zero value even under load.
+        var (worker, _) = CreateWorkerWithMockService();
+        Assert.Equal(0, worker.PendingPacketCount);
+    }
+
     [Fact]
     public async Task ProcessSinglePacket_UnknownResponseType_SendsButNoCounterAdvances()
     {

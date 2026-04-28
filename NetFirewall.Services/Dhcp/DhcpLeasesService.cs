@@ -93,24 +93,19 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
 
         try
         {
-            // First check for MAC reservation (single query)
-            _logger.LogDebug("[LEASE] Checking MAC reservation for {Mac}", macAddress);
-            var reservedIp = await GetReservationInternalAsync(connection, macAddress, transaction).ConfigureAwait(false);
-            if (reservedIp != null)
+            // Single query that prefers a MAC reservation over any existing
+            // lease — Postgres short-circuits COALESCE so the second subquery
+            // is only executed when the first returns NULL. This collapses
+            // the previous 2 round-trips into 1 on the cache-miss / startup
+            // path (both branches downstream just commit + return the IP, so
+            // we don't need to distinguish reservation vs renewal here).
+            _logger.LogDebug("[LEASE] Checking reservation+existing-lease for {Mac}", macAddress);
+            var preassignedIp = await GetReservedOrExistingIpAsync(connection, macAddress, transaction).ConfigureAwait(false);
+            if (preassignedIp != null)
             {
-                _logger.LogDebug("[LEASE] Found reservation: {Ip} for {Mac}", reservedIp, macAddress);
+                _logger.LogDebug("[LEASE] Found pre-assigned IP: {Ip} for {Mac}", preassignedIp, macAddress);
                 await transaction.CommitAsync().ConfigureAwait(false);
-                return reservedIp;
-            }
-
-            // Check for existing lease for this MAC
-            _logger.LogDebug("[LEASE] Checking existing lease for {Mac}", macAddress);
-            var existingIp = await GetExistingLeaseIpAsync(connection, macAddress, transaction).ConfigureAwait(false);
-            if (existingIp != null)
-            {
-                _logger.LogDebug("[LEASE] Found existing lease: {Ip} for {Mac}", existingIp, macAddress);
-                await transaction.CommitAsync().ConfigureAwait(false);
-                return existingIp;
+                return preassignedIp;
             }
 
             // Find first available IP using optimized SQL
@@ -144,7 +139,14 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         }
     }
 
-    private async Task<IPAddress?> GetExistingLeaseIpAsync(
+    /// <summary>
+    /// Single-roundtrip lookup that returns either the MAC's reservation OR
+    /// its current active lease IP, preferring the reservation. Replaces what
+    /// used to be two sequential queries on the OfferLease cache-miss path.
+    /// COALESCE short-circuits in Postgres — the second subquery is only
+    /// executed when no reservation row exists for the MAC.
+    /// </summary>
+    private async Task<IPAddress?> GetReservedOrExistingIpAsync(
         NpgsqlConnection connection,
         string macAddress,
         NpgsqlTransaction transaction)
@@ -152,30 +154,21 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         var parsedMac = ParseMacAddress(macAddress);
         var now = DateTime.UtcNow;
 
-        // Use raw SQL for better performance
         const string sql = @"
-            SELECT ip_address
-            FROM dhcp_leases
-            WHERE mac_address = @mac AND end_time > @now
-            LIMIT 1";
+            SELECT COALESCE(
+                (SELECT reserved_ip FROM dhcp_mac_reservations
+                    WHERE mac_address = @mac LIMIT 1),
+                (SELECT ip_address FROM dhcp_leases
+                    WHERE mac_address = @mac AND end_time > @now LIMIT 1)
+            ) AS ip";
 
-        _logger.LogTrace("[SQL] GetExistingLease: {Sql} | @mac={Mac}, @now={Now}", sql, macAddress, now);
+        _logger.LogTrace("[SQL] GetReservedOrExistingIp: @mac={Mac}, @now={Now}", macAddress, now);
 
         await using var cmd = new NpgsqlCommand(sql, connection, transaction);
         cmd.Parameters.AddWithValue("mac", parsedMac);
         cmd.Parameters.AddWithValue("now", now);
 
         var result = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
-
-        if (result != null)
-        {
-            _logger.LogDebug("[SQL] GetExistingLease: Found {Ip} for {Mac}", result, macAddress);
-        }
-        else
-        {
-            _logger.LogDebug("[SQL] GetExistingLease: No active lease for {Mac}", macAddress);
-        }
-
         return result as IPAddress;
     }
 

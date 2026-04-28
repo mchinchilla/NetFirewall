@@ -75,6 +75,15 @@ public class DhcpWorker : BackgroundService
     internal long AcksCount => Interlocked.Read(ref _acksCount);
     internal long NaksCount => Interlocked.Read(ref _naksCount);
 
+    /// <summary>
+    /// Backpressure indicator: how many packets are queued but not yet
+    /// processed. The channel uses <c>FullMode = DropOldest</c>, so a
+    /// sustained value near capacity (1024) means we're silently dropping
+    /// inbound packets and clients will time out. Surface it on the periodic
+    /// stats log + expose for ops dashboards / alerts.
+    /// </summary>
+    public int PendingPacketCount => _packetChannel.Reader.Count;
+
     // Pre-allocated for MAC address formatting
     private static readonly char[] HexChars = "0123456789ABCDEF".ToCharArray();
 
@@ -222,11 +231,14 @@ public class DhcpWorker : BackgroundService
         {
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
 
+            // PendingPacketCount near channel capacity (1024) is the alert
+            // signal for "we're dropping inbound packets" — DropOldest is
+            // silent on the wire, only this counter shows the saturation.
             _logger.LogInformation(
-                "DHCP Stats - Received: {Received}, Processed: {Processed}, " +
+                "DHCP Stats - Received: {Received}, Processed: {Processed}, Pending: {Pending}, " +
                 "DISCOVER: {Discover}, REQUEST: {Request}, RELEASE: {Release}, " +
                 "OFFER: {Offer}, ACK: {Ack}, NAK: {Nak}, Errors: {Errors}",
-                _packetsReceived, _packetsProcessed,
+                _packetsReceived, _packetsProcessed, PendingPacketCount,
                 _discoverCount, _requestCount, _releaseCount,
                 _offersCount, _acksCount, _naksCount, _errorsCount);
         }
