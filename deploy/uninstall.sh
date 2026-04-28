@@ -34,6 +34,11 @@ log "Removing systemd units"
 rm -f /etc/systemd/system/netfirewall-{daemon,web}.service
 systemctl daemon-reload
 
+log "Removing TUI symlink + manpage + completion (if present)"
+rm -f /usr/local/bin/netfirewall-tui
+rm -f /usr/local/share/man/man1/netfirewall-tui.1
+rm -f /etc/bash_completion.d/netfirewall-tui
+
 log "Removing $PREFIX"
 rm -rf "$PREFIX"
 

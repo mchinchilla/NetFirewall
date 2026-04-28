@@ -1,0 +1,28 @@
+# Bash completion for netfirewall-tui.
+# Installed by deploy/install.sh to /etc/bash_completion.d/netfirewall-tui.
+#
+# The TUI is fully interactive — it doesn't take subcommands or flags. This
+# file exists so `netfirewall-tui <Tab>` doesn't complete random files in $PWD,
+# and so future flags get a single canonical place to register.
+
+_netfirewall_tui()
+{
+    local cur prev
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    # Only --help today. Surface it on Tab so users discover the binary takes
+    # no other args.
+    case "$cur" in
+        -*)
+            COMPREPLY=( $(compgen -W "--help -h" -- "$cur") )
+            return 0
+            ;;
+    esac
+
+    # No-arg invocation expected. Return nothing rather than completing files.
+    return 0
+}
+
+complete -F _netfirewall_tui netfirewall-tui

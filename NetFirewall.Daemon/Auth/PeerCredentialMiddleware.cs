@@ -29,10 +29,12 @@ public sealed class PeerCredentialMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (_opts.ExpectedPeerUid is null)
+        // No allow-list configured? Dev mode — FS perms (typically 0600 owned
+        // by the current user) are the only gate. Skip the in-process check.
+        var hasSingleUid = _opts.ExpectedPeerUid is not null;
+        var hasUidList = _opts.AcceptedPeerUids is { Length: > 0 };
+        if (!hasSingleUid && !hasUidList)
         {
-            // Dev mode — file-system perms (typically 0600 owned by current user)
-            // are the only gate. Skip the in-process check and continue.
             await _next(context);
             return;
         }
@@ -46,11 +48,18 @@ public sealed class PeerCredentialMiddleware
             return;
         }
 
-        if (actual.Value != _opts.ExpectedPeerUid.Value)
+        // Accept when the peer matches EITHER the legacy single-UID OR any
+        // entry in the new list. Both gates are inclusive — a deployment can
+        // pin one and ignore the other.
+        var matchesSingle = hasSingleUid && actual.Value == _opts.ExpectedPeerUid!.Value;
+        var matchesList = hasUidList && Array.IndexOf(_opts.AcceptedPeerUids!, actual.Value) >= 0;
+        if (!matchesSingle && !matchesList)
         {
             _logger.LogWarning(
-                "Rejected connection from peer UID {Actual} (expected {Expected}).",
-                actual.Value, _opts.ExpectedPeerUid.Value);
+                "Rejected connection from peer UID {Actual} (expected {Expected} or one of {List}).",
+                actual.Value,
+                _opts.ExpectedPeerUid?.ToString() ?? "(unset)",
+                _opts.AcceptedPeerUids is null ? "(unset)" : string.Join(",", _opts.AcceptedPeerUids));
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("peer not authorized");
             return;

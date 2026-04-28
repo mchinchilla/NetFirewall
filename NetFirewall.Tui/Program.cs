@@ -45,6 +45,7 @@ services.AddSingleton<IDaemonClient, DaemonClient>();
 services.AddSingleton<UserSessionState>();
 services.AddSingleton<LoginScreen>();
 services.AddSingleton<NetworkInterfacesScreen>();
+services.AddSingleton<RecoveryScreen>();
 services.AddSingleton<MainMenu>();
 
 await using var sp = services.BuildServiceProvider();

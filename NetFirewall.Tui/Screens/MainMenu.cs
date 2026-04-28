@@ -15,13 +15,14 @@ public sealed class MainMenu
     private readonly IDaemonClient _daemon;
     private readonly LoginScreen _login;
     private readonly NetworkInterfacesScreen _interfaces;
+    private readonly RecoveryScreen _recovery;
     private readonly TuiSessionTokenProvider _tokenStore;
     private readonly UserSessionState _session;
 
     private const string LoginChoice = "Login";
     private const string LogoutChoice = "Logout";
     private const string NetworkChoice = "Network interfaces";
-    private const string RecoveryChoice = "Recovery — reset admin / TOTP  [dim](planned)[/]";
+    private const string RecoveryChoice = "Recovery — reset admin / TOTP  [yellow](root only)[/]";
     private const string DaemonStatusChoice = "Daemon status";
     private const string QuitChoice = "Quit";
 
@@ -29,12 +30,14 @@ public sealed class MainMenu
         IDaemonClient daemon,
         LoginScreen login,
         NetworkInterfacesScreen interfaces,
+        RecoveryScreen recovery,
         TuiSessionTokenProvider tokenStore,
         UserSessionState session)
     {
         _daemon = daemon;
         _login = login;
         _interfaces = interfaces;
+        _recovery = recovery;
         _tokenStore = tokenStore;
         _session = session;
     }
@@ -48,17 +51,20 @@ public sealed class MainMenu
             RenderStatusLine(alive);
 
             // ── Choices ──
+            // Recovery is intentionally outside the IsLoggedIn gate: it's the
+            // break-glass path for "I can't log in". Daemon enforces root-peer
+            // for those endpoints, not session.
             var choices = new List<string>();
             if (_session.IsLoggedIn)
             {
                 choices.Add(NetworkChoice);
-                choices.Add(RecoveryChoice);
                 choices.Add(LogoutChoice);
             }
             else
             {
                 choices.Add(LoginChoice);
             }
+            choices.Add(RecoveryChoice);
             choices.Add(DaemonStatusChoice);
             choices.Add(QuitChoice);
 
@@ -81,6 +87,10 @@ public sealed class MainMenu
                     break;
                 case NetworkChoice:
                     await _interfaces.RunAsync();
+                    AnsiConsole.Clear();
+                    break;
+                case RecoveryChoice:
+                    await _recovery.RunAsync();
                     AnsiConsole.Clear();
                     break;
                 case DaemonStatusChoice:

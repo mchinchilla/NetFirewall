@@ -162,6 +162,23 @@ public sealed class UserService : IUserService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task ClearLockoutAsync(Guid id, CancellationToken ct = default)
+    {
+        // Same effect on lockout columns as RecordLoginSuccessAsync but does NOT
+        // touch last_login_at / last_login_ip — admin recovery is not a login.
+        const string sql = @"
+            UPDATE users SET
+              failed_login_count = 0,
+              locked_until = NULL,
+              updated_at = now()
+            WHERE id = @id";
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<bool> RecordLoginFailureAsync(Guid id, IPAddress? ip, int threshold, TimeSpan lockDuration, CancellationToken ct = default)
     {
         // Increment counter atomically; if we crossed the threshold, set lock.

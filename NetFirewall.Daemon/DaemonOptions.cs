@@ -20,11 +20,22 @@ public sealed class DaemonOptions
     public string SocketMode { get; set; } = "0660";
 
     /// <summary>
-    /// When set, the daemon refuses connections whose peer UID is anything
-    /// other than this. <c>null</c> = accept any peer (DEV ONLY — combine with
-    /// 0600 mode so only the running user can connect).
+    /// Legacy single-UID gate. When set, the daemon accepts connections from
+    /// this UID. Kept for backwards-compat — <see cref="AcceptedPeerUids"/>
+    /// supersedes it for new deployments. If both are set, a peer is accepted
+    /// when it matches EITHER. <c>null</c> = no single-UID restriction.
     /// </summary>
     public int? ExpectedPeerUid { get; set; }
+
+    /// <summary>
+    /// List of UIDs allowed to connect. Production deployments populate this
+    /// with the Web user's UID AND root (0) so the TUI invoked via <c>sudo</c>
+    /// can reach the socket. Empty / null = no list-based restriction.
+    /// If both <see cref="ExpectedPeerUid"/> and this list are unset, the
+    /// daemon accepts any peer (DEV ONLY — combine with 0600 socket mode so
+    /// only the running user can connect).
+    /// </summary>
+    public int[]? AcceptedPeerUids { get; set; }
 
     /// <summary>
     /// HTTP header carrying the Web's session cookie value for per-request

@@ -152,6 +152,10 @@ app.MapGet("/health", () => Results.Json(new { status = "ok", version = ThisVers
 // logout requires the session header.
 app.MapAuthEndpoints();
 
+// Recovery endpoints (/v1/auth/recovery/*) — root-peer-only, no session.
+// Used by the TUI when the operator can't log in normally (lost TOTP, etc.).
+app.MapRecoveryEndpoints();
+
 // Protected v1 endpoints.
 app.MapNetworkEndpoints();
 app.MapRouteEndpoints();

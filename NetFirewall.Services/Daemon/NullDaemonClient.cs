@@ -68,6 +68,15 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<bool>> LogoutAsync(CancellationToken ct = default) =>
         Task.FromResult(Disabled<bool>());
 
+    public Task<ServiceResponse<IReadOnlyList<RecoveryUserSummary>>> ListUsersForRecoveryAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<RecoveryUserSummary>>());
+
+    public Task<ServiceResponse<RecoveryActionResult>> RecoveryResetPasswordAsync(string username, string newPassword, CancellationToken ct = default)
+        => Task.FromResult(Disabled<RecoveryActionResult>());
+
+    public Task<ServiceResponse<RecoveryActionResult>> RecoveryDisableTotpAsync(string username, CancellationToken ct = default)
+        => Task.FromResult(Disabled<RecoveryActionResult>());
+
     // The TOTP path goes through ITotpSecretCipher and is rebound to the
     // in-process AES cipher when daemon is off — this method shouldn't be
     // reached. If it ever is, throw loud so the misconfig is obvious.

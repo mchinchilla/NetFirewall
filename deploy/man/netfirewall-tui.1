@@ -1,0 +1,105 @@
+.TH NETFIREWALL-TUI 1 "2026" "NetFirewall" "User Commands"
+.SH NAME
+netfirewall-tui \- console UI for the NetFirewall daemon
+.SH SYNOPSIS
+.B sudo netfirewall-tui
+.SH DESCRIPTION
+.B netfirewall-tui
+is a Spectre.Console-based text UI that talks to the local
+.B netfirewall-daemon
+over its Unix socket
+.RB ( /run/netfirewall/control.sock ).
+It exposes the same operations the Web UI does, intended for two scenarios:
+.RS 4
+.IP \(bu 2
+Configuring the first network interface on a freshly-installed host (no Web reachable yet).
+.IP \(bu 2
+Recovering from a locked-out admin or lost TOTP device, when the Web login flow is blocked.
+.RE
+.SH AUTHENTICATION
+The daemon enforces a peer-credential gate
+.RB ( SO_PEERCRED
+on Linux): only UIDs in
+.B Daemon__AcceptedPeerUids
+may connect.
+.B install.sh
+populates this with the
+.B netfirewall-web
+UID and root, so
+.B sudo netfirewall-tui
+reaches the socket from a console session.
+
+Once connected, the TUI presents two paths:
+.TP
+.B Login
+Single-step flow: username + password + TOTP/recovery code in one screen.
+.B POST /v1/auth/login
+on the daemon validates and issues a session.
+TUI sessions are born elevated \(em destructive operations don't re-prompt
+TOTP because the operator is at a physical console and just proved TOTP at login.
+.TP
+.B Recovery
+Reachable WITHOUT login via
+.BR DaemonRequireRootPeerAttribute :
+the daemon checks the connecting peer is root and skips the session check.
+Used when the operator can't log in at all (forgot password, lost TOTP device).
+Two actions: reset password, disable TOTP. Both also clear lockout state so
+the user can immediately re-authenticate.
+.SH MENU
+.TP
+.B Network interfaces
+List configured interfaces from
+.BR fw_interfaces .
+Edit IP / mask / gateway / MAC / MTU.
+Add new entries from physically-detected NICs (kernel-visible via
+.BR DiscoverInterfacesAsync ).
+Apply via
+.B POST /v1/network/{id}/apply
+which writes
+.IR /etc/netplan/*.yaml ,
+.IR /etc/network/interfaces.d/*.cfg ,
+or a NetworkManager
+.BR *.nmconnection ,
+depending on the host's distro / network manager.
+.TP
+.B Recovery \(em reset admin / TOTP
+Lists all users (with locked / inactive / no-totp markers) so the operator
+picks the right account at a glance.
+.TP
+.B Daemon status
+Read-only ping (no auth required) \(em
+.B GET /health
+plus a fetch of
+.BR "nft list ruleset" .
+.SH FILES
+.TP
+.I /opt/netfirewall/tui/netfirewall-tui.dll
+The published binary. Invoked via the wrapper at
+.IR /opt/netfirewall/tui/netfirewall-tui ,
+which is symlinked to
+.IR /usr/local/bin/netfirewall-tui .
+.TP
+.I /opt/netfirewall/tui/appsettings.json
+Resolves the daemon socket path. Mode 0644 \(em readable by anyone running
+the TUI.
+.TP
+.I /run/netfirewall/control.sock
+The daemon's Unix socket. Mode 0660, root:netfirewall. The TUI reaches it
+either as root (sudo) or as a member of the
+.B netfirewall
+group.
+.SH ENVIRONMENT
+.TP
+.B Daemon__SocketPath
+Override the daemon socket path for ad-hoc invocations \(em useful when
+testing against a non-default daemon instance.
+.SH EXIT STATUS
+0 on a clean exit (Quit choice). Non-zero if the TUI cannot start (typically
+a missing or unreadable
+.IR appsettings.json ).
+Operational errors during a session (daemon offline, login denied, apply
+failed) are reported in-screen and do NOT terminate the program.
+.SH SEE ALSO
+.BR netfirewall-daemon (8),
+.BR systemctl (1),
+.BR netplan (5)

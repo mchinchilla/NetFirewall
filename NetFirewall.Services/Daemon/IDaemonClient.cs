@@ -62,6 +62,24 @@ public interface IDaemonClient
     /// </summary>
     Task<ServiceResponse<bool>> LogoutAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// <c>GET /v1/auth/recovery/users</c> — list all users (slim view) so the
+    /// recovery picker can render. Root-peer only; no session required.
+    /// </summary>
+    Task<ServiceResponse<IReadOnlyList<RecoveryUserSummary>>> ListUsersForRecoveryAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>POST /v1/auth/recovery/reset-password</c> — set a new password and
+    /// clear lockout for the named user. Root-peer only.
+    /// </summary>
+    Task<ServiceResponse<RecoveryActionResult>> RecoveryResetPasswordAsync(string username, string newPassword, CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>POST /v1/auth/recovery/disable-totp</c> — wipe the user's TOTP secret
+    /// (forcing re-enroll on next Web login) and clear lockout. Root-peer only.
+    /// </summary>
+    Task<ServiceResponse<RecoveryActionResult>> RecoveryDisableTotpAsync(string username, CancellationToken ct = default);
+
     /// <summary><c>POST /v1/crypto/encrypt</c> — daemon holds the master key, returns ciphertext.</summary>
     Task<byte[]> EncryptTotpAsync(byte[] plaintext, CancellationToken ct = default);
 

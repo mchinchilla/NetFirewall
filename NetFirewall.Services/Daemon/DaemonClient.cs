@@ -142,6 +142,21 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         }
     }
 
+    public Task<ServiceResponse<IReadOnlyList<RecoveryUserSummary>>> ListUsersForRecoveryAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<RecoveryUserSummary>>("/v1/auth/recovery/users", ct);
+
+    public Task<ServiceResponse<RecoveryActionResult>> RecoveryResetPasswordAsync(string username, string newPassword, CancellationToken ct = default)
+        => PostJsonAsync<RecoveryResetPasswordRequest, RecoveryActionResult>(
+            "/v1/auth/recovery/reset-password",
+            new RecoveryResetPasswordRequest(username, newPassword),
+            ct);
+
+    public Task<ServiceResponse<RecoveryActionResult>> RecoveryDisableTotpAsync(string username, CancellationToken ct = default)
+        => PostJsonAsync<RecoveryDisableTotpRequest, RecoveryActionResult>(
+            "/v1/auth/recovery/disable-totp",
+            new RecoveryDisableTotpRequest(username),
+            ct);
+
     public async Task<byte[]> EncryptTotpAsync(byte[] plaintext, CancellationToken ct = default)
         => await CryptoCallAsync("/v1/crypto/encrypt", plaintext, ct);
 

@@ -1,0 +1,49 @@
+Source: netfirewall
+Section: net
+Priority: optional
+Maintainer: NetFirewall Project <noreply@example.invalid>
+Build-Depends:
+ debhelper-compat (= 13),
+ dotnet-sdk-10.0
+Standards-Version: 4.6.2
+Homepage: https://github.com/mchinchilla/NetFirewall
+Rules-Requires-Root: no
+
+Package: netfirewall
+Architecture: amd64
+Depends:
+ ${misc:Depends},
+ dotnet-runtime-10.0,
+ aspnetcore-runtime-10.0,
+ postgresql-client,
+ nftables,
+ iproute2,
+ systemd (>= 250),
+ adduser,
+ openssl
+Recommends:
+ postgresql,
+ wireguard-tools,
+ nginx | apache2
+Suggests:
+ fail2ban
+Description: Multi-WAN firewall, DHCP server, VPN and router (full appliance)
+ NetFirewall is an opinionated home/SOHO firewall stack built from scratch on
+ .NET 10 + PostgreSQL. It bundles a hardened privileged daemon, a web UI, a
+ DHCP server, a WAN failover monitor, and a console TUI for offline / break
+ -glass administration.
+ .
+ This package installs:
+   * /opt/netfirewall/{daemon,web,tui,migrations} — published binaries
+   * /etc/netfirewall/{daemon,web}.env — secrets (mode 0600 / 0640)
+   * Two systemd units: netfirewall-daemon, netfirewall-web
+   * /usr/local/bin/netfirewall-tui symlink + manpage + bash completion
+ .
+ The post-install script provisions the `netfirewall` system group, the
+ `netfirewall-web` service user, generates an AES-256 master key (used by
+ the daemon to encrypt TOTP secrets at rest), and runs database migrations
+ against the configured PostgreSQL instance.
+ .
+ First-time configuration via the web UI requires a bootstrap token, printed
+ to journalctl on the first start with an empty users table. See
+ /usr/share/doc/netfirewall/README.Debian for the unattended-install path.

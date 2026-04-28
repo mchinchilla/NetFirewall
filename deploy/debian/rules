@@ -1,0 +1,57 @@
+#!/usr/bin/make -f
+#
+# debhelper rules for the netfirewall package. The "build" step publishes
+# four .NET projects into a staging tree under debian/tmp/opt/netfirewall/;
+# dh_install + the maintainer scripts then move them into the final paths.
+#
+# We intentionally avoid Source-built dependency restoration during dpkg-
+# buildpackage to keep the build hermetic — the project depends on the
+# .NET 10 SDK which is declared in Build-Depends and provides `dotnet`.
+
+export DEB_BUILD_OPTIONS = nostrip
+DH_VERBOSE = 1
+DH_OPTIONS = -v
+
+# Where the publishes land before dh_install distributes them.
+STAGING := debian/tmp
+
+# The four publish targets. WanMonitor is published too but isn't on by
+# default — operators enable the unit only on multi-WAN deployments.
+PUBLISH_TARGETS := \
+	NetFirewall.Daemon:daemon \
+	NetFirewall.Web:web \
+	NetFirewall.Tui:tui \
+	NetFirewall.Migrations:migrations \
+	NetFirewall.WanMonitor:wanmonitor
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	@for entry in $(PUBLISH_TARGETS); do \
+		proj=$${entry%%:*}; out=$${entry##*:}; \
+		echo "==> publishing $$proj -> $(STAGING)/opt/netfirewall/$$out"; \
+		dotnet publish -c Release -r linux-x64 --self-contained false \
+			-o $(STAGING)/opt/netfirewall/$$out \
+			$$proj/$$proj.csproj; \
+	done
+	# Stage SQL migration files alongside the migration runner.
+	mkdir -p $(STAGING)/opt/netfirewall/migrations/sql/migrations
+	cp NetFirewall.Services/sql/migrations/*.sql \
+	   $(STAGING)/opt/netfirewall/migrations/sql/migrations/
+	# TUI shim wrapper — same logic as deploy/install.sh writes today, but
+	# baked into the .deb so it ships with the package instead of being
+	# generated at install time.
+	printf '#!/usr/bin/env bash\nexec dotnet /opt/netfirewall/tui/netfirewall-tui.dll "$$@"\n' \
+	    > $(STAGING)/opt/netfirewall/tui/netfirewall-tui
+	chmod 0755 $(STAGING)/opt/netfirewall/tui/netfirewall-tui
+
+override_dh_auto_test:
+	# dotnet test is run separately in CI — skipping here keeps the .deb
+	# build deterministic and avoids dragging the test deps (xunit etc.)
+	# into the build environment.
+
+override_dh_auto_clean:
+	-find . -type d -name bin   -exec rm -rf {} +
+	-find . -type d -name obj   -exec rm -rf {} +
+	-rm -rf $(STAGING)

@@ -24,6 +24,7 @@ readonly RUN_DIR=/run/netfirewall
 readonly GROUP_NAME=netfirewall
 readonly WEB_USER=netfirewall-web
 readonly DAEMON_PORT_WEB=5000
+readonly TUI_SYMLINK=/usr/local/bin/netfirewall-tui
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -144,6 +145,11 @@ if [[ $SKIP_PUBLISH -eq 0 ]]; then
     install -d -m 0755 "$PREFIX/migrations/sql/migrations"
     install -m 0644 "$REPO_DIR/NetFirewall.Services/sql/migrations/"*.sql \
             "$PREFIX/migrations/sql/migrations/"
+
+    log "Publishing TUI"
+    dotnet publish -c Release -r linux-x64 --self-contained false \
+        -o "$PREFIX/tui" \
+        "$REPO_DIR/NetFirewall.Tui/NetFirewall.Tui.csproj" >/dev/null
 fi
 
 # Web's wwwroot lives under the publish output already; chmod for nginx-alike
@@ -161,8 +167,11 @@ install -m 0640 -o root -g "$GROUP_NAME" \
 log "Writing environment files"
 
 # Daemon env (root-only — peer UID + DB password live here).
+# Two REPLACE tokens in the template: the DB password (first) and the Web UID
+# for AcceptedPeerUids[0] (second). Use a positional sed to hit them in order.
 DAEMON_ENV="$ETC_DIR/daemon.env"
-sed -e "s|__REPLACE__|$PG_PASSWORD|" -e "s|Daemon__ExpectedPeerUid=__REPLACE__|Daemon__ExpectedPeerUid=$WEB_UID|" \
+sed -e "0,/__REPLACE__/{s|__REPLACE__|$PG_PASSWORD|}" \
+    -e "s|Daemon__AcceptedPeerUids__0=__REPLACE__|Daemon__AcceptedPeerUids__0=$WEB_UID|" \
     "$SCRIPT_DIR/env/daemon.env.template" > "$DAEMON_ENV.tmp"
 sed -i \
     -e "s|Host=127.0.0.1;Port=5432|Host=$PG_HOST;Port=5432|" \
@@ -198,6 +207,51 @@ rm -f "$WEB_ENV.tmp"
 log "Master key (KEEP A SECURE BACKUP — losing it invalidates all TOTP enrollments):"
 echo "    NETFIREWALL_MASTER_KEY=$MASTER_KEY"
 
+# ───────────────────────────── TUI config + symlink ─────────────────────────────
+
+# The TUI runs ad-hoc (no systemd unit) — needs minimal config telling it
+# where the daemon socket lives. Mode 0644 because anyone running the TUI
+# (typically root via sudo) needs to read it.
+TUI_CONFIG="$PREFIX/tui/appsettings.json"
+cat >"$TUI_CONFIG" <<EOF
+{
+  "Daemon": {
+    "SocketPath": "$RUN_DIR/control.sock",
+    "SessionHeader": "X-NetFw-Session",
+    "Timeout": "00:00:10"
+  },
+  "Logging": { "LogLevel": { "Default": "Warning" } }
+}
+EOF
+chmod 0644 "$TUI_CONFIG"
+
+# Convenience symlink so operators can run `netfirewall-tui` directly
+# instead of `dotnet /opt/netfirewall/tui/netfirewall-tui.dll`. We wrap the
+# dotnet invocation in a tiny shim because the publish output is a managed
+# DLL with a launcher executable next to it — both must stay together.
+TUI_LAUNCHER="$PREFIX/tui/netfirewall-tui"
+if [[ ! -x "$TUI_LAUNCHER" ]]; then
+    # The publish target produces a native launcher; if absent, write a shim.
+    cat >"$TUI_LAUNCHER" <<EOF
+#!/usr/bin/env bash
+exec dotnet "$PREFIX/tui/netfirewall-tui.dll" "\$@"
+EOF
+    chmod 0755 "$TUI_LAUNCHER"
+fi
+ln -sfn "$TUI_LAUNCHER" "$TUI_SYMLINK"
+
+# Manpage + bash completion for the TUI. Both are best-effort: skip silently
+# if the system doesn't have the standard target dirs (some minimal distros
+# strip them).
+if [[ -d /usr/local/share/man/man1 ]]; then
+    install -m 0644 "$SCRIPT_DIR/man/netfirewall-tui.1" \
+        /usr/local/share/man/man1/netfirewall-tui.1
+fi
+if [[ -d /etc/bash_completion.d ]]; then
+    install -m 0644 "$SCRIPT_DIR/completion/netfirewall-tui" \
+        /etc/bash_completion.d/netfirewall-tui
+fi
+
 # ───────────────────────────── migrations ─────────────────────────────
 
 log "Applying database migrations"
@@ -225,9 +279,10 @@ cat <<EOF
 
   Daemon : systemctl status netfirewall-daemon
   Web    : systemctl status netfirewall-web
+  TUI    : sudo netfirewall-tui    (console-only; reaches daemon as root via SO_PEERCRED)
   Logs   : $LOG_DIR/{daemon,web}/
   Config : $ETC_DIR/{daemon,web}.env  (mode 0600/0640)
-  Socket : $RUN_DIR/control.sock      (root:netfirewall 0660)
+  Socket : $RUN_DIR/control.sock      (root:netfirewall 0660 — Web UID + root accepted)
   Web URL: http://127.0.0.1:$DAEMON_PORT_WEB  (set up TLS via the nginx example in deploy/nginx)
 
 Next steps:
@@ -235,6 +290,7 @@ Next steps:
   2. Open a browser to https://your-host/setup/bootstrap?token=<...>
      (token printed to journalctl -u netfirewall-web on first start with empty users table).
   3. Create the first admin → enroll TOTP → walk through the setup wizard.
+  4. (Optional) On the console: \`sudo netfirewall-tui\` for offline / break-glass admin.
 
 To upgrade later: re-run this installer (preserves master key + TOTP enrollments).
 To remove:        deploy/uninstall.sh

@@ -17,6 +17,14 @@ public interface IUserService
     Task SetActiveAsync(Guid id, bool active, CancellationToken ct = default);
     Task SetRoleAsync(Guid id, string role, CancellationToken ct = default);
 
+    /// <summary>
+    /// Clear lockout state (failed_login_count = 0, locked_until = NULL) without
+    /// stamping a fake login. Used by admin recovery flows — distinct from
+    /// <see cref="RecordLoginSuccessAsync"/> which would also update last_login_at,
+    /// muddying the audit timeline (no real login happened).
+    /// </summary>
+    Task ClearLockoutAsync(Guid id, CancellationToken ct = default);
+
     /// <summary>Record a successful login: clears lockout state, stamps last login.</summary>
     Task RecordLoginSuccessAsync(Guid id, IPAddress? ip, CancellationToken ct = default);
 

@@ -207,6 +207,46 @@ public sealed class UserServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ClearLockoutAsync_ClearsCounterAndLock_WithoutTouchingLastLogin()
+    {
+        // The recovery path uses ClearLockoutAsync precisely BECAUSE it must
+        // not stamp last_login_at — that would record a fake "successful login"
+        // event and pollute the audit timeline. Pin both halves of the contract.
+        var u = await _svc.CreateAsync(MakeUser());
+        for (var i = 0; i < 5; i++)
+            await _svc.RecordLoginFailureAsync(u.Id, IPAddress.Loopback, threshold: 5, TimeSpan.FromMinutes(10));
+
+        var beforeFetched = await _svc.GetByIdAsync(u.Id);
+        Assert.NotNull(beforeFetched!.LockedUntil);
+        Assert.Null(beforeFetched.LastLoginAt); // no logins yet
+
+        await _svc.ClearLockoutAsync(u.Id);
+
+        var fetched = await _svc.GetByIdAsync(u.Id);
+        Assert.Equal(0, fetched!.FailedLoginCount);
+        Assert.Null(fetched.LockedUntil);
+        // Critical: last_login_at MUST stay null. A regression that copy-pasted
+        // RecordLoginSuccessAsync's SQL would set it to now() and this fails.
+        Assert.Null(fetched.LastLoginAt);
+        Assert.Null(fetched.LastLoginIp);
+    }
+
+    [Fact]
+    public async Task ClearLockoutAsync_OnAlreadyClearUser_IsNoOp()
+    {
+        // Idempotent — recovery should be safe to re-run if the operator
+        // double-clicked or restarted the flow.
+        var u = await _svc.CreateAsync(MakeUser());
+
+        await _svc.ClearLockoutAsync(u.Id);
+        await _svc.ClearLockoutAsync(u.Id);
+
+        var fetched = await _svc.GetByIdAsync(u.Id);
+        Assert.Equal(0, fetched!.FailedLoginCount);
+        Assert.Null(fetched.LockedUntil);
+    }
+
+    [Fact]
     public async Task RecordLoginSuccessAsync_ClearsLockoutEvenAfterPriorLock()
     {
         // Simulates the "lockout expired, user finally logs in successfully" path.

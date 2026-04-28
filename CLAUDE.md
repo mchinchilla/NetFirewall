@@ -49,10 +49,20 @@ deploy/
   config/{daemon,web}.json.template     prod appsettings (mode 0640)
   env/{daemon,web}.env.template         secrets — mode 0600/0640
   nginx/netfirewall.conf                reverse-proxy example with TLS
-  install.sh                            idempotent installer
+  man/netfirewall-tui.1                 TUI manpage installed to /usr/local/share/man/man1
+  completion/netfirewall-tui            bash completion installed to /etc/bash_completion.d
+  install.sh                            idempotent installer (also publishes TUI + symlink)
   uninstall.sh                          reverse install (--purge wipes data)
   README.txt                            operational handbook
 ```
+
+The installer publishes **three** runtime targets (daemon, web, tui) plus the
+migration runner. The TUI ships as `/opt/netfirewall/tui/` with a wrapper at
+`/usr/local/bin/netfirewall-tui`. Daemon's `Daemon__AcceptedPeerUids` is
+populated with both the Web UID (so the Web reaches the socket) AND `0` (so
+`sudo netfirewall-tui` from a console reaches it too). The legacy single
+`Daemon__ExpectedPeerUid` is still honored for backward compat — the
+`PeerCredentialMiddleware` accepts a peer matching either gate.
 
 **Install** on a Debian/Ubuntu/Rocky/Alma/openSUSE host with .NET 10 SDK,
 PostgreSQL 14+ and systemd 250+:
@@ -147,7 +157,7 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
 
 - **NetFirewall.Migrations** — standalone console (`netfirewall-migrate`) that applies / tracks / drift-checks the SQL files in `NetFirewall.Services/sql/migrations/`. NOT registered with Aspire — invoked via `bin/db.sh` or `dotnet run --project NetFirewall.Migrations`.
 - **NetFirewall.AppHost** — Aspire orchestrator (ApiService + Web + DhcpServer).
-- **NetFirewall.Tui** — Console UI built on Spectre.Console (`netfirewall-tui` binary). Talks to the same daemon Unix socket the Web does, via the lifted `IDaemonClient` in `NetFirewall.Services/Daemon/`. Auth: single-step login flow (username + password + TOTP/recovery in one screen) via `POST /v1/auth/login` on the daemon, token stored in-memory by `TuiSessionTokenProvider`. **TUI sessions are born elevated** (login already proved TOTP + operator is at console), so destructive endpoints don't re-prompt. Peer-cred middleware on the daemon (`SO_PEERCRED` Linux / `LOCAL_PEERCRED` macOS) gates the socket connection itself. Phases 0-2 shipped: skeleton + daemon ping + login/logout + **NetworkInterfacesScreen** (list, edit IP/mask/gateway/MAC/MTU, add new from physically-detected NICs, apply via daemon). Recovery screen pending (Phase 3).
+- **NetFirewall.Tui** — Console UI built on Spectre.Console (`netfirewall-tui` binary). Talks to the same daemon Unix socket the Web does, via the lifted `IDaemonClient` in `NetFirewall.Services/Daemon/`. Auth: single-step login flow (username + password + TOTP/recovery in one screen) via `POST /v1/auth/login` on the daemon, token stored in-memory by `TuiSessionTokenProvider`. **TUI sessions are born elevated** (login already proved TOTP + operator is at console), so destructive endpoints don't re-prompt. Peer-cred middleware on the daemon (`SO_PEERCRED` Linux / `LOCAL_PEERCRED` macOS) gates the socket connection itself. Phases 0-3 shipped: skeleton + daemon ping + login/logout + **NetworkInterfacesScreen** (list, edit IP/mask/gateway/MAC/MTU, add new from physically-detected NICs, apply via daemon) + **RecoveryScreen** (break-glass: reset password, disable TOTP, clear lockout — root-peer-only via `[DaemonRequireRootPeerAttribute]`, no session needed; reachable when a user is locked out of the Web).
 - **NetFirewall.WanMonitor** — Background worker for dual-WAN monitoring/failover. Pings configured IPs through each interface (see `WanMonitorService`) and runs the bash commands listed in `appsettings.json` → `BashCommands.ExtraPrimaryCommands` / `ExtraSecondaryCommands` on state changes. Runs under systemd via `UseSystemd()`.
 - **NetFirewall.DhcpServer** — RFC 2131 server with PXE boot support. Standalone host (not ASP.NET) using `Host.CreateDefaultBuilder` + `UseSystemd`. See "DHCP Server internals" below.
 - **NetFirewall.Web** — ASP.NET Core MVC (`AddControllersWithViews`) using **Tailwind CSS 4** (compiled from `Styles/site.css`), **HTMX** and **Alpine.js** (vendored under `wwwroot/lib/{htmx,alpinejs}/`). Logging uses **Serilog** read from `appsettings.json` (`UseSerilog` + `UseSerilogRequestLogging`). Bootstrap and jQuery were removed; do not reintroduce them. The MSBuild target `BuildTailwindCss` invokes the **standalone `tailwindcss` CLI** (must be on `PATH`) during every `dotnet build`, producing `wwwroot/css/site.css` (gitignored). Manual rebuild / watch: `tailwindcss -i Styles/site.css -o wwwroot/css/site.css --minify` (add `--watch` for live rebuild).

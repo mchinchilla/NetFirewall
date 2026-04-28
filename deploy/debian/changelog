@@ -1,0 +1,9 @@
+netfirewall (0.4.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging.
+  * Bundles daemon, web, TUI, migrations, and the WAN monitor binaries.
+  * Wraps deploy/install.sh logic into debhelper postinst / prerm scripts.
+  * Configures Daemon__AcceptedPeerUids with the netfirewall-web UID + root
+    so `sudo netfirewall-tui` reaches the socket from console.
+
+ -- NetFirewall Project <noreply@example.invalid>  Mon, 27 Apr 2026 12:00:00 +0000
