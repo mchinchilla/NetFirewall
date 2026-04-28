@@ -16,8 +16,8 @@ I've used pfSense, OPNsense, IPCop, Zentyal, ClearOS, VyOS, IPFire, Endian for y
 El objetivo final del proyecto es una **distribución Linux basada en Debian** (ISO booteable) que se instala en una máquina y queda lista como appliance multi-WAN. Tres planos de control comparten exactamente la misma capa de servicios:
 
 - **Web UI** — ASP.NET Core MVC + Tailwind 4 + HTMX + Alpine. Ejecuta sin privilegios; toda operación destructiva pasa por el daemon vía Unix socket autenticado y exige TOTP step-up.
-- **TUI sobre TTY** — para configuración inicial sin red, recovery, o admin local sobre consola serie. Llama el mismo socket que el Web; cero duplicación de lógica.
-- **ISO installer** — instalación desatendida o guiada, partitioning, primer boot que suelta el bootstrap token para enrolar el primer admin con TOTP.
+- **TUI sobre TTY** — Spectre.Console para configuración inicial sin red, recovery, o admin local sobre consola serie. Llama el mismo socket que el Web; cero duplicación de lógica. **Funcional desde v0.4** (login + network + recovery).
+- **ISO installer** — Debian-based con preseed unattended, primer boot que suelta el bootstrap token para enrolar el primer admin con TOTP. **En curso (v0.5, Fase 5)** — sources `live-build` bajo `deploy/iso/` que consumen el `.deb` desde `deploy/debian/`.
 
 ### Lo que pretende ofrecer "out of the box"
 
@@ -67,8 +67,9 @@ El objetivo final del proyecto es una **distribución Linux basada en Debian** (
 | **Búsqueda full-text** | Beta | tsvector + GIN, sync por triggers, autocomplete debounced en el header. |
 | **Monitoreo** | Alpha | Métricas de sistema + dashboards live (HTMX polling). |
 | **WebUI** | Beta | ASP.NET Core MVC + Tailwind 4 + HTMX + Alpine, sin npm. Tema con tokens semánticos (`bg-surface`, `--accent`, `--feedback-*`). |
-| **TUI** | Planned | Config inicial, recovery sobre consola, admin local. Mismo daemon socket. |
-| **ISO installer** | Planned | Debian-based, instalación guiada, primer boot bootstrap. |
+| **TUI** | Beta | Spectre.Console sobre el mismo daemon socket que el Web. Login single-step (user + pwd + TOTP/recovery), `NetworkInterfacesScreen` (list/edit/apply), `RecoveryScreen` (break-glass: reset password / disable TOTP, root-peer-only). Distribuido por `install.sh` como `/usr/local/bin/netfirewall-tui` con manpage + bash completion. |
+| **`.deb` package** | En curso (v0.5) | `deploy/debian/` — debhelper sources que convierten `install.sh` en `apt install netfirewall`. Bakea las cinco unidades publish (daemon/web/tui/migrations/wanmonitor) más unidades systemd, manpage, completion y `postinst` para usuarios + master key + migraciones. |
+| **ISO installer** | En curso (v0.5) | `deploy/iso/` — config `live-build` Debian-based con preseed unattended; consume el `.deb` vía `package-lists/`. Primer boot suelta el bootstrap token para enrolar al primer admin con TOTP. |
 
 ---
 
@@ -144,12 +145,12 @@ Reglas duras del repo, documentadas en [`CLAUDE.md`](./CLAUDE.md). Resumen:
         └──────────────────┴──────────────────┐
                            │                  │
                            ▼                  ▼
-              ┌──────────────────────────┐  Future:
-              │ NetFirewall.Services     │  ┌──────────────┐
-              │ (Auth, Dhcp, Firewall,   │  │ TUI (TTY)    │
-              │  Network, Vpn, Search,   │  │ daemon sock  │
-              │  Monitoring, Setup, ...) │  └──────────────┘
-              └──────────────────────────┘
+              ┌──────────────────────────┐  ┌──────────────────┐
+              │ NetFirewall.Services     │  │ TUI (Spectre)    │
+              │ (Auth, Dhcp, Firewall,   │  │ ── unix sock ──► │
+              │  Network, Vpn, Search,   │  │ login + network  │
+              │  Monitoring, Setup, ...) │  │ + recovery screen│
+              └──────────────────────────┘  └──────────────────┘
                            │
                            ▼
                    ┌──────────────┐
@@ -172,6 +173,7 @@ Aparte (no bajo Aspire):
 | `NetFirewall.DhcpServer` | Servidor DHCP standalone (Host genérico + systemd). |
 | `NetFirewall.Daemon` | Daemon root con Unix socket: aplica nftables/red/wireguard/crypto. |
 | `NetFirewall.WanMonitor` | Background worker de failover dual-WAN. |
+| `NetFirewall.Tui` | Console UI (Spectre.Console). Habla el mismo daemon socket que el Web; recovery + admin local. |
 | `NetFirewall.Services` | Lógica de negocio + acceso a datos (Npgsql + RepoDb). |
 | `NetFirewall.Models` | POCOs/DTOs por dominio + `ServiceResponse<T>`. |
 | `NetFirewall.Migrations` | Runner forward-only con SHA-256 drift detection. |
@@ -202,7 +204,7 @@ NetFirewall puede gestionar **toda la configuración de red de la máquina** des
 | **MAC address** | **Spoofing soportado** — kernel-level via writer de distro (`macaddress:` netplan, `cloned-mac-address=` NM, `hwaddress ether` Debian). Sobrevive reboots. |
 | **MTU** | Por interfaz. |
 | **VLAN ID** | 802.1Q tagging. |
-| **Bridge / bond** | Planned para v0.4. |
+| **Bridge / bond** | Planned para v0.6. |
 | **Type** | WAN / LAN / DMZ / Management — dirige selección de subnet DHCP, reglas firewall, métricas. |
 
 ### Por qué pasa todo por el daemon
@@ -265,13 +267,27 @@ dotnet run --project NetFirewall.AppHost
 
 Aspire levanta el dashboard, ApiService, Web y DhcpServer. El primer login lo guía el setup wizard (bootstrap token impreso en consola).
 
-> **Nota:** `NetFirewall.WanMonitor` y `NetFirewall.Daemon` **no** están registrados en AppHost — corren como systemd workers independientes en producción. Para desarrollo local del daemon, lanzar manualmente con `dotnet run --project NetFirewall.Daemon` sobre Linux con caps adecuadas (o como root en una VM).
+> **Nota:** `NetFirewall.WanMonitor`, `NetFirewall.Daemon` y `NetFirewall.Tui` **no** están registrados en AppHost — el WanMonitor y el daemon corren como systemd workers en producción, la TUI se invoca a demanda en consola. Para desarrollo local del daemon, lanzar manualmente con `dotnet run --project NetFirewall.Daemon` sobre Linux con caps adecuadas (o como root en una VM).
+
+### Correr la TUI
+
+Con el daemon arriba (vía Aspire o systemd), la TUI se invoca:
+
+```bash
+# Dev (apunta al socket que use Aspire o tu daemon local):
+dotnet run --project NetFirewall.Tui
+
+# Producción (instalado por install.sh):
+sudo netfirewall-tui
+```
+
+El menú principal muestra estado del daemon y de la sesión, login single-step (user + pwd + TOTP/recovery), `NetworkInterfacesScreen` para list/edit/apply de interfaces, y `RecoveryScreen` (root-peer-only) para break-glass cuando un admin está locked out del Web. La TUI se autentica vía peer-cred (`SO_PEERCRED` en Linux, `LOCAL_PEERCRED` en macOS) — el daemon acepta el UID del Web **y** root.
 
 ---
 
 ## Tests y cobertura
 
-**Estado actual: 853 tests pasando, 1 skipped, 0 failing.** El proyecto pasó de tener cobertura mínima a una suite robusta cubriendo seguridad, lógica de negocio, hot-path DHCP, y filtros web.
+**Estado actual: ~880 tests pasando, 1 skipped, 0 failing.** El proyecto pasó de tener cobertura mínima a una suite robusta cubriendo seguridad, lógica de negocio, hot-path DHCP, filtros web y la TUI.
 
 ### Lo que está cubierto
 
@@ -304,6 +320,11 @@ NetFirewall.Tests/
 ├── Network/                 → object resolver (recursion + cycles),
 │                              service resolver, distro detection,
 │                              netplan/NM/Debian writers
+├── Tui/                     → RecoveryScreen label builder (locked/inactive/
+│                              no-totp markers), NetworkInterfacesScreen
+│                              validation/orchestration, TuiSessionState
+│                              transitions, DaemonOptions binding (env var
+│                              shape that install.sh writes)
 ├── Migrations/              → runner, drift detection, transaction rollback
 ├── Models/                  → User.EffectiveDisplayName, Initials, validation
 └── Infra/                   → PostgresFixture (Testcontainers)
@@ -321,7 +342,8 @@ NetFirewall.Tests/
 | **Web filters / helpers** | Alta | RequireElevated, validation→ServiceResponse, HX-Trigger merge. |
 | **Daemon API** | Media | Endpoints clave, integration con Web vía DaemonClient real. |
 | **WAN monitor** | Baja | Pendiente sustituir bash watchdog por logic testeable. |
-| **TUI / ISO** | N/A | No empezados. |
+| **TUI** | Media | Label builder de RecoveryScreen, validación de NetworkInterfacesScreen, transiciones de UserSessionState, binding de `DaemonOptions.AcceptedPeerUids` (la pieza que install.sh escribe en daemon.env). El flujo Spectre interactivo no es unit-testeable sin TTY. |
+| **`.deb` / ISO live-build** | N/A | Validación al integrarse en el builder Debian (Fase 5). |
 
 ### Estrategia de testing aplicada
 
@@ -344,9 +366,13 @@ deploy/
   config/{daemon,web}.json.template     appsettings (modo 0640)
   env/{daemon,web}.env.template         secretos — modo 0600/0640
   nginx/netfirewall.conf                proxy reverso TLS
+  man/netfirewall-tui.1                 manpage de la TUI
+  completion/netfirewall-tui            bash completion de la TUI
   install.sh                            instalador idempotente
   uninstall.sh                          inverso (--purge limpia datos)
   README.txt                            handbook operacional
+  debian/                               (en curso) sources debhelper para .deb
+  iso/                                  (en curso) config live-build para ISO
 ```
 
 Instalar en Debian/Ubuntu/Rocky/Alma/openSUSE con .NET 10 SDK + PostgreSQL 14+ + systemd 250+:
@@ -355,9 +381,16 @@ Instalar en Debian/Ubuntu/Rocky/Alma/openSUSE con .NET 10 SDK + PostgreSQL 14+ +
 sudo deploy/install.sh
 ```
 
+`install.sh` publica los cinco binarios (daemon, web, **tui**, migrations, wanmonitor), crea el grupo `netfirewall` + el usuario `netfirewall-web`, genera la master key AES-256, escribe `daemon.env` con `Daemon__AcceptedPeerUids` poblado con el UID del Web **y** root (para que `sudo netfirewall-tui` desde consola alcance el socket), aplica migraciones, deja la TUI en `/usr/local/bin/netfirewall-tui` con manpage en `/usr/local/share/man/man1/` y completion en `/etc/bash_completion.d/`, y arranca ambas unidades systemd.
+
 Para detalles de hardening (capabilities, `ProtectSystem`, `SystemCallFilter`, manejo de la master key AES-256 para cifrado de secretos TOTP, modelo de privilegios Web ↔ Daemon vía Unix socket): ver [`deploy/README.txt`](./deploy/README.txt) y [`CLAUDE.md`](./CLAUDE.md).
 
-> **Próximo paso de despliegue (planned):** ISO Debian-based con instalador desatendido, primer boot con bootstrap, snapshot LVM antes de cada apply de network config.
+> **Próximo paso de despliegue (Fase 5 — NetFirewall OS, en curso):** dos capas que reemplazan al `install.sh` para entornos no desarrollables.
+>
+> 1. **`.deb` package** bajo `deploy/debian/` — `apt install netfirewall` instala las cinco unidades publish, las units systemd, manpage y completion; el `postinst` porta la lógica de creación de usuarios + master key + migraciones.
+> 2. **`live-build` ISO** bajo `deploy/iso/` — bakea el `.deb` en una ISO Debian-based con preseed unattended; primer boot suelta el bootstrap token para enrolar al primer admin con TOTP. Snapshot LVM antes de cada apply queda como TODO de v0.6.
+>
+> Esta fase se desarrolla **sobre Debian 13 directamente** (no macOS) — el toolchain (`debuild`, `dpkg-buildpackage`, `lintian`, `live-build`, `debootstrap`) es Linux-only.
 
 ---
 
@@ -389,21 +422,28 @@ Mensajes adicionales: **DHCPDECLINE** (cliente detecta IP duplicada), **DHCPRELE
 
 ## Roadmap
 
-### Corto plazo (v0.3)
-- [ ] Buffer pool refactor en `IDhcpServerService` para eliminar el `new byte[offset]` por respuesta (~1.5 MB/s GC pressure).
-- [ ] OfferLeaseAsync batched query (cache-miss path).
-- [ ] Refactor `LeaseCache` a uint keys para `FindAvailableIp` zero-alloc.
+### Shipped (hasta v0.4)
+- [x] **TUI sobre TTY** — Spectre.Console + mismo daemon socket. Login single-step (user + pwd + TOTP/recovery), `NetworkInterfacesScreen` (list/edit/apply IP/máscara/gateway/MAC/MTU), `RecoveryScreen` (root-peer-only break-glass: reset password / disable TOTP / clear lockout), distribución por `install.sh` con manpage + bash completion + symlink + multi-UID peer-cred.
+- [x] Buffer pool refactor en `IDhcpServerService` (`DhcpResponseBuffer`) — elimina el `new byte[offset]` por respuesta, validado por bench (`Allocated: -`).
+- [x] Per-message-type counters en `DhcpWorker` para monitoreo.
+- [x] FQDN support en network objects con DNS resolver + cache.
+- [x] Schedules con timezone + watcher que re-aplica nft al cambiar estado.
+
+### En curso (v0.5 — Fase 5: NetFirewall OS)
+- [ ] **`.deb` package** bajo `deploy/debian/` — `apt install netfirewall` con `postinst` que porta `install.sh`. Hoy: `control`, `rules`, `changelog`, `compat` listos; falta `postinst` / `prerm` / `postrm` / `install` / `copyright` / `source/format`.
+- [ ] **`live-build` ISO** bajo `deploy/iso/` — Debian-based con preseed unattended, consume el `.deb` vía `package-lists/`. Hoy: árbol de directorios listo; falta el contenido (`auto/{config,build}`, preseed, hooks, package-lists, `includes.chroot/etc/netfirewall/`).
 - [ ] UI completa de WireGuard con QR para móviles.
 - [ ] DNS resolver integrado (Unbound o BIND embebido).
 
-### Medio plazo (v0.4)
-- [ ] **TUI sobre TTY** — Spectre.Console + mismo daemon socket, config inicial sin red, recovery, admin local.
+### Medio plazo (v0.6)
 - [ ] Bridges + bonds en network config.
 - [ ] IPv6 first-class en DHCP (DHCPv6) y firewall (nft `ip6` family).
 - [ ] Snapshot LVM/btrfs antes de cada apply destructivo.
+- [ ] Tail/`journalctl` viewer dentro de la TUI (troubleshoot sin salir).
+- [ ] TUI: ver/editar firewall rules (escala el use case más allá de network).
+- [ ] E2E integration tests con Testcontainers Postgres + Kestrel-on-UDS para `IDaemonClient` real.
 
 ### Largo plazo (v1.0)
-- [ ] **ISO Debian-based** con instalador desatendido.
 - [ ] Captive portal.
 - [ ] Cluster HA (active/passive con keepalived + replicación logical Postgres).
 - [ ] Plugin/marketplace para reglas comunitarias (block-lists, GeoIP).
