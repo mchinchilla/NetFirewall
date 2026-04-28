@@ -87,8 +87,15 @@ public class DhcpWorker : BackgroundService
         _useRawSocket = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
         // Channel will be configured based on interfaces loaded from DB
-        // Use multi-writer for Linux (multiple interfaces), single-writer for Windows
-        _packetChannel = Channel.CreateBounded<DhcpPacketContext>(new BoundedChannelOptions(100)
+        // Use multi-writer for Linux (multiple interfaces), single-writer for Windows.
+        //
+        // Capacity sized for ~200ms of burst at 5k req/s sustained load. The
+        // earlier 100-slot bound silently DropOldest'd under ARP storms / switch
+        // flaps because a single ProcessPacketsAsync iteration can take a few
+        // ms and 100 packets backs up in <20ms. 1024 buys us headroom without
+        // meaningfully impacting memory (each context is a 576-byte ArrayPool
+        // rental + ~80 bytes of struct fields ≈ 650 KB worst case).
+        _packetChannel = Channel.CreateBounded<DhcpPacketContext>(new BoundedChannelOptions(1024)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
@@ -463,14 +470,17 @@ public class DhcpWorker : BackgroundService
         _logger.LogDebug("[PROC] Creating DHCP response for {MessageType} from {Mac} on interface {Interface}",
             request.MessageType, request.ClientMac, context.InterfaceName ?? "unknown");
 
-        var response = await dhcpService.CreateDhcpResponseAsync(request).ConfigureAwait(false);
+        // The response carries a pool-rented buffer. `using` ensures the
+        // buffer goes back to the pool whether the send succeeds, throws, or
+        // the response is empty (Dispose on Empty is a no-op).
+        using var response = await dhcpService.CreateDhcpResponseAsync(request).ConfigureAwait(false);
 
-        if (response.Length > 0)
+        if (!response.IsEmpty)
         {
             var destination = DetermineDestinationEndPoint(request, context.RemoteEndPoint);
 
             // Parse response to log what we're sending
-            var responseType = ParseResponseMessageType(response);
+            var responseType = ParseResponseMessageType(response.Span);
             LogDhcpResponse(request, responseType, destination, context.InterfaceName);
 
             // Track response types
@@ -487,7 +497,7 @@ public class DhcpWorker : BackgroundService
                     break;
             }
 
-            await SendResponseAsync(response, destination, context.InterfaceName, stoppingToken).ConfigureAwait(false);
+            await SendResponseAsync(response.Memory, destination, context.InterfaceName, stoppingToken).ConfigureAwait(false);
 
             _logger.LogDebug("[SEND] Sent {Length} bytes to {Destination} via {Interface}",
                 response.Length, destination, context.InterfaceName ?? "default");
@@ -508,7 +518,7 @@ public class DhcpWorker : BackgroundService
     /// Vtable lookup cost (~1ns/packet) is negligible vs the DB round-trip
     /// (100-500µs) that dominates each request.
     /// </summary>
-    internal virtual ValueTask<int> SendResponseAsync(byte[] response, IPEndPoint destination, string? interfaceName, CancellationToken cancellationToken)
+    internal virtual ValueTask<int> SendResponseAsync(ReadOnlyMemory<byte> response, IPEndPoint destination, string? interfaceName, CancellationToken cancellationToken)
     {
         var sendSocket = GetSendSocketForInterface(interfaceName);
         return sendSocket.SendToAsync(response, SocketFlags.None, destination, cancellationToken);
@@ -577,7 +587,7 @@ public class DhcpWorker : BackgroundService
             interfaceName ?? "default");
     }
 
-    internal static DhcpMessageType ParseResponseMessageType(byte[] response)
+    internal static DhcpMessageType ParseResponseMessageType(ReadOnlySpan<byte> response)
     {
         // DHCP message type is in options, after magic cookie (offset 240)
         // Look for option 53 (message type)

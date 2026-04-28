@@ -71,7 +71,7 @@ public sealed class DhcpServerService : IDhcpServerService
         LeaseTime = 86400
     };
 
-    public async Task<byte[]> CreateDhcpResponseAsync(DhcpRequest request)
+    public async Task<DhcpResponseBuffer> CreateDhcpResponseAsync(DhcpRequest request)
     {
         try
         {
@@ -117,7 +117,7 @@ public sealed class DhcpServerService : IDhcpServerService
                 _ => CreateNakResponse(request, subnet)
             };
 
-            if (response.Length == 0)
+            if (response.IsEmpty)
             {
                 _logger.LogWarning(
                     "[SERVICE] Empty response generated for {MessageType} from {Mac}",
@@ -134,7 +134,7 @@ public sealed class DhcpServerService : IDhcpServerService
         }
     }
 
-    private async Task<byte[]> HandleDiscoverAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
+    private async Task<DhcpResponseBuffer> HandleDiscoverAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
         _logger.LogDebug("[DISCOVER] Processing DISCOVER from {Mac}, Hostname: {Hostname}",
             request.ClientMac, request.Hostname ?? "(none)");
@@ -145,13 +145,13 @@ public sealed class DhcpServerService : IDhcpServerService
             if (!_failoverService.CanServe)
             {
                 _logger.LogDebug("[DISCOVER] Failover state prevents serving DISCOVER from {Mac}", request.ClientMac);
-                return []; // Don't respond, let peer handle it
+                return DhcpResponseBuffer.Empty; // Don't respond, let peer handle it
             }
 
             if (!_failoverService.ShouldHandleRequest(request.ClientMac, request.RequestedIp))
             {
                 _logger.LogDebug("[DISCOVER] Load balancing: peer should handle DISCOVER from {Mac}", request.ClientMac);
-                return []; // Let peer handle based on load balancing
+                return DhcpResponseBuffer.Empty; // Let peer handle based on load balancing
             }
         }
 
@@ -222,7 +222,7 @@ public sealed class DhcpServerService : IDhcpServerService
         return ConstructDhcpPacket(request, offeredIp, DhcpMessageType.Offer, subnet, clientClass);
     }
 
-    private async Task<byte[]> HandleRequestAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
+    private async Task<DhcpResponseBuffer> HandleRequestAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
         _logger.LogDebug("[REQUEST] Processing REQUEST from {Mac}, RequestedIP: {RequestedIp}",
             request.ClientMac, request.RequestedIp);
@@ -233,13 +233,13 @@ public sealed class DhcpServerService : IDhcpServerService
             if (!_failoverService.CanServe)
             {
                 _logger.LogDebug("[REQUEST] Failover state prevents serving REQUEST from {Mac}", request.ClientMac);
-                return []; // Don't respond
+                return DhcpResponseBuffer.Empty; // Don't respond
             }
 
             if (!_failoverService.ShouldHandleRequest(request.ClientMac, request.RequestedIp))
             {
                 _logger.LogDebug("[REQUEST] Load balancing: peer should handle REQUEST from {Mac}", request.ClientMac);
-                return []; // Let peer handle
+                return DhcpResponseBuffer.Empty; // Let peer handle
             }
         }
 
@@ -318,7 +318,7 @@ public sealed class DhcpServerService : IDhcpServerService
         return CreateNakResponse(request, subnet);
     }
 
-    private async Task<byte[]> HandleReleaseAsync(DhcpRequest request)
+    private async Task<DhcpResponseBuffer> HandleReleaseAsync(DhcpRequest request)
     {
         // Get the lease before releasing to notify failover peer
         var assignedIp = await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
@@ -335,32 +335,32 @@ public sealed class DhcpServerService : IDhcpServerService
         {
             _logger.LogDebug("Released lease for {Mac}", request.ClientMac);
         }
-        return [];
+        return DhcpResponseBuffer.Empty; // RFC 2131: server doesn't reply to RELEASE
     }
 
-    private async Task<byte[]> HandleDeclineAsync(DhcpRequest request)
+    private async Task<DhcpResponseBuffer> HandleDeclineAsync(DhcpRequest request)
     {
         if (request.RequestedIp != null)
         {
             await _dhcpLeasesService.MarkIpAsDeclinedAsync(request.RequestedIp).ConfigureAwait(false);
             _logger.LogWarning("IP {Ip} declined by {Mac}", request.RequestedIp, request.ClientMac);
         }
-        return [];
+        return DhcpResponseBuffer.Empty; // RFC 2131: server doesn't reply to DECLINE
     }
 
-    private byte[] HandleInform(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
+    private DhcpResponseBuffer HandleInform(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
         var clientIp = request.RequestedIp ?? request.CiAddr ?? IPAddress.Any;
         return ConstructDhcpPacket(request, clientIp, DhcpMessageType.Ack, subnet, clientClass, includeLeaseTime: false);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private byte[] CreateNakResponse(DhcpRequest request, DhcpSubnet? subnet)
+    private DhcpResponseBuffer CreateNakResponse(DhcpRequest request, DhcpSubnet? subnet)
     {
         return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Nak, subnet, null, includeLeaseTime: false);
     }
 
-    private byte[] ConstructDhcpPacket(
+    private DhcpResponseBuffer ConstructDhcpPacket(
         DhcpRequest request,
         IPAddress assignedIp,
         DhcpMessageType messageType,
@@ -380,7 +380,10 @@ public sealed class DhcpServerService : IDhcpServerService
         var bootFilename = GetBootFilename(request, subnet, clientClass);
         var tftpServer = clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
 
-        // Rent buffer from pool (max DHCP packet is ~576 bytes, allocate 1024 for safety)
+        // Rent buffer from pool. Caller (the worker) owns the rental from this
+        // point on — DhcpResponseBuffer carries it to the wire and Disposes
+        // back to the pool after send. We deliberately don't allocate a
+        // right-sized copy at the end (saves ~280B/packet vs the old design).
         var buffer = _bufferPool.Rent(1024);
 
         try
@@ -463,14 +466,15 @@ public sealed class DhcpServerService : IDhcpServerService
             // End option
             buffer[offset++] = (byte)DhcpOptionCode.End;
 
-            // Copy to correctly-sized array
-            var result = new byte[offset];
-            Buffer.BlockCopy(buffer, 0, result, 0, offset);
-            return result;
+            // Hand the rental + length to the caller. No copy, no return-to-
+            // pool here — the consumer's Dispose() does that after send.
+            return new DhcpResponseBuffer(buffer, offset, _bufferPool);
         }
-        finally
+        catch
         {
+            // Build failure: return the rental ourselves so it doesn't leak.
             _bufferPool.Return(buffer);
+            throw;
         }
     }
 

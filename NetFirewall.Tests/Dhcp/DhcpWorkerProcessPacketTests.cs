@@ -49,7 +49,7 @@ public class DhcpWorkerProcessPacketTests
     {
         var service = new Mock<IDhcpServerService>(MockBehavior.Strict);
         // Default: empty response → worker skips the send path entirely.
-        service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(Array.Empty<byte>());
+        service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(DhcpResponseBuffer.Empty);
 
         var sp = new ServiceCollection()
             .AddScoped(_ => service.Object)
@@ -79,7 +79,7 @@ public class DhcpWorkerProcessPacketTests
         DhcpRequest? captured = null;
         service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>()))
                .Callback<DhcpRequest>(r => captured = r)
-               .ReturnsAsync(Array.Empty<byte>());
+               .ReturnsAsync(DhcpResponseBuffer.Empty);
 
         using var ctx = WrapPacket(BuildValidDiscover(), interfaceName: "eth0");
         await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
@@ -100,7 +100,7 @@ public class DhcpWorkerProcessPacketTests
         string? observedIface = null;
         service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>()))
                .Callback<DhcpRequest>(r => observedIface = r.SourceInterfaceName)
-               .ReturnsAsync(Array.Empty<byte>());
+               .ReturnsAsync(DhcpResponseBuffer.Empty);
 
         using var ctx = WrapPacket(BuildValidDiscover(), interfaceName: "eth1.lan");
         await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
@@ -377,12 +377,11 @@ public class DhcpWorkerProcessPacketTests
         {
         }
 
-        internal override ValueTask<int> SendResponseAsync(byte[] response, IPEndPoint destination, string? interfaceName, CancellationToken cancellationToken)
+        internal override ValueTask<int> SendResponseAsync(ReadOnlyMemory<byte> response, IPEndPoint destination, string? interfaceName, CancellationToken cancellationToken)
         {
-            // Copy the buffer — the caller may pool/recycle it after we return.
-            var copy = new byte[response.Length];
-            Array.Copy(response, copy, response.Length);
-            Sent.Add(copy);
+            // Snapshot the bytes — the underlying buffer goes back to the pool
+            // as soon as the worker disposes the DhcpResponseBuffer.
+            Sent.Add(response.ToArray());
             return ValueTask.FromResult(response.Length);
         }
     }
@@ -390,7 +389,9 @@ public class DhcpWorkerProcessPacketTests
     private static RecordingDhcpWorker CreateRecordingWorker(byte[] serviceResponse)
     {
         var service = new Mock<IDhcpServerService>(MockBehavior.Strict);
-        service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(serviceResponse);
+        // pool=null: tests don't rent from a real pool, so no return needed.
+        var buffer = new DhcpResponseBuffer(serviceResponse, serviceResponse.Length, pool: null);
+        service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(buffer);
 
         var sp = new ServiceCollection().AddScoped(_ => service.Object).BuildServiceProvider();
         return new RecordingDhcpWorker(sp.GetRequiredService<IServiceScopeFactory>());

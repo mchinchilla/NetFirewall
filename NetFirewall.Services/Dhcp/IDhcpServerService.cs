@@ -9,5 +9,11 @@ namespace NetFirewall.Services.Dhcp;
 
 public interface IDhcpServerService
 {
-    Task<byte[]> CreateDhcpResponseAsync( DhcpRequest request );
+    /// <summary>
+    /// Builds the DHCP response for the given request. The returned buffer is
+    /// pool-rented — the caller MUST <c>Dispose</c> it (or use <c>using</c>)
+    /// after consuming. <see cref="DhcpResponseBuffer.IsEmpty"/> means "no
+    /// response should be sent" (e.g. RELEASE, DECLINE, or failover declined).
+    /// </summary>
+    Task<DhcpResponseBuffer> CreateDhcpResponseAsync( DhcpRequest request );
 }

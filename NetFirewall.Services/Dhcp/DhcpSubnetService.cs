@@ -23,6 +23,12 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     private readonly ConcurrentDictionary<Guid, List<DhcpExclusion>> _exclusionCache = new();
     private readonly ConcurrentDictionary<string, DhcpClass> _classCache = new();
 
+    // Pre-parsed (network, mask) byte pairs per subnet — avoids
+    // string.Split('/') + IPAddress.TryParse + GetAddressBytes() on every
+    // FindSubnetContainingIp lookup. Populated in lockstep with _subnetCache.
+    private readonly ConcurrentDictionary<Guid, ParsedCidr> _cidrCache = new();
+    private readonly record struct ParsedCidr(byte[] NetworkBytes, byte[] MaskBytes);
+
     private DateTime _lastCacheRefresh = DateTime.MinValue;
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(5);
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
@@ -56,8 +62,10 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         if (!string.IsNullOrEmpty(request.SourceInterfaceName))
         {
             _logger.LogDebug("[SUBNET] Checking SourceInterfaceName {Interface} for subnet match", request.SourceInterfaceName);
+            // SQL filter `WHERE s.enabled = true` already excluded disabled subnets
+            // from _subnetCache — no need to re-check Enabled here.
             var interfaceSubnet = _subnetCache.Values
-                .FirstOrDefault(s => s.Enabled &&
+                .FirstOrDefault(s =>
                     string.Equals(s.InterfaceName, request.SourceInterfaceName, StringComparison.OrdinalIgnoreCase));
 
             if (interfaceSubnet != null)
@@ -114,8 +122,9 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         // Priority 4: Return first enabled subnet (for direct connections without relay)
         _logger.LogDebug("[SUBNET] No specific subnet match, looking for default subnet");
+        // SQL filter already removed disabled rows; the OrderBy is kept for
+        // deterministic fallback selection when multiple subnets exist.
         var firstSubnet = _subnetCache.Values
-            .Where(s => s.Enabled)
             .OrderBy(s => s.Name)
             .FirstOrDefault();
 
@@ -157,9 +166,16 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private DhcpSubnet? FindSubnetContainingIp(IPAddress ip)
     {
-        foreach (var subnet in _subnetCache.Values.Where(s => s.Enabled))
+        // Stack-allocate the input IP bytes once per lookup (4 bytes). The
+        // per-subnet bytes come from _cidrCache, parsed once at load time.
+        Span<byte> ipBytes = stackalloc byte[4];
+        if (!ip.TryWriteBytes(ipBytes, out var written) || written != 4)
+            return null;
+
+        // _subnetCache only contains enabled subnets (SQL `WHERE enabled = true`).
+        foreach (var subnet in _subnetCache.Values)
         {
-            if (IsIpInNetwork(ip, subnet.Network, subnet.SubnetMask))
+            if (_cidrCache.TryGetValue(subnet.Id, out var cidr) && IpMatchesNetwork(ipBytes, cidr))
             {
                 return subnet;
             }
@@ -168,30 +184,26 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsIpInNetwork(IPAddress ip, string networkCidr, IPAddress? subnetMask)
+    private static bool IpMatchesNetwork(ReadOnlySpan<byte> ipBytes, ParsedCidr cidr)
     {
-        if (subnetMask == null) return false;
-
-        // Parse CIDR (e.g., "192.168.1.0/24")
-        var parts = networkCidr.Split('/');
-        if (parts.Length != 2 || !IPAddress.TryParse(parts[0], out var network))
-        {
-            return false;
-        }
-
-        var ipBytes = ip.GetAddressBytes();
-        var networkBytes = network.GetAddressBytes();
-        var maskBytes = subnetMask.GetAddressBytes();
-
+        var net = cidr.NetworkBytes;
+        var mask = cidr.MaskBytes;
         for (int i = 0; i < 4; i++)
         {
-            if ((ipBytes[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i]))
-            {
+            if ((ipBytes[i] & mask[i]) != (net[i] & mask[i]))
                 return false;
-            }
         }
-
         return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ParsedCidr? TryParseCidr(string networkCidr, IPAddress? subnetMask)
+    {
+        if (subnetMask == null) return null;
+        var slash = networkCidr.IndexOf('/');
+        var addrPart = slash >= 0 ? networkCidr.AsSpan(0, slash) : networkCidr.AsSpan();
+        if (!IPAddress.TryParse(addrPart, out var network)) return null;
+        return new ParsedCidr(network.GetAddressBytes(), subnetMask.GetAddressBytes());
     }
 
     #endregion
@@ -235,11 +247,11 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             return (null, null);
         }
 
-        // Filter pools by enabled and client eligibility
-        var eligiblePools = pools
-            .Where(p => p.Enabled)
-            .OrderBy(p => p.Priority)
-            .ToList();
+        // LoadPoolsForSubnetAsync already runs `WHERE enabled = true ORDER BY
+        // priority, name` in SQL, so the cached list is pre-filtered + sorted.
+        // Iterating it directly avoids ~500B of LINQ + ToList allocation per
+        // packet (Where + OrderBy buffers + List<T> backing array).
+        var eligiblePools = pools;
 
         _logger.LogDebug("[SUBNET] {EligibleCount} eligible pools (enabled) in subnet '{SubnetName}'",
             eligiblePools.Count, subnet.Name);
@@ -637,10 +649,15 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         await using (var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
             _subnetCache.Clear();
+            _cidrCache.Clear();
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 var subnet = ReadSubnetFromReader(reader);
                 _subnetCache[subnet.Id] = subnet;
+                // Pre-parse CIDR + mask once so FindSubnetContainingIp doesn't
+                // re-split + re-parse the same string thousands of times/sec.
+                if (TryParseCidr(subnet.Network, subnet.SubnetMask) is { } parsed)
+                    _cidrCache[subnet.Id] = parsed;
                 _logger.LogDebug("[SUBNET] Loaded subnet: {Name} ({Network})", subnet.Name, subnet.Network);
             }
         }

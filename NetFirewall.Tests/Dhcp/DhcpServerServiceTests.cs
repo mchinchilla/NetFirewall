@@ -56,16 +56,19 @@ public class DhcpServerServiceTests
     /// <summary>
     /// Walk past the BOOTP fixed header + magic cookie and locate the option-53
     /// (DHCP message type) byte. Returns null if the response is empty.
+    /// Takes a <see cref="DhcpResponseBuffer"/> so callers don't have to remember
+    /// to <c>using</c> + <c>.Span</c> at every site.
     /// </summary>
-    private static byte? ExtractMessageType(byte[] response)
+    private static byte? ExtractMessageType(DhcpResponseBuffer response)
     {
-        if (response.Length == 0) return null;
+        if (response.IsEmpty) return null;
+        var span = response.Span;
         var i = 240; // standard offset post-fixed-header + magic cookie
-        for (; i < response.Length - 1; i++)
+        for (; i < span.Length - 1; i++)
         {
-            if (response[i] == 53 && response[i + 1] == 1)
-                return response[i + 2];
-            if (response[i] == 0xFF) break;
+            if (span[i] == 53 && span[i + 1] == 1)
+                return span[i + 2];
+            if (span[i] == 0xFF) break;
         }
         return null;
     }
@@ -135,7 +138,7 @@ public class DhcpServerServiceTests
 
         var response = await CreateSvc(withFailover: true).CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Discover));
 
-        Assert.Empty(response);
+        Assert.True(response.IsEmpty);
         _leases.Verify(l => l.OfferLeaseAsync(It.IsAny<string>(), It.IsAny<IPAddress>(), It.IsAny<IPAddress>()), Times.Never);
     }
 
@@ -150,7 +153,7 @@ public class DhcpServerServiceTests
 
         var response = await CreateSvc(withFailover: true).CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Discover));
 
-        Assert.Empty(response);
+        Assert.True(response.IsEmpty);
     }
 
     // ── REQUEST ────────────────────────────────────────────────────────
@@ -216,7 +219,7 @@ public class DhcpServerServiceTests
 
         var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Release));
 
-        Assert.Empty(response); // RFC: server doesn't reply to RELEASE
+        Assert.True(response.IsEmpty); // RFC: server doesn't reply to RELEASE
         _leases.Verify(l => l.ReleaseLeaseAsync("aa:bb:cc:00:00:01"), Times.Once);
     }
 
@@ -232,7 +235,7 @@ public class DhcpServerServiceTests
 
         var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Decline, ip));
 
-        Assert.Empty(response);
+        Assert.True(response.IsEmpty);
         _leases.Verify(l => l.MarkIpAsDeclinedAsync(ip), Times.Once);
     }
 
