@@ -415,7 +415,7 @@ public sealed class DhcpWorker : BackgroundService
         _logger.LogInformation("DHCP packet processor stopped");
     }
 
-    private async Task ProcessSinglePacketAsync(DhcpPacketContext context, CancellationToken stoppingToken)
+    internal async Task ProcessSinglePacketAsync(DhcpPacketContext context, CancellationToken stoppingToken)
     {
         var buffer = context.Buffer.AsSpan(0, context.Length);
 

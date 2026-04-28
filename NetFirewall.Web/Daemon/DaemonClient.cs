@@ -181,7 +181,17 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
 
     private static async Task<ServiceResponse<T>> ReadEnvelopeAsync<T>(HttpResponseMessage resp, CancellationToken ct)
     {
-        // Daemon always returns ServiceResponse<T> JSON (200 or 4xx/5xx).
+        // Daemon's contract: always 200 + ServiceResponse<T> JSON, even for
+        // operation failures (Success=false in the envelope). Anything else
+        // (5xx from a middleware, ProblemDetails JSON, plaintext) means the
+        // daemon itself is broken — synthesize a Fail with the HTTP status so
+        // the operator sees something more useful than "Success=false, Message=null".
+        var statusFallback = $"Daemon returned HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}";
+        if (!resp.IsSuccessStatusCode)
+        {
+            return ServiceResponse<T>.Fail(statusFallback);
+        }
+
         try
         {
             var envelope = await resp.Content.ReadFromJsonAsync<ServiceResponse<T>>(JsonOpts, ct);
@@ -191,8 +201,7 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         {
             // Non-JSON body — fall through to generic failure.
         }
-        var msg = $"Daemon returned HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}";
-        return ServiceResponse<T>.Fail(msg);
+        return ServiceResponse<T>.Fail(statusFallback);
     }
 
     private static string ResolveSocketPath(string raw) =>

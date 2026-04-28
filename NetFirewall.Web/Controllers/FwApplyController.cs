@@ -64,8 +64,13 @@ public sealed class FwApplyController : Controller
     public async Task<IActionResult> Execute(CancellationToken ct)
     {
         var envelope = await _daemon.ApplyFirewallAsync(ct);
-        Response.Headers["HX-Trigger"] = "firewallApplied";
-        return this.ToHtmxResponse(envelope);
+        // ToHtmxResponse adds showToast; AttachHxEvent merges firewallApplied
+        // alongside it. The previous direct Response.Headers assignment was
+        // clobbered by ToHtmxResponse, so the panel-refresh trigger never
+        // reached the browser — visible as "applied" toast but stale ruleset.
+        var resp = this.ToHtmxResponse(envelope);
+        this.AttachHxEvent("firewallApplied", new { });
+        return resp;
     }
 
     [HttpGet("qos-preview")]
@@ -88,7 +93,8 @@ public sealed class FwApplyController : Controller
     public async Task<IActionResult> QosExecute(CancellationToken ct)
     {
         var envelope = await _daemon.ApplyQosAsync(ct);
-        Response.Headers["HX-Trigger"] = "qosApplied";
-        return this.ToHtmxResponse(envelope);
+        var resp = this.ToHtmxResponse(envelope);
+        this.AttachHxEvent("qosApplied", new { });
+        return resp;
     }
 }
