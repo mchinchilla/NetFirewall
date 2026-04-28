@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Services.Firewall;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Helpers;
 
 namespace NetFirewall.Web.Controllers;

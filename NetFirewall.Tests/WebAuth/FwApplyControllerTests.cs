@@ -5,7 +5,7 @@ using Moq;
 using NetFirewall.Models;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Web.Controllers;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using Xunit;
 
 namespace NetFirewall.Tests.WebAuth;

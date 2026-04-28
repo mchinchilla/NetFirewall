@@ -8,6 +8,7 @@ using NetFirewall.Services.Network;
 using NetFirewall.Services.Processes;
 using NetFirewall.Web.Auth;
 using NetFirewall.Web.Auth.Bootstrap;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Daemon;
 using NetFirewall.Web.Filters;
 using Npgsql;

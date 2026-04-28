@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using Moq;
 using NetFirewall.Web.Auth;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using Xunit;
 
 namespace NetFirewall.Tests.WebAuth;

@@ -32,6 +32,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetFirewall.Daemon", "NetFi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetFirewall.Benchmarks", "NetFirewall.Benchmarks\NetFirewall.Benchmarks.csproj", "{B7390165-8821-403E-9302-9142B9142946}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetFirewall.Tui", "NetFirewall.Tui\NetFirewall.Tui.csproj", "{289FAC62-5ADC-484F-889F-521994B07FAD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -186,6 +188,18 @@ Global
 		{B7390165-8821-403E-9302-9142B9142946}.Release|x64.Build.0 = Release|Any CPU
 		{B7390165-8821-403E-9302-9142B9142946}.Release|x86.ActiveCfg = Release|Any CPU
 		{B7390165-8821-403E-9302-9142B9142946}.Release|x86.Build.0 = Release|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Debug|x64.Build.0 = Debug|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Debug|x86.Build.0 = Debug|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Release|x64.ActiveCfg = Release|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Release|x64.Build.0 = Release|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Release|x86.ActiveCfg = Release|Any CPU
+		{289FAC62-5ADC-484F-889F-521994B07FAD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

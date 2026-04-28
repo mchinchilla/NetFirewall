@@ -1,13 +1,14 @@
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text.Json;
-using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetFirewall.Models;
+using NetFirewall.Models.Auth;
+using NetFirewall.Models.Firewall;
 using NetFirewall.Models.System;
-using NetFirewall.Web.Auth;
 
-namespace NetFirewall.Web.Daemon;
+namespace NetFirewall.Services.Daemon;
 
 public sealed class DaemonClient : IDaemonClient, IDisposable
 {
@@ -15,17 +16,17 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
 
     private readonly HttpClient _http;
     private readonly DaemonClientOptions _opts;
-    private readonly IHttpContextAccessor _httpContext;
+    private readonly IDaemonSessionTokenProvider _tokenProvider;
     private readonly ILogger<DaemonClient> _logger;
     private bool _disposed;
 
     public DaemonClient(
         IOptions<DaemonClientOptions> opts,
-        IHttpContextAccessor httpContext,
+        IDaemonSessionTokenProvider tokenProvider,
         ILogger<DaemonClient> logger)
     {
         _opts = opts.Value;
-        _httpContext = httpContext;
+        _tokenProvider = tokenProvider;
         _logger = logger;
 
         var socketPath = ResolveSocketPath(_opts.SocketPath);
@@ -45,6 +46,18 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
             Timeout = _opts.Timeout
         };
     }
+
+    public Task<ServiceResponse<IReadOnlyList<FwInterface>>> ListInterfacesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<FwInterface>>("/v1/network/interfaces", ct);
+
+    public Task<ServiceResponse<IReadOnlyList<InterfaceSuggestion>>> DiscoverInterfacesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<InterfaceSuggestion>>("/v1/network/interfaces/discover", ct);
+
+    public Task<ServiceResponse<FwInterface>> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default)
+        => PostJsonAsync<FwInterface, FwInterface>("/v1/network/interfaces", iface, ct);
+
+    public Task<ServiceResponse<FwInterface>> UpdateInterfaceAsync(Guid id, FwInterface iface, CancellationToken ct = default)
+        => SendJsonAsync<FwInterface, FwInterface>(HttpMethod.Put, $"/v1/network/interfaces/{id}", iface, ct);
 
     public Task<ServiceResponse<NetworkApplyResult>> ApplyInterfaceAsync(Guid id, CancellationToken ct = default)
         => PostAsync<NetworkApplyResult>($"/v1/network/{id}/apply", ct);
@@ -91,6 +104,41 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         {
             _logger.LogDebug(ex, "Daemon health probe failed");
             return false;
+        }
+    }
+
+    public async Task<ServiceResponse<TuiLoginResult>> LoginAsync(TuiLoginRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/v1/auth/login")
+            {
+                Content = JsonContent.Create(request, options: JsonOpts)
+            };
+            // Login is anonymous on the daemon side — no header attach.
+            using var resp = await _http.SendAsync(req, ct);
+            return await ReadEnvelopeAsync<TuiLoginResult>(resp, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Daemon login call failed");
+            return ServiceResponse<TuiLoginResult>.Fail($"Daemon unreachable: {ex.Message}");
+        }
+    }
+
+    public async Task<ServiceResponse<bool>> LogoutAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/v1/auth/logout");
+            AttachSessionHeader(req);
+            using var resp = await _http.SendAsync(req, ct);
+            return await ReadEnvelopeAsync<bool>(resp, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Daemon logout call failed");
+            return ServiceResponse<bool>.Fail($"Daemon unreachable: {ex.Message}");
         }
     }
 
@@ -149,7 +197,7 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     private sealed record CryptoCallResult(string Data);
 
     /// <summary>
-    /// Send a POST, forward the session token from the inbound request's cookie,
+    /// Send a POST, forward the current session token from the provider,
     /// and translate non-2xx responses into a meaningful <see cref="ServiceResponse{T}"/>.
     /// </summary>
     private async Task<ServiceResponse<T>> PostAsync<T>(string path, CancellationToken ct)
@@ -169,11 +217,53 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         }
     }
 
+    /// <summary>GET that forwards the session header and parses ServiceResponse&lt;T&gt;.</summary>
+    private async Task<ServiceResponse<T>> GetAsync<T>(string path, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, path);
+        AttachSessionHeader(req);
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            return await ReadEnvelopeAsync<T>(resp, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Daemon call to {Path} failed", path);
+            return ServiceResponse<T>.Fail($"Daemon unreachable: {ex.Message}");
+        }
+    }
+
+    /// <summary>POST with a JSON body — for CRUD endpoints that take a model.</summary>
+    private Task<ServiceResponse<TResp>> PostJsonAsync<TBody, TResp>(string path, TBody body, CancellationToken ct)
+        => SendJsonAsync<TBody, TResp>(HttpMethod.Post, path, body, ct);
+
+    /// <summary>PUT/POST/PATCH with a JSON body. Used by CRUD endpoints (create/update).</summary>
+    private async Task<ServiceResponse<TResp>> SendJsonAsync<TBody, TResp>(HttpMethod method, string path, TBody body, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(method, path)
+        {
+            Content = JsonContent.Create(body, options: JsonOpts)
+        };
+        AttachSessionHeader(req);
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            return await ReadEnvelopeAsync<TResp>(resp, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Daemon call to {Path} failed", path);
+            return ServiceResponse<TResp>.Fail($"Daemon unreachable: {ex.Message}");
+        }
+    }
+
     private void AttachSessionHeader(HttpRequestMessage req)
     {
-        var ctx = _httpContext.HttpContext;
-        if (ctx is null) return;
-        if (ctx.Request.Cookies.TryGetValue(SessionCookieAuthHandler.CookieName, out var token) && !string.IsNullOrEmpty(token))
+        var token = _tokenProvider.GetCurrentToken();
+        if (!string.IsNullOrEmpty(token))
         {
             req.Headers.TryAddWithoutValidation(_opts.SessionHeader, token);
         }

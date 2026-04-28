@@ -8,7 +8,7 @@ using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
 using NetFirewall.Services.Vpn;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Models;
 
 namespace NetFirewall.Web.Controllers;

@@ -100,6 +100,14 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISessionService, SessionService>();
 builder.Services.AddScoped<IAuthAuditService, AuthAuditService>();
 
+// Hasher / TOTP / recovery codes — needed by /v1/auth/login (TUI). The Web
+// owns the same services in its own DI; the daemon registers them too because
+// it now hosts a full login flow for headless clients.
+builder.Services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
+builder.Services.AddSingleton<ITotpService, TotpService>();
+builder.Services.AddScoped<IUserTotpService, UserTotpService>();
+builder.Services.AddScoped<IRecoveryCodeService, RecoveryCodeService>();
+
 // TOTP cipher — the master key now lives HERE, not in the Web. The Web
 // proxies encrypt/decrypt over the Unix socket via /v1/crypto/*. Singleton
 // because the AES-256-GCM key never changes during process lifetime.
@@ -139,6 +147,10 @@ app.UseAuthorization();
 // Health probe — no auth, useful for AppHost / monitoring.
 app.MapGet("/health", () => Results.Json(new { status = "ok", version = ThisVersion() }))
    .AllowAnonymous();
+
+// Auth endpoints (/v1/auth/login, /v1/auth/logout) — login is anonymous,
+// logout requires the session header.
+app.MapAuthEndpoints();
 
 // Protected v1 endpoints.
 app.MapNetworkEndpoints();

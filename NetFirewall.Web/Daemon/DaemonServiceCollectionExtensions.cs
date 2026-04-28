@@ -1,3 +1,4 @@
+using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Auth;
 using NetFirewall.Services.Network;
 using NetFirewall.Web.Auth;
@@ -33,6 +34,12 @@ public static class DaemonServiceCollectionExtensions
         this IServiceCollection services,
         DaemonClientOptions opts)
     {
+        // Web-side token provider: reads the session cookie via IHttpContextAccessor.
+        // Singleton — IHttpContextAccessor itself is singleton-safe (AsyncLocal
+        // under the hood) and DaemonClient is also singleton, so the lifetime
+        // chain stays consistent.
+        services.AddSingleton<IDaemonSessionTokenProvider, WebDaemonSessionTokenProvider>();
+
         if (opts.Enabled)
         {
             // Daemon owns OS mutations.

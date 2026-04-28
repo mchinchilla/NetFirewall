@@ -1,8 +1,10 @@
 using NetFirewall.Models;
+using NetFirewall.Models.Auth;
+using NetFirewall.Models.Firewall;
 using NetFirewall.Models.System;
 using NetFirewall.Models.Vpn;
 
-namespace NetFirewall.Web.Daemon;
+namespace NetFirewall.Services.Daemon;
 
 /// <summary>
 /// In-process stand-in for <see cref="IDaemonClient"/> used when
@@ -23,6 +25,18 @@ public sealed class NullDaemonClient : IDaemonClient
         "Daemon is disabled (Daemon:Enabled=false). This operation requires the netfirewall daemon — start it or run a full Linux deployment.";
 
     private static ServiceResponse<T> Disabled<T>() => ServiceResponse<T>.Fail(DisabledMessage);
+
+    public Task<ServiceResponse<IReadOnlyList<FwInterface>>> ListInterfacesAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<FwInterface>>());
+
+    public Task<ServiceResponse<IReadOnlyList<InterfaceSuggestion>>> DiscoverInterfacesAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<InterfaceSuggestion>>());
+
+    public Task<ServiceResponse<FwInterface>> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default)
+        => Task.FromResult(Disabled<FwInterface>());
+
+    public Task<ServiceResponse<FwInterface>> UpdateInterfaceAsync(Guid id, FwInterface iface, CancellationToken ct = default)
+        => Task.FromResult(Disabled<FwInterface>());
 
     public Task<ServiceResponse<NetworkApplyResult>> ApplyInterfaceAsync(Guid interfaceId, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetworkApplyResult>());
@@ -47,6 +61,12 @@ public sealed class NullDaemonClient : IDaemonClient
 
     public Task<bool> IsAliveAsync(CancellationToken ct = default) =>
         Task.FromResult(false);
+
+    public Task<ServiceResponse<TuiLoginResult>> LoginAsync(TuiLoginRequest request, CancellationToken ct = default) =>
+        Task.FromResult(Disabled<TuiLoginResult>());
+
+    public Task<ServiceResponse<bool>> LogoutAsync(CancellationToken ct = default) =>
+        Task.FromResult(Disabled<bool>());
 
     // The TOTP path goes through ITotpSecretCipher and is rebound to the
     // in-process AES cipher when daemon is off — this method shouldn't be

@@ -4,7 +4,7 @@ using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Services.Network;
 using NetFirewall.Services.Setup;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Filters;
 using NetFirewall.Web.Helpers;
 using NetFirewall.Web.Models.Setup;

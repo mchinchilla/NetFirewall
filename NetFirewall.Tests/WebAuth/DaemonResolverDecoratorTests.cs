@@ -1,8 +1,9 @@
+using NetFirewall.Web.Daemon;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Network;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using Xunit;
 
 namespace NetFirewall.Tests.WebAuth;

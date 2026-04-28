@@ -23,6 +23,7 @@ public sealed class DaemonSessionAuthHandler : AuthenticationHandler<DaemonSessi
 {
     public const string SchemeName = "DaemonSession";
     public const string AuthLevelClaim = "auth_level";
+    public const string SessionIdClaim = "session_id";
 
     private readonly ISessionService _sessions;
     private readonly IUserService _users;
@@ -59,7 +60,10 @@ public sealed class DaemonSessionAuthHandler : AuthenticationHandler<DaemonSessi
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
             new Claim(ClaimTypes.Role, user.Role),
-            new Claim(AuthLevelClaim, elevated ? AuthLevels.Elevated : AuthLevels.Basic)
+            new Claim(AuthLevelClaim, elevated ? AuthLevels.Elevated : AuthLevels.Basic),
+            // Required by AuthEndpoints.LogoutAsync to revoke the right session
+            // (we get a token in the header, the session ID identifies the row).
+            new Claim(SessionIdClaim, session.Id.ToString())
         };
         var identity = new ClaimsIdentity(claims, SchemeName, ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);

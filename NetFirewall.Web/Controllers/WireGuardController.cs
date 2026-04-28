@@ -4,7 +4,7 @@ using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Models.Vpn;
 using NetFirewall.Services.Vpn;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Filters;
 using NetFirewall.Web.Helpers;
 using NetFirewall.Web.Models.Vpn;

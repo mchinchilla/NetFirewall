@@ -1,5 +1,5 @@
 using NetFirewall.Services.Auth;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 
 namespace NetFirewall.Web.Auth;
 

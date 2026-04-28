@@ -1,7 +1,9 @@
 using NetFirewall.Models;
+using NetFirewall.Models.Auth;
+using NetFirewall.Models.Firewall;
 using NetFirewall.Models.System;
 
-namespace NetFirewall.Web.Daemon;
+namespace NetFirewall.Services.Daemon;
 
 /// <summary>
 /// Tiny client-side surface over the daemon's HTTP-on-Unix-socket API.
@@ -10,6 +12,18 @@ namespace NetFirewall.Web.Daemon;
 /// </summary>
 public interface IDaemonClient
 {
+    /// <summary><c>GET /v1/network/interfaces</c> — list configured interfaces (read-only).</summary>
+    Task<ServiceResponse<IReadOnlyList<FwInterface>>> ListInterfacesAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/network/interfaces/discover</c> — physical NICs with type/role suggestions (read-only).</summary>
+    Task<ServiceResponse<IReadOnlyList<InterfaceSuggestion>>> DiscoverInterfacesAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/network/interfaces</c> — create a new interface row. Elevation required.</summary>
+    Task<ServiceResponse<FwInterface>> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default);
+
+    /// <summary><c>PUT /v1/network/interfaces/{id}</c> — update IP / mask / gateway / MAC etc. Elevation required.</summary>
+    Task<ServiceResponse<FwInterface>> UpdateInterfaceAsync(Guid id, FwInterface iface, CancellationToken ct = default);
+
     /// <summary><c>POST /v1/network/{id}/apply</c></summary>
     Task<ServiceResponse<NetworkApplyResult>> ApplyInterfaceAsync(Guid interfaceId, CancellationToken ct = default);
 
@@ -33,6 +47,20 @@ public interface IDaemonClient
 
     /// <summary>Lightweight health probe (no auth on the daemon side).</summary>
     Task<bool> IsAliveAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>POST /v1/auth/login</c> — single-step login for headless clients (TUI).
+    /// Validates username + password + TOTP / recovery code, returns the issued
+    /// session token in the envelope. Caller stores it in their
+    /// <see cref="IDaemonSessionTokenProvider"/> and subsequent calls forward it.
+    /// </summary>
+    Task<ServiceResponse<TuiLoginResult>> LoginAsync(TuiLoginRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>POST /v1/auth/logout</c> — revokes the current session on the daemon
+    /// side. Caller should also clear the local token after a successful response.
+    /// </summary>
+    Task<ServiceResponse<bool>> LogoutAsync(CancellationToken ct = default);
 
     /// <summary><c>POST /v1/crypto/encrypt</c> — daemon holds the master key, returns ciphertext.</summary>
     Task<byte[]> EncryptTotpAsync(byte[] plaintext, CancellationToken ct = default);

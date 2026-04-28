@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 using NetFirewall.Models;
 using NetFirewall.Models.System;
 using NetFirewall.Web.Auth;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using Xunit;
 
 namespace NetFirewall.Tests.WebAuth;
@@ -98,8 +98,21 @@ public sealed class DaemonClientTests : IAsyncLifetime
             SessionHeader = "X-NetFw-Session",
             Timeout = TimeSpan.FromSeconds(5)
         });
-        var accessor = new HttpContextAccessor { HttpContext = incoming };
-        return new DaemonClient(opts, accessor, NullLogger<DaemonClient>.Instance);
+        // The provider is exactly what the Web's WebDaemonSessionTokenProvider
+        // does: read the cookie out of the (optional) inbound request.
+        var tokenProvider = new StubSessionTokenProvider(incoming);
+        return new DaemonClient(opts, tokenProvider, NullLogger<DaemonClient>.Instance);
+    }
+
+    private sealed class StubSessionTokenProvider : IDaemonSessionTokenProvider
+    {
+        private readonly HttpContext? _ctx;
+        public StubSessionTokenProvider(HttpContext? ctx) { _ctx = ctx; }
+        public string? GetCurrentToken()
+        {
+            if (_ctx is null) return null;
+            return _ctx.Request.Cookies.TryGetValue(SessionCookieAuthHandler.CookieName, out var t) ? t : null;
+        }
     }
 
     private static HttpContext IncomingWithSessionCookie(string token)

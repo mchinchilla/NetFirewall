@@ -8,7 +8,7 @@ using NetFirewall.Models.System;
 using NetFirewall.Services.Network;
 using NetFirewall.Services.Setup;
 using NetFirewall.Web.Controllers;
-using NetFirewall.Web.Daemon;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Models.Setup;
 using Xunit;
 
