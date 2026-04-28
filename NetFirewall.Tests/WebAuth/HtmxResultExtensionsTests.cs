@@ -266,4 +266,56 @@ public class HtmxResultExtensionsTests
 
         Assert.Equal(422, c.Response.StatusCode);
     }
+
+    // ── Cross-cutting contracts (regression pins) ──────────────────────
+
+    [Fact]
+    public void ToHtmxFragment_SuccessWithMessage_AlsoEmitsToastTrigger()
+    {
+        // Fragments are supposed to carry BOTH the partial swap AND the toast —
+        // a successful "save & re-render" should toast "Saved!" while swapping
+        // the new HTML. Without this pin, a refactor that skips toast on the
+        // success branch (because it "already swapped the UI") would break the
+        // single source of feedback (project rule #6) silently.
+        var c = MakeController();
+
+        c.ToHtmxFragment(ServiceResponse<string>.Ok("data", "Saved!"), "_MyPartial");
+
+        var trigger = ParseTrigger(c.Response.Headers["HX-Trigger"].ToString());
+        Assert.True(trigger.ContainsKey("showToast"));
+        Assert.Equal("success", trigger["showToast"].GetProperty("level").GetString());
+        Assert.Equal("Saved!", trigger["showToast"].GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void AttachToastTrigger_FailWithMessageAndErrors_MessageWins_NotJoinedErrors()
+    {
+        // Priority order: an explicit Message from the controller beats the
+        // auto-joined errors string. Otherwise a server that wants a friendly
+        // "Login attempt blocked" message would get clobbered by the raw
+        // "Username: required, Password: too short" join.
+        var envelope = ServiceResponse<object>.ValidationFailed(
+            new Dictionary<string, string[]> { ["Username"] = new[] { "required" } },
+            message: "Login attempt blocked");
+        var c = MakeController();
+
+        c.AttachToastTrigger(envelope);
+
+        var toast = ParseTrigger(c.Response.Headers["HX-Trigger"].ToString())["showToast"];
+        Assert.Equal("Login attempt blocked", toast.GetProperty("message").GetString());
+        Assert.Equal("warning", toast.GetProperty("level").GetString()); // still warning b/c errors present
+    }
+
+    [Fact]
+    public void ToHtmxResponse_SuccessNoMessage_OmitsHxTriggerHeader()
+    {
+        // The silent-success short-circuit lives in AttachToastTrigger, but
+        // ToHtmxResponse calls it unconditionally — pin that the convenience
+        // helper inherits the same behaviour and doesn't accidentally emit an
+        // empty toast on a 200 with no message (ghost notifications in the UI).
+        var c = MakeController();
+        c.ToHtmxResponse(ServiceResponse<string>.Ok("data"));
+
+        Assert.False(c.Response.Headers.ContainsKey("HX-Trigger"));
+    }
 }

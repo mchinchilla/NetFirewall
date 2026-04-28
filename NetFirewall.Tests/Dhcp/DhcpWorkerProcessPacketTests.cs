@@ -27,7 +27,10 @@ namespace NetFirewall.Tests.Dhcp;
 /// </summary>
 public class DhcpWorkerProcessPacketTests
 {
-    private static byte[] BuildValidDiscover(byte mac6 = 0x01)
+    private static byte[] BuildValidDiscover(byte mac6 = 0x01) =>
+        BuildValidRequest(DhcpMessageType.Discover, mac6);
+
+    private static byte[] BuildValidRequest(DhcpMessageType type, byte mac6 = 0x01)
     {
         var pkt = new byte[576];
         pkt[0] = 1;             // op = BOOTREQUEST
@@ -36,8 +39,8 @@ public class DhcpWorkerProcessPacketTests
         pkt[28] = 0xAA; pkt[29] = 0xBB; pkt[30] = 0xCC;
         pkt[31] = 0x11; pkt[32] = 0x22; pkt[33] = mac6;
         pkt[236] = 99; pkt[237] = 130; pkt[238] = 83; pkt[239] = 99; // magic cookie
-        // Option 53 = Discover, then End
-        pkt[240] = 53; pkt[241] = 1; pkt[242] = (byte)DhcpMessageType.Discover;
+        // Option 53 = <type>, then End
+        pkt[240] = 53; pkt[241] = 1; pkt[242] = (byte)type;
         pkt[243] = 0xFF;
         return pkt;
     }
@@ -264,5 +267,82 @@ public class DhcpWorkerProcessPacketTests
         var dest = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
 
         Assert.Equal(IPAddress.Broadcast, dest.Address);
+    }
+
+    // ── Per-message-type counters ──────────────────────────────────────
+    //
+    // These pin the observable side-effect of ProcessSinglePacketAsync: every
+    // recognized inbound message type bumps the corresponding counter exactly
+    // once. The same counters feed ReportStatisticsAsync's hourly log line and
+    // any future telemetry endpoint, so a regression here would silently break
+    // operational monitoring.
+
+    [Theory]
+    [InlineData(DhcpMessageType.Discover)]
+    [InlineData(DhcpMessageType.Request)]
+    [InlineData(DhcpMessageType.Release)]
+    public async Task ProcessSinglePacket_BumpsExactlyOneRequestCounter_PerMessageType(DhcpMessageType type)
+    {
+        var (worker, _) = CreateWorkerWithMockService();
+        using var ctx = WrapPacket(BuildValidRequest(type), interfaceName: "eth0");
+
+        await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+
+        // Only the matching counter should advance — the rest stay at zero.
+        Assert.Equal(type == DhcpMessageType.Discover ? 1 : 0, worker.DiscoverCount);
+        Assert.Equal(type == DhcpMessageType.Request  ? 1 : 0, worker.RequestCount);
+        Assert.Equal(type == DhcpMessageType.Release  ? 1 : 0, worker.ReleaseCount);
+    }
+
+    [Fact]
+    public async Task ProcessSinglePacket_DeclineAndInform_DoNotBumpRequestCounters()
+    {
+        // Decline / Inform are valid DHCP types but the worker only tracks the
+        // three "interesting" inbound types (Discover/Request/Release). Pin
+        // that the switch doesn't accidentally count them under another label.
+        var (worker, _) = CreateWorkerWithMockService();
+
+        using (var ctx = WrapPacket(BuildValidRequest(DhcpMessageType.Decline), "eth0"))
+            await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+        using (var ctx = WrapPacket(BuildValidRequest(DhcpMessageType.Inform), "eth0"))
+            await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+
+        Assert.Equal(0, worker.DiscoverCount);
+        Assert.Equal(0, worker.RequestCount);
+        Assert.Equal(0, worker.ReleaseCount);
+    }
+
+    [Fact]
+    public async Task ProcessSinglePacket_BadMagicCookie_NoCountersAdvance()
+    {
+        // Parser-rejection happens before the message-type switch. Pin that
+        // the counters stay at zero — otherwise a flood of malformed packets
+        // would inflate "DISCOVER count" in the stats log.
+        var (worker, _) = CreateWorkerWithMockService();
+        var pkt = BuildValidDiscover();
+        pkt[236] = 0xDE; pkt[237] = 0xAD; pkt[238] = 0xBE; pkt[239] = 0xEF;
+        using var ctx = WrapPacket(pkt, interfaceName: "eth0");
+
+        await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+
+        Assert.Equal(0, worker.DiscoverCount);
+        Assert.Equal(0, worker.RequestCount);
+        Assert.Equal(0, worker.ReleaseCount);
+    }
+
+    [Fact]
+    public async Task ProcessSinglePacket_RepeatedDiscovers_AccumulateCount()
+    {
+        // Sanity: counters are cumulative across calls (Interlocked.Increment,
+        // not assigned). A regression to `_discoverCount = 1` would pass the
+        // single-call tests but show up here.
+        var (worker, _) = CreateWorkerWithMockService();
+        for (var i = 0; i < 5; i++)
+        {
+            using var ctx = WrapPacket(BuildValidDiscover((byte)i), interfaceName: "eth0");
+            await worker.ProcessSinglePacketAsync(ctx, CancellationToken.None);
+        }
+
+        Assert.Equal(5, worker.DiscoverCount);
     }
 }

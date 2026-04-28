@@ -66,6 +66,15 @@ public sealed class DhcpWorker : BackgroundService
     private long _naksCount;
     private long _errorsCount;
 
+    // Test-only accessors. Interlocked.Read mirrors what ReportStatisticsAsync
+    // does on the logging path — same instruction on 64-bit, atomic on 32-bit.
+    internal long DiscoverCount => Interlocked.Read(ref _discoverCount);
+    internal long RequestCount => Interlocked.Read(ref _requestCount);
+    internal long ReleaseCount => Interlocked.Read(ref _releaseCount);
+    internal long OffersCount => Interlocked.Read(ref _offersCount);
+    internal long AcksCount => Interlocked.Read(ref _acksCount);
+    internal long NaksCount => Interlocked.Read(ref _naksCount);
+
     // Pre-allocated for MAC address formatting
     private static readonly char[] HexChars = "0123456789ABCDEF".ToCharArray();
 
