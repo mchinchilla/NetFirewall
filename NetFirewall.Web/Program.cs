@@ -28,6 +28,17 @@ builder.Host.UseSerilog((context, services, configuration) =>
 
 builder.AddServiceDefaults();
 
+// Behind nginx on loopback: trust X-Forwarded-For / X-Forwarded-Proto so
+// audit logs and the "System info" card show the real client IP instead of
+// 127.0.0.1. KnownNetworks default already includes loopback. Activated via
+// app.UseForwardedHeaders() in the pipeline below.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+        | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+});
+
 // ----- MVC + global filters + global [Authorize] -----
 builder.Services.AddControllersWithViews(options =>
 {
@@ -177,6 +188,13 @@ var app = builder.Build();
 
 app.UseSerilogRequestLogging();
 app.MapDefaultEndpoints();
+
+// Behind nginx (or any reverse proxy on loopback). Promote X-Forwarded-For
+// and X-Forwarded-Proto into Connection.RemoteIpAddress / Request.Scheme so
+// audit logs, rate limiters, and the login "System info" card show the real
+// client — not 127.0.0.1. Restricted to loopback by default; if you ever
+// terminate TLS off-host, add the proxy IP to KnownProxies.
+app.UseForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())
 {
