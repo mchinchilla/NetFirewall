@@ -18,6 +18,13 @@ public interface IDaemonClient
     /// <summary><c>GET /v1/network/interfaces/discover</c> — physical NICs with type/role suggestions (read-only).</summary>
     Task<ServiceResponse<IReadOnlyList<InterfaceSuggestion>>> DiscoverInterfacesAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// <c>POST /v1/network/interfaces/redetect</c> — reconcile <c>fw_interfaces</c>
+    /// against the live OS. UPSERTs ip/mask/gateway/mac/mtu from /sys/class/net,
+    /// preserving operator-edited fields. Idempotent.
+    /// </summary>
+    Task<ServiceResponse<RedetectResult>> RedetectInterfacesAsync(CancellationToken ct = default);
+
     /// <summary><c>POST /v1/network/interfaces</c> — create a new interface row. Elevation required.</summary>
     Task<ServiceResponse<FwInterface>> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default);
 

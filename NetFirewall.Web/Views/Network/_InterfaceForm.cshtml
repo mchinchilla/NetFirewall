@@ -14,7 +14,7 @@
       x-data="{
         addressing: '@Model.AddressingMode',
         showAdvanced: @(Model.VlanId.HasValue ? "true" : "false"),
-        savedId: @(Model.Id?.ToString("\"D\"") ?? "null")
+        savedId: @(Model.Id.HasValue ? $"\"{Model.Id.Value:D}\"" : "null")
       }">
     @Html.AntiForgeryToken()
     <input type="hidden" name="Id" :value="savedId" />

@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Network;
 using NetFirewall.Web.Helpers;
@@ -14,17 +15,20 @@ public sealed class NetworkController : Controller
     private readonly ILinuxDistroService _distroService;
     private readonly IFirewallService _firewallService;
     private readonly INetworkConfigResolver _configResolver;
+    private readonly IDaemonClient _daemon;
     private readonly ILogger<NetworkController> _logger;
 
     public NetworkController(
         ILinuxDistroService distroService,
         IFirewallService firewallService,
         INetworkConfigResolver configResolver,
+        IDaemonClient daemon,
         ILogger<NetworkController> logger)
     {
         _distroService = distroService;
         _firewallService = firewallService;
         _configResolver = configResolver;
+        _daemon = daemon;
         _logger = logger;
     }
 
@@ -39,6 +43,24 @@ public sealed class NetworkController : Controller
     public async Task<IActionResult> InterfacesTable(CancellationToken ct)
     {
         var rows = await BuildRowsAsync(ct);
+        return PartialView("_InterfaceTable", rows);
+    }
+
+    // Real re-detect: asks the daemon to walk /sys/class/net and reconcile
+    // fw_interfaces (UPSERT ip/mask/gateway/mac/mtu, preserve operator edits).
+    // The button on /Network/Interfaces points here instead of just re-listing.
+    [HttpPost("/Network/Redetect")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Redetect(CancellationToken ct)
+    {
+        var resp = await _daemon.RedetectInterfacesAsync(ct);
+        var rows = await BuildRowsAsync(ct);
+
+        var summary = resp.Success && resp.Data is not null
+            ? $"Re-detect: {resp.Data.Added} new · {resp.Data.Updated} updated · {resp.Data.Missing} missing"
+            : resp.Message ?? "Re-detect failed.";
+
+        this.AttachHxEvent("showToast", new { level = resp.Success ? "success" : "error", message = summary });
         return PartialView("_InterfaceTable", rows);
     }
 

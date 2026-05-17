@@ -32,6 +32,9 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<IReadOnlyList<InterfaceSuggestion>>> DiscoverInterfacesAsync(CancellationToken ct = default)
         => Task.FromResult(Disabled<IReadOnlyList<InterfaceSuggestion>>());
 
+    public Task<ServiceResponse<RedetectResult>> RedetectInterfacesAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<RedetectResult>());
+
     public Task<ServiceResponse<FwInterface>> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default)
         => Task.FromResult(Disabled<FwInterface>());
 

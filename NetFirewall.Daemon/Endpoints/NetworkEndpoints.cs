@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Daemon.Auth;
@@ -124,6 +125,90 @@ public static class NetworkEndpoints
         })
         .WithMetadata(new DaemonRequireElevatedAttribute());
 
+        // POST /v1/network/interfaces/redetect — walk /sys/class/net, reconcile
+        // each detected NIC against fw_interfaces. For existing rows: refresh
+        // ip/mask/gateway/mac/mtu from the OS (preserving operator-edited
+        // type/role/description/addressing_mode/vlan/enabled). For new NICs:
+        // insert with detected values + suggested type/role. Demoted rows are
+        // not deleted — they're reported as "missing" so the operator decides.
+        //
+        // Non-elevated: read-only against the OS, idempotent upsert against
+        // the DB. Available during bootstrap so the seed never wins over reality.
+        grp.MapPost("/interfaces/redetect", async (
+                ILinuxDistroService distro,
+                IFirewallService firewall,
+                IAuthAuditService audit,
+                ClaimsPrincipal user,
+                HttpContext ctx,
+                CancellationToken ct) =>
+        {
+            var detected = await distro.DiscoverInterfacesAsync(ct);
+            var configured = await firewall.GetInterfacesAsync(ct);
+            var byName = configured.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+
+            var result = new RedetectResult();
+
+            foreach (var d in detected)
+            {
+                var detectedMask = ParseMaskFromCidr(d.CurrentSubnet);
+
+                if (byName.TryGetValue(d.Name, out var existing))
+                {
+                    var ipChanged       = !Equals(existing.IpAddress?.ToString(), d.CurrentIp?.ToString());
+                    var maskChanged     = !Equals(existing.SubnetMask?.ToString(), detectedMask?.ToString());
+                    var gatewayChanged  = !Equals(existing.Gateway?.ToString(), d.CurrentGateway?.ToString());
+                    var macChanged      = !Equals(existing.MacAddress, d.MacAddress);
+                    var mtuChanged      = existing.Mtu != d.Mtu;
+
+                    if (ipChanged || maskChanged || gatewayChanged || macChanged || mtuChanged)
+                    {
+                        existing.IpAddress  = d.CurrentIp;
+                        existing.SubnetMask = detectedMask;
+                        existing.Gateway    = d.CurrentGateway;
+                        existing.MacAddress = d.MacAddress;
+                        existing.Mtu        = d.Mtu;
+                        await firewall.UpdateInterfaceAsync(existing, ct);
+                        result.Updated++;
+                        if (ipChanged || gatewayChanged) result.Changed.Add(d.Name);
+                    }
+                }
+                else
+                {
+                    var inserted = new FwInterface
+                    {
+                        Name        = d.Name,
+                        Type        = string.IsNullOrEmpty(d.SuggestedType) ? "LAN" : d.SuggestedType,
+                        Role        = string.IsNullOrEmpty(d.SuggestedRole) ? null : d.SuggestedRole,
+                        IpAddress   = d.CurrentIp,
+                        SubnetMask  = detectedMask,
+                        Gateway     = d.CurrentGateway,
+                        MacAddress  = d.MacAddress,
+                        Mtu         = d.Mtu,
+                        AddressingMode = "static",
+                        Enabled     = d.IsUp,
+                        AutoStart   = true
+                    };
+                    await firewall.CreateInterfaceAsync(inserted, ct);
+                    result.Added++;
+                }
+            }
+
+            // Rows in the DB whose NIC the kernel no longer sees.
+            var detectedNames = detected.Select(d => d.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            result.Missing = configured.Count(c => !detectedNames.Contains(c.Name));
+
+            await audit.LogAsync(
+                "network.interface.redetect",
+                userId: TryGetUserId(user),
+                username: user.Identity?.Name,
+                ip: ctx.Connection.RemoteIpAddress,
+                userAgent: ctx.Request.Headers.UserAgent.ToString(),
+                detail: new { result.Added, result.Updated, result.Missing, changed = result.Changed },
+                ct: ct);
+
+            return Results.Json(ServiceResponse<RedetectResult>.Ok(result, "Interfaces reconciled."));
+        });
+
         // POST /v1/network/restart — restart networking subsystem.
         grp.MapPost("/restart", async (
                 INetworkConfigResolver resolver,
@@ -153,6 +238,24 @@ public static class NetworkEndpoints
 
     private static Guid? TryGetUserId(ClaimsPrincipal user)
         => Guid.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
+
+    /// <summary>
+    /// Given a CIDR string like "192.168.99.1/24", return the netmask
+    /// (255.255.255.0) so we can store it in fw_interfaces.subnet_mask.
+    /// fw_interfaces stores the mask as an inet (dotted-quad) for IPv4
+    /// compatibility with the legacy schema.
+    /// </summary>
+    private static IPAddress? ParseMaskFromCidr(string? cidr)
+    {
+        if (string.IsNullOrWhiteSpace(cidr)) return null;
+        var slash = cidr.IndexOf('/');
+        if (slash < 0 || !int.TryParse(cidr.AsSpan(slash + 1), out var prefix)) return null;
+        if (prefix < 0 || prefix > 32) return null;
+        // 24-bit prefix → 0xFFFFFF00 → 255.255.255.0
+        uint maskInt = prefix == 0 ? 0u : 0xFFFFFFFFu << (32 - prefix);
+        var bytes = new[] { (byte)(maskInt >> 24), (byte)(maskInt >> 16), (byte)(maskInt >> 8), (byte)maskInt };
+        return new IPAddress(bytes);
+    }
 
     public sealed record NetworkApplyResultDto(string? FilePath, string? Backup, int ExitCode, string? Output, string? Error)
     {

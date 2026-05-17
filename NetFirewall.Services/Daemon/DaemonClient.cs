@@ -53,6 +53,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<IReadOnlyList<InterfaceSuggestion>>> DiscoverInterfacesAsync(CancellationToken ct = default)
         => GetAsync<IReadOnlyList<InterfaceSuggestion>>("/v1/network/interfaces/discover", ct);
 
+    public Task<ServiceResponse<RedetectResult>> RedetectInterfacesAsync(CancellationToken ct = default)
+        => PostAsync<RedetectResult>("/v1/network/interfaces/redetect", ct);
+
     public Task<ServiceResponse<FwInterface>> CreateInterfaceAsync(FwInterface iface, CancellationToken ct = default)
         => PostJsonAsync<FwInterface, FwInterface>("/v1/network/interfaces", iface, ct);
 
