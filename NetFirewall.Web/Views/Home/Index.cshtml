@@ -131,6 +131,76 @@
     }
 </div>
 
+@* Traffic chart + critical events — second row, right after KPIs. *@
+<div class="grid gap-4 grid-cols-1 xl:grid-cols-3 mb-6">
+    <section class="card xl:col-span-2" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
+        <header class="flex items-center justify-between mb-4">
+            <div>
+                <h2 class="text-base font-semibold">Traffic — last 24h</h2>
+                <p class="text-xs text-surface-fg-muted">Hourly aggregate from <span class="font-mono">system_metrics_hourly</span></p>
+            </div>
+            <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
+        </header>
+
+        @if (Model.TrafficLabels.Length == 0)
+        {
+            <div class="h-56 flex flex-col items-center justify-center text-center">
+                <p class="text-sm font-medium text-surface-fg">No traffic samples yet.</p>
+                <p class="text-xs mt-1 text-surface-fg-muted">
+                    The collector aggregates hourly. Wait ~1 hour after the daemon starts, or check
+                    <a class="hover:underline text-accent" href="@Url.Action("Index", "Monitoring")">live monitoring</a>.
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="relative h-56">
+                <canvas x-data='{ data: @Html.Raw(trafficJson) }'
+                        x-init="$nextTick(() => NetFw.charts.makeTraffic($el, data))"></canvas>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
+                <div><p class="font-semibold text-sm">@Model.TrafficAvgInMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg in</p></div>
+                <div><p class="font-semibold text-sm">@Model.TrafficAvgOutMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg out</p></div>
+                <div><p class="font-semibold text-sm">@FmtBytes(Model.TrafficTotalBytes)</p><p class="text-surface-fg-muted">24h total</p></div>
+            </div>
+        }
+    </section>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <header class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-semibold">Recent activity</h2>
+            <a href="@Url.Action("Index", "FwAuditLog")" class="text-xs hover:underline text-accent">View all</a>
+        </header>
+        @if (Model.RecentActivity.Count == 0)
+        {
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No firewall activity logged yet.</p>
+        }
+        else
+        {
+            <ol class="relative space-y-4 pl-5">
+                @foreach (var a in Model.RecentActivity)
+                {
+                    var dotColor = a.Severity switch
+                    {
+                        ActivitySeverity.Success => "var(--feedback-success-bd)",
+                        ActivitySeverity.Info    => "var(--feedback-info-bd)",
+                        ActivitySeverity.Warning => "var(--feedback-warning-bd)",
+                        ActivitySeverity.Danger  => "var(--feedback-danger-bd)",
+                        _                        => "var(--surface-fg-muted)"
+                    };
+                    <li class="relative">
+                        <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4"
+                              style="background-color: @dotColor; --tw-ring-color: var(--surface-elevated);"></span>
+                        <p class="text-sm font-medium">@a.Title</p>
+                        <p class="text-xs text-surface-fg-muted">@a.Detail · @AgoFromNow(a.Timestamp)</p>
+                    </li>
+                }
+            </ol>
+        }
+    </section>
+</div>
+
 @* Pending-changes banner: only renders when there's drift from kernel state. *@
 @{
     var pendingWithChanges = Model.PendingChanges.Where(p => p.HasPending).ToList();
@@ -251,76 +321,6 @@
                     </li>
                 }
             </ul>
-        }
-    </section>
-</div>
-
-@* Two-column area: chart + activity *@
-<div class="grid gap-4 grid-cols-1 xl:grid-cols-3 mb-6">
-    <section class="card xl:col-span-2" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
-        <header class="flex items-center justify-between mb-4">
-            <div>
-                <h2 class="text-base font-semibold">Traffic — last 24h</h2>
-                <p class="text-xs text-surface-fg-muted">Hourly aggregate from <span class="font-mono">system_metrics_hourly</span></p>
-            </div>
-            <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
-        </header>
-
-        @if (Model.TrafficLabels.Length == 0)
-        {
-            <div class="h-56 flex flex-col items-center justify-center text-center">
-                <p class="text-sm font-medium text-surface-fg">No traffic samples yet.</p>
-                <p class="text-xs mt-1 text-surface-fg-muted">
-                    The collector aggregates hourly. Wait ~1 hour after the daemon starts, or check
-                    <a class="hover:underline text-accent" href="@Url.Action("Index", "Monitoring")">live monitoring</a>.
-                </p>
-            </div>
-        }
-        else
-        {
-            <div class="relative h-56">
-                <canvas x-data='{ data: @Html.Raw(trafficJson) }'
-                        x-init="$nextTick(() => NetFw.charts.makeTraffic($el, data))"></canvas>
-            </div>
-
-            <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
-                <div><p class="font-semibold text-sm">@Model.TrafficAvgInMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg in</p></div>
-                <div><p class="font-semibold text-sm">@Model.TrafficAvgOutMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg out</p></div>
-                <div><p class="font-semibold text-sm">@FmtBytes(Model.TrafficTotalBytes)</p><p class="text-surface-fg-muted">24h total</p></div>
-            </div>
-        }
-    </section>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
-        <header class="flex items-center justify-between mb-3">
-            <h2 class="text-base font-semibold">Recent activity</h2>
-            <a href="@Url.Action("Index", "FwAuditLog")" class="text-xs hover:underline text-accent">View all</a>
-        </header>
-        @if (Model.RecentActivity.Count == 0)
-        {
-            <p class="text-sm py-6 text-center text-surface-fg-muted">No firewall activity logged yet.</p>
-        }
-        else
-        {
-            <ol class="relative space-y-4 pl-5">
-                @foreach (var a in Model.RecentActivity)
-                {
-                    var dotColor = a.Severity switch
-                    {
-                        ActivitySeverity.Success => "var(--feedback-success-bd)",
-                        ActivitySeverity.Info    => "var(--feedback-info-bd)",
-                        ActivitySeverity.Warning => "var(--feedback-warning-bd)",
-                        ActivitySeverity.Danger  => "var(--feedback-danger-bd)",
-                        _                        => "var(--surface-fg-muted)"
-                    };
-                    <li class="relative">
-                        <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4"
-                              style="background-color: @dotColor; --tw-ring-color: var(--surface-elevated);"></span>
-                        <p class="text-sm font-medium">@a.Title</p>
-                        <p class="text-xs text-surface-fg-muted">@a.Detail · @AgoFromNow(a.Timestamp)</p>
-                    </li>
-                }
-            </ol>
         }
     </section>
 </div>
