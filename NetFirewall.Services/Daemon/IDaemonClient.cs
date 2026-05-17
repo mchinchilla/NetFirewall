@@ -107,6 +107,15 @@ public interface IDaemonClient
 
     /// <summary><c>GET /v1/wireguard/status</c> — wg show dump parsed into per-peer stats.</summary>
     Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/wireguard/import</c> — list wg-quick .conf files on disk.</summary>
+    Task<ServiceResponse<IReadOnlyList<string>>> ListWireGuardImportablesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>POST /v1/wireguard/import/{name}</c> — read /etc/wireguard/{name}.conf
+    /// and upsert into wg_servers + wg_peers. Idempotent. Elevation required.
+    /// </summary>
+    Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default);
 }
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);

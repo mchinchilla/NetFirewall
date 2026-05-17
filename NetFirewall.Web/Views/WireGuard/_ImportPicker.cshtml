@@ -1,0 +1,41 @@
+@{
+    var importables = (IReadOnlyList<string>)(ViewBag.Importables ?? Array.Empty<string>());
+    var err = ViewBag.Error as string;
+}
+
+<div class="space-y-2">
+    @if (!string.IsNullOrEmpty(err))
+    {
+        <p class="text-xs text-feedback-danger-fg">@err</p>
+    }
+    else if (importables.Count == 0)
+    {
+        <p class="text-sm text-surface-fg-muted">
+            No <code>.conf</code> files found under <code>/etc/wireguard</code>.
+        </p>
+    }
+    else
+    {
+        <p class="text-xs text-surface-fg-muted">
+            Found @importables.Count config(s) on disk. Import reads the
+            <code>.conf</code> file and upserts it into the database.
+            <strong>It does not touch the running interface</strong> — apply
+            afterwards if you want the daemon to take over.
+        </p>
+        <ul class="divide-y border border-surface-border rounded">
+            @foreach (var name in importables)
+            {
+                <li class="flex items-center justify-between px-3 py-2">
+                    <span class="font-mono text-sm">@name<span class="text-surface-fg-muted">.conf</span></span>
+                    <button type="button"
+                            class="btn btn-ghost text-xs"
+                            hx-post="/Vpn/WireGuard/import/@name"
+                            hx-swap="none"
+                            hx-confirm="Import @name from disk and overwrite the DB record (if any)?">
+                        Import
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>

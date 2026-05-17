@@ -146,6 +146,8 @@ builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
                               NetFirewall.Services.Vpn.WireGuardConfigService>();
 builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardApplyService,
                               NetFirewall.Services.Vpn.WireGuardApplyService>();
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardImporter,
+                           NetFirewall.Services.Vpn.WireGuardImporter>();
 builder.Services.Configure<NetFirewall.Services.Vpn.WireGuardApplyOptions>(
     builder.Configuration.GetSection("WireGuard"));
 

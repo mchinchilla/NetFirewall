@@ -12,6 +12,11 @@ public class WgPeer
     [Map("preshared_key")]         public string?  PresharedKey        { get; set; }
     [Map("allowed_ips")]           public string[] AllowedIps          { get; set; } = Array.Empty<string>();
     [Map("persistent_keepalive")]  public int?     PersistentKeepalive { get; set; }
+    // "host:port" of the remote side. REQUIRED when the parent server is in
+    // 'client' mode (this peer represents the remote wg server we connect to).
+    // Optional for inbound peers in 'server' mode — some site-to-site configs
+    // also set Endpoint there for symmetric keepalive.
+    [Map("endpoint")]              public string?  Endpoint            { get; set; }
     [Map("description")]           public string?  Description         { get; set; }
     [Map("enabled")]               public bool     Enabled             { get; set; } = true;
     [Map("created_at")]            public DateTime CreatedAt           { get; set; }

@@ -106,4 +106,10 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>.Ok(
             Array.Empty<WgPeerLiveStatus>(), "Daemon disabled — no live status available."));
+
+    public Task<ServiceResponse<IReadOnlyList<string>>> ListWireGuardImportablesAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<IReadOnlyList<string>>.Ok(Array.Empty<string>(), "Daemon disabled."));
+
+    public Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Services.Vpn.WireGuardImportResult>());
 }

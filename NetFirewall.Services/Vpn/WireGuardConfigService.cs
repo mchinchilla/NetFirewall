@@ -7,14 +7,25 @@ public sealed class WireGuardConfigService : IWireGuardConfigService
 {
     public string GenerateServerConfig(WgServer server, IReadOnlyList<WgPeer> peers)
     {
+        var isClient = server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase);
+
         var sb = new StringBuilder();
-        sb.AppendLine("# NetFirewall WireGuard server config");
+        sb.AppendLine($"# NetFirewall WireGuard {(isClient ? "client" : "server")} config");
         sb.AppendLine($"# Generated: {DateTime.UtcNow:O}");
         sb.AppendLine();
         sb.AppendLine("[Interface]");
         sb.AppendLine($"PrivateKey = {server.PrivateKey}");
         sb.AppendLine($"Address    = {server.AddressCidr}");
-        sb.AppendLine($"ListenPort = {server.ListenPort}");
+        // ListenPort only in server mode. In client mode we initiate, so the
+        // kernel picks an ephemeral source port.
+        if (!isClient && server.ListenPort > 0)
+            sb.AppendLine($"ListenPort = {server.ListenPort}");
+        if (!string.IsNullOrWhiteSpace(server.Dns))
+            sb.AppendLine($"DNS        = {server.Dns}");
+        if (server.Mtu is { } mtu && mtu > 0)
+            sb.AppendLine($"MTU        = {mtu}");
+        if (server.TableOff)
+            sb.AppendLine("Table      = off");
         if (!string.IsNullOrWhiteSpace(server.PostUp))
             sb.AppendLine($"PostUp     = {server.PostUp}");
         if (!string.IsNullOrWhiteSpace(server.PostDown))
@@ -32,6 +43,11 @@ public sealed class WireGuardConfigService : IWireGuardConfigService
             if (!string.IsNullOrEmpty(p.PresharedKey))
                 sb.AppendLine($"PresharedKey = {p.PresharedKey}");
             sb.AppendLine($"AllowedIPs = {string.Join(", ", p.AllowedIps)}");
+            // Endpoint matters most in client mode (we need to know where to
+            // send packets). In server mode it's optional but valid for
+            // site-to-site keepalive.
+            if (!string.IsNullOrWhiteSpace(p.Endpoint))
+                sb.AppendLine($"Endpoint   = {p.Endpoint}");
             if (p.PersistentKeepalive is { } ka && ka > 0)
                 sb.AppendLine($"PersistentKeepalive = {ka}");
         }

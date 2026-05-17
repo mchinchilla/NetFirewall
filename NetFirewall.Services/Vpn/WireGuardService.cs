@@ -37,16 +37,21 @@ public sealed class WireGuardService : IWireGuardService
 
         const string sql = @"
             INSERT INTO wg_servers
-                (id, name, private_key, public_key, listen_port, address_cidr,
-                 post_up, post_down, enabled, created_at, updated_at)
+                (id, name, mode, private_key, public_key, listen_port, address_cidr,
+                 dns, mtu, table_off, post_up, post_down, enabled, created_at, updated_at)
             VALUES
-                (@id, @name, @priv, @pub, @port, @addr, @up, @down, @enabled, @created, @updated)
+                (@id, @name, @mode, @priv, @pub, @port, @addr,
+                 @dns, @mtu, @tableOff, @up, @down, @enabled, @created, @updated)
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
+                mode = EXCLUDED.mode,
                 private_key = EXCLUDED.private_key,
                 public_key = EXCLUDED.public_key,
                 listen_port = EXCLUDED.listen_port,
                 address_cidr = EXCLUDED.address_cidr,
+                dns = EXCLUDED.dns,
+                mtu = EXCLUDED.mtu,
+                table_off = EXCLUDED.table_off,
                 post_up = EXCLUDED.post_up,
                 post_down = EXCLUDED.post_down,
                 enabled = EXCLUDED.enabled,
@@ -54,10 +59,14 @@ public sealed class WireGuardService : IWireGuardService
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", server.Id);
         cmd.Parameters.AddWithValue("name", server.Name);
+        cmd.Parameters.AddWithValue("mode", server.Mode);
         cmd.Parameters.AddWithValue("priv", server.PrivateKey);
         cmd.Parameters.AddWithValue("pub", server.PublicKey);
         cmd.Parameters.AddWithValue("port", server.ListenPort);
         cmd.Parameters.AddWithValue("addr", server.AddressCidr);
+        cmd.Parameters.AddWithValue("dns",   (object?)server.Dns ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("mtu",   (object?)server.Mtu ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tableOff", server.TableOff);
         cmd.Parameters.AddWithValue("up",   (object?)server.PostUp   ?? DBNull.Value);
         cmd.Parameters.AddWithValue("down", (object?)server.PostDown ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", server.Enabled);
@@ -108,9 +117,9 @@ public sealed class WireGuardService : IWireGuardService
         const string sql = @"
             INSERT INTO wg_peers
                 (id, server_id, name, public_key, preshared_key, allowed_ips,
-                 persistent_keepalive, description, enabled, created_at)
+                 persistent_keepalive, endpoint, description, enabled, created_at)
             VALUES
-                (@id, @sid, @name, @pub, @psk, @ips, @ka, @desc, @enabled, @created)";
+                (@id, @sid, @name, @pub, @psk, @ips, @ka, @endpoint, @desc, @enabled, @created)";
         await using var cmd = new NpgsqlCommand(sql, conn);
         BindPeerParams(cmd, peer);
         cmd.Parameters.AddWithValue("created", peer.CreatedAt);
@@ -127,6 +136,7 @@ public sealed class WireGuardService : IWireGuardService
             UPDATE wg_peers SET
                 name = @name, public_key = @pub, preshared_key = @psk,
                 allowed_ips = @ips, persistent_keepalive = @ka,
+                endpoint = @endpoint,
                 description = @desc, enabled = @enabled
             WHERE id = @id";
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -154,6 +164,7 @@ public sealed class WireGuardService : IWireGuardService
         cmd.Parameters.AddWithValue("psk", (object?)p.PresharedKey ?? DBNull.Value);
         cmd.Parameters.AddWithValue("ips", p.AllowedIps);
         cmd.Parameters.AddWithValue("ka", (object?)p.PersistentKeepalive ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("endpoint", (object?)p.Endpoint ?? DBNull.Value);
         cmd.Parameters.AddWithValue("desc", (object?)p.Description ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", p.Enabled);
     }
@@ -162,10 +173,14 @@ public sealed class WireGuardService : IWireGuardService
     {
         Id          = r.GetGuid(r.GetOrdinal("id")),
         Name        = r.GetString(r.GetOrdinal("name")),
+        Mode        = r.GetString(r.GetOrdinal("mode")),
         PrivateKey  = r.GetString(r.GetOrdinal("private_key")),
         PublicKey   = r.GetString(r.GetOrdinal("public_key")),
         ListenPort  = r.GetInt32(r.GetOrdinal("listen_port")),
         AddressCidr = r.GetString(r.GetOrdinal("address_cidr")),
+        Dns         = r.IsDBNull(r.GetOrdinal("dns"))       ? null : r.GetString(r.GetOrdinal("dns")),
+        Mtu         = r.IsDBNull(r.GetOrdinal("mtu"))       ? null : r.GetInt32(r.GetOrdinal("mtu")),
+        TableOff    = r.GetBoolean(r.GetOrdinal("table_off")),
         PostUp      = r.IsDBNull(r.GetOrdinal("post_up"))   ? null : r.GetString(r.GetOrdinal("post_up")),
         PostDown    = r.IsDBNull(r.GetOrdinal("post_down")) ? null : r.GetString(r.GetOrdinal("post_down")),
         Enabled     = r.GetBoolean(r.GetOrdinal("enabled")),
@@ -182,6 +197,7 @@ public sealed class WireGuardService : IWireGuardService
         PresharedKey        = r.IsDBNull(r.GetOrdinal("preshared_key")) ? null : r.GetString(r.GetOrdinal("preshared_key")),
         AllowedIps          = r.IsDBNull(r.GetOrdinal("allowed_ips")) ? Array.Empty<string>() : (string[])r["allowed_ips"],
         PersistentKeepalive = r.IsDBNull(r.GetOrdinal("persistent_keepalive")) ? null : r.GetInt32(r.GetOrdinal("persistent_keepalive")),
+        Endpoint            = r.IsDBNull(r.GetOrdinal("endpoint")) ? null : r.GetString(r.GetOrdinal("endpoint")),
         Description         = r.IsDBNull(r.GetOrdinal("description")) ? null : r.GetString(r.GetOrdinal("description")),
         Enabled             = r.GetBoolean(r.GetOrdinal("enabled")),
         CreatedAt           = r.GetDateTime(r.GetOrdinal("created_at"))

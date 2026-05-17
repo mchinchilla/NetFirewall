@@ -4,6 +4,26 @@ Mid-deployment state of `fw.tekium.net` (server 192.168.99.1 / 154.12.104.135).
 Resume from here when continuing the deploy — covers what was done, what
 broke, what was fixed, and what's still pending. Last touched 2026-05-17.
 
+## Session-end snapshot (2026-05-17 02:00 CST)
+
+- **WireGuard full support landed**: server mode + client mode + import from disk.
+  - Migration 00021 adds wg_servers.mode/dns/mtu/table_off + wg_peers.endpoint.
+  - `IWireGuardImporter` parses `/etc/wireguard/*.conf` (wg-quick format) and
+    UPSERTs into DB. Idempotent by interface name + peer public key.
+  - Daemon endpoints: `GET /v1/wireguard/import`, `POST /v1/wireguard/import/{name}`.
+  - UI: "Import from /etc/wireguard" card on the WireGuard page with Scan button.
+  - Apply now respects `mode='client'`: no `ListenPort`, peer Endpoint included.
+  - User imported their real `wg0.conf` + 2 others (`catelco-wg0`, `contabo-wg0`)
+    from disk → Applied → wg0 stayed up (hot-reload via `wg syncconf`).
+- Known gap: model still misses `FwMark`, `Table`, `SaveConfig`, `PreUp`/`PreDown`.
+  User's wg0 doesn't put fwmark in the .conf (it's set externally by
+  /root/firewall.sh via `ip rule fwmark 0xca6c lookup 51820`), so this didn't bite
+  on import. But if another config uses any of these in `[Interface]`, the import
+  loses them on regenerate. Add columns when needed.
+- Note: after any WireGuard Apply, the operator must re-run `/root/firewall.sh`
+  to re-add the policy routing rules. Future work: wire firewall.sh's
+  ip-rule/tc state into a DB-driven equivalent so Apply is self-sufficient.
+
 ## Session-end snapshot (2026-05-17 01:10 CST)
 
 - Apply nftables **successfully ran** against production. The live ruleset

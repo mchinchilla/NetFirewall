@@ -16,6 +16,13 @@ public interface IWireGuardApplyService
     Task<string> GeneratePresharedKeyAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Derives the public key for a given private key by piping it through
+    /// <c>wg pubkey</c>. Used by the importer when reading an existing
+    /// <c>[Interface]</c> block that only stores the private key.
+    /// </summary>
+    Task<string> DerivePublicKeyAsync(string privateKey, CancellationToken ct = default);
+
+    /// <summary>
     /// Writes the rendered server config to <c>/etc/wireguard/{name}.conf</c>
     /// (mode 0600) then either brings the interface up (first apply) or
     /// hot-reloads peers via <c>wg syncconf</c> (preserves existing handshakes).

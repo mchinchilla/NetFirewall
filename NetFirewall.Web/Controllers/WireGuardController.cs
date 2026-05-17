@@ -148,6 +148,31 @@ public sealed class WireGuardController : Controller
         return this.ToHtmxResponse(envelope);
     }
 
+    // GET /Vpn/WireGuard/importables — list /etc/wireguard/*.conf candidates.
+    // The Index view shows a small picker if the DB is empty (or always, as a
+    // way to re-sync after manual edits to the on-disk config).
+    [HttpGet("importables")]
+    public async Task<IActionResult> Importables(CancellationToken ct)
+    {
+        var envelope = await _daemon.ListWireGuardImportablesAsync(ct);
+        ViewBag.Importables = envelope.Success ? envelope.Data ?? Array.Empty<string>() : Array.Empty<string>();
+        ViewBag.Error = envelope.Success ? null : envelope.Message;
+        return PartialView("_ImportPicker");
+    }
+
+    // POST /Vpn/WireGuard/import/{name} — daemon parses the named config and
+    // UPSERTs wg_servers + wg_peers. Idempotent. Does NOT touch the live
+    // interface — operator clicks Apply afterwards if they want.
+    [HttpPost("import/{name}"), ValidateAntiForgeryToken, RequireElevated]
+    public async Task<IActionResult> Import(string name, CancellationToken ct)
+    {
+        var envelope = await _daemon.ImportWireGuardConfigAsync(name, ct);
+        Response.Headers["HX-Trigger"] = "refreshWireGuard";
+        // Translate the daemon envelope into a UI-friendly toast. ToHtmxResponse
+        // already adds showToast — we just pass through.
+        return this.ToHtmxResponse(envelope);
+    }
+
     private static WgServerFormViewModel ToForm(WgServer s) => new()
     {
         Id = s.Id, Name = s.Name, ListenPort = s.ListenPort, AddressCidr = s.AddressCidr,

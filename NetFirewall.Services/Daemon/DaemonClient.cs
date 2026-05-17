@@ -194,6 +194,12 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         }
     }
 
+    public Task<ServiceResponse<IReadOnlyList<string>>> ListWireGuardImportablesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<string>>("/v1/wireguard/import", ct);
+
+    public Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default)
+        => PostAsync<NetFirewall.Services.Vpn.WireGuardImportResult>($"/v1/wireguard/import/{Uri.EscapeDataString(interfaceName)}", ct);
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

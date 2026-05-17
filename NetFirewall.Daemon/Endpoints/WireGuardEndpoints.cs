@@ -90,6 +90,40 @@ public static class WireGuardEndpoints
             var status = await apply.GetStatusAsync(server.Name, ct);
             return Results.Json(ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>.Ok(status, "Status fetched."));
         });
+
+        // GET /v1/wireguard/import — list wg-quick .conf files visible on disk.
+        // The Web shows these so the operator can pick which one to onboard.
+        grp.MapGet("/import", async (IWireGuardImporter importer, CancellationToken ct) =>
+        {
+            var names = await importer.ListAvailableAsync(ct);
+            return Results.Json(ServiceResponse<IReadOnlyList<string>>.Ok(names, $"Found {names.Count} config(s)."));
+        });
+
+        // POST /v1/wireguard/import/{name} — parse the named config and UPSERT
+        // into wg_servers + wg_peers. Idempotent on re-run. Does NOT touch the
+        // live interface (use /apply afterwards). Requires elevation: it
+        // overwrites whatever the operator may have edited in the UI.
+        grp.MapPost("/import/{name}", async (
+                string name,
+                IWireGuardImporter importer,
+                CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await importer.ImportAsync(name, ct);
+                return Results.Json(ServiceResponse<WireGuardImportResult>.Ok(result,
+                    $"Imported {name} ({result.Mode}, {result.Peers.Count} peer(s))."));
+            }
+            catch (FileNotFoundException ex)
+            {
+                return Results.Json(ServiceResponse<object>.Fail(ex.Message), statusCode: 404);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(ServiceResponse<object>.Fail($"Import failed: {ex.Message}"), statusCode: 500);
+            }
+        })
+        .WithMetadata(new DaemonRequireElevatedAttribute());
     }
 
     public sealed record KeyPairDto(string PrivateKey, string PublicKey);

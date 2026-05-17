@@ -70,6 +70,31 @@ public sealed class WireGuardApplyService : IWireGuardApplyService
         return result.Output.Trim();
     }
 
+    public async Task<string> DerivePublicKeyAsync(string privateKey, CancellationToken ct = default)
+    {
+        // wg pubkey reads the private key from stdin. We can't pipe via
+        // IProcessRunner (no stdin support), so we wrap in bash and use a
+        // single-quoted printf — the privkey appears briefly on the bash
+        // arg list. Acceptable: importer is invoked once at onboarding, not
+        // in a hot path, and the daemon already holds the key in memory.
+        // Quotes around the key are safe because wg's base64 alphabet never
+        // contains '.
+        var sanitized = privateKey.Trim();
+        if (sanitized.Contains('\'') || sanitized.Contains('\n'))
+            throw new ArgumentException("Private key contains illegal characters.", nameof(privateKey));
+
+        var script = $"printf '%s' '{sanitized}' | wg pubkey";
+        var result = await _runner.RunAsync(
+            _options.BashPath,
+            $"-c \"{script}\"",
+            TimeSpan.FromSeconds(_options.CommandTimeoutSeconds),
+            ct);
+
+        if (!result.Success)
+            throw new InvalidOperationException($"wg pubkey failed (exit {result.ExitCode}): {result.Error}");
+        return result.Output.Trim();
+    }
+
     public async Task<NftApplyResult> ApplyAsync(WgServer server, IReadOnlyList<WgPeer> peers, CancellationToken ct = default)
     {
         try
