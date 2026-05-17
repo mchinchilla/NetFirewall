@@ -68,12 +68,15 @@ public sealed class SessionService : ISessionService
         var now = DateTimeOffset.UtcNow;
 
         // Fetch + sliding-update in one round-trip when still valid.
+        // @basic <= 0 means "validate but don't slide" — used by the daemon
+        // so a Web→daemon call doesn't clobber the Web's expires_at to "now"
+        // (which would log the operator out on their next click).
         const string sql = @"
             UPDATE user_sessions
                SET last_seen_at = @now,
                    expires_at = CASE
                      -- Sliding window for basic; elevated keeps its hard cap.
-                     WHEN auth_level = 'basic' THEN @now + @basic
+                     WHEN auth_level = 'basic' AND @basic > interval '0' THEN @now + @basic
                      ELSE expires_at
                    END
              WHERE token_hash = @hash

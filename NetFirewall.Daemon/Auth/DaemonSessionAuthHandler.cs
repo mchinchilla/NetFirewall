@@ -46,8 +46,10 @@ public sealed class DaemonSessionAuthHandler : AuthenticationHandler<DaemonSessi
         if (string.IsNullOrEmpty(token)) return AuthenticateResult.NoResult();
 
         // Sliding window for daemon validations is irrelevant — the Web is the
-        // user-facing session owner. Pass a 0 lifetime so we don't push expiry
-        // forward from a daemon hit.
+        // user-facing session owner. TimeSpan.Zero is the "validate but don't
+        // slide" signal recognised by SessionService.ValidateAsync; without it
+        // the daemon would overwrite expires_at to "now" and log the Web
+        // operator out on their next request.
         var session = await _sessions.ValidateAsync(token, TimeSpan.Zero, Context.RequestAborted);
         if (session is null) return AuthenticateResult.Fail("session invalid or expired");
 
