@@ -45,6 +45,8 @@ public static class WireGuardEndpoints
         grp.MapPost("/apply", async (
                 IWireGuardService data,
                 IWireGuardApplyService apply,
+                NetFirewall.Services.Firewall.IApplyHistoryService history,
+                System.Security.Claims.ClaimsPrincipal user,
                 CancellationToken ct) =>
         {
             var server = await data.GetServerAsync(ct);
@@ -54,10 +56,15 @@ public static class WireGuardEndpoints
             var peers = await data.GetPeersAsync(server.Id, ct);
             var result = await apply.ApplyAsync(server, peers, ct);
 
+            var msg = result.Success
+                ? $"WireGuard {server.Name} applied (exit {result.ExitCode})."
+                : result.Error ?? "wg apply failed";
+            await history.RecordAsync("wireguard", result.Success, result.ExitCode, msg, user.Identity?.Name, ct);
+
             var dto = new FirewallEndpoints.NftApplyDto(result.ExitCode, result.BackupPath, result.Output, result.Error);
             return result.Success
-                ? Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Ok(dto, $"WireGuard {server.Name} applied (exit {result.ExitCode})."))
-                : Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Fail(result.Error ?? "wg apply failed"), statusCode: 500);
+                ? Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Ok(dto, msg))
+                : Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Fail(msg), statusCode: 500);
         })
         .WithMetadata(new DaemonRequireElevatedAttribute());
 

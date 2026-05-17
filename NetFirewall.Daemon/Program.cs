@@ -109,6 +109,12 @@ builder.Services.AddSingleton<NetFirewall.Services.Settings.IAppSettingsService,
 //        and stays running across Web restarts so we don't lose samples). -----
 builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorService,
                               NetFirewall.Services.Monitoring.SystemMonitorService>();
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemServiceHealthService,
+                              NetFirewall.Services.Monitoring.SystemServiceHealthService>();
+builder.Services.AddScoped<NetFirewall.Services.Monitoring.IWanReachabilityService,
+                           NetFirewall.Services.Monitoring.WanReachabilityService>();
+builder.Services.AddScoped<NetFirewall.Services.Firewall.IApplyHistoryService,
+                           NetFirewall.Services.Firewall.ApplyHistoryService>();
 builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
                            NetFirewall.Services.Monitoring.MetricsQueryService>();
 builder.Services.Configure<NetFirewall.Services.Monitoring.MetricsCollectorOptions>(
@@ -187,6 +193,7 @@ app.MapNetworkEndpoints();
 app.MapRouteEndpoints();
 app.MapFirewallEndpoints();
 app.MapCryptoEndpoints();
+app.MapSystemEndpoints();
 app.MapWireGuardEndpoints();
 
 // Kestrel only creates the Unix socket once the host has started, so chmod

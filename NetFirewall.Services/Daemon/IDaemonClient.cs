@@ -116,6 +116,18 @@ public interface IDaemonClient
     /// and upsert into wg_servers + wg_peers. Idempotent. Elevation required.
     /// </summary>
     Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/services</c> — systemd unit status for the dashboard.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.ServiceHealth>>> GetSystemServicesAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/wan-status</c> — ping each WAN gateway, return up/down + RTT.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.WanReachability>>> GetWanStatusAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/pending-changes</c> — DB rows changed since last Apply, per kind.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.PendingChangesSummary>>> GetPendingChangesAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/apply-history</c> — last N apply attempts.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>> GetApplyHistoryAsync(int limit = 10, CancellationToken ct = default);
 }
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);

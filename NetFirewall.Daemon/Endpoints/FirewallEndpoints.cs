@@ -21,6 +21,7 @@ public static class FirewallEndpoints
         grp.MapPost("/apply", async (
                 INftApplyService nft,
                 IAuthAuditService audit,
+                IApplyHistoryService history,
                 ClaimsPrincipal user,
                 HttpContext ctx,
                 CancellationToken ct) =>
@@ -36,6 +37,8 @@ public static class FirewallEndpoints
                 userAgent: ctx.Request.Headers.UserAgent.ToString(),
                 detail: new { success = result.Success, exit = result.ExitCode, error = result.Error, backupPath = result.BackupPath },
                 ct: ct);
+            // Apply-history feeds the dashboard's "pending changes" detector.
+            await history.RecordAsync("nftables", result.Success, result.ExitCode, msg, user.Identity?.Name, ct);
 
             return result.Success
                 ? Results.Json(ServiceResponse<NftApplyDto>.Ok(NftApplyDto.From(result), msg))
@@ -84,6 +87,7 @@ public static class FirewallEndpoints
         grp.MapPost("/apply-qos", async (
                 ITcApplyService tc,
                 IAuthAuditService audit,
+                IApplyHistoryService history,
                 ClaimsPrincipal user,
                 HttpContext ctx,
                 CancellationToken ct) =>
@@ -101,6 +105,7 @@ public static class FirewallEndpoints
                 userAgent: ctx.Request.Headers.UserAgent.ToString(),
                 detail: new { success = result.Success, exit = result.ExitCode, error = result.Error },
                 ct: ct);
+            await history.RecordAsync("tc", result.Success, result.ExitCode, msg, user.Identity?.Name, ct);
 
             return result.Success
                 ? Results.Json(ServiceResponse<NftApplyDto>.Ok(NftApplyDto.From(result), msg))

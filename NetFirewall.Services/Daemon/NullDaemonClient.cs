@@ -112,4 +112,20 @@ public sealed class NullDaemonClient : IDaemonClient
 
     public Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Services.Vpn.WireGuardImportResult>());
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.ServiceHealth>>> GetSystemServicesAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.ServiceHealth>>.Ok(
+            Array.Empty<NetFirewall.Services.Monitoring.ServiceHealth>(), "Daemon disabled."));
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.WanReachability>>> GetWanStatusAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.WanReachability>>.Ok(
+            Array.Empty<NetFirewall.Services.Monitoring.WanReachability>(), "Daemon disabled."));
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.PendingChangesSummary>>> GetPendingChangesAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.PendingChangesSummary>>.Ok(
+            Array.Empty<NetFirewall.Services.Firewall.PendingChangesSummary>(), "Daemon disabled."));
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>> GetApplyHistoryAsync(int limit = 10, CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>.Ok(
+            Array.Empty<NetFirewall.Services.Firewall.ApplyHistoryEntry>(), "Daemon disabled."));
 }

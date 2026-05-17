@@ -200,6 +200,18 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default)
         => PostAsync<NetFirewall.Services.Vpn.WireGuardImportResult>($"/v1/wireguard/import/{Uri.EscapeDataString(interfaceName)}", ct);
 
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.ServiceHealth>>> GetSystemServicesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Services.Monitoring.ServiceHealth>>("/v1/system/services", ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.WanReachability>>> GetWanStatusAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Services.Monitoring.WanReachability>>("/v1/system/wan-status", ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.PendingChangesSummary>>> GetPendingChangesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Services.Firewall.PendingChangesSummary>>("/v1/system/pending-changes", ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>> GetApplyHistoryAsync(int limit = 10, CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>($"/v1/system/apply-history?limit={limit}", ct);
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

@@ -109,6 +109,130 @@
     </div>
 </div>
 
+@* Pending-changes banner: only renders when there's drift from kernel state. *@
+@{
+    var pendingWithChanges = Model.PendingChanges.Where(p => p.HasPending).ToList();
+}
+@if (pendingWithChanges.Count > 0)
+{
+    <div class="card mb-4 border-l-4" style="border-left-color: var(--feedback-warning-bd); animation: var(--animate-slide-up); animation-delay: 30ms;">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <p class="text-sm font-semibold">Pending changes — DB ahead of kernel</p>
+                <p class="text-xs mt-0.5 text-surface-fg-muted">
+                    @foreach (var p in pendingWithChanges)
+                    {
+                        <span class="inline-block mr-3"><strong>@p.PendingCount</strong> @p.Kind change@(p.PendingCount == 1 ? "" : "s")</span>
+                    }
+                    Apply to push the new config to the kernel.
+                </p>
+            </div>
+            <a href="@Url.Action("Index", "FwApply")" class="btn btn-primary text-xs">Apply firewall</a>
+        </div>
+    </div>
+}
+
+@* Operational health row: systemd services + WAN reachability. *@
+<div class="grid gap-4 grid-cols-1 xl:grid-cols-2 mb-6"
+     style="animation: var(--animate-slide-up); animation-delay: 40ms;">
+    @* Services *@
+    <section class="card">
+        <header class="flex items-baseline justify-between mb-3">
+            <h2 class="text-base font-semibold">Services</h2>
+            @{
+                var failed = Model.Services.Count(s => s.ActiveState == "failed");
+                var inactive = Model.Services.Count(s => s.ActiveState == "inactive");
+            }
+            <span class="text-xs text-surface-fg-muted">
+                @if (failed > 0)
+                {
+                    <span class="text-feedback-danger-fg font-semibold">@failed failed</span>
+                    @(inactive > 0 ? " · " : "")
+                }
+                @if (inactive > 0)
+                {
+                    <span>@inactive inactive</span>
+                }
+                @if (failed == 0 && inactive == 0 && Model.Services.Count > 0)
+                {
+                    <span class="text-feedback-success-fg">all healthy</span>
+                }
+            </span>
+        </header>
+        @if (Model.Services.Count == 0)
+        {
+            <p class="text-sm text-surface-fg-muted">Service status unavailable (daemon down?).</p>
+        }
+        else
+        {
+            <ul class="divide-y border-surface-border">
+                @foreach (var svc in Model.Services)
+                {
+                    <li class="flex items-center justify-between py-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                            @{
+                                var dotCls = svc.ActiveState switch
+                                {
+                                    "active"     => "bg-feedback-success-bd",
+                                    "failed"     => "bg-feedback-danger-bd",
+                                    "activating" => "bg-feedback-warning-bd",
+                                    _            => "bg-surface-fg-muted"
+                                };
+                            }
+                            <span class="inline-flex h-2 w-2 rounded-full @dotCls"></span>
+                            <span class="font-medium text-sm truncate">@svc.DisplayName</span>
+                            <code class="text-xs text-surface-fg-muted truncate">@svc.UnitName</code>
+                        </div>
+                        <span class="text-xs text-surface-fg-muted shrink-0">
+                            @svc.ActiveState@(svc.SubState is { Length: > 0 } ? $" · {svc.SubState}" : "")
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    @* WAN reachability *@
+    <section class="card">
+        <header class="flex items-baseline justify-between mb-3">
+            <h2 class="text-base font-semibold">WAN reachability</h2>
+            <span class="text-xs text-surface-fg-muted">via daemon ping</span>
+        </header>
+        @if (Model.WanStatus.Count == 0)
+        {
+            <p class="text-sm text-surface-fg-muted">No WAN interfaces with gateway configured.</p>
+        }
+        else
+        {
+            <ul class="divide-y border-surface-border">
+                @foreach (var wan in Model.WanStatus)
+                {
+                    <li class="flex items-center justify-between py-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                            @{
+                                var wanDotCls = wan.IsUp ? "bg-feedback-success-bd" : "bg-feedback-danger-bd";
+                            }
+                            <span class="inline-flex h-2 w-2 rounded-full @wanDotCls"></span>
+                            <span class="font-medium text-sm">@wan.InterfaceName</span>
+                            <span class="text-xs text-surface-fg-muted">@wan.Role</span>
+                        </div>
+                        <span class="text-xs text-surface-fg-muted shrink-0 font-mono">
+                            @if (wan.IsUp && wan.RttMs is { } rtt)
+                            {
+                                <span>@wan.Target  ·  @rtt.ToString("F1") ms</span>
+                            }
+                            else
+                            {
+                                <span class="text-feedback-danger-fg">@(wan.Message ?? "unreachable")</span>
+                            }
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>
+
 @* KPI cards *@
 @{
     // Tailwind JIT only sees literal class names — keep one literal per branch.

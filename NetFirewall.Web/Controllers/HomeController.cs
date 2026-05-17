@@ -3,7 +3,9 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Services.Auth;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
@@ -22,6 +24,7 @@ public class HomeController : Controller
     private readonly IWireGuardService _wg;
     private readonly IDaemonClient _daemon;
     private readonly IScheduleService _schedules;
+    private readonly IAuthAuditService _authAudit;
     private readonly ILogger<HomeController> _logger;
 
     public HomeController(
@@ -32,6 +35,7 @@ public class HomeController : Controller
         IWireGuardService wg,
         IDaemonClient daemon,
         IScheduleService schedules,
+        IAuthAuditService authAudit,
         ILogger<HomeController> logger)
     {
         _dhcp = dhcp;
@@ -41,6 +45,7 @@ public class HomeController : Controller
         _wg = wg;
         _daemon = daemon;
         _schedules = schedules;
+        _authAudit = authAudit;
         _logger = logger;
     }
 
@@ -53,13 +58,20 @@ public class HomeController : Controller
         var ifacesTask     = _firewall.GetInterfacesAsync(ct);
         var filterTask     = _firewall.GetFilterRulesAsync(null, ct);
         var snapshotTask   = _monitor.GetSnapshotAsync(ct);
-        var auditTask      = _firewall.GetAuditLogsAsync(limit: 6, offset: 0, ct);
         var historyTask    = SafeQueryHistoryAsync(ct);
         var wgTask         = SafeQueryWireGuardAsync(ct);
         var schedulesTask  = SafeQuerySchedulesAsync(ct);
 
+        // New panels — every daemon call has its own safe-wrapper so the page
+        // still renders if the daemon is unreachable or the endpoint 4xx-es.
+        var servicesTask   = SafeQueryServicesAsync(ct);
+        var wanTask        = SafeQueryWanAsync(ct);
+        var pendingTask    = SafeQueryPendingAsync(ct);
+        var eventsTask     = SafeQueryCriticalEventsAsync(ct);
+
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
-                           filterTask, snapshotTask, auditTask, historyTask, wgTask, schedulesTask);
+                           filterTask, snapshotTask, historyTask, wgTask, schedulesTask,
+                           servicesTask, wanTask, pendingTask, eventsTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -67,10 +79,13 @@ public class HomeController : Controller
         var ifaces    = ifacesTask.Result;
         var filters   = filterTask.Result;
         var snapshot  = snapshotTask.Result;
-        var audit     = auditTask.Result;
         var history   = historyTask.Result;
         var wg        = wgTask.Result;
         var sched     = schedulesTask.Result;
+        var services  = servicesTask.Result;
+        var wanStatus = wanTask.Result;
+        var pending   = pendingTask.Result;
+        var events    = eventsTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
         var totalBytesPerSec = snapshot.Network
@@ -104,8 +119,11 @@ public class HomeController : Controller
             TrafficAvgOutMbps = history.TxMbps.Length > 0 ? Math.Round(history.TxMbps.Average(), 1) : 0,
             TrafficTotalBytes = history.TotalBytes,
 
-            RecentActivity = audit.Select(MapAudit).ToList(),
+            RecentActivity = events,
             Subnets = subnetSummaries,
+            Services = services,
+            WanStatus = wanStatus,
+            PendingChanges = pending,
         };
 
         return View(vm);
@@ -246,23 +264,128 @@ public class HomeController : Controller
         return ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
     }
 
-    private static RecentActivity MapAudit(FwAuditLog e)
+    // Event types we surface on the dashboard. Routine successes (login.success,
+    // totp.verified, profile.updated) are noise here — they go to the full
+    // audit log page. The dashboard shows only operationally interesting items.
+    private static readonly HashSet<string> CriticalEvents = new(StringComparer.Ordinal)
     {
-        var sev = e.Action switch
+        AuthAuditEvents.LoginFailed,
+        AuthAuditEvents.LoginLocked,
+        AuthAuditEvents.TotpFailed,
+        AuthAuditEvents.TotpReplayed,
+        AuthAuditEvents.ElevationDenied,
+        AuthAuditEvents.RecoveryUsed,
+        AuthAuditEvents.BootstrapUsed,
+        AuthAuditEvents.UserDisabled,
+        AuthAuditEvents.SessionRevoked,
+    };
+
+    private async Task<IReadOnlyList<RecentActivity>> SafeQueryCriticalEventsAsync(CancellationToken ct)
+    {
+        try
         {
-            "INSERT" => ActivitySeverity.Success,
-            "UPDATE" => ActivitySeverity.Info,
-            "DELETE" => ActivitySeverity.Warning,
-            _        => ActivitySeverity.Neutral
+            var recent = await _authAudit.RecentAsync(50, ct);
+            return recent
+                .Where(e => CriticalEvents.Contains(e.EventType))
+                .Take(6)
+                .Select(MapAuthEvent)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Auth audit query failed");
+            return Array.Empty<RecentActivity>();
+        }
+    }
+
+    private static RecentActivity MapAuthEvent(AuthAuditEntry e)
+    {
+        var sev = e.EventType switch
+        {
+            AuthAuditEvents.LoginLocked      => ActivitySeverity.Danger,
+            AuthAuditEvents.LoginFailed      => ActivitySeverity.Warning,
+            AuthAuditEvents.TotpFailed       => ActivitySeverity.Warning,
+            AuthAuditEvents.TotpReplayed     => ActivitySeverity.Danger,
+            AuthAuditEvents.ElevationDenied  => ActivitySeverity.Warning,
+            AuthAuditEvents.RecoveryUsed     => ActivitySeverity.Warning,
+            AuthAuditEvents.BootstrapUsed    => ActivitySeverity.Info,
+            AuthAuditEvents.UserDisabled     => ActivitySeverity.Danger,
+            AuthAuditEvents.SessionRevoked   => ActivitySeverity.Warning,
+            _                                => ActivitySeverity.Neutral
         };
-        var prettyTable = e.TableName.Replace("_", " ");
         return new RecentActivity
         {
-            Title = $"{prettyTable} · {e.Action.ToLowerInvariant()}",
-            Detail = $"record {e.RecordId.ToString("N")[..8]}…",
+            Title = e.EventType.Replace('.', ' '),
+            Detail = string.IsNullOrEmpty(e.Username) ? (e.Ip?.ToString() ?? "—") : $"{e.Username}  ·  {e.Ip}",
             Severity = sev,
-            Timestamp = e.CreatedAt,
+            Timestamp = e.OccurredAt.UtcDateTime,
         };
+    }
+
+    private async Task<IReadOnlyList<SystemServiceStatus>> SafeQueryServicesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var env = await _daemon.GetSystemServicesAsync(ct);
+            if (!env.Success || env.Data is null) return Array.Empty<SystemServiceStatus>();
+            return env.Data.Select(s => new SystemServiceStatus
+            {
+                UnitName = s.UnitName,
+                DisplayName = s.DisplayName,
+                ActiveState = s.ActiveState,
+                SubState = s.SubState,
+                Enabled = s.Enabled,
+                SinceUtc = s.SinceUtc,
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "systemd services query failed");
+            return Array.Empty<SystemServiceStatus>();
+        }
+    }
+
+    private async Task<IReadOnlyList<WanStatusSummary>> SafeQueryWanAsync(CancellationToken ct)
+    {
+        try
+        {
+            var env = await _daemon.GetWanStatusAsync(ct);
+            if (!env.Success || env.Data is null) return Array.Empty<WanStatusSummary>();
+            return env.Data.Select(w => new WanStatusSummary
+            {
+                InterfaceName = w.InterfaceName,
+                Role = w.Role,
+                Target = w.Target,
+                IsUp = w.IsUp,
+                RttMs = w.RttMs,
+                Message = w.Message,
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "WAN status query failed");
+            return Array.Empty<WanStatusSummary>();
+        }
+    }
+
+    private async Task<IReadOnlyList<PendingApplySummary>> SafeQueryPendingAsync(CancellationToken ct)
+    {
+        try
+        {
+            var env = await _daemon.GetPendingChangesAsync(ct);
+            if (!env.Success || env.Data is null) return Array.Empty<PendingApplySummary>();
+            return env.Data.Select(p => new PendingApplySummary
+            {
+                Kind = p.Kind,
+                LastAppliedAt = p.LastAppliedAt,
+                PendingCount = p.PendingCount,
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Pending-changes query failed");
+            return Array.Empty<PendingApplySummary>();
+        }
     }
 
     private sealed record TrafficHistory(string[] Labels, double[] RxMbps, double[] TxMbps, long TotalBytes)

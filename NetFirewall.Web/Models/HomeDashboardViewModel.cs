@@ -36,6 +36,49 @@ public sealed class HomeDashboardViewModel
 
     public IReadOnlyList<RecentActivity> RecentActivity { get; init; } = [];
     public IReadOnlyList<SubnetSummary> Subnets { get; init; } = [];
+
+    /// <summary>systemd units (daemon, web, nginx, postgres, …) with active/failed state.</summary>
+    public IReadOnlyList<SystemServiceStatus> Services { get; init; } = [];
+    /// <summary>WAN reachability snapshot — one row per configured WAN interface.</summary>
+    public IReadOnlyList<WanStatusSummary> WanStatus { get; init; } = [];
+    /// <summary>Per-kind (nftables/tc/wireguard) pending change counts vs last successful Apply.</summary>
+    public IReadOnlyList<PendingApplySummary> PendingChanges { get; init; } = [];
+}
+
+public sealed class SystemServiceStatus
+{
+    public required string UnitName { get; init; }
+    public required string DisplayName { get; init; }
+    public required string ActiveState { get; init; }   // active | inactive | failed | activating | unknown
+    public string? SubState { get; init; }
+    public bool Enabled { get; init; }
+    public DateTime? SinceUtc { get; init; }
+    /// <summary>active = ok, failed = danger, activating = warning, others = neutral.</summary>
+    public string SeverityClass => ActiveState switch
+    {
+        "active" => "success",
+        "failed" => "danger",
+        "activating" or "deactivating" => "warning",
+        _ => "neutral"
+    };
+}
+
+public sealed class WanStatusSummary
+{
+    public required string InterfaceName { get; init; }
+    public required string Role { get; init; }
+    public string? Target { get; init; }
+    public required bool IsUp { get; init; }
+    public double? RttMs { get; init; }
+    public string? Message { get; init; }
+}
+
+public sealed class PendingApplySummary
+{
+    public required string Kind { get; init; }          // nftables | tc | wireguard
+    public DateTime? LastAppliedAt { get; init; }
+    public int PendingCount { get; init; }
+    public bool HasPending => PendingCount > 0;
 }
 
 public sealed class RecentActivity
