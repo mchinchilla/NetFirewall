@@ -2,7 +2,21 @@
 
 Mid-deployment state of `fw.tekium.net` (server 192.168.99.1 / 154.12.104.135).
 Resume from here when continuing the deploy — covers what was done, what
-broke, what was fixed, and what's still pending. Last touched 2026-05-16.
+broke, what was fixed, and what's still pending. Last touched 2026-05-17.
+
+## Session-end snapshot (2026-05-17 00:36 CST)
+
+- Apply nftables **successfully ran** against production. The live ruleset
+  (`nft list ruleset`, 89 lines) was regenerated from `fw_*` tables.
+- Backups in `/var/lib/netfirewall/backups/` (timestamped before each apply).
+- Internet reachability + masquerade NAT verified (`ping 8.8.8.8` from WAN OK).
+- Policy routing (ip rule, table wan1/wan2/202) still working — the `firewall.sh`
+  legacy script's iproute2 state persists across restarts.
+- QoS via `Apply tc` works (tc HTB + classes).
+- Known gap: the generator can't emit `tcp flags syn ... drop` (anti-MSS) yet
+  because `fw_filter_rules` lacks tcp_flags / tcp_options columns. The legacy
+  rules of this kind are NOT in the live ruleset now.
+- Known gap: `chain output` ICMP echo accept on WAN — also not emitted.
 
 ## Operator preferences (apply to every shell command you suggest)
 

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc.Authorization;
 using NetFirewall.Models.System;
 using NetFirewall.Services.Auth;
@@ -27,6 +28,25 @@ builder.Host.UseSerilog((context, services, configuration) =>
         .ReadFrom.Services(services));
 
 builder.AddServiceDefaults();
+
+// DataProtection keys go to a persistent dir so sessions survive a Web
+// restart. systemd's StateDirectory= (netfirewall/web) creates the parent
+// owned by the netfirewall-web user; we just nest "keys" under it. Without
+// this, ASP.NET falls back to an in-memory key ring and every restart
+// invalidates session cookies + antiforgery tokens.
+//
+// The DataProtectionKeysDir env var (set in /etc/netfirewall/web.env) lets
+// the install location override this; default keeps dev simple.
+{
+    var keysDir = builder.Configuration["DataProtectionKeysDir"]
+                  ?? (builder.Environment.IsProduction()
+                      ? "/var/lib/netfirewall/web/keys"
+                      : Path.Combine(builder.Environment.ContentRootPath, ".dp-keys"));
+    Directory.CreateDirectory(keysDir);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(keysDir))
+        .SetApplicationName("NetFirewall.Web");
+}
 
 // Behind nginx on loopback: trust X-Forwarded-For / X-Forwarded-Proto so
 // audit logs and the "System info" card show the real client IP instead of

@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using NetFirewall.Daemon;
@@ -31,6 +32,21 @@ builder.Host.UseSerilog((ctx, services, configuration) =>
         .ReadFrom.Services(services));
 
 builder.AddServiceDefaults();
+
+// DataProtection keys persist to disk so the daemon's antiforgery / session
+// crypto survives restarts. The daemon doesn't directly issue cookies but
+// the framework still spins up a key ring at startup; without this it warns
+// loudly about ephemeral keys every time.
+{
+    var keysDir = builder.Configuration["DataProtectionKeysDir"]
+                  ?? (builder.Environment.IsProduction()
+                      ? "/var/lib/netfirewall/daemon/keys"
+                      : Path.Combine(builder.Environment.ContentRootPath, ".dp-keys"));
+    Directory.CreateDirectory(keysDir);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(keysDir))
+        .SetApplicationName("NetFirewall.Daemon");
+}
 
 // ----- Daemon options -----
 builder.Services.Configure<DaemonOptions>(builder.Configuration.GetSection(DaemonOptions.SectionName));
