@@ -1850,7 +1850,18 @@ public sealed class FirewallService : IFirewallService
             sb.Append($"iif {iface} ");
         }
 
-        // Protocol (handle tcp/udp)
+        // Source address restrictions go BEFORE the L4 protocol token. nft
+        // refuses `udp ip saddr {...} dport ...` — it expects `ip saddr {...}
+        // udp dport ...`. Same for tcp.
+        if (pf.SourceAddresses is { Length: > 0 })
+        {
+            if (pf.SourceAddresses.Length == 1)
+                sb.Append($"ip saddr {pf.SourceAddresses[0]} ");
+            else
+                sb.Append($"ip saddr {{ {string.Join(", ", pf.SourceAddresses)} }} ");
+        }
+
+        // Protocol (handle tcp/udp) — now adjacent to dport, which is what nft expects.
         var protocols = pf.Protocol.ToLower().Split('/');
         if (protocols.Length == 1)
         {
@@ -1860,15 +1871,6 @@ public sealed class FirewallService : IFirewallService
         {
             // For tcp/udp, we generate separate rules in practice, but here we simplify
             sb.Append($"meta l4proto {{ tcp, udp }} ");
-        }
-
-        // Source address restrictions
-        if (pf.SourceAddresses is { Length: > 0 })
-        {
-            if (pf.SourceAddresses.Length == 1)
-                sb.Append($"ip saddr {pf.SourceAddresses[0]} ");
-            else
-                sb.Append($"ip saddr {{ {string.Join(", ", pf.SourceAddresses)} }} ");
         }
 
         // Port range

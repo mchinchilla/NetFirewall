@@ -55,7 +55,7 @@ NoNewPrivileges=yes
 # detects which network stack is present at runtime; we just give the
 # namespace permission to write to any of them that happen to exist.
 ProtectSystem=strict
-ReadWritePaths=-/etc/network -/etc/NetworkManager -/etc/netplan -/etc/nftables.conf /var/log/netfirewall
+ReadWritePaths=-/etc/network -/etc/NetworkManager -/etc/netplan -/etc/nftables.conf /var/lib/netfirewall /var/log/netfirewall
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
