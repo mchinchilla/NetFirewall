@@ -1,0 +1,39 @@
+@model NetFirewall.Models.ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>
+
+@if (!Model.Success || Model.Data is null)
+{
+    <div class="text-sm py-6 text-center text-feedback-danger-fg">
+        @(Model.Message ?? "Dry-run failed.")
+    </div>
+}
+else
+{
+    var r = Model.Data;
+    var grouped = r.Steps.GroupBy(s => s.Phase).ToList();
+
+    <div class="space-y-4">
+        <p class="text-xs text-surface-fg-muted">
+            @r.Steps.Count step@(r.Steps.Count == 1 ? "" : "s") planned · <strong>nothing was executed</strong> — click <span class="font-mono">Apply</span> above to run for real.
+        </p>
+
+        @foreach (var grp in grouped)
+        {
+            <div>
+                <h3 class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted mb-1">@grp.Key</h3>
+                <ul class="font-mono text-xs space-y-1">
+                    @foreach (var step in grp)
+                    {
+                        var icon = step.Command.StartsWith("#") ? "·" : "$";
+                        <li class="@(step.Command.StartsWith("#") ? "text-surface-fg-muted" : "")">
+                            <span class="text-surface-fg-muted mr-1">@icon</span>@step.Command
+                            @if (!string.IsNullOrEmpty(step.Detail) && step.Detail != "dry-run")
+                            {
+                                <span class="ml-2 text-feedback-warning-fg">— @step.Detail</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+    </div>
+}

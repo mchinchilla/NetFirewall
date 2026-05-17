@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# NetFirewall boot-time apply.
+#
+# Calls the daemon over its Unix socket to push the DB-defined state into the
+# kernel: nftables ruleset, tc/HTB QoS, ip rule / ip route policy routing, and
+# (if configured) WireGuard. Auth: the daemon trusts uid=0 peers via
+# DaemonAllowRootPeer; no session token needed here.
+#
+# Designed to run as `netfirewall-bootstrap.service` after netfirewall-daemon
+# is ready. Each step is independent — we log failures but keep going so a
+# broken nftables config doesn't prevent QoS from coming up.
+
+set -uo pipefail
+
+SOCK=/run/netfirewall/control.sock
+BASE="http://daemon"
+TIMEOUT=30
+
+if [[ ! -S "$SOCK" ]]; then
+    echo "netfirewall-bootstrap: daemon socket $SOCK not present — abort." >&2
+    exit 1
+fi
+
+call() {
+    local method="$1" path="$2" label="$3"
+    local code body
+    body=$(curl --unix-socket "$SOCK" \
+                --max-time "$TIMEOUT" \
+                -sS \
+                -X "$method" \
+                -o /tmp/nfw-bootstrap-body.$$ \
+                -w '%{http_code}' \
+                "${BASE}${path}" 2>&1) || {
+        echo "netfirewall-bootstrap: $label — curl error: $body"
+        return 1
+    }
+    code="$body"
+    body=$(cat /tmp/nfw-bootstrap-body.$$ 2>/dev/null || true)
+    rm -f /tmp/nfw-bootstrap-body.$$
+    if [[ "$code" =~ ^2 ]]; then
+        echo "netfirewall-bootstrap: $label — OK (HTTP $code)"
+        return 0
+    else
+        echo "netfirewall-bootstrap: $label — FAIL (HTTP $code): $body"
+        return 1
+    fi
+}
+
+echo "netfirewall-bootstrap: starting state reconciliation via $SOCK"
+
+# Order matters:
+#   1. nftables (NAT, port forwards, filter, mangle, QoS netdev tables) —
+#      base ruleset that other layers reference.
+#   2. tc / HTB — shaping built on top of the mangle fwmark marks.
+#   3. policy routing — ip rule + per-table ip route, also references marks.
+#   4. WireGuard — last so we can use the tunnel for any post-bring-up checks.
+#      It's optional; we don't fail the bootstrap if there's no wg server.
+call POST /v1/firewall/apply               "nftables" || true
+call POST /v1/firewall/apply-qos           "QoS"      || true
+call POST /v1/firewall/apply-policy-routing "policy routing" || true
+
+# WireGuard is optional — skip without error if no server row in DB.
+if curl --unix-socket "$SOCK" -sf --max-time 5 "${BASE}/v1/wireguard/status" >/dev/null 2>&1; then
+    call POST /v1/wireguard/apply "WireGuard" || true
+fi
+
+echo "netfirewall-bootstrap: done"

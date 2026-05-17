@@ -1,0 +1,43 @@
+[Unit]
+Description=NetFirewall boot-time apply (nftables + QoS + policy routing + wg)
+Documentation=file:///opt/netfirewall/README.txt
+# Order: after daemon is fully up (sd_notify READY=1) and after networking is
+# available. Before the Web binds — keeps the window where the Web shows
+# "DB ahead of kernel" smaller.
+After=netfirewall-daemon.service network-online.target
+Wants=netfirewall-daemon.service network-online.target
+Before=netfirewall-web.service
+
+# Treat this as part of "the firewall is up" so if it fails on boot, dependent
+# units (the Web) get the dependency-failed signal too.
+PartOf=netfirewall-daemon.service
+
+[Service]
+Type=oneshot
+# Run as root so the daemon's DaemonAllowRootPeer middleware accepts us
+# without a session token.
+User=root
+Group=root
+ExecStart=/usr/local/bin/netfirewall-bootstrap
+
+# Short retry policy: 3 attempts, 5s apart. Don't loop forever — if the
+# daemon really isn't healthy we'd rather surface that than spam the log.
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+# We only touch the network, no FS writes of our own. The daemon does the
+# actual work and runs with its own hardening.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target

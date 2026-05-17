@@ -212,6 +212,10 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>> GetApplyHistoryAsync(int limit = 10, CancellationToken ct = default)
         => GetAsync<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>($"/v1/system/apply-history?limit={limit}", ct);
 
+    public Task<ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>> ApplyPolicyRoutingAsync(bool dryRun, CancellationToken ct = default)
+        => PostAsync<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>(
+            $"/v1/firewall/apply-policy-routing?dryRun={(dryRun ? "true" : "false")}", ct);
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

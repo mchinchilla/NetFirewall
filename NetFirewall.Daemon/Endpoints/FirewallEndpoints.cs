@@ -44,7 +44,7 @@ public static class FirewallEndpoints
                 ? Results.Json(ServiceResponse<NftApplyDto>.Ok(NftApplyDto.From(result), msg))
                 : Results.Json(ServiceResponse<NftApplyDto>.Fail(msg), statusCode: 500);
         })
-        .WithMetadata(new DaemonRequireElevatedAttribute());
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
 
         grp.MapPost("/validate", async (
                 ValidateRequest req,
@@ -82,7 +82,57 @@ public static class FirewallEndpoints
                 ct: ct);
             return Results.Json(ServiceResponse<string>.Ok(path, "Ruleset backed up."));
         })
-        .WithMetadata(new DaemonRequireElevatedAttribute());
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
+
+        // GET /v1/firewall/policy-routing — read-only listing for the UI (preview).
+        grp.MapGet("/policy-routing", async (
+                IPolicyRoutingService svc,
+                CancellationToken ct) =>
+        {
+            var tables = await svc.GetRouteTablesAsync(ct);
+            var rules = await svc.GetPolicyRulesAsync(ct);
+            return Results.Json(ServiceResponse<PolicyRoutingViewDto>.Ok(
+                new PolicyRoutingViewDto(tables, rules), "OK"));
+        });
+
+        // POST /v1/firewall/apply-policy-routing?dryRun=true — reconcile iproute2
+        // with fw_route_tables + fw_policy_rules + fw_static_routes(table_id).
+        // Replaces what /root/firewall.sh used to do.
+        grp.MapPost("/apply-policy-routing", async (
+                IPolicyRoutingApplyService apply,
+                IAuthAuditService audit,
+                IApplyHistoryService history,
+                ClaimsPrincipal user,
+                HttpContext ctx,
+                bool? dryRun,
+                CancellationToken ct) =>
+        {
+            var isDryRun = dryRun ?? false;
+            var result = await apply.ApplyAsync(isDryRun, ct);
+            var msg = isDryRun
+                ? $"Dry-run produced {result.Steps.Count} step(s) — no kernel changes"
+                : (result.Success
+                    ? $"Policy routing applied ({result.Steps.Count(s => s.Executed)} command(s))"
+                    : result.Error ?? "apply failed");
+
+            await audit.LogAsync(
+                isDryRun ? "firewall.apply-routing.dry-run" : "firewall.apply-routing",
+                userId: TryUid(user),
+                username: user.Identity?.Name,
+                ip: ctx.Connection.RemoteIpAddress,
+                userAgent: ctx.Request.Headers.UserAgent.ToString(),
+                detail: new { result.Success, stepCount = result.Steps.Count, isDryRun },
+                ct: ct);
+
+            // Only real runs (not dry-runs) count as "applied" for pending-changes tracking.
+            if (!isDryRun)
+                await history.RecordAsync("routing", result.Success, null, msg, user.Identity?.Name, ct);
+
+            return result.Success
+                ? Results.Json(ServiceResponse<PolicyRoutingApplyResult>.Ok(result, msg))
+                : Results.Json(ServiceResponse<PolicyRoutingApplyResult>.Fail(msg), statusCode: 500);
+        })
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
 
         grp.MapPost("/apply-qos", async (
                 ITcApplyService tc,
@@ -111,7 +161,7 @@ public static class FirewallEndpoints
                 ? Results.Json(ServiceResponse<NftApplyDto>.Ok(NftApplyDto.From(result), msg))
                 : Results.Json(ServiceResponse<NftApplyDto>.Fail(msg), statusCode: 500);
         })
-        .WithMetadata(new DaemonRequireElevatedAttribute());
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
     }
 
     private static Guid? TryUid(ClaimsPrincipal user)
@@ -129,4 +179,8 @@ public static class FirewallEndpoints
         public static NftApplyDto From(NftApplyResult r) =>
             new(r.ExitCode, r.BackupPath, r.Output, r.Error);
     }
+
+    public sealed record PolicyRoutingViewDto(
+        IReadOnlyList<NetFirewall.Models.Firewall.FwRouteTable> Tables,
+        IReadOnlyList<NetFirewall.Models.Firewall.FwPolicyRule> Rules);
 }

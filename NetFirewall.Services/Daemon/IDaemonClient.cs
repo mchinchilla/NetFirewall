@@ -128,6 +128,9 @@ public interface IDaemonClient
 
     /// <summary><c>GET /v1/system/apply-history</c> — last N apply attempts.</summary>
     Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>> GetApplyHistoryAsync(int limit = 10, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/firewall/apply-policy-routing</c> — reconcile iproute2 with DB. Set <paramref name="dryRun"/> to preview without changes.</summary>
+    Task<ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>> ApplyPolicyRoutingAsync(bool dryRun, CancellationToken ct = default);
 }
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);

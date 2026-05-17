@@ -128,4 +128,7 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>> GetApplyHistoryAsync(int limit = 10, CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<IReadOnlyList<NetFirewall.Services.Firewall.ApplyHistoryEntry>>.Ok(
             Array.Empty<NetFirewall.Services.Firewall.ApplyHistoryEntry>(), "Daemon disabled."));
+
+    public Task<ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>> ApplyPolicyRoutingAsync(bool dryRun, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>());
 }

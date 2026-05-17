@@ -66,7 +66,7 @@ public static class WireGuardEndpoints
                 ? Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Ok(dto, msg))
                 : Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Fail(msg), statusCode: 500);
         })
-        .WithMetadata(new DaemonRequireElevatedAttribute());
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
 
         grp.MapPost("/stop", async (
                 IWireGuardService data,
@@ -83,7 +83,7 @@ public static class WireGuardEndpoints
                 ? Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Ok(dto, $"WireGuard {server.Name} stopped."))
                 : Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Fail(result.Error ?? "wg stop failed"), statusCode: 500);
         })
-        .WithMetadata(new DaemonRequireElevatedAttribute());
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
 
         grp.MapGet("/status", async (
                 IWireGuardService data,
@@ -130,7 +130,7 @@ public static class WireGuardEndpoints
                 return Results.Json(ServiceResponse<object>.Fail($"Import failed: {ex.Message}"), statusCode: 500);
             }
         })
-        .WithMetadata(new DaemonRequireElevatedAttribute());
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
     }
 
     public sealed record KeyPairDto(string PrivateKey, string PublicKey);

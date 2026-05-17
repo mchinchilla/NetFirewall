@@ -97,4 +97,31 @@ public sealed class FwApplyController : Controller
         this.AttachHxEvent("qosApplied", new { });
         return resp;
     }
+
+    // ───────────────── policy routing (ip rule / ip route / rt_tables) ─────────────────
+
+    [HttpPost("routing-preview"), ValidateAntiForgeryToken]
+    [Filters.RequireElevated]
+    public async Task<IActionResult> RoutingPreview(CancellationToken ct)
+    {
+        // Dry-run mode: the daemon enumerates every command it WOULD execute
+        // and returns them without touching the kernel. The view renders them
+        // so the operator can sanity-check before clicking Apply for real.
+        var envelope = await _daemon.ApplyPolicyRoutingAsync(dryRun: true, ct);
+        return PartialView("_RoutingPreviewBlock", envelope);
+    }
+
+    [HttpPost("routing-execute"), ValidateAntiForgeryToken]
+    [Filters.RequireElevated]
+    public async Task<IActionResult> RoutingExecute(CancellationToken ct)
+    {
+        var envelope = await _daemon.ApplyPolicyRoutingAsync(dryRun: false, ct);
+        // Translate the typed envelope into a generic one for the HTMX toast helper.
+        var generic = envelope.Success
+            ? ServiceResponse<object>.Ok(new { }, envelope.Message ?? "Policy routing applied.")
+            : ServiceResponse<object>.Fail(envelope.Message ?? "apply failed");
+        var resp = this.ToHtmxResponse(generic);
+        this.AttachHxEvent("policyRoutingApplied", new { });
+        return resp;
+    }
 }

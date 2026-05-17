@@ -26,6 +26,14 @@ public class FwStaticRoute
     [Map("enabled")]
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// Named route table this route lives in. NULL = goes to <c>main</c>.
+    /// Set when the route is part of policy routing (e.g., default route in
+    /// table <c>wan1</c> matched by an <c>ip rule fwmark 0x100</c>).
+    /// </summary>
+    [Map("table_id")]
+    public Guid? TableId { get; set; }
+
     [Map("created_at")]
     public DateTime CreatedAt { get; set; }
 }

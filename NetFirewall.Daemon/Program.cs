@@ -115,6 +115,10 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.IWanReachabilityServi
                            NetFirewall.Services.Monitoring.WanReachabilityService>();
 builder.Services.AddScoped<NetFirewall.Services.Firewall.IApplyHistoryService,
                            NetFirewall.Services.Firewall.ApplyHistoryService>();
+builder.Services.AddScoped<NetFirewall.Services.Firewall.IPolicyRoutingService,
+                           NetFirewall.Services.Firewall.PolicyRoutingService>();
+builder.Services.AddScoped<NetFirewall.Services.Firewall.IPolicyRoutingApplyService,
+                           NetFirewall.Services.Firewall.PolicyRoutingApplyService>();
 builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
                            NetFirewall.Services.Monitoring.MetricsQueryService>();
 builder.Services.Configure<NetFirewall.Services.Monitoring.MetricsCollectorOptions>(
