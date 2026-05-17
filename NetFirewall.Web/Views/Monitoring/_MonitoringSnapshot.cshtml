@@ -112,7 +112,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y border-surface-border">
-                        @foreach (var n in Model.Network.OrderByDescending(x => x.BytesReceivedPerSecond + x.BytesSentPerSecond))
+                        @foreach (var n in Model.Network.OrderBy(x => x.InterfaceName, StringComparer.OrdinalIgnoreCase))
                         {
                             <tr>
                                 <td class="px-5 py-3 font-mono text-xs font-medium">@n.InterfaceName</td>

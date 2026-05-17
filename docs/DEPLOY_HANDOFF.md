@@ -4,7 +4,7 @@ Mid-deployment state of `fw.tekium.net` (server 192.168.99.1 / 154.12.104.135).
 Resume from here when continuing the deploy — covers what was done, what
 broke, what was fixed, and what's still pending. Last touched 2026-05-17.
 
-## Session-end snapshot (2026-05-17 00:36 CST)
+## Session-end snapshot (2026-05-17 01:10 CST)
 
 - Apply nftables **successfully ran** against production. The live ruleset
   (`nft list ruleset`, 89 lines) was regenerated from `fw_*` tables.
@@ -13,10 +13,21 @@ broke, what was fixed, and what's still pending. Last touched 2026-05-17.
 - Policy routing (ip rule, table wan1/wan2/202) still working — the `firewall.sh`
   legacy script's iproute2 state persists across restarts.
 - QoS via `Apply tc` works (tc HTB + classes).
+- DataProtection keys now persist:
+  - Daemon → `/var/lib/netfirewall/daemon/keys` (root:root, 0750)
+  - Web → `/var/lib/netfirewall/web/keys` (netfirewall-web:netfirewall, 0750)
+  - Parent `/var/lib/netfirewall` had to be chowned to `root:netfirewall` so
+    the Web user can traverse to its keys subdir.
+  - In-memory / ephemeral key warnings gone. Only "No XML encryptor configured"
+    remains (optional — would require X509 cert to encrypt the keyring at rest).
+- Sessions now survive Web restarts. Antiforgery tokens too.
 - Known gap: the generator can't emit `tcp flags syn ... drop` (anti-MSS) yet
   because `fw_filter_rules` lacks tcp_flags / tcp_options columns. The legacy
   rules of this kind are NOT in the live ruleset now.
 - Known gap: `chain output` ICMP echo accept on WAN — also not emitted.
+- Known gap: second click on "Re-detect" still triggers a redirect to /login
+  (bug NOT yet rooted — `[IgnoreAntiforgeryToken]` fix landed but user reports
+  it still happens. Needs DOM-cookie inspection at reproduce time).
 
 ## Operator preferences (apply to every shell command you suggest)
 
