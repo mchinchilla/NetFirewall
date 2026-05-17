@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +19,10 @@ using Serilog;
 [assembly: SupportedOSPlatform("linux")]
 
 var builder = WebApplication.CreateBuilder(args);
+
+// systemd integration: sends sd_notify READY=1 once the host is started,
+// satisfying the Type=notify unit. No-op on non-systemd hosts.
+builder.Host.UseSystemd();
 
 // ----- Logging -----
 builder.Host.UseSerilog((ctx, services, configuration) =>
@@ -166,8 +171,15 @@ app.MapFirewallEndpoints();
 app.MapCryptoEndpoints();
 app.MapWireGuardEndpoints();
 
-ApplySocketMode(daemonOpts);
-Log.Information("NetFirewall daemon listening on Unix socket {Socket}", ResolveSocketPath(daemonOpts.SocketPath));
+// Kestrel only creates the Unix socket once the host has started, so chmod
+// must run from the ApplicationStarted callback. Running it inline before
+// app.Run() silently no-ops (File.Exists is false) and the socket stays at
+// the umask default — blocking the Web from connecting.
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    ApplySocketMode(daemonOpts);
+    Log.Information("NetFirewall daemon listening on Unix socket {Socket}", ResolveSocketPath(daemonOpts.SocketPath));
+});
 
 app.Run();
 
@@ -208,6 +220,27 @@ static void ApplySocketMode(DaemonOptions opts)
     catch (Exception ex)
     {
         Log.Warning(ex, "Failed to apply socket mode {Mode} to {Path}", opts.SocketMode, path);
+    }
+
+    // chown the socket to the configured group. Without this the group owner
+    // stays root:root and the chmod g+rw above is useless to the Web user.
+    // Only meaningful on Linux; .NET doesn't expose chown so we P/Invoke.
+    if (OperatingSystem.IsLinux() && !string.IsNullOrWhiteSpace(opts.SocketGroup))
+    {
+        var gid = NativeMethods.GetGroupId(opts.SocketGroup);
+        if (gid is null)
+        {
+            Log.Warning("Socket group {Group} not found on this host; leaving socket as root:root", opts.SocketGroup);
+        }
+        else if (NativeMethods.Chown(path, uint.MaxValue, gid.Value) != 0)
+        {
+            var err = Marshal.GetLastPInvokeError();
+            Log.Warning("chown({Path}, -1, {Gid}) failed: errno={Errno}", path, gid.Value, err);
+        }
+        else
+        {
+            Log.Information("Socket group set to {Group} (gid {Gid})", opts.SocketGroup, gid.Value);
+        }
     }
 }
 

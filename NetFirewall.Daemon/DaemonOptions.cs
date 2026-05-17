@@ -20,6 +20,14 @@ public sealed class DaemonOptions
     public string SocketMode { get; set; } = "0660";
 
     /// <summary>
+    /// Group name to chown the socket to after creation. The chmod above only
+    /// helps if the group owner is right — without this the socket ends up
+    /// <c>root:root</c> and the Web (running as <c>netfirewall-web</c>) can't
+    /// connect. Leave null on dev (no group setup needed).
+    /// </summary>
+    public string? SocketGroup { get; set; }
+
+    /// <summary>
     /// Legacy single-UID gate. When set, the daemon accepts connections from
     /// this UID. Kept for backwards-compat — <see cref="AcceptedPeerUids"/>
     /// supersedes it for new deployments. If both are set, a peer is accepted

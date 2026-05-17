@@ -38,9 +38,11 @@ LogsDirectoryMode=0750
 #   CAP_NET_ADMIN   — modify interfaces, routes, addresses
 #   CAP_DAC_OVERRIDE — read/write files in /etc/network /etc/NetworkManager
 #   CAP_NET_RAW     — required by some `ip` / `nft` operations
+#   CAP_CHOWN       — chown the control socket to root:netfirewall so the
+#                     Web user (in that group) can connect over it
 # Everything else (including CAP_SYS_ADMIN, CAP_SYS_MODULE, CAP_SYS_PTRACE,
-# CAP_AUDIT_WRITE, CAP_KILL, CAP_CHOWN, etc.) is unavailable.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_NET_RAW
+# CAP_AUDIT_WRITE, CAP_KILL, etc.) is unavailable.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_NET_RAW CAP_CHOWN
 AmbientCapabilities=
 
 NoNewPrivileges=yes
