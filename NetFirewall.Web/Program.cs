@@ -17,6 +17,10 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// systemd integration: sends sd_notify READY=1 once Kestrel is listening,
+// satisfying the Type=notify unit. No-op on non-systemd hosts.
+builder.Host.UseSystemd();
+
 builder.Host.UseSerilog((context, services, configuration) =>
     configuration
         .ReadFrom.Configuration(context.Configuration)
