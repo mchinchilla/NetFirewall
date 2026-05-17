@@ -124,7 +124,9 @@ public sealed class DhcpAdminService : IDhcpAdminService
     {
         cmd.Parameters.AddWithValue("id", subnet.Id);
         cmd.Parameters.AddWithValue("name", subnet.Name);
-        cmd.Parameters.AddWithValue("network", subnet.Network);
+        // 'cidr' columns in Npgsql 10 take IPNetwork, not string. Parse the
+        // model's "addr/prefix" form once on the way in.
+        cmd.Parameters.AddWithValue("network", IPNetwork.Parse(subnet.Network));
         cmd.Parameters.AddWithValue("mask", (object?)subnet.SubnetMask ?? DBNull.Value);
         cmd.Parameters.AddWithValue("router", subnet.Router ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("broadcast", subnet.Broadcast ?? (object)DBNull.Value);
@@ -159,7 +161,10 @@ public sealed class DhcpAdminService : IDhcpAdminService
             {
                 Id = reader.GetGuid(reader.GetOrdinal("id")),
                 Name = reader.GetString(reader.GetOrdinal("name")),
-                Network = reader.GetString(reader.GetOrdinal("network")),
+                // PostgreSQL 'cidr' maps to System.Net.IPNetwork in Npgsql 10
+                // (NpgsqlCidr was deprecated). Format back to "addr/prefix" for
+                // the model's string-based Network field.
+                Network = reader.GetFieldValue<IPNetwork>(reader.GetOrdinal("network")).ToString(),
                 SubnetMask = reader.GetFieldValue<IPAddress>(reader.GetOrdinal("subnet_mask")),
                 Router = reader.IsDBNull(reader.GetOrdinal("router")) ? null : reader.GetFieldValue<IPAddress>(reader.GetOrdinal("router")),
                 Broadcast = reader.IsDBNull(reader.GetOrdinal("broadcast")) ? null : reader.GetFieldValue<IPAddress>(reader.GetOrdinal("broadcast")),
