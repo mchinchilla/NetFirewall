@@ -1,470 +1,523 @@
-# NetFirewall
+<div align="center">
 
-> Firewall multi-WAN, DHCP, VPN y router para uso doméstico y SOHO, hecho desde cero con **C# / .NET 10** y **PostgreSQL**.
-> Multi-WAN firewall, DHCP, VPN and router for home/SOHO use, built from scratch with **C# / .NET 10** and **PostgreSQL**.
+# 🛡️ NetFirewall
 
-He usado durante años pfSense, OPNsense, IPCop, Zentyal, ClearOS, VyOS, IPFire, Endian — cada uno con sus pros y contras. NetFirewall es el intento de tener exactamente lo que quiero, en un stack que conozco a fondo, sin dependencias de plataformas históricas (PHP / FreeBSD) y con una WebUI moderna.
+**A modern, self-hosted, single-pane firewall built from scratch in C# / .NET 10**
 
-I've used pfSense, OPNsense, IPCop, Zentyal, ClearOS, VyOS, IPFire, Endian for years — each with its pros and cons. NetFirewall is an attempt to get exactly what I want, on a stack I know deeply, without legacy platform dependencies and with a modern WebUI.
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![nftables](https://img.shields.io/badge/nftables-native-0F4C81)](https://wiki.nftables.org/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
+[![Status](https://img.shields.io/badge/status-production-success)]()
 
-> **Estado / Status:** alpha → beta. Apto para experimentar, co-desarrollar y desplegar en laboratorios; el Web UI y el daemon ya pueden gestionar producción acotada con TOTP step-up para operaciones destructivas.
+nftables · DHCP · WireGuard · dual-WAN failover · QoS · policy routing — all driven from one database, applied by one daemon, managed from one Web UI.
 
----
+[English](#english) · [Español](#español)
 
-## Visión: NetFirewall OS
-
-El objetivo final del proyecto es una **distribución Linux basada en Debian** (ISO booteable) que se instala en una máquina y queda lista como appliance multi-WAN. Tres planos de control comparten exactamente la misma capa de servicios:
-
-- **Web UI** — ASP.NET Core MVC + Tailwind 4 + HTMX + Alpine. Ejecuta sin privilegios; toda operación destructiva pasa por el daemon vía Unix socket autenticado y exige TOTP step-up.
-- **TUI sobre TTY** — Spectre.Console para configuración inicial sin red, recovery, o admin local sobre consola serie. Llama el mismo socket que el Web; cero duplicación de lógica. **Funcional desde v0.4** (login + network + recovery).
-- **ISO installer** — Debian-based con preseed unattended, primer boot que suelta el bootstrap token para enrolar el primer admin con TOTP. **En curso (v0.5, Fase 5)** — sources `live-build` bajo `deploy/iso/` que consumen el `.deb` desde `deploy/debian/`.
-
-### Lo que pretende ofrecer "out of the box"
-
-- **Multi-WAN failover** con WAN Monitor: ping-watchdog por interfaz, scripts pre/post-failover, métricas de latencia.
-- **DHCP server propio** que vive directo sobre PostgreSQL (sin ISC dhcpd, sin Kea): pools, clases, reservaciones MAC, DDNS, failover RFC 3074-style, PXE boot, opciones por clase.
-- **Firewall nftables world-class**: filter rules, NAT, port forwards, mangle/marks, QoS (HTB), static routes, schedules con timezone, audit log, dry-run + apply con rollback automático.
-- **VPN WireGuard** integrada: peers, render de config, apply.
-- **Configuración de interfaces de red completa**: IP/máscara/gateway, **MAC spoofing** (kernel-level, sobrevive reboots), bridges, VLANs, MTU. Distro-aware: detecta y escribe Netplan / NetworkManager / Debian `interfaces` según corresponda.
-- **DNS resolver** (planned), **proxy/captive portal** (planned), **monitoring** con métricas live.
-- **Auth con MFA real**: Argon2id + sesiones server-side + TOTP enrollment + códigos de recuperación + step-up para operaciones destructivas.
-- **Búsqueda full-text** en toda la config: tsvector + GIN, autocomplete debounced en el header.
+</div>
 
 ---
 
-## Tabla de contenidos
+<a id="english"></a>
 
-- [Estado por subsistema](#estado-por-subsistema)
-- [Stack técnico](#stack-técnico)
-- [Modelo de seguridad](#modelo-de-seguridad)
-- [Reglas del proyecto (no negociables)](#reglas-del-proyecto-no-negociables)
-- [Arquitectura](#arquitectura)
-- [Configuración de red e interfaces](#configuración-de-red-e-interfaces)
-- [Base de datos y migraciones](#base-de-datos-y-migraciones)
-- [Build y desarrollo](#build-y-desarrollo)
-- [Tests y cobertura](#tests-y-cobertura)
-- [Despliegue en producción](#despliegue-en-producción)
-- [DHCP — notas RFC 2131 y performance](#dhcp--notas-rfc-2131-y-performance)
-- [Roadmap](#roadmap)
-- [Contribuir](#contribuir)
+# 🇺🇸 English
 
----
+## 📸 Dashboard
 
-## Estado por subsistema
+![NetFirewall dashboard](docs/images/dashboard.png)
 
-| Subsistema | Estado | Notas |
-|---|---|---|
-| **WAN Monitor** | Producción | Failover dual-WAN funcional, corre en producción doméstica hace meses bajo systemd. |
-| **DHCP Server** | Beta | Pipeline RFC 2131 + opciones + clases + reservaciones + DDNS + failover básico (RFC 3074-style). Hot-path zero-allocation (Span/stackalloc/ArrayPool). LeaseCache singleton warmed at boot. PXE boot soportado. |
-| **Firewall (nftables)** | Beta | CRUD de filter rules, NAT, port forwards, mangle/marks, QoS (HTB), static routes, audit log. Apply real con backup/rollback observable en UI. |
-| **Schedules** | Beta | Reglas con ventanas horarias y timezone; daemon watcher re-aplica al cambiar estado. |
-| **VPN (WireGuard)** | Alpha | Peers + config render + apply. Falta UI completa de QR para móviles. |
-| **Network Objects / Services** | Beta | Aliases reusables (host/CIDR/range/FQDN/grupo) y catálogo de ~70 servicios well-known. Resolver con detección de ciclos. |
-| **Network interfaces config** | Beta | Distro-aware (Netplan / NetworkManager / Debian interfaces). Escribe `/etc/network/interfaces` o YAML netplan + bring-up vía daemon. **MAC spoofing soportado**. |
-| **Auth (sesión + TOTP)** | Beta | Argon2id + sesiones server-side + MFA TOTP + códigos de recuperación + bootstrap token de primer arranque. **Step-up TOTP** obligatorio para operaciones destructivas vía `[RequireElevated]`. |
-| **Daemon Web ↔ root** | Beta | Unix socket autenticado (`X-NetFw-Session`), endpoints `/v1/{network,firewall,crypto,...}` con caps mínimas (`CAP_NET_ADMIN`/`CAP_DAC_OVERRIDE`/`CAP_NET_RAW`). |
-| **Setup wizard** | Beta | 5 pasos guiados, persistencia por paso, re-run idempotente. |
-| **Búsqueda full-text** | Beta | tsvector + GIN, sync por triggers, autocomplete debounced en el header. |
-| **Monitoreo** | Alpha | Métricas de sistema + dashboards live (HTMX polling). |
-| **WebUI** | Beta | ASP.NET Core MVC + Tailwind 4 + HTMX + Alpine, sin npm. Tema con tokens semánticos (`bg-surface`, `--accent`, `--feedback-*`). |
-| **TUI** | Beta | Spectre.Console sobre el mismo daemon socket que el Web. Login single-step (user + pwd + TOTP/recovery), `NetworkInterfacesScreen` (list/edit/apply), `RecoveryScreen` (break-glass: reset password / disable TOTP, root-peer-only). Distribuido por `install.sh` como `/usr/local/bin/netfirewall-tui` con manpage + bash completion. |
-| **`.deb` package** | En curso (v0.5) | `deploy/debian/` — debhelper sources que convierten `install.sh` en `apt install netfirewall`. Bakea las cinco unidades publish (daemon/web/tui/migrations/wanmonitor) más unidades systemd, manpage, completion y `postinst` para usuarios + master key + migraciones. |
-| **ISO installer** | En curso (v0.5) | `deploy/iso/` — config `live-build` Debian-based con preseed unattended; consume el `.deb` vía `package-lists/`. Primer boot suelta el bootstrap token para enrolar al primer admin con TOTP. |
+Single overview pane: KPIs at the top, traffic + critical events second, services + WAN health row, subnets, top talkers, and operational shortcuts.
 
----
+## ✨ What it does
 
-## Stack técnico
-
-- **Backend:** C# / .NET 10, ASP.NET Core MVC + Minimal APIs, .NET Aspire (orquestación dev), Serilog.
-- **Datos:** PostgreSQL 14+, Npgsql, RepoDb (micro-ORM), tsvector + GIN para búsqueda.
-- **Frontend:** Tailwind CSS 4 (binario standalone, **sin Node**), HTMX, Alpine.js — todo vendoreado bajo `wwwroot/lib/`.
-- **Sistema:** nftables, iproute2, tc (HTB), Linux raw sockets para DHCP, WireGuard CLI, Netplan / NetworkManager / `/etc/network/interfaces` autodetect.
-- **Crypto:** Argon2id (passwords), AES-GCM (TOTP secret cipher, key vive solo en daemon), TOTP RFC 6238.
-- **Tests:** xUnit + Moq + `Aspire.Hosting.Testing` + Testcontainers (Postgres real).
-- **Despliegue:** systemd (dos units: `netfirewall-daemon` con caps mínimas, `netfirewall-web` sin caps), nginx con TLS, instalador idempotente.
-
----
-
-## Modelo de seguridad
-
-NetFirewall toma operaciones destructivas (cambiar reglas firewall, aplicar config de red, mutar usuarios) muy en serio. El modelo:
-
-1. **Web sin privilegios.** El proceso `netfirewall-web` corre como usuario sistema sin capabilities, solo puede escribir en `/var/lib/netfirewall/web`.
-2. **Daemon root con caps mínimas.** `netfirewall-daemon` tiene `CAP_NET_ADMIN` + `CAP_DAC_OVERRIDE` + `CAP_NET_RAW` (no `CAP_SYS_ADMIN`, no `CAP_SYS_MODULE`). Sandbox systemd: `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `LockPersonality`, `RestrictNamespaces`, `SystemCallFilter` curado.
-3. **Comunicación Web ↔ Daemon** sobre Unix socket (`/run/netfirewall/daemon.sock`, mode 0660 root:netfirewall) con header de sesión (`X-NetFw-Session`). El daemon valida la sesión contra Postgres antes de cualquier op.
-4. **Master key para cifrado de TOTP secrets** vive **solo** en el daemon (`/etc/netfirewall/daemon.env`, mode 0600 root:root). El Web nunca la ve — para enrolar/verificar TOTP llama `POST /v1/crypto/{encrypt,decrypt}` sobre el socket. **Compromiso del Web no descifra secretos TOTP almacenados.**
-5. **Step-up TOTP obligatorio** para operaciones destructivas (`[RequireElevated]` filter): el usuario debe verificar TOTP en los últimos 15 min. Si la sesión es básica, el filter retorna 401 con `HX-Trigger: showElevationModal` y el front-end muestra el modal de step-up que re-fire el request original tras verificar.
-6. **Auth audit log** — toda operación de auth (login, logout, TOTP fail, lock, elevation) se persiste en `auth_audit_log` con IP + UA + detalle estructurado.
-7. **`__Host-` cookie** — atributo `Secure`, `Path=/`, sin `Domain`, `SameSite=Lax`, `HttpOnly`. Resistente a sub-domain hijack.
-8. **Argon2id** con salt + hash 32 bytes (defaults), `NeedsRehash` rotación automática al login si los parámetros suben.
-
----
-
-## Reglas del proyecto (no negociables)
-
-Reglas duras del repo, documentadas en [`CLAUDE.md`](./CLAUDE.md). Resumen:
-
-1. **Nada de npm / Node.** Tailwind se compila con el binario standalone, dependencias JS vendoreadas.
-2. **Async/await en todo I/O** (server y browser). Cero `.Result`, `.Wait()`, `.then()` chains.
-3. **Un solo CSS y un solo JS:** `Styles/site.css` → `wwwroot/css/site.css`, y `wwwroot/js/site.js`. Sin `<style>` inline ni scoped CSS.
-4. **Validación en ambos lados** (cliente con Tailwind + HTML5 + Alpine; servidor con DataAnnotations / FluentValidation).
-5. **Contratos tipados** con `ServiceResponse<T>` y genéricos.
-6. **Feedback visible siempre** — toast, banner o inline error tras cada operación, éxito y error.
-7. **Decomponer en partials/componentes** — `_Layout.cshtml` solo compone, no contiene markup de negocio.
-8. **Cada proceso es un servicio DI-registrado** detrás de una interfaz. Cero estáticos "manager"/"helper" con lógica.
-9. **Estilos vía tokens semánticos** del theme (`bg-surface`, `text-accent`, `var(--feedback-*)`...). Cero hex literales ni `bg-red-500`.
-10. **Sin SQL ni acceso a datos en controllers.** Controllers componen; services hacen.
-
----
-
-## Arquitectura
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  NetFirewall.AppHost (Aspire)                   │
-│   orquesta dev: ApiService + Web + DhcpServer                   │
-└─────────────────────────────────────────────────────────────────┘
-        │                  │                  │
-        ▼                  ▼                  ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
-│ ApiService   │   │ Web (MVC)    │   │ DhcpServer       │
-│ Minimal APIs │   │ HTMX+Alpine  │   │ UDP/67, RFC 2131 │
-│ + OpenAPI    │   │ + Tailwind   │   │ Channel pipeline │
-└──────────────┘   └──────────────┘   └──────────────────┘
-        │                  │                  │
-        │                  │ ── unix sock ──► ┌──────────────┐
-        │                  │                  │ Daemon (root)│
-        │                  │                  │ caps mínimas │
-        │                  │                  └──────────────┘
-        │                  │                          │
-        │                  │                          ▼
-        │                  │           nftables / iproute2 /
-        │                  │           tc / netplan / wg /
-        │                  │           /etc/network/interfaces
-        │                  │
-        └──────────────────┴──────────────────┐
-                           │                  │
-                           ▼                  ▼
-              ┌──────────────────────────┐  ┌──────────────────┐
-              │ NetFirewall.Services     │  │ TUI (Spectre)    │
-              │ (Auth, Dhcp, Firewall,   │  │ ── unix sock ──► │
-              │  Network, Vpn, Search,   │  │ login + network  │
-              │  Monitoring, Setup, ...) │  │ + recovery screen│
-              └──────────────────────────┘  └──────────────────┘
-                           │
-                           ▼
-                   ┌──────────────┐
-                   │ PostgreSQL   │
-                   └──────────────┘
-
-Aparte (no bajo Aspire):
-  • NetFirewall.WanMonitor  → systemd worker, dual-WAN failover
-  • NetFirewall.Daemon      → systemd unit, root, Unix socket API
-  • NetFirewall.Migrations  → console runner, schema forward-only
-```
-
-### Proyectos
-
-| Proyecto | Rol |
+| Module | What you get |
 |---|---|
-| `NetFirewall.AppHost` | Orquestador Aspire (dev). |
-| `NetFirewall.Web` | WebUI MVC. Tailwind, HTMX, Alpine. Sin npm. Sin caps. |
-| `NetFirewall.ApiService` | Minimal APIs + OpenAPI (consumido por la UI). |
-| `NetFirewall.DhcpServer` | Servidor DHCP standalone (Host genérico + systemd). |
-| `NetFirewall.Daemon` | Daemon root con Unix socket: aplica nftables/red/wireguard/crypto. |
-| `NetFirewall.WanMonitor` | Background worker de failover dual-WAN. |
-| `NetFirewall.Tui` | Console UI (Spectre.Console). Habla el mismo daemon socket que el Web; recovery + admin local. |
-| `NetFirewall.Services` | Lógica de negocio + acceso a datos (Npgsql + RepoDb). |
-| `NetFirewall.Models` | POCOs/DTOs por dominio + `ServiceResponse<T>`. |
-| `NetFirewall.Migrations` | Runner forward-only con SHA-256 drift detection. |
-| `NetFirewall.ServiceDefaults` | Aspire-shared OpenTelemetry, service discovery, resilience. |
-| `NetFirewall.Tests` | xUnit + Moq + `Aspire.Hosting.Testing` + Testcontainers. |
+| 🛡️ **Firewall** | Native nftables ruleset generated from DB — filter rules, NAT, port forwards, mangle, traffic marks. Apply with one click; backups taken before every push. |
+| 📡 **DHCP server** | Pure-C# RFC 2131 server with PXE boot, subnets/pools/exclusions/MAC reservations/DDNS, AF_PACKET raw sockets for zero-IP DISCOVER handling. |
+| 🌐 **Dual-WAN failover** | Daemon-side health monitor pings each WAN via fwmark policy routing (so probes hit the right link), with hysteresis (3 fails → down, 5 succ → up). Automatic default route swap when winner changes. |
+| 🔐 **WireGuard VPN** | Both modes: hub-server with N peers AND outbound-client to a remote server. Import existing `/etc/wireguard/*.conf` files from disk into DB. |
+| 📊 **QoS (tc HTB)** | Hierarchical Token Bucket per interface with per-traffic-mark class shares. |
+| 🛣️ **Policy routing** | `fw_route_tables` + `fw_policy_rules` model `ip rule` + `ip route` declaratively. The daemon reconciles `/etc/iproute2/rt_tables` + kernel state. |
+| 📈 **Monitoring** | systemd service health, WAN reachability, top talkers (conntrack sampler), traffic graphs, pending-changes detector. |
+| 👤 **Auth** | Custom session cookies, TOTP enrollment + recovery codes, elevation gates for destructive ops, comprehensive audit log. |
 
----
+## 🏗️ Architecture
 
-## Configuración de red e interfaces
+```mermaid
+graph TB
+    subgraph Browser
+        UI[Web UI · HTMX + Alpine.js + Tailwind]
+    end
 
-NetFirewall puede gestionar **toda la configuración de red de la máquina** desde el Web UI (y eventualmente la TUI). El flujo:
+    subgraph "Web tier · user netfirewall-web"
+        WEB[NetFirewall.Web · ASP.NET Core MVC]
+    end
 
-1. **`LinuxDistroService`** detecta la distro y el stack de red activo (`netplan`, `NetworkManager`, o `/etc/network/interfaces`) examinando archivos en `/etc/`, `os-release`, y servicios systemd activos.
-2. **`INetworkConfigService`** se resuelve a la implementación correcta:
-   - `NetplanConfigService` — escribe YAML en `/etc/netplan/*.yaml`, ejecuta `netplan apply`.
-   - `NetworkManagerConfigService` — escribe `*.nmconnection` en `/etc/NetworkManager/system-connections/`, recarga.
-   - `DebianInterfacesConfigService` — escribe `/etc/network/interfaces.d/*.cfg`, `ifup/ifdown`.
-3. **Endpoint `POST /v1/network/{id}/apply`** en el daemon recibe el ID de la interfaz, lee el modelo de Postgres, invoca el writer correcto, y devuelve `NetworkApplyResult` con stdout/stderr.
-4. **Endpoint `POST /v1/network/restart`** — restart del subsistema entero (en caso de cambios masivos).
+    subgraph "Privileged tier · root + CAP_NET_*"
+        D[NetFirewall.Daemon]
+        D --> HM[WanHealthMonitorService]
+        D --> CS[ConntrackSamplerService]
+        D --> SW[ScheduleWatcherService]
+        D --> MC[MetricsCollectorService]
+        D --> AP[AuditPrunerService]
+    end
 
-### Lo que se puede configurar
+    subgraph "Standalone units"
+        DHCP[NetFirewall.DhcpServer · UDP/67]
+        BS[netfirewall-bootstrap · oneshot at boot]
+    end
 
-| Campo | Notas |
+    subgraph "Persistence"
+        PG[(PostgreSQL · net_firewall)]
+    end
+
+    subgraph Kernel
+        NFT[nftables ruleset]
+        IPR[ip rule + ip route]
+        TC[tc HTB]
+        WG[wg0 interface]
+    end
+
+    UI -.HTTPS via nginx.-> WEB
+    WEB -.Unix socket SO_PEERCRED.-> D
+    BS -.Apply on boot.-> D
+    WEB <--> PG
+    D <--> PG
+    DHCP <--> PG
+    D --> NFT
+    D --> IPR
+    D --> TC
+    D --> WG
+    HM --> IPR
+```
+
+The daemon owns every privileged kernel mutation. The Web is sandboxed (no caps), and talks to the daemon over a Unix socket gated by `SO_PEERCRED` + session token. Persistent config lives in PostgreSQL; the kernel is just a derived view that the daemon reconciles on demand.
+
+## ⚙️ Components
+
+```
+NetFirewall/
+├── NetFirewall.Daemon           # Privileged HTTP-on-Unix-socket — every kernel mutation goes here
+├── NetFirewall.Web              # ASP.NET Core MVC — HTMX + Alpine.js + Tailwind 4
+├── NetFirewall.DhcpServer       # RFC 2131 + PXE — independent systemd unit
+├── NetFirewall.Tui              # Spectre.Console TUI for break-glass admin
+├── NetFirewall.Services         # Business logic + Npgsql + sql/migrations/
+├── NetFirewall.Models           # POCOs (DHCP, Firewall, Vpn, WanMonitor, Auth)
+├── NetFirewall.Migrations       # Forward-only SQL migration runner
+├── NetFirewall.Benchmarks       # BenchmarkDotNet hot-path validation
+├── NetFirewall.Tests            # xUnit + Aspire.Hosting.Testing
+└── deploy/
+    ├── systemd/                 # Hardened unit files
+    ├── bootstrap/               # /usr/local/bin/netfirewall-bootstrap script
+    ├── nginx/                   # Reverse-proxy example
+    ├── seeds/                   # Per-deployment seed SQL
+    └── install.sh               # One-shot installer
+```
+
+## 🚀 Quick start
+
+### Requirements
+
+- 🐧 Debian 13 / Ubuntu 24.04 / Rocky 9 (any modern systemd + Linux 5.x)
+- 🟣 .NET 10 SDK + runtime
+- 🐘 PostgreSQL 14+
+- 🔧 `nftables`, `iproute2`, `wireguard-tools`, `conntrack` packages
+- 🌐 nginx (or any reverse proxy) for TLS termination
+
+### Install
+
+```bash
+git clone https://github.com/your-org/NetFirewall /opt/tekium/src
+cd /opt/tekium/src
+deploy/install.sh
+```
+
+The installer publishes all five binaries (`daemon`, `web`, `dhcp-server`, `migrations`, `tui`), creates the `netfirewall` group + `netfirewall-web` user, lays out `/etc/netfirewall/`, `/var/lib/netfirewall/`, `/var/log/netfirewall/`, generates an AES-256 master key for TOTP encryption, applies all migrations, and starts both services.
+
+### Verify
+
+```bash
+systemctl status netfirewall-*
+nft list ruleset | head
+curl -sS https://fw.example.com/login
+```
+
+Open `https://fw.example.com/setup/bootstrap?token=<token-printed-to-journalctl>` for first admin enrollment.
+
+## 🔄 Boot-time apply workflow
+
+```mermaid
+sequenceDiagram
+    participant systemd
+    participant Daemon as netfirewall-daemon
+    participant Bootstrap as netfirewall-bootstrap
+    participant Kernel
+    participant DB as PostgreSQL
+
+    systemd->>Daemon: start
+    Daemon->>Daemon: sd_notify READY=1
+    systemd->>Bootstrap: start (After=daemon)
+    Bootstrap->>Daemon: curl unix:///run/netfirewall/control.sock
+    Note over Daemon: RootPeerBypass middleware<br/>accepts uid=0 without session
+    Bootstrap->>Daemon: POST /v1/firewall/apply
+    Daemon->>DB: SELECT fw_filter_rules, fw_nat_rules, ...
+    Daemon->>Kernel: nft -f /etc/nftables.conf
+    Bootstrap->>Daemon: POST /v1/firewall/apply-qos
+    Daemon->>Kernel: tc qdisc / class / filter
+    Bootstrap->>Daemon: POST /v1/firewall/apply-policy-routing
+    Daemon->>Kernel: ip rule + ip route + /etc/iproute2/rt_tables
+    Bootstrap->>Daemon: POST /v1/wireguard/apply
+    Daemon->>Kernel: wg-quick up wg0
+    Note over Daemon,Kernel: WanHealthMonitorService<br/>now polls every 30s
+```
+
+## 🌐 Dual-WAN failover
+
+The daemon's `WanHealthMonitorService` runs every 30s by default. For each enabled `wan_health_config` row:
+
+1. **Probe** — `ping -m <fwmark>` to every monitor target. The fwmark forces the kernel to honor `ip rule fwmark X lookup wanN`, so the probe pins to the WAN being tested even when the main table points elsewhere.
+2. **Hysteresis** — 3 consecutive failures flip the WAN to `is_up=false`; 5 consecutive successes flip it back.
+3. **Reconcile** — lowest-priority healthy WAN wins. If the winner changed, `ip route replace default via <gw> dev <iface>` in the main table.
+4. **Audit** — `wan_health_events` records every transition; `fw_apply_history` registers each failover.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Degrading: ping fails
+    Degrading --> Healthy: ping ok
+    Degrading --> Down: 3 consecutive fails
+    Down --> Recovering: ping ok
+    Recovering --> Down: ping fails
+    Recovering --> Healthy: 5 consecutive successes
+    Down --> [*]: removed from config
+```
+
+## 🗄️ Database schema (26 migrations)
+
+| Range | Domain |
 |---|---|
-| **IP address** | IPv4 estático o DHCP. IPv6 planned. |
-| **Subnet mask** | Notación CIDR o decimal. |
-| **Gateway** | Per-interface o default. |
-| **MAC address** | **Spoofing soportado** — kernel-level via writer de distro (`macaddress:` netplan, `cloned-mac-address=` NM, `hwaddress ether` Debian). Sobrevive reboots. |
-| **MTU** | Por interfaz. |
-| **VLAN ID** | 802.1Q tagging. |
-| **Bridge / bond** | Planned para v0.6. |
-| **Type** | WAN / LAN / DMZ / Management — dirige selección de subnet DHCP, reglas firewall, métricas. |
+| `00001–00004` | Extensions + firewall core (interfaces, filter/NAT/mangle rules, traffic marks, static routes, QoS, audit log) |
+| `00005–00010` | DHCP (legacy + subnets + pools + options + relay + failover + DDNS + setup wizard) |
+| `00011` | Auth (users, sessions, TOTP secrets, auth audit log) |
+| `00012–00013` | System metrics + app settings |
+| `00014, 00021` | WireGuard (servers, peers, modes) |
+| `00015–00020` | Network objects, FQDN sets, user profile, search index, schedules, services |
+| `00022` | Apply history (per-kind drift detection) |
+| `00023` | Policy routing (named tables + fwmark rules) |
+| `00024` | LAN traffic samples (conntrack-fed top talkers) |
+| `00025–00026` | WAN health + probe fwmark |
 
-### Por qué pasa todo por el daemon
+Forward-only; `__migrations` table tracks SHA-256 of every applied file to detect drift.
 
-El Web corre sin capabilities — no puede escribir en `/etc/`, no puede ejecutar `netplan apply`, no puede hacer `ip link set`. Pasar por el daemon (con caps mínimas) significa que un compromiso del Web **no puede reconfigurar la red** sin antes comprometer el daemon o robar una sesión TOTP-elevated.
+## 🔐 Hardening
 
----
+- **Privilege separation** — Daemon runs as root with `CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_NET_RAW CAP_CHOWN`. Web runs as unprivileged `netfirewall-web`. Bootstrap is a one-shot that calls the daemon over Unix socket.
+- **Systemd sandbox** — `ProtectSystem=strict`, `ProtectKernelTunables/Modules/Logs`, `RestrictAddressFamilies` (carefully tuned per-service: AF_PACKET for DHCP, AF_NETLINK for daemon), `SystemCallFilter=@system-service` minus `@mount @swap @reboot @raw-io`.
+- **Auth flow** — Session cookie issued only over HTTPS, TOTP required for first login, **elevation** gate (re-prompt TOTP) for destructive endpoints (`apply firewall`, `update interface`, etc.).
+- **TOTP encryption** — master key lives only inside the daemon (loaded from `/etc/netfirewall/daemon.env`). The Web posts to `POST /v1/crypto/encrypt|decrypt` over the Unix socket — a Web compromise can't decrypt stored secrets.
 
-## Base de datos y migraciones
+## 🛠️ Operations
 
-Schema gestionado por **`NetFirewall.Migrations`** — runner que aplica archivos de `NetFirewall.Services/sql/migrations/` (formato `NNNNN_descripcion.sql`) y los registra en `__migrations` con checksum SHA-256 para detectar drift.
-
-```bash
-bin/db.sh status      # listar aplicadas / pendientes / con drift
-bin/db.sh up          # aplicar pendientes (cada una en su propia transacción)
-bin/db.sh reset       # DROP SCHEMA + up — DEV ONLY, pide confirmación
-bin/db.sh seed        # seed idempotente (demo_interfaces.sql)
-```
-
-Resolución del connection string:
-
-1. Flag `--connection "Host=..."`.
-2. Variable `NETFIREWALL_CONN`.
-3. `ConnectionStrings:DefaultConnection` de `NetFirewall.Web/appsettings.json`.
-
-> **Forward-only por diseño.** Para revertir un cambio, escribe una migración nueva. Editar una ya aplicada hace que el runner detecte drift y rechace continuar.
-
----
-
-## Build y desarrollo
-
-### Prerrequisitos
-
-- .NET 10 SDK
-- PostgreSQL 14+
-- Binario standalone de **`tailwindcss`** en `PATH` (descarga desde https://github.com/tailwindlabs/tailwindcss/releases — pin a v4.x)
-- Linux para correr el daemon DHCP / firewall en serio (UDP/67, nftables, raw sockets, network config). En macOS/Windows la WebUI funciona bien para desarrollo pero las apply-ops son no-op.
-- Docker (opcional, para los tests con Testcontainers Postgres).
-
-### Build & test
+### Manual apply via curl (root peer bypass)
 
 ```bash
-dotnet build
-dotnet build -c Release
-dotnet test
-dotnet test --filter "FullyQualifiedName~DhcpLeasesServiceTests"
+SOCK=/run/netfirewall/control.sock
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-qos
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-policy-routing
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/wireguard/apply
 ```
 
-El target MSBuild `BuildTailwindCss` invoca el CLI standalone en cada `dotnet build` y produce `wwwroot/css/site.css` (gitignored). Para watch:
+### Migrations
 
 ```bash
-tailwindcss -i NetFirewall.Web/Styles/site.css -o NetFirewall.Web/wwwroot/css/site.css --watch
+bin/db.sh status   # what's applied / pending / drifted
+bin/db.sh up       # apply pending
+bin/db.sh seed     # apply demo seed (DEV ONLY)
 ```
 
-### Correr el entorno orquestado (Aspire)
+### Tail audit + apply history
 
-```bash
-dotnet run --project NetFirewall.AppHost
+```sql
+SELECT event_type, username, ip, occurred_at FROM auth_audit_log ORDER BY occurred_at DESC LIMIT 20;
+SELECT kind, success, applied_at, applied_by, message FROM fw_apply_history ORDER BY applied_at DESC LIMIT 20;
 ```
 
-Aspire levanta el dashboard, ApiService, Web y DhcpServer. El primer login lo guía el setup wizard (bootstrap token impreso en consola).
+## ⚠️ Deprecated
 
-> **Nota:** `NetFirewall.WanMonitor`, `NetFirewall.Daemon` y `NetFirewall.Tui` **no** están registrados en AppHost — el WanMonitor y el daemon corren como systemd workers en producción, la TUI se invoca a demanda en consola. Para desarrollo local del daemon, lanzar manualmente con `dotnet run --project NetFirewall.Daemon` sobre Linux con caps adecuadas (o como root en una VM).
+These artifacts are kept in the repo for reference but no longer active in production:
 
-### Correr la TUI
-
-Con el daemon arriba (vía Aspire o systemd), la TUI se invoca:
-
-```bash
-# Dev (apunta al socket que use Aspire o tu daemon local):
-dotnet run --project NetFirewall.Tui
-
-# Producción (instalado por install.sh):
-sudo netfirewall-tui
-```
-
-El menú principal muestra estado del daemon y de la sesión, login single-step (user + pwd + TOTP/recovery), `NetworkInterfacesScreen` para list/edit/apply de interfaces, y `RecoveryScreen` (root-peer-only) para break-glass cuando un admin está locked out del Web. La TUI se autentica vía peer-cred (`SO_PEERCRED` en Linux, `LOCAL_PEERCRED` en macOS) — el daemon acepta el UID del Web **y** root.
-
----
-
-## Tests y cobertura
-
-**Estado actual: ~880 tests pasando, 1 skipped, 0 failing.** El proyecto pasó de tener cobertura mínima a una suite robusta cubriendo seguridad, lógica de negocio, hot-path DHCP, filtros web y la TUI.
-
-### Lo que está cubierto
-
-```
-NetFirewall.Tests/
-├── Auth/                    → password hashing, TOTP, recovery codes,
-│                              session lifecycle, audit log
-├── WebAuth/                 → SessionCookieAuthHandler, AuthController flow
-│                              (login + TOTP + recovery + lock + step-up),
-│                              AccountController (TOTP enrollment regression),
-│                              RequireElevatedAttribute (4 outcomes),
-│                              ValidationToServiceResponseFilter,
-│                              HtmxResultExtensions (HX-Trigger merge),
-│                              FwApplyController, SetupWizardController,
-│                              DaemonClient (real Unix socket via Kestrel),
-│                              DaemonTotpSecretCipher, DaemonStaticRouteApplicator,
-│                              DaemonNetworkConfigService, DaemonResolverDecorator,
-│                              BashScriptCatalog
-├── Dhcp/                    → DhcpServerService (orchestration),
-│                              DhcpLeasesService (lifecycle + real Postgres),
-│                              DhcpSubnetService (selection chain + alloc),
-│                              DhcpAdminService, DdnsService, FailoverService,
-│                              LeaseCache, DhcpWorker parser (zero-alloc),
-│                              DhcpWorker option parser edge cases (truncated,
-│                              Pad/End, length-zero, multi-option),
-│                              DhcpWorker ProcessSinglePacketAsync
-│                              (counters request- y response-side, send seam)
-├── Firewall/                → NftApplyService generation + rollback,
-│                              TcApplyService, schedules, audit pruner
-├── Network/                 → object resolver (recursion + cycles),
-│                              service resolver, distro detection,
-│                              netplan/NM/Debian writers
-├── Tui/                     → RecoveryScreen label builder (locked/inactive/
-│                              no-totp markers), NetworkInterfacesScreen
-│                              validation/orchestration, TuiSessionState
-│                              transitions, DaemonOptions binding (env var
-│                              shape that install.sh writes)
-├── Migrations/              → runner, drift detection, transaction rollback
-├── Models/                  → User.EffectiveDisplayName, Initials, validation
-└── Infra/                   → PostgresFixture (Testcontainers)
-```
-
-### Coverage por área (aproximado)
-
-| Área | Cobertura | Notas |
+| Item | Replaced by | Notes |
 |---|---|---|
-| **Crypto / Auth** | Alta | Argon2, AES-GCM, TOTP, recovery codes, sessions, audit. |
-| **DHCP hot path** | Alta | Parser + serializer zero-alloc verificados; counters; send seam. |
-| **DHCP business logic** | Media-Alta | Subnet/lease/failover/DDNS con Postgres real (Testcontainers). |
-| **Firewall apply** | Media | Generation + rollback. Falta más cobertura sobre QoS classes. |
-| **Network config** | Media | Distro detection + writers. Falta integración real con `ip` cmd. |
-| **Web filters / helpers** | Alta | RequireElevated, validation→ServiceResponse, HX-Trigger merge. |
-| **Daemon API** | Media | Endpoints clave, integration con Web vía DaemonClient real. |
-| **WAN monitor** | Baja | Pendiente sustituir bash watchdog por logic testeable. |
-| **TUI** | Media | Label builder de RecoveryScreen, validación de NetworkInterfacesScreen, transiciones de UserSessionState, binding de `DaemonOptions.AcceptedPeerUids` (la pieza que install.sh escribe en daemon.env). El flujo Spectre interactivo no es unit-testeable sin TTY. |
-| **`.deb` / ISO live-build** | N/A | Validación al integrarse en el builder Debian (Fase 5). |
+| `/root/firewall.sh` (or `Bash/firewall.sh`) | `netfirewall-bootstrap.service` + DB-driven `fw_policy_rules` + `fw_route_tables` | Old script issued `ip rule add` and `ip route add` directly; now reconciled by `IPolicyRoutingApplyService` from DB. |
+| `NetFirewall.WanMonitor` (standalone process) | `WanHealthMonitorService` (HostedService inside the daemon) | Old monitor shelled out and had no DB state. New one persists `wan_health_state` + `wan_health_events`. |
+| `netfirewall-wanmonitor.service` | (none — absorbed into daemon) | Disable + remove if upgrading from a pre-2026-05 deployment. |
+| `BashCommandsConfig.Extra{Primary,Secondary}Commands` | Daemon-driven Apply endpoints | Old WanMonitor invoked these bash lists on failover; daemon now does the equivalent declaratively. |
 
-### Estrategia de testing aplicada
+## 📖 Docs
 
-- **Tier P0 (seguridad):** primero, cubierto. Argon2, AES-GCM, sessions, TOTP enrollment + verify, recovery codes, step-up, audit log.
-- **Tier P1 (lógica de negocio + integración real):** mayoritariamente cubierto. Postgres real para servicios DB-heavy (no mocks de SQL); Unix socket real para DaemonClient; ArrayPool real para DhcpPacketContext.
-- **Tier P2 (filtros web, helpers, controllers):** cubierto. Filtros validation, HX-Trigger merge, pipelines de respuesta HTMX.
-- **Sin reflection ni Castle dynamic-mock-the-private-method:** el test seam se construye con `internal virtual` + `InternalsVisibleTo`, o subclase de prueba (`RecordingDhcpWorker`). Honesto y rápido.
+- [`docs/DEPLOY_HANDOFF.md`](docs/DEPLOY_HANDOFF.md) — current deployment state + handoff notes
+- [`docs/PerformanceAnalysis.md`](docs/PerformanceAnalysis.md) — DHCP hot path budget + zero-allocation rules
+- [`docs/DHCP_FEATURE_COMPARISON.md`](docs/DHCP_FEATURE_COMPARISON.md) — feature parity vs isc-dhcp / kea
+- [`CLAUDE.md`](CLAUDE.md) — project rules (non-negotiable)
 
-> Antes de tocar el hot-path DHCP, lee [`docs/PerformanceAnalysis.md`](./docs/PerformanceAnalysis.md). Las reglas zero-allocation (Span/stackalloc/ArrayPool) son obligatorias.
+## 📜 License
+
+MIT — see [LICENSE.txt](LICENSE.txt).
 
 ---
 
-## Despliegue en producción
+<a id="español"></a>
 
-Producción son **dos units systemd** (`netfirewall-daemon` con `CAP_NET_ADMIN`/`CAP_DAC_OVERRIDE`/`CAP_NET_RAW` y nada más; `netfirewall-web` con cero capabilities) detrás de **nginx con TLS**. Toda la plomería vive bajo `deploy/`:
+# 🇪🇸 Español
+
+## 📸 Panel principal
+
+![Panel de NetFirewall](docs/images/dashboard.png)
+
+Vista única consolidada: KPIs arriba, gráfica de tráfico + eventos críticos en segunda fila, salud de servicios + WAN, subnets, top talkers y atajos operativos.
+
+## ✨ Qué hace
+
+| Módulo | Lo que obtienes |
+|---|---|
+| 🛡️ **Firewall** | Ruleset de nftables generado desde la DB — filter rules, NAT, port forwards, mangle, traffic marks. Apply con un click; backup antes de cada push. |
+| 📡 **Servidor DHCP** | Servidor RFC 2131 en C# puro con PXE boot, subnets/pools/exclusiones/reservas MAC/DDNS, raw sockets AF_PACKET para manejar DISCOVER sin IP. |
+| 🌐 **Failover dual-WAN** | Health monitor en el daemon pinguea cada WAN vía fwmark de policy routing (para que el probe salga por el enlace correcto), con histéresis (3 fallos → down, 5 éxitos → up). Cambio automático de default route. |
+| 🔐 **VPN WireGuard** | Ambos modos: hub-server con N peers Y cliente-saliente a un servidor remoto. Importación de archivos `/etc/wireguard/*.conf` existentes hacia la DB. |
+| 📊 **QoS (tc HTB)** | Hierarchical Token Bucket por interface con porcentajes de banda por traffic mark. |
+| 🛣️ **Policy routing** | `fw_route_tables` + `fw_policy_rules` modelan `ip rule` + `ip route` declarativamente. El daemon reconcilia `/etc/iproute2/rt_tables` + estado del kernel. |
+| 📈 **Monitoreo** | Health de servicios systemd, alcance WAN, top talkers (sampler de conntrack), gráficas de tráfico, detector de pending changes. |
+| 👤 **Auth** | Session cookies, enrollment TOTP + recovery codes, elevation para ops destructivas, audit log completo. |
+
+## 🏗️ Arquitectura
+
+```mermaid
+graph TB
+    subgraph Navegador
+        UI[Web UI · HTMX + Alpine.js + Tailwind]
+    end
+
+    subgraph "Capa Web · usuario netfirewall-web"
+        WEB[NetFirewall.Web · ASP.NET Core MVC]
+    end
+
+    subgraph "Capa privilegiada · root + CAP_NET_*"
+        D[NetFirewall.Daemon]
+        D --> HM[WanHealthMonitorService]
+        D --> CS[ConntrackSamplerService]
+        D --> SW[ScheduleWatcherService]
+        D --> MC[MetricsCollectorService]
+        D --> AP[AuditPrunerService]
+    end
+
+    subgraph "Unidades independientes"
+        DHCP[NetFirewall.DhcpServer · UDP/67]
+        BS[netfirewall-bootstrap · oneshot al boot]
+    end
+
+    subgraph "Persistencia"
+        PG[(PostgreSQL · net_firewall)]
+    end
+
+    subgraph Kernel
+        NFT[nftables ruleset]
+        IPR[ip rule + ip route]
+        TC[tc HTB]
+        WG[wg0 interface]
+    end
+
+    UI -.HTTPS vía nginx.-> WEB
+    WEB -.Unix socket SO_PEERCRED.-> D
+    BS -.Apply al boot.-> D
+    WEB <--> PG
+    D <--> PG
+    DHCP <--> PG
+    D --> NFT
+    D --> IPR
+    D --> TC
+    D --> WG
+    HM --> IPR
+```
+
+El daemon es el único proceso que muta el kernel. El Web corre sin capabilities, y se comunica con el daemon vía Unix socket protegido por `SO_PEERCRED` + session token. La configuración persistente vive en PostgreSQL; el estado del kernel es una vista derivada que el daemon reconcilia bajo demanda.
+
+## ⚙️ Componentes
 
 ```
-deploy/
-  systemd/                              units endurecidos
-  config/{daemon,web}.json.template     appsettings (modo 0640)
-  env/{daemon,web}.env.template         secretos — modo 0600/0640
-  nginx/netfirewall.conf                proxy reverso TLS
-  man/netfirewall-tui.1                 manpage de la TUI
-  completion/netfirewall-tui            bash completion de la TUI
-  install.sh                            instalador idempotente
-  uninstall.sh                          inverso (--purge limpia datos)
-  README.txt                            handbook operacional
-  debian/                               (en curso) sources debhelper para .deb
-  iso/                                  (en curso) config live-build para ISO
+NetFirewall/
+├── NetFirewall.Daemon           # HTTP sobre Unix socket privilegiado — toda mutación del kernel pasa aquí
+├── NetFirewall.Web              # ASP.NET Core MVC — HTMX + Alpine.js + Tailwind 4
+├── NetFirewall.DhcpServer       # RFC 2131 + PXE — unidad systemd independiente
+├── NetFirewall.Tui              # TUI en Spectre.Console para admin de emergencia
+├── NetFirewall.Services         # Lógica de negocio + Npgsql + sql/migrations/
+├── NetFirewall.Models           # POCOs (DHCP, Firewall, Vpn, WanMonitor, Auth)
+├── NetFirewall.Migrations       # Runner SQL forward-only
+├── NetFirewall.Benchmarks       # BenchmarkDotNet para validar hot paths
+├── NetFirewall.Tests            # xUnit + Aspire.Hosting.Testing
+└── deploy/
+    ├── systemd/                 # Units endurecidas
+    ├── bootstrap/               # Script /usr/local/bin/netfirewall-bootstrap
+    ├── nginx/                   # Ejemplo de reverse proxy
+    ├── seeds/                   # Seed SQL por deployment
+    └── install.sh               # Instalador one-shot
 ```
 
-Instalar en Debian/Ubuntu/Rocky/Alma/openSUSE con .NET 10 SDK + PostgreSQL 14+ + systemd 250+:
+## 🚀 Inicio rápido
+
+### Requisitos
+
+- 🐧 Debian 13 / Ubuntu 24.04 / Rocky 9 (systemd moderno + kernel 5.x+)
+- 🟣 .NET 10 SDK + runtime
+- 🐘 PostgreSQL 14+
+- 🔧 Paquetes `nftables`, `iproute2`, `wireguard-tools`, `conntrack`
+- 🌐 nginx (o cualquier reverse proxy) para terminar TLS
+
+### Instalación
 
 ```bash
-sudo deploy/install.sh
+git clone https://github.com/your-org/NetFirewall /opt/tekium/src
+cd /opt/tekium/src
+deploy/install.sh
 ```
 
-`install.sh` publica los cinco binarios (daemon, web, **tui**, migrations, wanmonitor), crea el grupo `netfirewall` + el usuario `netfirewall-web`, genera la master key AES-256, escribe `daemon.env` con `Daemon__AcceptedPeerUids` poblado con el UID del Web **y** root (para que `sudo netfirewall-tui` desde consola alcance el socket), aplica migraciones, deja la TUI en `/usr/local/bin/netfirewall-tui` con manpage en `/usr/local/share/man/man1/` y completion en `/etc/bash_completion.d/`, y arranca ambas unidades systemd.
+El instalador publica los cinco binarios (`daemon`, `web`, `dhcp-server`, `migrations`, `tui`), crea el grupo `netfirewall` + usuario `netfirewall-web`, prepara `/etc/netfirewall/`, `/var/lib/netfirewall/`, `/var/log/netfirewall/`, genera una llave maestra AES-256 para cifrar TOTP, aplica todas las migraciones y arranca los servicios.
 
-Para detalles de hardening (capabilities, `ProtectSystem`, `SystemCallFilter`, manejo de la master key AES-256 para cifrado de secretos TOTP, modelo de privilegios Web ↔ Daemon vía Unix socket): ver [`deploy/README.txt`](./deploy/README.txt) y [`CLAUDE.md`](./CLAUDE.md).
+### Verificación
 
-> **Próximo paso de despliegue (Fase 5 — NetFirewall OS, en curso):** dos capas que reemplazan al `install.sh` para entornos no desarrollables.
->
-> 1. **`.deb` package** bajo `deploy/debian/` — `apt install netfirewall` instala las cinco unidades publish, las units systemd, manpage y completion; el `postinst` porta la lógica de creación de usuarios + master key + migraciones.
-> 2. **`live-build` ISO** bajo `deploy/iso/` — bakea el `.deb` en una ISO Debian-based con preseed unattended; primer boot suelta el bootstrap token para enrolar al primer admin con TOTP. Snapshot LVM antes de cada apply queda como TODO de v0.6.
->
-> Esta fase se desarrolla **sobre Debian 13 directamente** (no macOS) — el toolchain (`debuild`, `dpkg-buildpackage`, `lintian`, `live-build`, `debootstrap`) es Linux-only.
+```bash
+systemctl status netfirewall-*
+nft list ruleset | head
+curl -sS https://fw.example.com/login
+```
+
+Abre `https://fw.example.com/setup/bootstrap?token=<token-impreso-en-journalctl>` para crear el primer admin.
+
+## 🔄 Workflow de apply al boot
+
+```mermaid
+sequenceDiagram
+    participant systemd
+    participant Daemon as netfirewall-daemon
+    participant Bootstrap as netfirewall-bootstrap
+    participant Kernel
+    participant DB as PostgreSQL
+
+    systemd->>Daemon: start
+    Daemon->>Daemon: sd_notify READY=1
+    systemd->>Bootstrap: start (After=daemon)
+    Bootstrap->>Daemon: curl unix:///run/netfirewall/control.sock
+    Note over Daemon: Middleware RootPeerBypass<br/>acepta uid=0 sin sesión
+    Bootstrap->>Daemon: POST /v1/firewall/apply
+    Daemon->>DB: SELECT fw_filter_rules, fw_nat_rules, ...
+    Daemon->>Kernel: nft -f /etc/nftables.conf
+    Bootstrap->>Daemon: POST /v1/firewall/apply-qos
+    Daemon->>Kernel: tc qdisc / class / filter
+    Bootstrap->>Daemon: POST /v1/firewall/apply-policy-routing
+    Daemon->>Kernel: ip rule + ip route + /etc/iproute2/rt_tables
+    Bootstrap->>Daemon: POST /v1/wireguard/apply
+    Daemon->>Kernel: wg-quick up wg0
+    Note over Daemon,Kernel: WanHealthMonitorService<br/>polling cada 30s
+```
+
+## 🌐 Failover dual-WAN
+
+El `WanHealthMonitorService` del daemon corre cada 30s por defecto. Para cada fila habilitada de `wan_health_config`:
+
+1. **Probe** — `ping -m <fwmark>` a cada target. El fwmark fuerza al kernel a respetar `ip rule fwmark X lookup wanN`, por lo que el probe sale por la WAN que se está probando incluso cuando el main table apunta a otra.
+2. **Histéresis** — 3 fallos consecutivos marcan la WAN como `is_up=false`; 5 éxitos consecutivos la marcan como `is_up=true`.
+3. **Reconciliación** — gana la WAN healthy con menor priority. Si cambió el ganador, `ip route replace default via <gw> dev <iface>` en la tabla main.
+4. **Auditoría** — `wan_health_events` registra cada transición; `fw_apply_history` registra cada failover.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Degrading: ping falla
+    Degrading --> Healthy: ping ok
+    Degrading --> Down: 3 fallos consecutivos
+    Down --> Recovering: ping ok
+    Recovering --> Down: ping falla
+    Recovering --> Healthy: 5 éxitos consecutivos
+    Down --> [*]: removida del config
+```
+
+## 🗄️ Esquema de DB (26 migraciones)
+
+| Rango | Dominio |
+|---|---|
+| `00001–00004` | Extensions + firewall core (interfaces, filter/NAT/mangle rules, traffic marks, static routes, QoS, audit log) |
+| `00005–00010` | DHCP (legacy + subnets + pools + opciones + relay + failover + DDNS + setup wizard) |
+| `00011` | Auth (users, sessions, secrets TOTP, auth audit log) |
+| `00012–00013` | Métricas del sistema + app settings |
+| `00014, 00021` | WireGuard (servers, peers, modos server/client) |
+| `00015–00020` | Network objects, FQDN sets, perfil de usuario, search index, schedules, services |
+| `00022` | Apply history (detección de drift por kind) |
+| `00023` | Policy routing (named tables + reglas fwmark) |
+| `00024` | LAN traffic samples (top talkers desde conntrack) |
+| `00025–00026` | WAN health + probe fwmark |
+
+Forward-only; la tabla `__migrations` guarda el SHA-256 de cada archivo aplicado para detectar drift.
+
+## 🔐 Hardening
+
+- **Separación de privilegios** — Daemon corre como root con `CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_NET_RAW CAP_CHOWN`. Web corre como `netfirewall-web` sin capabilities. Bootstrap es un oneshot que invoca al daemon vía Unix socket.
+- **Sandbox de systemd** — `ProtectSystem=strict`, `ProtectKernelTunables/Modules/Logs`, `RestrictAddressFamilies` ajustadas por servicio (AF_PACKET para DHCP, AF_NETLINK para daemon), `SystemCallFilter=@system-service` menos `@mount @swap @reboot @raw-io`.
+- **Flujo de auth** — Session cookie solo sobre HTTPS, TOTP obligatorio en el primer login, **elevation** (re-prompt TOTP) para endpoints destructivos (`apply firewall`, `update interface`, etc.).
+- **Cifrado de TOTP** — la master key vive solo dentro del daemon (cargada desde `/etc/netfirewall/daemon.env`). El Web hace `POST /v1/crypto/encrypt|decrypt` por el Unix socket — un compromiso del Web no puede descifrar los secrets almacenados.
+
+## 🛠️ Operaciones
+
+### Apply manual vía curl (con bypass de root peer)
+
+```bash
+SOCK=/run/netfirewall/control.sock
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-qos
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-policy-routing
+curl --unix-socket "$SOCK" -X POST http://daemon/v1/wireguard/apply
+```
+
+### Migraciones
+
+```bash
+bin/db.sh status   # qué está aplicado / pendiente / con drift
+bin/db.sh up       # aplica pendientes
+bin/db.sh seed     # aplica seed demo (SOLO DEV)
+```
+
+### Audit + apply history
+
+```sql
+SELECT event_type, username, ip, occurred_at FROM auth_audit_log ORDER BY occurred_at DESC LIMIT 20;
+SELECT kind, success, applied_at, applied_by, message FROM fw_apply_history ORDER BY applied_at DESC LIMIT 20;
+```
+
+## ⚠️ Obsoleto
+
+Estos artefactos quedan en el repo como referencia pero ya no se usan en producción:
+
+| Componente | Reemplazado por | Notas |
+|---|---|---|
+| `/root/firewall.sh` (o `Bash/firewall.sh`) | `netfirewall-bootstrap.service` + `fw_policy_rules` + `fw_route_tables` desde DB | El script viejo hacía `ip rule add` y `ip route add` directo; ahora lo reconcilia `IPolicyRoutingApplyService` desde la DB. |
+| `NetFirewall.WanMonitor` (proceso standalone) | `WanHealthMonitorService` (HostedService dentro del daemon) | El monitor viejo shelleaba comandos y no tenía estado en DB. El nuevo persiste `wan_health_state` + `wan_health_events`. |
+| `netfirewall-wanmonitor.service` | (ninguno — absorbido al daemon) | Desactiva y elimina si vienes de un deploy pre-2026-05. |
+| `BashCommandsConfig.Extra{Primary,Secondary}Commands` | Endpoints de Apply del daemon | El WanMonitor viejo ejecutaba esas listas de bash en failover; el daemon ahora hace lo equivalente declarativamente. |
+
+## 📖 Documentación
+
+- [`docs/DEPLOY_HANDOFF.md`](docs/DEPLOY_HANDOFF.md) — estado del deployment + notas de handoff
+- [`docs/PerformanceAnalysis.md`](docs/PerformanceAnalysis.md) — budget del hot path DHCP + reglas zero-allocation
+- [`docs/DHCP_FEATURE_COMPARISON.md`](docs/DHCP_FEATURE_COMPARISON.md) — paridad de features vs isc-dhcp / kea
+- [`CLAUDE.md`](CLAUDE.md) — reglas del proyecto (no negociables)
+
+## 📜 Licencia
+
+MIT — ver [LICENSE.txt](LICENSE.txt).
 
 ---
 
-## DHCP — notas RFC 2131 y performance
+<div align="center">
 
-Resumen rápido del diálogo cliente↔servidor que el `DhcpServer` implementa:
+**Built with ❤️ in C# / .NET 10 · Powered by PostgreSQL + nftables**
 
-1. **DHCPDISCOVER** — cliente broadcast (Option 53 = 1) con su MAC en Option 61.
-2. **DHCPOFFER** — servidor responde (Option 53 = 2) con `yiaddr`, server identifier (Option 54), subnet/router/DNS/lease time.
-3. **DHCPREQUEST** — cliente elige una offer (Option 53 = 3) e identifica al server elegido (Option 54).
-4. **DHCPACK** — server confirma (Option 53 = 5) con lease time + T1 (renew) + T2 (rebind).
-5. **DHCPNAK** — server niega si la IP ya no está disponible (Option 53 = 6).
-
-Mensajes adicionales: **DHCPDECLINE** (cliente detecta IP duplicada), **DHCPRELEASE** (libera el lease), **DHCPINFORM** (cliente con IP estática pide solo opciones).
-
-**Lease management:** los timers T1 y T2 controlan el renew y rebind. T1 → unicast al server original; T2 → broadcast a cualquiera.
-
-**Hot path optimization:**
-
-- Pipeline: UDP receive → bounded `Channel<DhcpPacketContext>` (capacity 1024) → consumer parse + dispatch + reply.
-- Parser usa `ReadOnlySpan<byte>` end-to-end; serializer rentea de `ArrayPool<byte>`.
-- `LeaseCache` (singleton, write-through a Postgres) responde la mayoría de los lookups O(1) sin tocar DB.
-- `DhcpSubnetService` (singleton) cachea subnets, pools, exclusiones, y CIDR pre-parseado para `FindSubnetContainingIp` zero-alloc.
-- Counters per-message-type observables vía `internal long` properties (Discover/Request/Release inbound; Offer/Ack/Nak outbound) — el log periódico los reporta cada minuto.
-
-**Antes de tocar el hot-path:** lee [`docs/PerformanceAnalysis.md`](./docs/PerformanceAnalysis.md). Documenta el budget de latencia per-stage (150-550µs/paquete, dominado por el DB round-trip) y las reglas zero-allocation obligatorias.
-
----
-
-## Roadmap
-
-### Shipped (hasta v0.4)
-- [x] **TUI sobre TTY** — Spectre.Console + mismo daemon socket. Login single-step (user + pwd + TOTP/recovery), `NetworkInterfacesScreen` (list/edit/apply IP/máscara/gateway/MAC/MTU), `RecoveryScreen` (root-peer-only break-glass: reset password / disable TOTP / clear lockout), distribución por `install.sh` con manpage + bash completion + symlink + multi-UID peer-cred.
-- [x] Buffer pool refactor en `IDhcpServerService` (`DhcpResponseBuffer`) — elimina el `new byte[offset]` por respuesta, validado por bench (`Allocated: -`).
-- [x] Per-message-type counters en `DhcpWorker` para monitoreo.
-- [x] FQDN support en network objects con DNS resolver + cache.
-- [x] Schedules con timezone + watcher que re-aplica nft al cambiar estado.
-
-### En curso (v0.5 — Fase 5: NetFirewall OS)
-- [ ] **`.deb` package** bajo `deploy/debian/` — `apt install netfirewall` con `postinst` que porta `install.sh`. Hoy: `control`, `rules`, `changelog`, `compat` listos; falta `postinst` / `prerm` / `postrm` / `install` / `copyright` / `source/format`.
-- [ ] **`live-build` ISO** bajo `deploy/iso/` — Debian-based con preseed unattended, consume el `.deb` vía `package-lists/`. Hoy: árbol de directorios listo; falta el contenido (`auto/{config,build}`, preseed, hooks, package-lists, `includes.chroot/etc/netfirewall/`).
-- [ ] UI completa de WireGuard con QR para móviles.
-- [ ] DNS resolver integrado (Unbound o BIND embebido).
-
-### Medio plazo (v0.6)
-- [ ] Bridges + bonds en network config.
-- [ ] IPv6 first-class en DHCP (DHCPv6) y firewall (nft `ip6` family).
-- [ ] Snapshot LVM/btrfs antes de cada apply destructivo.
-- [ ] Tail/`journalctl` viewer dentro de la TUI (troubleshoot sin salir).
-- [ ] TUI: ver/editar firewall rules (escala el use case más allá de network).
-- [ ] E2E integration tests con Testcontainers Postgres + Kestrel-on-UDS para `IDaemonClient` real.
-
-### Largo plazo (v1.0)
-- [ ] Captive portal.
-- [ ] Cluster HA (active/passive con keepalived + replicación logical Postgres).
-- [ ] Plugin/marketplace para reglas comunitarias (block-lists, GeoIP).
-
----
-
-## Contribuir
-
-Si te interesa colaborar, eres bienvenido. Antes de abrir un PR:
-
-1. Lee [`CLAUDE.md`](./CLAUDE.md) — las 10 reglas no negociables aplican a todo el código.
-2. Asegúrate de que `dotnet build` y `dotnet test` pasen verde.
-3. Para cambios de schema: nueva migración, **nunca** edites una ya aplicada.
-4. Para cambios de UI: usa los tokens semánticos del theme; cero hex literales, cero `<style>` inline.
-5. Si tu cambio afecta la pipeline DHCP: corre el bench/profile manualmente y nota el impacto en el PR.
-6. Tests primero (TDD bienvenido). Si tu cambio afecta lógica, debe haber un test que falle antes y pase después.
-
-Issues, ideas y discusión: usa la pestaña Issues del repo. Para PRs grandes, abre primero un issue describiendo el approach.
-
----
-
-## Licencia
-
-Por definir. Hasta entonces, considera "todos los derechos reservados" pero siéntete libre de leer, fork-ear para experimentar, y abrir issues / PRs.
+</div>
