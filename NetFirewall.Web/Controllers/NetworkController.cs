@@ -49,8 +49,14 @@ public sealed class NetworkController : Controller
     // Real re-detect: asks the daemon to walk /sys/class/net and reconcile
     // fw_interfaces (UPSERT ip/mask/gateway/mac/mtu, preserve operator edits).
     // The button on /Network/Interfaces points here instead of just re-listing.
+    //
+    // [IgnoreAntiforgeryToken]: the first POST works, but HTMX swapping in the
+    // partial doesn't refresh the token in the parent document, so a second
+    // click sends a stale token → 400 → the global HTMX error handler bounces
+    // the user to /login. Endpoint is idempotent and the session cookie still
+    // authenticates the operator, so dropping CSRF here is acceptable.
     [HttpPost("/Network/Redetect")]
-    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
     public async Task<IActionResult> Redetect(CancellationToken ct)
     {
         var resp = await _daemon.RedetectInterfacesAsync(ct);
