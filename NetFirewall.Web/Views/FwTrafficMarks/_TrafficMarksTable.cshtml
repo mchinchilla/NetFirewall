@@ -22,7 +22,7 @@ else
                 {
                     <tr>
                         <td class="px-5 py-3 font-medium">@m.Name</td>
-                        <td class="px-5 py-3 font-mono text-xs">@m.MarkValue · 0x@m.MarkValue.ToString("X")</td>
+                        <td class="px-5 py-3 font-mono text-xs">@m.MarkValue · 0x@(m.MarkValue.ToString("X"))</td>
                         <td class="px-5 py-3 hidden md:table-cell font-mono text-xs">@(m.RouteTable ?? "—")</td>
                         <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">@(m.Description ?? "—")</td>
                         <td class="px-5 py-3 text-right">

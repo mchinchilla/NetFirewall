@@ -1,11 +1,27 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Firewall;
 using NetFirewall.Services.Network;
 using Npgsql;
 
 namespace NetFirewall.Services.Firewall;
+
+/// <summary>System.Text.Json converter for <see cref="IPAddress"/>. The default
+/// reflection-based serializer touches the <c>ScopeId</c> getter, which throws
+/// <see cref="SocketException"/> ("Operation not supported") on IPv6 addresses
+/// that aren't link-local — breaking audit-log writes whenever an interface
+/// has any IPv6 attached. Stringify with <c>ToString()</c> instead.</summary>
+internal sealed class IPAddressJsonConverter : JsonConverter<IPAddress>
+{
+    public override IPAddress? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.GetString() is { } s ? IPAddress.Parse(s) : null;
+
+    public override void Write(Utf8JsonWriter writer, IPAddress value, JsonSerializerOptions options)
+        => writer.WriteStringValue(value.ToString());
+}
 
 /// <summary>
 /// Firewall service for managing nftables configuration stored in PostgreSQL.
@@ -17,6 +33,11 @@ public sealed class FirewallService : IFirewallService
     private readonly INetworkObjectResolver _objectResolver;
     private readonly INetworkServiceResolver _serviceResolver;
     private readonly ILogger<FirewallService> _logger;
+
+    private static readonly JsonSerializerOptions AuditJsonOptions = new()
+    {
+        Converters = { new IPAddressJsonConverter() }
+    };
 
     public FirewallService(
         NpgsqlDataSource dataSource,
@@ -1378,8 +1399,8 @@ public sealed class FirewallService : IFirewallService
             cmd.Parameters.AddWithValue("table", tableName);
             cmd.Parameters.AddWithValue("record", recordId);
             cmd.Parameters.AddWithValue("action", action);
-            cmd.Parameters.AddWithValue("old", oldValues != null ? JsonSerializer.Serialize(oldValues) : DBNull.Value);
-            cmd.Parameters.AddWithValue("new", newValues != null ? JsonSerializer.Serialize(newValues) : DBNull.Value);
+            cmd.Parameters.AddWithValue("old", oldValues != null ? JsonSerializer.Serialize(oldValues, AuditJsonOptions) : DBNull.Value);
+            cmd.Parameters.AddWithValue("new", newValues != null ? JsonSerializer.Serialize(newValues, AuditJsonOptions) : DBNull.Value);
             cmd.Parameters.AddWithValue("user", userId ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("created", DateTime.UtcNow);
 
