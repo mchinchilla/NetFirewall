@@ -97,16 +97,38 @@
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Overview</p>
         <h1 class="text-2xl font-semibold tracking-tight">Network at a glance</h1>
     </div>
-    <div class="flex items-center gap-2">
-        <a href="@Url.Action("Index", "Monitoring")" class="btn btn-ghost">
+    <div class="flex items-center gap-2 flex-wrap">
+        <a href="@Url.Action("Index", "Monitoring")" class="btn btn-ghost" title="Live system metrics">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"/></svg>
-            Live monitoring
+            Monitoring
         </a>
-        <a href="@Url.Action("Index", "FwApply")" class="btn btn-primary">
+        <a href="@Url.Action("Index", "WireGuard")" class="btn btn-ghost" title="Manage VPN">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+            VPN
+        </a>
+        <a href="@Url.Action("Index", "FwApply")" class="btn btn-primary" title="Push DB state to kernel">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
             Apply firewall
         </a>
     </div>
+</div>
+
+@* KPI cards — first row so the operator sees counts at a glance. *@
+@{
+    // Tailwind JIT only sees literal class names — keep one literal per branch.
+    var kpiGridCls = kpis.Count switch
+    {
+        6 => "xl:grid-cols-6",
+        5 => "xl:grid-cols-5",
+        _ => "xl:grid-cols-4"
+    };
+}
+<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 @kpiGridCls mb-6"
+     style="animation: var(--animate-slide-up); animation-delay: 20ms;">
+    @foreach (var kpi in kpis)
+    {
+        @await Html.PartialAsync("_KpiCard", kpi)
+    }
 </div>
 
 @* Pending-changes banner: only renders when there's drift from kernel state. *@
@@ -115,7 +137,7 @@
 }
 @if (pendingWithChanges.Count > 0)
 {
-    <div class="card mb-4 border-l-4" style="border-left-color: var(--feedback-warning-bd); animation: var(--animate-slide-up); animation-delay: 30ms;">
+    <div class="card mb-4 border-l-4" style="border-left-color: var(--feedback-warning-bd); animation: var(--animate-slide-up); animation-delay: 40ms;">
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <p class="text-sm font-semibold">Pending changes — DB ahead of kernel</p>
@@ -231,24 +253,6 @@
             </ul>
         }
     </section>
-</div>
-
-@* KPI cards *@
-@{
-    // Tailwind JIT only sees literal class names — keep one literal per branch.
-    var kpiGridCls = kpis.Count switch
-    {
-        6 => "xl:grid-cols-6",
-        5 => "xl:grid-cols-5",
-        _ => "xl:grid-cols-4"
-    };
-}
-<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 @kpiGridCls mb-6"
-     style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-    @foreach (var kpi in kpis)
-    {
-        @await Html.PartialAsync("_KpiCard", kpi)
-    }
 </div>
 
 @* Two-column area: chart + activity *@
@@ -393,4 +397,127 @@
             </table>
         </div>
     }
+</section>
+
+@* Top talkers — hosts and services side by side. Data comes from
+   ConntrackSamplerService running in the daemon every 30s. Empty when the
+   sampler hasn't been running long enough or conntrack-tools aren't installed. *@
+<div class="grid gap-4 grid-cols-1 xl:grid-cols-2 mt-6"
+     style="animation: var(--animate-slide-up); animation-delay: 300ms;">
+    <section class="card">
+        <header class="flex items-baseline justify-between mb-3">
+            <div>
+                <h2 class="text-base font-semibold">Top hosts (24h)</h2>
+                <p class="text-xs text-surface-fg-muted">By total bytes — sampled from conntrack</p>
+            </div>
+        </header>
+        @if (Model.TopHosts.Count == 0)
+        {
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No samples yet. Daemon needs ~30s of warm-up.</p>
+        }
+        else
+        {
+            var maxHostBytes = Model.TopHosts.Max(h => h.TotalBytes);
+            <ul class="space-y-3">
+                @foreach (var h in Model.TopHosts)
+                {
+                    var pct = maxHostBytes > 0 ? (double)h.TotalBytes / maxHostBytes * 100 : 0;
+                    <li>
+                        <div class="flex items-baseline justify-between text-sm">
+                            <div class="min-w-0">
+                                <span class="font-mono font-medium">@h.Label</span>
+                                @if (!string.IsNullOrEmpty(h.Sublabel))
+                                {
+                                    <span class="text-xs text-surface-fg-muted ml-2">@h.Sublabel</span>
+                                }
+                            </div>
+                            <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
+                                ↓ @FmtBytes(h.BytesIn) · ↑ @FmtBytes(h.BytesOut)
+                            </div>
+                        </div>
+                        <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
+                            <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="card">
+        <header class="flex items-baseline justify-between mb-3">
+            <div>
+                <h2 class="text-base font-semibold">Top services (24h)</h2>
+                <p class="text-xs text-surface-fg-muted">By total bytes — proto + destination port</p>
+            </div>
+        </header>
+        @if (Model.TopServices.Count == 0)
+        {
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No samples yet.</p>
+        }
+        else
+        {
+            var maxSvcBytes = Model.TopServices.Max(s => s.TotalBytes);
+            <ul class="space-y-3">
+                @foreach (var s in Model.TopServices)
+                {
+                    var pct = maxSvcBytes > 0 ? (double)s.TotalBytes / maxSvcBytes * 100 : 0;
+                    <li>
+                        <div class="flex items-baseline justify-between text-sm">
+                            <div class="min-w-0">
+                                <span class="font-mono font-medium">@s.Label</span>
+                                @if (!string.IsNullOrEmpty(s.Sublabel))
+                                {
+                                    <span class="text-xs text-surface-fg-muted ml-2">@s.Sublabel</span>
+                                }
+                            </div>
+                            <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
+                                ↓ @FmtBytes(s.BytesIn) · ↑ @FmtBytes(s.BytesOut)
+                            </div>
+                        </div>
+                        <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
+                            <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>
+
+@* Quick actions — operational shortcuts. HTMX-posts to daemon, toasts on result.
+   Antiforgery comes from the global htmx:configRequest handler in site.js. *@
+<section class="card mt-6" style="animation: var(--animate-slide-up); animation-delay: 360ms;">
+    <header class="flex items-baseline justify-between mb-3">
+        <h2 class="text-base font-semibold">Quick actions</h2>
+        <span class="text-xs text-surface-fg-muted">Operational shortcuts</span>
+    </header>
+    <div class="grid gap-2 grid-cols-2 md:grid-cols-4">
+        <button type="button" class="btn btn-ghost text-sm justify-start"
+                hx-post="/Firewall/Apply/execute"
+                hx-swap="none"
+                hx-confirm="Reload nftables ruleset now?">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+            Reload firewall
+        </button>
+        <button type="button" class="btn btn-ghost text-sm justify-start"
+                hx-post="/Vpn/WireGuard/apply"
+                hx-swap="none"
+                hx-confirm="Re-apply WireGuard config?">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+            Restart wg0
+        </button>
+        <button type="button" class="btn btn-ghost text-sm justify-start"
+                hx-post="/Firewall/Apply/routing-execute"
+                hx-swap="none"
+                hx-confirm="Re-apply policy routing (ip rule + ip route)?">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+            Re-apply routing
+        </button>
+        <a href="@Url.Action("Index", "Monitoring")"
+           class="btn btn-ghost text-sm justify-start">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5m.75-9 3-3 2.148 2.148A12.061 12.061 0 0 1 16.5 7.605"/></svg>
+            Open logs
+        </a>
+    </div>
 </section>

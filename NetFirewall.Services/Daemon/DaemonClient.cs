@@ -216,6 +216,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         => PostAsync<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>(
             $"/v1/firewall/apply-policy-routing?dryRun={(dryRun ? "true" : "false")}", ct);
 
+    public Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default)
+        => GetAsync<TopTalkersDto>($"/v1/system/top-talkers?hours={hours}&limit={limit}", ct);
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

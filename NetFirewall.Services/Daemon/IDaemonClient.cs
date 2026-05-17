@@ -131,9 +131,20 @@ public interface IDaemonClient
 
     /// <summary><c>POST /v1/firewall/apply-policy-routing</c> — reconcile iproute2 with DB. Set <paramref name="dryRun"/> to preview without changes.</summary>
     Task<ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>> ApplyPolicyRoutingAsync(bool dryRun, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/top-talkers</c> — top N LAN hosts + services by bytes in the last N hours.</summary>
+    Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default);
 }
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);
 public sealed record WireGuardPskDto(string PresharedKey);
 
 public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string? Output, string? Error);
+
+/// <summary>
+/// Wire shape of the top-talkers endpoint. Hosts and services are independent
+/// lists — the dashboard shows both side-by-side.
+/// </summary>
+public sealed record TopTalkersDto(
+    IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerHost> Hosts,
+    IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerService> Services);

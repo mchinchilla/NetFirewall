@@ -111,6 +111,11 @@ builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorServ
                               NetFirewall.Services.Monitoring.SystemMonitorService>();
 builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemServiceHealthService,
                               NetFirewall.Services.Monitoring.SystemServiceHealthService>();
+builder.Services.AddScoped<NetFirewall.Services.Monitoring.ITopTalkersService,
+                           NetFirewall.Services.Monitoring.TopTalkersService>();
+builder.Services.Configure<NetFirewall.Services.Monitoring.ConntrackSamplerOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Monitoring.ConntrackSamplerOptions.SectionName));
+builder.Services.AddHostedService<NetFirewall.Services.Monitoring.ConntrackSamplerService>();
 builder.Services.AddScoped<NetFirewall.Services.Monitoring.IWanReachabilityService,
                            NetFirewall.Services.Monitoring.WanReachabilityService>();
 builder.Services.AddScoped<NetFirewall.Services.Firewall.IApplyHistoryService,

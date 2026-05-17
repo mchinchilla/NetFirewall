@@ -131,4 +131,10 @@ public sealed class NullDaemonClient : IDaemonClient
 
     public Task<ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>> ApplyPolicyRoutingAsync(bool dryRun, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>());
+
+    public Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<TopTalkersDto>.Ok(
+            new TopTalkersDto(Array.Empty<NetFirewall.Services.Monitoring.TopTalkerHost>(),
+                              Array.Empty<NetFirewall.Services.Monitoring.TopTalkerService>()),
+            "Daemon disabled."));
 }

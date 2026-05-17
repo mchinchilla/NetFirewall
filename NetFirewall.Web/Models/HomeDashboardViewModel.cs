@@ -43,6 +43,20 @@ public sealed class HomeDashboardViewModel
     public IReadOnlyList<WanStatusSummary> WanStatus { get; init; } = [];
     /// <summary>Per-kind (nftables/tc/wireguard) pending change counts vs last successful Apply.</summary>
     public IReadOnlyList<PendingApplySummary> PendingChanges { get; init; } = [];
+
+    /// <summary>Top N hosts by bytes — populated from conntrack samples.</summary>
+    public IReadOnlyList<TopTalkerRow> TopHosts { get; init; } = [];
+    /// <summary>Top N services by bytes — same source.</summary>
+    public IReadOnlyList<TopTalkerRow> TopServices { get; init; } = [];
+}
+
+public sealed class TopTalkerRow
+{
+    public required string Label { get; init; }   // "192.168.99.10" or "tcp/443 (https)"
+    public string? Sublabel { get; init; }         // hostname for hosts, flow count for services
+    public required long BytesIn { get; init; }
+    public required long BytesOut { get; init; }
+    public long TotalBytes => BytesIn + BytesOut;
 }
 
 public sealed class SystemServiceStatus

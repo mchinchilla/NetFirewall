@@ -42,5 +42,25 @@ public static class SystemEndpoints
             var list = await history.RecentAsync(limit ?? 10, ct);
             return Results.Json(ServiceResponse<IReadOnlyList<ApplyHistoryEntry>>.Ok(list));
         });
+
+        // GET /v1/system/top-talkers?hours=24&limit=5 — top hosts + services.
+        grp.MapGet("/top-talkers", async (
+                ITopTalkersService svc,
+                int? hours,
+                int? limit,
+                CancellationToken ct) =>
+        {
+            var h = Math.Clamp(hours ?? 24, 1, 168);  // 1h .. 7d
+            var n = Math.Clamp(limit ?? 5, 1, 50);
+            var hostsTask    = svc.GetTopHostsAsync(h, n, ct);
+            var servicesTask = svc.GetTopServicesAsync(h, n, ct);
+            await Task.WhenAll(hostsTask, servicesTask);
+            return Results.Json(ServiceResponse<TopTalkersDto>.Ok(
+                new TopTalkersDto(hostsTask.Result, servicesTask.Result), "OK"));
+        });
     }
+
+    public sealed record TopTalkersDto(
+        IReadOnlyList<TopTalkerHost> Hosts,
+        IReadOnlyList<TopTalkerService> Services);
 }
