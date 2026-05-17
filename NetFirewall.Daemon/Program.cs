@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Runtime.Versioning;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -13,6 +14,8 @@ using NetFirewall.Services.Processes;
 using Npgsql;
 using RepoDb;
 using Serilog;
+
+[assembly: SupportedOSPlatform("linux")]
 
 var builder = WebApplication.CreateBuilder(args);
 

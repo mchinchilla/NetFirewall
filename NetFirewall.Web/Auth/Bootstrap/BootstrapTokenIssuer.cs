@@ -80,8 +80,10 @@ public sealed class BootstrapTokenIssuer : IHostedService
                 $"This token is one-time. Delete this file after first use.\n", ct);
 
             // Best-effort restrictive perms — Windows ignores chmod, that's fine.
+#pragma warning disable CA1416
             try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
             catch { /* not on a unix-y FS */ }
+#pragma warning restore CA1416
         }
         catch (Exception ex)
         {

@@ -12,28 +12,28 @@ public class DhcpResponse
     public byte[] Xid { get; set; }
     public ushort Secs { get; set; }
     public ushort Flags { get; set; }
-    public IPAddress CiAddr { get; set; }
-    public IPAddress YiAddr { get; set; }
-    public IPAddress SiAddr { get; set; }
-    public IPAddress GiAddr { get; set; }
-    public string ClientMac { get; set; }
-    public byte[] ChAddr { get; set; }
-    public string SName { get; set; }
-    public string File { get; set; }
+    public IPAddress CiAddr { get; set; } = IPAddress.Any;
+    public IPAddress YiAddr { get; set; } = IPAddress.Any;
+    public IPAddress SiAddr { get; set; } = IPAddress.Any;
+    public IPAddress GiAddr { get; set; } = IPAddress.Any;
+    public string ClientMac { get; set; } = string.Empty;
+    public byte[] ChAddr { get; set; } = Array.Empty<byte>();
+    public string SName { get; set; } = string.Empty;
+    public string File { get; set; } = string.Empty;
 
     // DHCP Options for Response:
     public DhcpMessageType MessageType { get; set; }
-    public IPAddress ServerIdentifier { get; set; }
-    public IPAddress SubnetMask { get; set; }
-    public IPAddress Router { get; set; }
-    public IPAddress[] DnsServers { get; set; }
-    public string DomainName { get; set; }
+    public IPAddress ServerIdentifier { get; set; } = IPAddress.Any;
+    public IPAddress SubnetMask { get; set; } = IPAddress.Any;
+    public IPAddress Router { get; set; } = IPAddress.Any;
+    public IPAddress[] DnsServers { get; set; } = Array.Empty<IPAddress>();
+    public string DomainName { get; set; } = string.Empty;
     public int LeaseTime { get; set; }
     public int RenewalTime { get; set; }
     public int RebindingTime { get; set; }
 
     public bool IsBootp { get; set; }
-    public IPEndPoint RemoteEndPoint { get; set; }
+    public IPEndPoint RemoteEndPoint { get; set; } = new(IPAddress.Any, 0);
 
     public DhcpResponse()
     {

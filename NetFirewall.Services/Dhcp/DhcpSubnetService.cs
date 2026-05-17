@@ -1050,7 +1050,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         cmd.Parameters.AddWithValue("id", pool.Id);
-        cmd.Parameters.AddWithValue("subnetId", pool.SubnetId);
+        cmd.Parameters.AddWithValue("subnetId", (object?)pool.SubnetId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("name", (object?)pool.Name ?? DBNull.Value);
         cmd.Parameters.AddWithValue("rangeStart", pool.RangeStart);
         cmd.Parameters.AddWithValue("rangeEnd", pool.RangeEnd);

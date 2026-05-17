@@ -412,7 +412,10 @@ public sealed class SystemMonitorService : ISystemMonitorService
             {
                 var stats = iface.GetIPStatistics();
 
-                // Some properties throw PlatformNotSupportedException on macOS/BSD
+                // Some properties throw PlatformNotSupportedException on macOS/BSD;
+                // SafeGetStat catches it. CA1416 only flags OutgoingPacketsDiscarded
+                // on this analyzer version — suppress locally.
+#pragma warning disable CA1416
                 metrics.Add(new NetworkMetrics
                 {
                     InterfaceName = iface.Name,
@@ -425,6 +428,7 @@ public sealed class SystemMonitorService : ISystemMonitorService
                     DropsReceived = SafeGetStat(() => stats.IncomingPacketsDiscarded),
                     DropsSent = SafeGetStat(() => stats.OutgoingPacketsDiscarded)
                 });
+#pragma warning restore CA1416
             }
             catch (PlatformNotSupportedException)
             {

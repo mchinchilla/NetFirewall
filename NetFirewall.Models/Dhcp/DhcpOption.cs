@@ -9,5 +9,5 @@ namespace NetFirewall.Models.Dhcp;
 public class DhcpOption
 {
     public byte Code { get; set; }
-    public byte[] Data { get; set; }
+    public byte[] Data { get; set; } = Array.Empty<byte>();
 }

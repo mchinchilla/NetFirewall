@@ -18,10 +18,10 @@ public class DhcpLease
 
     [NpgsqlDbType( NpgsqlDbType.MacAddr )]
     [Map( "mac_address" )]
-    public PhysicalAddress MacAddress { get; set; }
+    public PhysicalAddress MacAddress { get; set; } = PhysicalAddress.None;
 
-    [Map( "ip_address" )] 
-    public IPAddress IpAddress { get; set; }
+    [Map( "ip_address" )]
+    public IPAddress IpAddress { get; set; } = IPAddress.Any;
     [Map( "start_time" )] 
     public DateTime StartTime { get; set; }
     [Map( "end_time" )] 

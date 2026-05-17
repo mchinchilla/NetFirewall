@@ -11,7 +11,6 @@ using NetFirewall.Web.Models.Auth;
 
 namespace NetFirewall.Web.Controllers;
 
-[AllowAnonymous]
 public sealed class AuthController : Controller
 {
     private const int FailedThreshold = 5;
@@ -52,10 +51,10 @@ public sealed class AuthController : Controller
 
     // ---------------------------------------------------------------- /login
 
-    [HttpGet("/login")]
+    [HttpGet("/login"), AllowAnonymous]
     public IActionResult Login(string? returnUrl = null) => View(new LoginViewModel { ReturnUrl = returnUrl });
 
-    [HttpPost("/login"), ValidateAntiForgeryToken]
+    [HttpPost("/login"), ValidateAntiForgeryToken, AllowAnonymous]
     public async Task<IActionResult> Login(LoginViewModel model, CancellationToken ct)
     {
         if (!ModelState.IsValid) return View(model);
@@ -120,7 +119,7 @@ public sealed class AuthController : Controller
 
     // ---------------------------------------------------------- /login/totp
 
-    [HttpGet("/login/totp")]
+    [HttpGet("/login/totp"), AllowAnonymous]
     public IActionResult LoginTotp(string? returnUrl = null)
     {
         if (!_pending.TryRead(out _, out var stashedReturn, out _))
@@ -128,7 +127,7 @@ public sealed class AuthController : Controller
         return View(new LoginTotpViewModel { ReturnUrl = returnUrl ?? stashedReturn });
     }
 
-    [HttpPost("/login/totp"), ValidateAntiForgeryToken]
+    [HttpPost("/login/totp"), ValidateAntiForgeryToken, AllowAnonymous]
     public async Task<IActionResult> LoginTotp(LoginTotpViewModel model, CancellationToken ct)
     {
         if (!_pending.TryRead(out var userId, out var stashedReturn, out _))

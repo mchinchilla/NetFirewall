@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetFirewall.Models.Vpn;
@@ -18,6 +19,7 @@ public sealed class WireGuardApplyOptions
     public int CommandTimeoutSeconds { get; set; } = 30;
 }
 
+[SupportedOSPlatform("linux")]
 public sealed class WireGuardApplyService : IWireGuardApplyService
 {
     private readonly IWireGuardConfigService _config;

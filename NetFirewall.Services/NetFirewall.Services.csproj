@@ -8,15 +8,15 @@
 
   <ItemGroup>
     <PackageReference Include="AmpScm.RepoDb.PostgreSql.BulkOperations" Version="1.2026.412.489" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.7" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.7" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.8" />
     <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="Serilog" Version="4.3.1" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
-    <PackageReference Include="Otp.NET" Version="1.4.0" />
+    <PackageReference Include="Otp.NET" Version="1.4.1" />
   </ItemGroup>
 
   <ItemGroup>

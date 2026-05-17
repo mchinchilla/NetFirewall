@@ -10,7 +10,6 @@
     <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="RepoDb" Version="1.13.1" />
     <PackageReference Include="RepoDb.PostgreSql" Version="1.13.1" />
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
   </ItemGroup>
 
 </Project>

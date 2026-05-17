@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetFirewall.Services.Processes;
@@ -17,6 +18,7 @@ public sealed class TcApplyOptions
     public int CommandTimeoutSeconds { get; set; } = 30;
 }
 
+[SupportedOSPlatform("linux")]
 public sealed class TcApplyService : ITcApplyService
 {
     private readonly IFirewallService _firewall;

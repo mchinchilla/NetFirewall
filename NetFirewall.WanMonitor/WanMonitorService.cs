@@ -27,9 +27,6 @@ public class WanMonitorService : BackgroundService
     private readonly List<string>? _extraPrimaryCommands;
     private readonly List<string>? _extraSecondaryCommands;
 
-    private string? _currentInterface;
-    private string? _currentGateway;
-    private List<string>? _currentIPs;
     private bool _isFailoverActive = false;
     
 
@@ -61,15 +58,15 @@ public class WanMonitorService : BackgroundService
             var bashCommandsConfig = _configuration.GetSection( "BashCommands" ).Get<BashCommandsConfig>();
             _extraPrimaryCommands = bashCommandsConfig?.ExtraPrimaryCommands ?? new List<string>();
             _extraSecondaryCommands = bashCommandsConfig?.ExtraSecondaryCommands ?? new List<string>();
-            
-            foreach ( var command in bashCommandsConfig.ExtraPrimaryCommands )
+
+            foreach ( var command in _extraPrimaryCommands )
             {
                 _logger.LogInformation( $"Extra Primary Command: {command}" );
             }
 
-            foreach ( var VARIABLE in bashCommandsConfig.ExtraSecondaryCommands )
+            foreach ( var command in _extraSecondaryCommands )
             {
-                _logger.LogInformation( $"Extra Secondary Command: {VARIABLE}" );
+                _logger.LogInformation( $"Extra Secondary Command: {command}" );
             }
             
             _logger.LogInformation( "WAN Monitor Worker Service configuration loaded successfully." );
@@ -87,13 +84,13 @@ public class WanMonitorService : BackgroundService
         _logger.LogInformation( $"".PadRight( 40, '=' ) );
         _logger.LogInformation( $"Primary Interface: {_primaryInterfaceName}" );
         _logger.LogInformation( $"Primary Gateway: {_primaryGateway}" );
-        _logger.LogInformation( $"Primary IPs: {string.Join( ", ", _primaryIPs )}" );
+        _logger.LogInformation( $"Primary IPs: {string.Join( ", ", _primaryIPs ?? Enumerable.Empty<string>() )}" );
 
         _logger.LogInformation( $"".PadRight( 40, '-' ) );
 
         _logger.LogInformation( $"Secondary Interface: {_secondaryInterfaceName}" );
         _logger.LogInformation( $"Secondary Gateway: {_secondaryGateway}" );
-        _logger.LogInformation( $"Secondary IPs: {string.Join( ", ", _secondaryIPs )}" );
+        _logger.LogInformation( $"Secondary IPs: {string.Join( ", ", _secondaryIPs ?? Enumerable.Empty<string>() )}" );
 
         _logger.LogInformation( $"".PadRight( 40, '-' ) );
 
@@ -238,7 +235,7 @@ public class WanMonitorService : BackgroundService
 
     private async Task<bool> PingThroughInterfaceAsync( string ipAddress, string? interfaceName, CancellationToken stoppingToken )
     {
-        Process process = null;
+        Process? process = null;
         try
         {
             process = new Process();
@@ -282,7 +279,7 @@ public class WanMonitorService : BackgroundService
         foreach ( var command in commands )
         {
             _logger.LogInformation(  $"Executing command: {command}" );
-            Process process = null;
+            Process? process = null;
             try
             {
                 process = new Process();

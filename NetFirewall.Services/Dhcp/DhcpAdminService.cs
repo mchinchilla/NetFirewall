@@ -125,7 +125,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("id", subnet.Id);
         cmd.Parameters.AddWithValue("name", subnet.Name);
         cmd.Parameters.AddWithValue("network", subnet.Network);
-        cmd.Parameters.AddWithValue("mask", subnet.SubnetMask);
+        cmd.Parameters.AddWithValue("mask", (object?)subnet.SubnetMask ?? DBNull.Value);
         cmd.Parameters.AddWithValue("router", subnet.Router ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("broadcast", subnet.Broadcast ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("domain", subnet.DomainName ?? (object)DBNull.Value);
@@ -1037,7 +1037,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("rev", config.EnableReverse);
         cmd.Parameters.AddWithValue("fwdZone", config.ForwardZone ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("revZone", config.ReverseZone ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("dns", config.DnsServer);
+        cmd.Parameters.AddWithValue("dns", (object?)config.DnsServer ?? DBNull.Value);
         cmd.Parameters.AddWithValue("port", config.DnsPort);
         cmd.Parameters.AddWithValue("keyName", config.TsigKeyName ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("keySecret", config.TsigKeySecret ?? (object)DBNull.Value);
