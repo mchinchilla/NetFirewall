@@ -178,6 +178,12 @@ app.UseMiddleware<PeerCredentialMiddleware>();
 
 app.UseRouting();
 app.UseAuthentication();
+// Root-peer bypass: if the Unix-socket peer is uid 0 and didn't send a
+// session header, treat the request as a system principal with elevated
+// privileges. Lets netfirewall-bootstrap.service apply config at boot
+// without needing a stored token. MUST run between UseAuthentication and
+// UseAuthorization so the latter sees the synthetic principal.
+app.UseMiddleware<NetFirewall.Daemon.Auth.RootPeerBypassMiddleware>();
 app.UseAuthorization();
 
 // Health probe — no auth, useful for AppHost / monitoring.

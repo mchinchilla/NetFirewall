@@ -81,7 +81,7 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
 
     private sealed record TableRow(int TableId, string Name);
     private sealed record RuleRow(long Fwmark, string TableName, int? Priority);
-    private sealed record RouteRow(string Destination, string? Gateway, int Metric, string TableName);
+    private sealed record RouteRow(string Destination, string? Gateway, int Metric, string TableName, string? DeviceName);
 
     private static async Task<List<TableRow>> LoadEnabledTablesAsync(NpgsqlConnection conn, CancellationToken ct)
     {
@@ -114,12 +114,17 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
         await using var cmd = new NpgsqlCommand(@"
             -- host() strips the /32 suffix Postgres adds when casting inet→text,
             -- which `ip route via X/32` would otherwise reject.
+            -- iface.name lets us emit `dev X` for routes without a gateway
+            -- (point-to-point links like wg0 — `ip route` needs SOMETHING to
+            -- route to, and 'No such device' is what you get without it).
             SELECT sr.destination::text,
                    CASE WHEN sr.gateway IS NULL THEN NULL ELSE host(sr.gateway) END,
                    sr.metric,
-                   rt.table_name
+                   rt.table_name,
+                   iface.name
             FROM fw_static_routes sr
-            JOIN fw_route_tables  rt ON rt.id = sr.table_id
+            JOIN fw_route_tables  rt    ON rt.id = sr.table_id
+            LEFT JOIN fw_interfaces iface ON iface.id = sr.interface_id
             WHERE sr.enabled = true AND rt.enabled = true
             ORDER BY rt.table_name, sr.metric", conn);
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -128,7 +133,8 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
                 r.GetString(0),
                 r.IsDBNull(1) ? null : r.GetString(1),
                 r.GetInt32(2),
-                r.GetString(3)));
+                r.GetString(3),
+                r.IsDBNull(4) ? null : r.GetString(4)));
         return list;
     }
 
@@ -349,6 +355,13 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
             var slash = gw.IndexOf('/');
             if (slash > 0) gw = gw[..slash];
             sb.Append(" via ").Append(gw);
+        }
+        else if (!string.IsNullOrEmpty(r.DeviceName))
+        {
+            // Point-to-point links (wg0) have no gateway. Tell the kernel
+            // which device to send the packet out of — without this we get
+            // "RTNETLINK answers: No such device".
+            sb.Append(" dev ").Append(r.DeviceName);
         }
         if (r.Metric > 0)
             sb.Append(" metric ").Append(r.Metric);
