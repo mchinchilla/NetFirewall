@@ -1,0 +1,57 @@
+[Unit]
+Description=NetFirewall WAN monitor (dual-WAN ping + failover)
+Documentation=file:///opt/netfirewall/README.txt
+After=network-online.target netfirewall-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# WAN monitor runs ping(8) against each configured target. ping needs
+# CAP_NET_RAW (or to use the unprivileged ping_group_range sysctl); we
+# stay with caps for portability.
+User=root
+Group=root
+
+WorkingDirectory=/opt/tekium/wan-monitor
+ExecStart=/opt/tekium/wan-monitor/NetFirewall.WanMonitor
+EnvironmentFile=-/etc/netfirewall/wanmonitor.env
+
+LogsDirectory=netfirewall/wanmonitor
+LogsDirectoryMode=0750
+
+# ─── Hardening ──────────────────────────────────────────────────────
+CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log/netfirewall/wanmonitor
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @swap @reboot @raw-io @cpu-emulation
+
+LimitNOFILE=4096
+TasksMax=32
+
+Restart=on-failure
+RestartSec=10
+
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

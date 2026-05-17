@@ -16,13 +16,14 @@ public sealed class SystemServiceHealthService : ISystemServiceHealthService
     // configured), systemctl reports "not-found" and we surface that.
     private static readonly (string Unit, string Display)[] WatchedUnits = new[]
     {
-        ("netfirewall-daemon.service",   "Daemon"),
-        ("netfirewall-web.service",      "Web"),
-        ("netfirewall-dhcp.service",     "DHCP server"),
+        ("netfirewall-daemon.service",    "Daemon"),
+        ("netfirewall-web.service",       "Web"),
+        ("netfirewall-bootstrap.service", "Bootstrap"),
+        ("netfirewall-dhcp.service",      "DHCP server"),
         ("netfirewall-wanmonitor.service","WAN monitor"),
-        ("postgresql.service",           "PostgreSQL"),
-        ("nginx.service",                "nginx"),
-        ("wg-quick@wg0.service",         "WireGuard wg0"),
+        ("postgresql.service",            "PostgreSQL"),
+        ("nginx.service",                 "nginx"),
+        ("wg-quick@wg0.service",          "WireGuard wg0"),
     };
 
     public SystemServiceHealthService(IProcessRunner runner, ILogger<SystemServiceHealthService> logger)

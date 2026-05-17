@@ -4,6 +4,68 @@ Mid-deployment state of `fw.tekium.net` (server 192.168.99.1 / 154.12.104.135).
 Resume from here when continuing the deploy — covers what was done, what
 broke, what was fixed, and what's still pending. Last touched 2026-05-17.
 
+## Session-end snapshot (2026-05-17 03:45 CST)
+
+- **Nomenclatura normalizada**. All 5 components now use `netfirewall-*` units
+  and kebab-case install paths:
+  ```
+  /opt/tekium/{daemon,web,dhcp-server,wan-monitor,migrations}
+  /etc/systemd/system/netfirewall-{daemon,web,bootstrap,dhcp,wanmonitor}.service
+  ```
+- DHCP server units **need `AF_PACKET`** in `RestrictAddressFamilies` — without
+  it, raw socket creation fails with EAFNOSUPPORT (errno 97). DHCP DISCOVERs
+  arrive at L2 (src=0.0.0.0) before clients have IPs, so the server has to
+  listen at frame level. Patched in deploy/systemd/netfirewall-dhcp.service.
+- DHCP server now serving leases on ens256 from the 192.168.99.100-199 pool
+  defined in the seed. 45 active leases warmed at startup.
+- Known minor: `[SUBNET] GetEnabledInterfacesAsync returning 0 interfaces —
+  falling back to configuration`. The DhcpServer wants a DB-level link
+  between dhcp_subnets and fw_interfaces; it falls back to its appsettings
+  for now. Non-blocking. Pending for a future session.
+- WanMonitor migrated too — uses appsettings.json (no env file needed).
+
+## Session-end snapshot (2026-05-17 03:20 CST)
+
+- **firewall.sh deprecated**. Replaced by:
+  - Migration 00023: `fw_route_tables`, `fw_policy_rules`,
+    `fw_static_routes.table_id`. Apply kind 'routing' added to
+    fw_apply_history check.
+  - Seed `deploy/seeds/seed_tekium_routing.sql`: 3 named tables
+    (wan1=200, wan2=201, wg0=202), 3 policy rules
+    (fwmark 0x100/0x200/0x500), static routes linked.
+  - `PolicyRoutingApplyService` (daemon, Linux-only): 3 phases
+    (rt_tables → ip rule diff → ip route replace). Dry-run supported.
+  - `netfirewall-bootstrap.service` (oneshot, runs after daemon):
+    curls daemon's Apply endpoints over Unix socket. After reboot,
+    nftables + QoS + policy routing + WireGuard all come up from DB.
+  - `RootPeerBypassMiddleware`: peer uid 0 + no session header →
+    synthetic "system-bootstrap" principal with Elevated claim. Lets
+    bootstrap.service call daemon without holding a token.
+- **firewall.sh removed from WanMonitor's ExtraPrimaryCommands**.
+  Operator can still invoke /root/firewall.sh manually for emergencies
+  but it's no longer in the boot path.
+- **Dashboard ("Network at a glance") extended**:
+  - Services card: systemd unit status (daemon/web/dhcp/wanmonitor/pg/nginx/wg-quick@wg0)
+    with active/failed/inactive colors.
+  - WAN reachability card: per-WAN gateway ping with RTT.
+  - Pending changes banner: shows when DB has fw_* rows newer than last Apply.
+  - Recent activity filtered to critical events only
+    (login.failed/locked, totp.failed/replayed, elevation.denied,
+    recovery.used, bootstrap.used, user.disabled, session.revoked).
+- New tables: `fw_apply_history` (00022), tracks each Apply with
+  kind/success/timestamp/user. Powers pending-changes detection.
+
+## Known gap (current focus)
+
+After reboot, wg-quick auto-adds `ip rule not from all fwmark 0xca6c lookup 51820`
+because the peer has `AllowedIPs = 0.0.0.0/0`. That rule preempts our
+fwmark→wan1 rules for the daemon's own outbound traffic (e.g., probing
+8.8.8.8 from the box itself). Workaround:
+`UPDATE wg_servers SET table_off=true WHERE name='wg0';` then re-apply wg.
+The `Table = off` directive tells wg-quick not to manage routing — our
+own policy routing already does that. After the user verifies, fold this
+into the seed.
+
 ## Session-end snapshot (2026-05-17 02:00 CST)
 
 - **WireGuard full support landed**: server mode + client mode + import from disk.
