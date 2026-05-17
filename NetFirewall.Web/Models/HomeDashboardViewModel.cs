@@ -48,6 +48,32 @@ public sealed class HomeDashboardViewModel
     public IReadOnlyList<TopTalkerRow> TopHosts { get; init; } = [];
     /// <summary>Top N services by bytes — same source.</summary>
     public IReadOnlyList<TopTalkerRow> TopServices { get; init; } = [];
+
+    /// <summary>Per-WAN health rows (state + last RTT + consecutive failures).</summary>
+    public IReadOnlyList<WanHealthRow> WanHealth { get; init; } = [];
+    /// <summary>Recent failover / up / down transitions across all WANs.</summary>
+    public IReadOnlyList<WanTransition> WanTransitions { get; init; } = [];
+}
+
+public sealed class WanHealthRow
+{
+    public required string InterfaceName { get; init; }
+    public required string Role { get; init; }
+    public required bool IsUp { get; init; }
+    public int ConsecutiveFailures { get; init; }
+    public int ConsecutiveSuccesses { get; init; }
+    public DateTime LastCheckAt { get; init; }
+    public DateTime LastTransitionAt { get; init; }
+    public double? LastRttMs { get; init; }
+    public string? LastTarget { get; init; }
+    public string? LastError { get; init; }
+}
+
+public sealed class WanTransition
+{
+    public required DateTime OccurredAt { get; init; }
+    public required string InterfaceName { get; init; }
+    public required string EventType { get; init; }   // up | down | failover | demoted
 }
 
 public sealed class TopTalkerRow

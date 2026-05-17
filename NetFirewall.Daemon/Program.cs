@@ -116,6 +116,15 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.ITopTalkersService,
 builder.Services.Configure<NetFirewall.Services.Monitoring.ConntrackSamplerOptions>(
     builder.Configuration.GetSection(NetFirewall.Services.Monitoring.ConntrackSamplerOptions.SectionName));
 builder.Services.AddHostedService<NetFirewall.Services.Monitoring.ConntrackSamplerService>();
+
+// WAN health monitor — absorbs the standalone NetFirewall.WanMonitor process.
+// Probes each WAN, persists state to wan_health_state, swaps the default
+// route in the main table when priority winner changes.
+builder.Services.AddScoped<NetFirewall.Services.WanMonitor.IWanHealthService,
+                           NetFirewall.Services.WanMonitor.WanHealthService>();
+builder.Services.Configure<NetFirewall.Services.WanMonitor.WanHealthMonitorOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.WanMonitor.WanHealthMonitorOptions.SectionName));
+builder.Services.AddHostedService<NetFirewall.Services.WanMonitor.WanHealthMonitorService>();
 builder.Services.AddScoped<NetFirewall.Services.Monitoring.IWanReachabilityService,
                            NetFirewall.Services.Monitoring.WanReachabilityService>();
 builder.Services.AddScoped<NetFirewall.Services.Firewall.IApplyHistoryService,

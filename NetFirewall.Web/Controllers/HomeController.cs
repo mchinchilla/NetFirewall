@@ -69,10 +69,11 @@ public class HomeController : Controller
         var pendingTask    = SafeQueryPendingAsync(ct);
         var eventsTask     = SafeQueryCriticalEventsAsync(ct);
         var topTalkersTask = SafeQueryTopTalkersAsync(ct);
+        var wanHealthTask  = SafeQueryWanHealthAsync(ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
                            filterTask, snapshotTask, historyTask, wgTask, schedulesTask,
-                           servicesTask, wanTask, pendingTask, eventsTask, topTalkersTask);
+                           servicesTask, wanTask, pendingTask, eventsTask, topTalkersTask, wanHealthTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -88,6 +89,7 @@ public class HomeController : Controller
         var pending   = pendingTask.Result;
         var events    = eventsTask.Result;
         var top       = topTalkersTask.Result;
+        var wanHealth = wanHealthTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
         var totalBytesPerSec = snapshot.Network
@@ -128,6 +130,8 @@ public class HomeController : Controller
             PendingChanges = pending,
             TopHosts = top.Hosts,
             TopServices = top.Services,
+            WanHealth = wanHealth.Health,
+            WanTransitions = wanHealth.Transitions,
         };
 
         return View(vm);
@@ -369,6 +373,49 @@ public class HomeController : Controller
         {
             _logger.LogDebug(ex, "WAN status query failed");
             return Array.Empty<WanStatusSummary>();
+        }
+    }
+
+    private sealed record WanHealthSnapshot(IReadOnlyList<WanHealthRow> Health, IReadOnlyList<WanTransition> Transitions)
+    {
+        public static readonly WanHealthSnapshot Empty =
+            new(Array.Empty<WanHealthRow>(), Array.Empty<WanTransition>());
+    }
+
+    private async Task<WanHealthSnapshot> SafeQueryWanHealthAsync(CancellationToken ct)
+    {
+        try
+        {
+            var env = await _daemon.GetWanHealthAsync(ct);
+            if (!env.Success || env.Data is null) return WanHealthSnapshot.Empty;
+
+            var rows = env.Data.State.Select(s => new WanHealthRow
+            {
+                InterfaceName        = s.InterfaceName,
+                Role                 = s.Role,
+                IsUp                 = s.IsUp,
+                ConsecutiveFailures  = s.ConsecutiveFailures,
+                ConsecutiveSuccesses = s.ConsecutiveSuccesses,
+                LastCheckAt          = s.LastCheckAt,
+                LastTransitionAt     = s.LastTransitionAt,
+                LastRttMs            = s.LastRttMs,
+                LastTarget           = s.LastTarget,
+                LastError            = s.LastError,
+            }).ToList();
+
+            var transitions = env.Data.RecentEvents.Select(e => new WanTransition
+            {
+                OccurredAt    = e.OccurredAt,
+                InterfaceName = e.InterfaceName,
+                EventType     = e.EventType,
+            }).ToList();
+
+            return new WanHealthSnapshot(rows, transitions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "WAN health query failed");
+            return WanHealthSnapshot.Empty;
         }
     }
 

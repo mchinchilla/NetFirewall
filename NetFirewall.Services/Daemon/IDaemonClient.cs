@@ -134,6 +134,9 @@ public interface IDaemonClient
 
     /// <summary><c>GET /v1/system/top-talkers</c> — top N LAN hosts + services by bytes in the last N hours.</summary>
     Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/wan-health</c> — per-WAN health state + recent transition events.</summary>
+    Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default);
 }
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);
@@ -148,3 +151,7 @@ public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string?
 public sealed record TopTalkersDto(
     IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerHost> Hosts,
     IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerService> Services);
+
+public sealed record WanHealthDto(
+    IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,
+    IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents);

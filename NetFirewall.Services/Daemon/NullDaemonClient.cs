@@ -137,4 +137,10 @@ public sealed class NullDaemonClient : IDaemonClient
             new TopTalkersDto(Array.Empty<NetFirewall.Services.Monitoring.TopTalkerHost>(),
                               Array.Empty<NetFirewall.Services.Monitoring.TopTalkerService>()),
             "Daemon disabled."));
+
+    public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<WanHealthDto>.Ok(
+            new WanHealthDto(Array.Empty<NetFirewall.Models.WanMonitor.WanHealthState>(),
+                             Array.Empty<NetFirewall.Models.WanMonitor.WanHealthEvent>()),
+            "Daemon disabled."));
 }

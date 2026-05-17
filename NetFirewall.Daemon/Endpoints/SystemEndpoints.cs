@@ -43,6 +43,16 @@ public static class SystemEndpoints
             return Results.Json(ServiceResponse<IReadOnlyList<ApplyHistoryEntry>>.Ok(list));
         });
 
+        // GET /v1/system/wan-health — current per-WAN health state + recent transitions.
+        grp.MapGet("/wan-health", async (
+                NetFirewall.Services.WanMonitor.IWanHealthService wan,
+                CancellationToken ct) =>
+        {
+            var state = await wan.GetStateAsync(ct);
+            var events = await wan.RecentEventsAsync(20, ct);
+            return Results.Json(ServiceResponse<WanHealthDto>.Ok(new WanHealthDto(state, events), "OK"));
+        });
+
         // GET /v1/system/top-talkers?hours=24&limit=5 — top hosts + services.
         grp.MapGet("/top-talkers", async (
                 ITopTalkersService svc,
@@ -63,4 +73,8 @@ public static class SystemEndpoints
     public sealed record TopTalkersDto(
         IReadOnlyList<TopTalkerHost> Hosts,
         IReadOnlyList<TopTalkerService> Services);
+
+    public sealed record WanHealthDto(
+        IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,
+        IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents);
 }
