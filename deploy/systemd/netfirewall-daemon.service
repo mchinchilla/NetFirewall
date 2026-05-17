@@ -21,11 +21,11 @@ WorkingDirectory=/opt/netfirewall/daemon
 ExecStart=/opt/netfirewall/daemon/netfirewall-daemon
 EnvironmentFile=-/etc/netfirewall/daemon.env
 
-# Created/owned by systemd before the unit starts; perms 0750 on /run/netfirewall
-# means only root + members of group `netfirewall` can traverse it.
-RuntimeDirectory=netfirewall
-RuntimeDirectoryMode=0750
-RuntimeDirectoryPreserve=no
+# /run/netfirewall is created by tmpfiles.d (deploy/tmpfiles/netfirewall.conf
+# → /etc/tmpfiles.d/netfirewall.conf), NOT by RuntimeDirectory=. Reason:
+# systemd doesn't expose RuntimeDirectoryGroup=, so RuntimeDirectory= would
+# leave the dir as root:root and break the Web's ability to traverse to the
+# socket. tmpfiles.d lets us declare root:netfirewall 0750 directly.
 
 # Persistent state (logs). Owned by root since the daemon runs as root.
 StateDirectory=netfirewall/daemon
@@ -49,8 +49,13 @@ NoNewPrivileges=yes
 
 # ProtectSystem=strict makes /usr /boot /efi read-only for the process.
 # ReadWritePaths re-opens only the directories the daemon legitimately writes.
+# The `-` prefix on a path makes it optional — Debian without NetworkManager,
+# Rocky without netplan, etc. don't have all these dirs, and a missing one
+# fails the mount namespace setup with status=226/NAMESPACE. The daemon
+# detects which network stack is present at runtime; we just give the
+# namespace permission to write to any of them that happen to exist.
 ProtectSystem=strict
-ReadWritePaths=/etc/network /etc/NetworkManager /etc/netplan /etc/nftables.conf /var/log/netfirewall
+ReadWritePaths=-/etc/network -/etc/NetworkManager -/etc/netplan -/etc/nftables.conf /var/log/netfirewall
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
