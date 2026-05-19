@@ -22,6 +22,6 @@
          hx-get="/Firewall/PortForwards/table"
          hx-trigger="load, refreshPortForwards from:body"
          hx-swap="innerHTML">
-        <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
+         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
     </div>
 </section>

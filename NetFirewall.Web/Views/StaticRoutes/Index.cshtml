@@ -27,6 +27,6 @@
          hx-get="/Network/Routes/table"
          hx-trigger="load, refreshRoutes from:body"
          hx-swap="innerHTML">
-        <div class="text-sm py-8 text-center text-surface-fg-muted">Loading routes…</div>
+        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder, Label = "Loading routes…" })
     </div>
 </section>

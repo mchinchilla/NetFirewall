@@ -40,7 +40,7 @@
                  :hx-vals="JSON.stringify({ includeExpired })"
                  hx-trigger="load, refreshLeases from:body, manual-refresh, every 30s"
                  hx-swap="innerHTML">
-                <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
+                 Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
             </div>
         </section>
     </div>

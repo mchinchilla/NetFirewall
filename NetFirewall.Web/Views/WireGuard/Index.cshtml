@@ -150,7 +150,7 @@
              hx-get="/Vpn/WireGuard/status"
              :hx-trigger="paused ? 'load, refreshWireGuard from:body' : 'load, every 10s, refreshWireGuard from:body'"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
+             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     </section>
 </div>
@@ -184,7 +184,7 @@
              hx-get="/Vpn/WireGuard/Peers/table"
              hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
+             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     }
 </section>

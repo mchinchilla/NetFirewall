@@ -36,7 +36,7 @@
              :hx-vals="JSON.stringify({ chain })"
              hx-trigger="load, refreshMangleRules from:body, manual-refresh"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
+             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     </section>
 </div>

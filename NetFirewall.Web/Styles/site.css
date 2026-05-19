@@ -605,4 +605,79 @@
     .toast-error   { border-left: 3px solid #b94545; }
     .toast-info    { border-left: 3px solid var(--jordy-blue-500); }
     .toast-warning { border-left: 3px solid var(--taupe-gray-600); }
+
+    /* ───────── Loading overlay ─────────
+       Single shared component. Wrap any swappable region in .loading-host;
+       drop a .loading-overlay inside it (via _LoadingOverlay.cshtml). The
+       overlay is invisible until the host element acquires .htmx-request
+       (added automatically by HTMX during in-flight requests) or .is-loading
+       (manual toggle via Alpine for non-HTMX flows). Blur + dim freeze the
+       previous content so the user doesn't perceive a flicker during swap. */
+    .loading-host {
+        position: relative;
+    }
+
+    .loading-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 0.5rem;
+        background-color: color-mix(in srgb, var(--surface-bg) 60%, transparent);
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+        border-radius: inherit;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 120ms ease-out;
+        z-index: 20;
+    }
+
+    /* Show the overlay whenever:
+       - HTMX has marked the host as in-flight (htmx-request),
+       - or an Alpine/JS flow has flipped .is-loading on the host,
+       - or the partial itself has data-loading-initial (placeholder mode). */
+    .loading-host.htmx-request > .loading-overlay,
+    .loading-host.is-loading > .loading-overlay,
+    .loading-overlay[data-loading-initial] {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* Placeholder variant — used for first-paint where there's no content
+       behind the overlay yet. No blur, smaller min-height so it doesn't
+       expand a card; lives inline rather than absolute. */
+    .loading-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 0.5rem;
+        min-height: 6rem;
+        padding: 1.5rem 1rem;
+        color: var(--surface-fg-muted);
+    }
+
+    .loading-spinner {
+        width: 1.5rem;
+        height: 1.5rem;
+        border-radius: 9999px;
+        border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+        border-top-color: var(--accent);
+        animation: loading-spin 0.8s linear infinite;
+    }
+    .loading-spinner-sm { width: 1rem;   height: 1rem;   border-width: 2px; }
+    .loading-spinner-lg { width: 2.25rem; height: 2.25rem; border-width: 3px; }
+
+    .loading-label {
+        font-size: 0.75rem;
+        color: var(--surface-fg-muted);
+        letter-spacing: 0.01em;
+    }
+}
+
+@keyframes loading-spin {
+    to { transform: rotate(360deg); }
 }

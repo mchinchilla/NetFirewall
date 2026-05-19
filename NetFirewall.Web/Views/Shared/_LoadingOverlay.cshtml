@@ -1,0 +1,75 @@
+@model NetFirewall.Web.Models.Shared.LoadingOverlayModel
+@using NetFirewall.Web.Models.Shared
+@*
+    Single shared loading indicator for the entire web app.
+
+    ┌────────────────────────────── USAGE ──────────────────────────────┐
+    │                                                                    │
+    │  Pattern A — HTMX poll/refresh with overlay on every request.      │
+    │  Wrap with a `loading-host` SIBLING of the swap target so the      │
+    │  overlay survives `hx-swap="innerHTML"`. HTMX-indicator points     │
+    │  back at the wrapper so it gets `.htmx-request` on every poll:    │
+    │                                                                    │
+    │     <div class="loading-host">                                     │
+    │         @await Html.PartialAsync("_LoadingOverlay")                │
+    │         <div id="leases-table"                                     │
+    │              hx-get="/foo" hx-trigger="load, every 30s"            │
+    │              hx-indicator="closest .loading-host">                 │
+    │             @await Html.PartialAsync("_LoadingOverlay",            │
+    │                 new LoadingOverlayModel {                          │
+    │                     Variant = LoadingOverlayVariant.Placeholder }) │
+    │         </div>                                                     │
+    │     </div>                                                         │
+    │                                                                    │
+    │  - The OVERLAY partial (first one) sits over the host and is       │
+    │    invisible until htmx-request flips on. It survives swaps.       │
+    │  - The PLACEHOLDER partial (second one) is the initial body of     │
+    │    the swap target; HTMX replaces it on first response.            │
+    │                                                                    │
+    │  Pattern B — single-shot load only (no refresh needed).            │
+    │  Just use the placeholder variant; no wrapper required:            │
+    │                                                                    │
+    │     <div hx-get="/foo" hx-trigger="load" hx-swap="innerHTML">      │
+    │         @await Html.PartialAsync("_LoadingOverlay",                │
+    │             new LoadingOverlayModel {                              │
+    │                 Variant = LoadingOverlayVariant.Placeholder })     │
+    │     </div>                                                         │
+    │                                                                    │
+    │  Pattern C — Alpine / JS manual toggle.                            │
+    │  Toggle `.is-loading` on the host element instead of relying on   │
+    │  HTMX (good for fetch-based or pre-submit flows):                  │
+    │                                                                    │
+    │     <div class="loading-host" :class="{ 'is-loading': busy }">     │
+    │         @await Html.PartialAsync("_LoadingOverlay")                │
+    │         <!-- content -->                                           │
+    │     </div>                                                         │
+    │                                                                    │
+    └────────────────────────────────────────────────────────────────────┘
+*@
+@{
+    var m = Model ?? new LoadingOverlayModel();
+    var spinSize = m.Size switch
+    {
+        LoadingOverlaySize.Sm => "loading-spinner loading-spinner-sm",
+        LoadingOverlaySize.Lg => "loading-spinner loading-spinner-lg",
+        _                     => "loading-spinner",
+    };
+
+    var rootClass = m.Variant == LoadingOverlayVariant.Placeholder
+        ? "loading-placeholder"
+        : "loading-overlay";
+
+    // ARIA: role=status with aria-live so screen readers announce the
+    // pending state. aria-label carries the human-readable label.
+}
+<div class="@rootClass"
+     role="status"
+     aria-live="polite"
+     aria-label="@m.Label"
+     @(m.ShowInitially ? "data-loading-initial" : "")>
+    <span class="@spinSize" aria-hidden="true"></span>
+    @if (!string.IsNullOrEmpty(m.Label))
+    {
+        <span class="loading-label">@m.Label</span>
+    }
+</div>

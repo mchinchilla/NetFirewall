@@ -37,9 +37,10 @@
             </button>
         </header>
 
-        <div id="drawer-body" class="flex-1 overflow-y-auto px-5 py-4">
+        <div id="drawer-body" class="flex-1 overflow-y-auto px-5 py-4 loading-host"
+             :class="{ 'is-loading': $store.drawer.loading }">
+            @await Html.PartialAsync("_LoadingOverlay")
             @* HTMX-loaded content lands here *@
-            <div x-show="$store.drawer.loading" class="text-sm text-surface-fg-muted">Loading…</div>
         </div>
     </aside>
 </div>

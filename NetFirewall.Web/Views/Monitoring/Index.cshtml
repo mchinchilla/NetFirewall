@@ -43,19 +43,19 @@
             <span class="text-xs text-surface-fg-muted"
                   x-text="paused ? '⏸ Polling paused' : '● Polling every 5s'"></span>
         </div>
-        <div id="monitoring-snapshot"
+        <div id="monitoring-snapshot" class="loading-host"
              hx-get="/Monitoring/snapshot"
              :hx-trigger="paused ? 'load' : 'load, every 5s'"
              hx-swap="innerHTML">
-            <div class="text-sm py-10 text-center text-surface-fg-muted">Loading…</div>
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder, Size = LoadingOverlaySize.Lg })
         </div>
 
         @* ---------- Top talkers (refreshed every 30s — daemon's sampler cadence) ---------- *@
-        <div id="monitoring-toptalkers" class="mt-4"
+        <div id="monitoring-toptalkers" class="mt-4 loading-host"
              hx-get="/Monitoring/toptalkers"
              :hx-trigger="paused ? 'load' : 'load, every 30s'"
              hx-swap="innerHTML">
-            <div class="text-sm py-6 text-center text-surface-fg-muted">Loading…</div>
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
 
         @* ---------- WireGuard live status (polled at the same cadence) ---------- *@
@@ -69,11 +69,11 @@
                 </div>
                 <a href="@Url.Action("Index", "WireGuard")" class="text-xs hover:underline text-accent">Manage →</a>
             </header>
-            <div id="monitoring-wg"
+            <div id="monitoring-wg" class="loading-host"
                  hx-get="/Vpn/WireGuard/status"
                  :hx-trigger="paused ? 'load' : 'load, every 10s'"
                  hx-swap="innerHTML">
-                <div class="text-sm py-6 text-center text-surface-fg-muted">Loading…</div>
+                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
             </div>
         </section>
 
@@ -88,11 +88,11 @@
                 </div>
                 <a href="@Url.Action("Index", "FwSchedules")" class="text-xs hover:underline text-accent">Manage →</a>
             </header>
-            <div id="monitoring-schedules"
+            <div id="monitoring-schedules" class="loading-host"
                  hx-get="/Monitoring/schedules"
                  :hx-trigger="paused ? 'load' : 'load, every 30s'"
                  hx-swap="innerHTML">
-                <div class="text-sm py-6 text-center text-surface-fg-muted">Loading…</div>
+                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
             </div>
         </section>
     </div>
@@ -113,11 +113,12 @@
                 </template>
             </div>
         </div>
-        <div id="monitoring-history"
+        <div id="monitoring-history" class="loading-host"
              hx-get="/Monitoring/history"
              :hx-vals="JSON.stringify({ range })"
              hx-trigger="manual-refresh"
              hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay")
             <div class="text-sm py-10 text-center text-surface-fg-muted">
                 Click the History tab to load.
             </div>

@@ -56,7 +56,7 @@
              :hx-vals="JSON.stringify({ table, action, since, page })"
              hx-trigger="load, manual-refresh"
              hx-swap="innerHTML">
-            <div class="text-sm py-8 text-center text-surface-fg-muted">Loading…</div>
+             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
 
         <div class="mt-4 flex items-center justify-between text-xs text-surface-fg-muted">
