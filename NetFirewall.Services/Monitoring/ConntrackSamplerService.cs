@@ -62,6 +62,17 @@ public sealed partial class ConntrackSamplerService : BackgroundService
         _logger.LogInformation("Conntrack sampler started — sampling every {Sec}s, LAN={Cidr}",
             _opts.SampleSeconds, _opts.LanCidr);
 
+        // conntrack -L only emits `bytes=` when kernel-side accounting is on.
+        // The flag is off by default on Debian; flip it once at startup so we
+        // actually get traffic counters. Idempotent and survives until the
+        // sysctl is reset (we don't persist it to /etc/sysctl.d on purpose —
+        // that's an operator's call).
+        var acct = await _runner.RunAsync("sysctl", "-w net.netfilter.nf_conntrack_acct=1",
+            TimeSpan.FromSeconds(5), stoppingToken);
+        if (!acct.Success)
+            _logger.LogWarning("Could not enable nf_conntrack_acct (exit {Exit}): {Err} — top-talkers will report 0 bytes",
+                acct.ExitCode, acct.Error);
+
         var lan = IPNetwork.Parse(_opts.LanCidr);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -88,7 +99,7 @@ public sealed partial class ConntrackSamplerService : BackgroundService
         var result = await _runner.RunAsync("conntrack", "-L -o extended", TimeSpan.FromSeconds(10), ct);
         if (!result.Success)
         {
-            _logger.LogDebug("conntrack -L exit {Exit}: {Err}", result.ExitCode, result.Error);
+            _logger.LogWarning("conntrack -L exit {Exit}: {Err}", result.ExitCode, result.Error);
             return;
         }
 
@@ -191,12 +202,13 @@ public sealed partial class ConntrackSamplerService : BackgroundService
     {
         flow = default;
 
-        // Sample line:
-        //   tcp 6 432000 ESTABLISHED src=192.168.99.10 dst=8.8.8.8 sport=51234 dport=443 packets=10 bytes=1234 \
-        //                              src=8.8.8.8 dst=192.168.99.10 sport=443 dport=51234 packets=8 bytes=5678 [ASSURED] mark=0 use=2
+        // Sample line (conntrack-tools 1.4.x on Debian):
+        //   ipv4 2 tcp 6 432000 ESTABLISHED src=192.168.99.10 dst=8.8.8.8 sport=51234 dport=443 packets=10 bytes=1234 \
+        //                                    src=8.8.8.8 dst=192.168.99.10 sport=443 dport=51234 packets=8 bytes=5678 [ASSURED] mark=0 use=2
         //
         // The two halves are the forward and reply tuples. We need both bytes
-        // counters. Only IPv4 here — ipv6 lines start with "ipv6 ...".
+        // counters. We skip ipv6 lines (`ipv6 10 ...`) — top-talkers are LAN-IPv4
+        // for now.
 
         var protoMatch = ProtoRx().Match(line);
         if (!protoMatch.Success) return false;
@@ -251,7 +263,10 @@ public sealed partial class ConntrackSamplerService : BackgroundService
         return true;
     }
 
-    [GeneratedRegex(@"^\s*(tcp|udp|icmp|ipv6|other)\s+\d+")] private static partial Regex ProtoRx();
+    // Matches the L4 protocol token. Handles both modern conntrack-tools output
+    // ("ipv4 2 tcp 6 ...") and the older bare form ("tcp 6 ..."). The leading
+    // `ipv4 <num>` is optional. Skips ipv6 (not tracked yet).
+    [GeneratedRegex(@"^\s*(?:ipv4\s+\d+\s+)?(tcp|udp|icmp|other)\s+\d+")] private static partial Regex ProtoRx();
     [GeneratedRegex(@"\bsrc=([\d.]+)")]    private static partial Regex SrcRx();
     [GeneratedRegex(@"\bdst=([\d.]+)")]    private static partial Regex DstRx();
     [GeneratedRegex(@"\bsport=(\d+)")]     private static partial Regex SportRx();
