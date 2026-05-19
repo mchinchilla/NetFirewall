@@ -48,6 +48,15 @@ builder.AddServiceDefaults();
         .SetApplicationName("NetFirewall.Daemon");
 }
 
+// ----- HTTP JSON options -----
+// System.Text.Json can't serialize IPAddress out of the box (emits {}). Any
+// endpoint returning a DTO with an IPAddress field (e.g. /v1/system/top-talkers)
+// would otherwise round-trip as null and the dashboard panel would render empty.
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.Converters.Add(new NetFirewall.Services.Json.IPAddressJsonConverter());
+});
+
 // ----- Daemon options -----
 builder.Services.Configure<DaemonOptions>(builder.Configuration.GetSection(DaemonOptions.SectionName));
 var daemonOpts = builder.Configuration.GetSection(DaemonOptions.SectionName).Get<DaemonOptions>() ?? new DaemonOptions();

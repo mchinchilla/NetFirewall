@@ -33,9 +33,11 @@ dotnet test --filter "FullyQualifiedName~TestMethodName"
 # Run the orchestrated dev environment (Aspire)
 dotnet run --project NetFirewall.AppHost
 
-# Publish for Linux deployment
-dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/wanmonitor  NetFirewall.WanMonitor
-dotnet publish -c Release -r linux-x64 -o /opt/netfirewall/dhcpserver NetFirewall.DhcpServer
+# Publish for Linux deployment (production runtime root: /opt/tekium/)
+dotnet publish -c Release -r linux-x64 -o /opt/tekium/daemon       NetFirewall.Daemon
+dotnet publish -c Release -r linux-x64 -o /opt/tekium/web          NetFirewall.Web
+dotnet publish -c Release -r linux-x64 -o /opt/tekium/dhcp-server  NetFirewall.DhcpServer
+dotnet publish -c Release -r linux-x64 -o /opt/tekium/Migrations   NetFirewall.Migrations
 ```
 
 ## Production deployment
@@ -57,7 +59,7 @@ deploy/
 ```
 
 The installer publishes **three** runtime targets (daemon, web, tui) plus the
-migration runner. The TUI ships as `/opt/netfirewall/tui/` with a wrapper at
+migration runner. The TUI ships as `/opt/tekium/tui/` with a wrapper at
 `/usr/local/bin/netfirewall-tui`. Daemon's `Daemon__AcceptedPeerUids` is
 populated with both the Web UID (so the Web reaches the socket) AND `0` (so
 `sudo netfirewall-tui` from a console reaches it too). The legacy single
@@ -72,7 +74,7 @@ sudo deploy/install.sh
 ```
 
 The installer creates `netfirewall` group + `netfirewall-web` user (system,
-nologin), lays out `/opt/netfirewall/{daemon,web,migrations}`, `/etc/netfirewall/`,
+nologin), lays out `/opt/tekium/{daemon,web,dhcp-server,Migrations,tui}`, `/etc/netfirewall/`,
 `/var/lib/netfirewall/{web,daemon}/`, `/var/log/netfirewall/` (with `/run/netfirewall/`
 provided by systemd `RuntimeDirectory=`), publishes both projects + the migration
 runner, generates an AES-256 master key for TOTP encryption, runs migrations,

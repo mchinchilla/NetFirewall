@@ -12,7 +12,14 @@ namespace NetFirewall.Services.Daemon;
 
 public sealed class DaemonClient : IDaemonClient, IDisposable
 {
-    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web)
+    {
+        // IPAddress has no built-in System.Text.Json converter — without this,
+        // any DTO carrying IPAddress (TopTalkerHost.SrcIp, etc.) deserializes
+        // the field as null and downstream .ToString() / projection silently
+        // breaks the dashboard panel.
+        Converters = { new Json.IPAddressJsonConverter() },
+    };
 
     private readonly HttpClient _http;
     private readonly DaemonClientOptions _opts;

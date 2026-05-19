@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Net;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -63,15 +65,24 @@ public sealed partial class ConntrackSamplerService : BackgroundService
             _opts.SampleSeconds, _opts.LanCidr);
 
         // conntrack -L only emits `bytes=` when kernel-side accounting is on.
-        // The flag is off by default on Debian; flip it once at startup so we
-        // actually get traffic counters. Idempotent and survives until the
-        // sysctl is reset (we don't persist it to /etc/sysctl.d on purpose —
-        // that's an operator's call).
-        var acct = await _runner.RunAsync("sysctl", "-w net.netfilter.nf_conntrack_acct=1",
-            TimeSpan.FromSeconds(5), stoppingToken);
-        if (!acct.Success)
-            _logger.LogWarning("Could not enable nf_conntrack_acct (exit {Exit}): {Err} — top-talkers will report 0 bytes",
-                acct.ExitCode, acct.Error);
+        // The flag is off by default on Debian. We can't `sysctl -w` it from
+        // the daemon because the systemd unit sets ProtectKernelTunables=yes
+        // (makes /proc/sys read-only inside the unit's mount namespace).
+        // The right place to enable it is /etc/sysctl.d/ — handled by the
+        // installer (deploy/sysctl/netfirewall.conf). We just observe and
+        // warn if accounting is off so the operator can fix it.
+        try
+        {
+            var v = await File.ReadAllTextAsync("/proc/sys/net/netfilter/nf_conntrack_acct", stoppingToken);
+            if (v.Trim() == "0")
+                _logger.LogWarning("net.netfilter.nf_conntrack_acct=0 — conntrack will not report byte counters " +
+                    "and top-talkers will be empty. Enable with: sysctl -w net.netfilter.nf_conntrack_acct=1 " +
+                    "(persist via /etc/sysctl.d/netfirewall.conf).");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read nf_conntrack_acct — proceeding anyway");
+        }
 
         var lan = IPNetwork.Parse(_opts.LanCidr);
 

@@ -266,6 +266,14 @@ install -m 0644 "$SCRIPT_DIR/systemd/netfirewall-daemon.service" /etc/systemd/sy
 install -m 0644 "$SCRIPT_DIR/systemd/netfirewall-web.service"    /etc/systemd/system/
 systemctl daemon-reload
 
+# Kernel tunables — enables conntrack per-flow accounting so the dashboard's
+# top-talkers panel has byte counters to read. The daemon itself can't write
+# /proc/sys because its unit sets ProtectKernelTunables=yes.
+log "Installing sysctl drop-in"
+install -m 0644 "$SCRIPT_DIR/sysctl/netfirewall.conf" /etc/sysctl.d/netfirewall.conf
+sysctl --quiet --load=/etc/sysctl.d/netfirewall.conf || \
+    log "warning: sysctl --load failed; reboot or run \`sysctl --system\` manually"
+
 log "Enabling + starting services"
 systemctl enable --now netfirewall-daemon.service
 sleep 1

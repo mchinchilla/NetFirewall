@@ -123,9 +123,8 @@ into the seed.
 ```
 /opt/tekium/
 ├── daemon/                 # netfirewall-daemon binary + dlls
-├── webui/                  # NetFirewall.Web binary + dlls + wwwroot
-├── dhcp_server/            # NetFirewall.DhcpServer (not yet deployed/started)
-├── wan_monitor/            # NetFirewall.WanMonitor (not yet wired up)
+├── web/                    # NetFirewall.Web binary + dlls + wwwroot  (netfirewall-web:netfirewall)
+├── dhcp-server/            # NetFirewall.DhcpServer
 └── Migrations/             # netfirewall-migrate + sql/migrations/
 ```
 
@@ -134,7 +133,7 @@ Config + secrets:
 /etc/netfirewall/daemon.env   (0600 root:root)   — DB pw, peer UIDs, SocketGroup=netfirewall
 /etc/netfirewall/web.env      (0640 root:netfirewall) — DB pw, master key, ASPNETCORE_URLS=http://127.0.0.1:5000
 /opt/tekium/daemon/appsettings.Production.json   (0640 root:netfirewall)
-/opt/tekium/webui/appsettings.Production.json    (0640 root:netfirewall)
+/opt/tekium/web/appsettings.Production.json      (0640 root:netfirewall)
 ```
 
 Runtime:
