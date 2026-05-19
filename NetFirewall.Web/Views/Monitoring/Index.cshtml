@@ -50,6 +50,14 @@
             <div class="text-sm py-10 text-center text-surface-fg-muted">Loading…</div>
         </div>
 
+        @* ---------- Top talkers (refreshed every 30s — daemon's sampler cadence) ---------- *@
+        <div id="monitoring-toptalkers" class="mt-4"
+             hx-get="/Monitoring/toptalkers"
+             :hx-trigger="paused ? 'load' : 'load, every 30s'"
+             hx-swap="innerHTML">
+            <div class="text-sm py-6 text-center text-surface-fg-muted">Loading…</div>
+        </div>
+
         @* ---------- WireGuard live status (polled at the same cadence) ---------- *@
         <section class="card mt-4">
             <header class="flex items-baseline justify-between mb-3">

@@ -1,0 +1,92 @@
+@model NetFirewall.Web.Models.Monitoring.TopTalkersLiveViewModel
+@{
+    static string FmtBytes(long bytes)
+    {
+        string[] u = ["B", "KB", "MB", "GB", "TB", "PB"];
+        var i = 0; var x = (double)bytes;
+        while (x >= 1024 && i < u.Length - 1) { x /= 1024; i++; }
+        return $"{x:0.##} {u[i]}";
+    }
+}
+
+<div class="grid gap-4 grid-cols-1 xl:grid-cols-2">
+    <section class="card">
+        <header class="flex items-baseline justify-between mb-3">
+            <div>
+                <h2 class="text-base font-semibold">Top hosts (24h)</h2>
+                <p class="text-xs text-surface-fg-muted">By total bytes — sampled from conntrack</p>
+            </div>
+        </header>
+        @if (Model.Hosts.Count == 0)
+        {
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No samples yet. Daemon needs ~30s of warm-up.</p>
+        }
+        else
+        {
+            var maxHostBytes = Model.Hosts.Max(h => h.TotalBytes);
+            <ul class="space-y-3">
+                @foreach (var h in Model.Hosts)
+                {
+                    var pct = maxHostBytes > 0 ? (double)h.TotalBytes / maxHostBytes * 100 : 0;
+                    <li>
+                        <div class="flex items-baseline justify-between text-sm">
+                            <div class="min-w-0">
+                                <span class="font-mono font-medium">@h.Label</span>
+                                @if (!string.IsNullOrEmpty(h.Sublabel))
+                                {
+                                    <span class="text-xs text-surface-fg-muted ml-2">@h.Sublabel</span>
+                                }
+                            </div>
+                            <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
+                                ↓ @FmtBytes(h.BytesIn) · ↑ @FmtBytes(h.BytesOut)
+                            </div>
+                        </div>
+                        <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
+                            <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="card">
+        <header class="flex items-baseline justify-between mb-3">
+            <div>
+                <h2 class="text-base font-semibold">Top services (24h)</h2>
+                <p class="text-xs text-surface-fg-muted">By total bytes — proto + destination port</p>
+            </div>
+        </header>
+        @if (Model.Services.Count == 0)
+        {
+            <p class="text-sm py-6 text-center text-surface-fg-muted">No samples yet.</p>
+        }
+        else
+        {
+            var maxSvcBytes = Model.Services.Max(s => s.TotalBytes);
+            <ul class="space-y-3">
+                @foreach (var s in Model.Services)
+                {
+                    var pct = maxSvcBytes > 0 ? (double)s.TotalBytes / maxSvcBytes * 100 : 0;
+                    <li>
+                        <div class="flex items-baseline justify-between text-sm">
+                            <div class="min-w-0">
+                                <span class="font-mono font-medium">@s.Label</span>
+                                @if (!string.IsNullOrEmpty(s.Sublabel))
+                                {
+                                    <span class="text-xs text-surface-fg-muted ml-2">@s.Sublabel</span>
+                                }
+                            </div>
+                            <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
+                                ↓ @FmtBytes(s.BytesIn) · ↑ @FmtBytes(s.BytesOut)
+                            </div>
+                        </div>
+                        <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
+                            <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>

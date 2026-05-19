@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models.Auth;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
+using NetFirewall.Web.Models;
 using NetFirewall.Web.Models.Monitoring;
 using Npgsql;
 
@@ -19,18 +21,24 @@ public sealed class MonitoringController : Controller
     private readonly ISystemMonitorService _monitor;
     private readonly IMetricsQueryService _query;
     private readonly IScheduleService _schedules;
+    private readonly IDaemonClient _daemon;
     private readonly NpgsqlDataSource _ds;
+    private readonly ILogger<MonitoringController> _logger;
 
     public MonitoringController(
         ISystemMonitorService monitor,
         IMetricsQueryService query,
         IScheduleService schedules,
-        NpgsqlDataSource ds)
+        IDaemonClient daemon,
+        NpgsqlDataSource ds,
+        ILogger<MonitoringController> logger)
     {
         _monitor = monitor;
         _query = query;
         _schedules = schedules;
+        _daemon = daemon;
         _ds = ds;
+        _logger = logger;
     }
 
     [HttpGet("")]
@@ -73,6 +81,54 @@ public sealed class MonitoringController : Controller
         }
 
         return PartialView("_MonitoringHistory", vm);
+    }
+
+    // Mirrors HomeController.SafeQueryTopTalkersAsync but renders directly as
+    // a partial so HTMX can swap it in-place on the Monitoring page every 30s
+    // (the daemon's ConntrackSampler cadence — faster polling is wasted work).
+    [HttpGet("toptalkers")]
+    public async Task<IActionResult> TopTalkers(CancellationToken ct)
+    {
+        TopTalkersLiveViewModel vm;
+        try
+        {
+            var env = await _daemon.GetTopTalkersAsync(24, 5, ct);
+            if (env.Success && env.Data is not null)
+            {
+                var hosts = env.Data.Hosts.Select(h => new TopTalkerRow
+                {
+                    Label = h.SrcIp.ToString(),
+                    Sublabel = h.Hostname ?? $"{h.FlowCount} flow(s)",
+                    BytesIn = h.BytesIn,
+                    BytesOut = h.BytesOut,
+                }).ToList();
+
+                var services = env.Data.Services.Select(s => new TopTalkerRow
+                {
+                    Label = s.DstPort is int port
+                        ? (s.ServiceName is { Length: > 0 } sn
+                            ? $"{s.Proto}/{port} ({sn})"
+                            : $"{s.Proto}/{port}")
+                        : s.Proto,
+                    Sublabel = $"{s.FlowCount} flow(s)",
+                    BytesIn = s.BytesIn,
+                    BytesOut = s.BytesOut,
+                }).ToList();
+
+                vm = new TopTalkersLiveViewModel { Hosts = hosts, Services = services };
+            }
+            else
+            {
+                vm = TopTalkersLiveViewModel.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Top-talkers query failed");
+            vm = TopTalkersLiveViewModel.Empty;
+        }
+
+        return PartialView("_TopTalkersLive", vm);
     }
 
     [HttpGet("schedules")]
