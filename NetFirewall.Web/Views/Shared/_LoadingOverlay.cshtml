@@ -11,7 +11,8 @@
     │  back at the wrapper so it gets `.htmx-request` on every poll:    │
     │                                                                    │
     │     <div class="loading-host">                                     │
-    │         @await Html.PartialAsync("_LoadingOverlay")                │
+    │         @await Html.PartialAsync("_LoadingOverlay",                │
+    │             new LoadingOverlayModel())                             │
     │         <div id="leases-table"                                     │
     │              hx-get="/foo" hx-trigger="load, every 30s"            │
     │              hx-indicator="closest .loading-host">                 │
@@ -40,7 +41,8 @@
     │  HTMX (good for fetch-based or pre-submit flows):                  │
     │                                                                    │
     │     <div class="loading-host" :class="{ 'is-loading': busy }">     │
-    │         @await Html.PartialAsync("_LoadingOverlay")                │
+    │         @await Html.PartialAsync("_LoadingOverlay",                │
+    │             new LoadingOverlayModel())                             │
     │         <!-- content -->                                           │
     │     </div>                                                         │
     │                                                                    │

@@ -39,7 +39,7 @@
 
         <div id="drawer-body" class="flex-1 overflow-y-auto px-5 py-4 loading-host"
              :class="{ 'is-loading': $store.drawer.loading }">
-            @await Html.PartialAsync("_LoadingOverlay")
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel())
             @* HTMX-loaded content lands here *@
         </div>
     </aside>

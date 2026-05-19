@@ -118,7 +118,7 @@
              :hx-vals="JSON.stringify({ range })"
              hx-trigger="manual-refresh"
              hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay")
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel())
             <div class="text-sm py-10 text-center text-surface-fg-muted">
                 Click the History tab to load.
             </div>
