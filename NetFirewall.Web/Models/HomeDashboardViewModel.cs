@@ -44,10 +44,9 @@ public sealed class HomeDashboardViewModel
     /// <summary>Per-kind (nftables/tc/wireguard) pending change counts vs last successful Apply.</summary>
     public IReadOnlyList<PendingApplySummary> PendingChanges { get; init; } = [];
 
-    /// <summary>Top N hosts by bytes — populated from conntrack samples.</summary>
-    public IReadOnlyList<TopTalkerRow> TopHosts { get; init; } = [];
-    /// <summary>Top N services by bytes — same source.</summary>
-    public IReadOnlyList<TopTalkerRow> TopServices { get; init; } = [];
+    // Top talkers (hosts/services) are no longer fetched here — the home
+    // dashboard loads them via HTMX from /Monitoring/toptalkers (shared
+    // _TopTalkersLive partial) so the window selector works. See Home/Index.cshtml.
 
     /// <summary>Per-WAN health rows (state + last RTT + consecutive failures).</summary>
     public IReadOnlyList<WanHealthRow> WanHealth { get; init; } = [];

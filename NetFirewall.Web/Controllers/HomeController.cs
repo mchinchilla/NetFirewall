@@ -68,12 +68,11 @@ public class HomeController : Controller
         var wanTask        = SafeQueryWanAsync(ct);
         var pendingTask    = SafeQueryPendingAsync(ct);
         var eventsTask     = SafeQueryCriticalEventsAsync(ct);
-        var topTalkersTask = SafeQueryTopTalkersAsync(ct);
         var wanHealthTask  = SafeQueryWanHealthAsync(ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
                            filterTask, snapshotTask, historyTask, wgTask, schedulesTask,
-                           servicesTask, wanTask, pendingTask, eventsTask, topTalkersTask, wanHealthTask);
+                           servicesTask, wanTask, pendingTask, eventsTask, wanHealthTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -88,7 +87,6 @@ public class HomeController : Controller
         var wanStatus = wanTask.Result;
         var pending   = pendingTask.Result;
         var events    = eventsTask.Result;
-        var top       = topTalkersTask.Result;
         var wanHealth = wanHealthTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
@@ -128,8 +126,6 @@ public class HomeController : Controller
             Services = services,
             WanStatus = wanStatus,
             PendingChanges = pending,
-            TopHosts = top.Hosts,
-            TopServices = top.Services,
             WanHealth = wanHealth.Health,
             WanTransitions = wanHealth.Transitions,
         };
@@ -416,51 +412,6 @@ public class HomeController : Controller
         {
             _logger.LogDebug(ex, "WAN health query failed");
             return WanHealthSnapshot.Empty;
-        }
-    }
-
-    private sealed record TopTalkerSnapshot(IReadOnlyList<TopTalkerRow> Hosts, IReadOnlyList<TopTalkerRow> Services)
-    {
-        public static readonly TopTalkerSnapshot Empty =
-            new(Array.Empty<TopTalkerRow>(), Array.Empty<TopTalkerRow>());
-    }
-
-    private async Task<TopTalkerSnapshot> SafeQueryTopTalkersAsync(CancellationToken ct)
-    {
-        try
-        {
-            var env = await _daemon.GetTopTalkersAsync(24, 5, ct);
-            if (!env.Success || env.Data is null) return TopTalkerSnapshot.Empty;
-
-            // Project the daemon DTOs into UI-friendly rows. Hostname goes in
-            // the sublabel; service name (https/sip/…) is interpolated into
-            // the main label so the user sees "tcp/443 (https)".
-            var hosts = env.Data.Hosts.Select(h => new TopTalkerRow
-            {
-                Label = h.SrcIp.ToString(),
-                Sublabel = h.Hostname ?? $"{h.FlowCount} flow(s)",
-                BytesIn = h.BytesIn,
-                BytesOut = h.BytesOut,
-            }).ToList();
-
-            var services = env.Data.Services.Select(s => new TopTalkerRow
-            {
-                Label = s.DstPort is int port
-                    ? (s.ServiceName is { Length: > 0 } sn
-                        ? $"{s.Proto}/{port} ({sn})"
-                        : $"{s.Proto}/{port}")
-                    : s.Proto,
-                Sublabel = $"{s.FlowCount} flow(s)",
-                BytesIn = s.BytesIn,
-                BytesOut = s.BytesOut,
-            }).ToList();
-
-            return new TopTalkerSnapshot(hosts, services);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Top-talkers query failed");
-            return TopTalkerSnapshot.Empty;
         }
     }
 

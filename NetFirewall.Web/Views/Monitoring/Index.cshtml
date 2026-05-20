@@ -2,7 +2,7 @@
     ViewData["Title"] = "Monitoring";
     Layout = "_Layout";
 }
-<div x-data="{ tab: 'live', range: '24h', paused: false }" class="space-y-4"
+<div x-data="{ tab: 'live', range: '24h', talkersRange: '24h', paused: false }" class="space-y-4"
      style="animation: var(--animate-slide-up);">
 
     @* ---------- header + tabs ---------- *@
@@ -51,8 +51,11 @@
         </div>
 
         @* ---------- Top talkers (refreshed every 30s — daemon's sampler cadence) ---------- *@
+        @* The 30s poll carries the selected window via hx-vals so the chosen
+           range survives auto-refresh; the in-partial selector updates talkersRange. *@
         <div id="monitoring-toptalkers" class="mt-4 loading-host"
              hx-get="/Monitoring/toptalkers"
+             :hx-vals="JSON.stringify({ range: talkersRange })"
              :hx-trigger="paused ? 'load' : 'load, every 30s'"
              hx-swap="innerHTML">
             @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })

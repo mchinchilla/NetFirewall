@@ -87,12 +87,17 @@ public sealed class MonitoringController : Controller
     // a partial so HTMX can swap it in-place on the Monitoring page every 30s
     // (the daemon's ConntrackSampler cadence — faster polling is wasted work).
     [HttpGet("toptalkers")]
-    public async Task<IActionResult> TopTalkers(CancellationToken ct)
+    public async Task<IActionResult> TopTalkers(string? range, CancellationToken ct)
     {
+        // Normalize to one of the known tokens so the selector always echoes a
+        // valid state back; unknown values fall through to the 24h default.
+        var window = TopTalkersLiveViewModel.Ranges.Contains(range) ? range! : "24h";
+        var hours = TopTalkersLiveViewModel.RangeToHours(window);
+
         TopTalkersLiveViewModel vm;
         try
         {
-            var env = await _daemon.GetTopTalkersAsync(24, 5, ct);
+            var env = await _daemon.GetTopTalkersAsync(hours, 5, ct);
             if (env.Success && env.Data is not null)
             {
                 var hosts = env.Data.Hosts.Select(h => new TopTalkerRow
@@ -115,17 +120,17 @@ public sealed class MonitoringController : Controller
                     BytesOut = s.BytesOut,
                 }).ToList();
 
-                vm = new TopTalkersLiveViewModel { Hosts = hosts, Services = services };
+                vm = new TopTalkersLiveViewModel { Hosts = hosts, Services = services, Range = window };
             }
             else
             {
-                vm = TopTalkersLiveViewModel.Empty;
+                vm = new TopTalkersLiveViewModel { Range = window };
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Top-talkers query failed");
-            vm = TopTalkersLiveViewModel.Empty;
+            vm = new TopTalkersLiveViewModel { Range = window };
         }
 
         return PartialView("_TopTalkersLive", vm);

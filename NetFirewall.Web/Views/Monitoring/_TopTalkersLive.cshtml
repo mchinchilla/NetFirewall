@@ -7,13 +7,39 @@
         while (x >= 1024 && i < u.Length - 1) { x /= 1024; i++; }
         return $"{x:0.##} {u[i]}";
     }
+
+    // Human label for the selected window, used in the panel titles.
+    var windowLabel = Model.Range switch
+    {
+        "1h" => "1h",
+        "6h" => "6h",
+        "7d" => "7d",
+        _ => "24h",
+    };
 }
+
+@* Window selector. Buttons set the page-level `talkersRange` Alpine var (so the
+   30s auto-poll keeps the chosen window) and re-trigger the container fetch.
+   Lives inside the swapped partial so the active button reflects server state. *@
+<div class="flex items-center justify-end gap-2 mb-3">
+    <span class="text-xs text-surface-fg-muted">Window:</span>
+    <div class="inline-flex p-1 rounded-md text-xs bg-surface-muted">
+        @foreach (var r in NetFirewall.Web.Models.Monitoring.TopTalkersLiveViewModel.Ranges)
+        {
+            var active = r == Model.Range;
+            <button type="button" class="px-2.5 py-1 rounded font-medium transition@(active ? " shadow-sm" : "")"
+                    style="@(active ? "background-color: var(--surface-elevated); color: var(--surface-fg);" : "color: var(--surface-fg-muted);")"
+                    @(active ? "aria-current=true" : "")
+                    @@click="talkersRange = '@r'; htmx.ajax('GET', '/Monitoring/toptalkers?range=@r', { target: $el.closest('.loading-host'), swap: 'innerHTML' })">@r</button>
+        }
+    </div>
+</div>
 
 <div class="grid gap-4 grid-cols-1 xl:grid-cols-2">
     <section class="card">
         <header class="flex items-baseline justify-between mb-3">
             <div>
-                <h2 class="text-base font-semibold">Top hosts (24h)</h2>
+                <h2 class="text-base font-semibold">Top hosts (@windowLabel)</h2>
                 <p class="text-xs text-surface-fg-muted">By total bytes — sampled from conntrack</p>
             </div>
         </header>
@@ -53,7 +79,7 @@
     <section class="card">
         <header class="flex items-baseline justify-between mb-3">
             <div>
-                <h2 class="text-base font-semibold">Top services (24h)</h2>
+                <h2 class="text-base font-semibold">Top services (@windowLabel)</h2>
                 <p class="text-xs text-surface-fg-muted">By total bytes — proto + destination port</p>
             </div>
         </header>
