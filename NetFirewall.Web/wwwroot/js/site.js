@@ -418,12 +418,12 @@ document.addEventListener("alpine:init", () => {
      * Each tag is either a literal CIDR/IP or an object name (the resolver
      * disambiguates server-side, so we only need to pass the strings through).
      *
-     *   <div x-data="addressPicker('192.168.1.0/24, DB_SERVERS')">
+     *   <div x-data="addressPicker()" data-initial="192.168.1.0/24, DB_SERVERS">
      *     <input type="hidden" x-ref="hidden" name="SourceAddresses" :value="csv">
      *     ...template...
      *   </div>
      */
-    Alpine.data("addressPicker", (initialCsv) => ({
+    Alpine.data("addressPicker", () => ({
         tags: [],            // current chips
         input: "",           // text the user is typing
         suggestions: [],     // current dropdown rows
@@ -432,7 +432,10 @@ document.addEventListener("alpine:init", () => {
         _searchTimer: null,
 
         init() {
-            this.tags = (initialCsv || "")
+            // Initial CSV comes from data-initial (set server-side). Reading it
+            // from a data-attribute instead of an x-data argument avoids quoting
+            // bugs when the value contains commas/quotes inside the HTML attribute.
+            this.tags = (this.$el.dataset.initial || "")
                 .split(",")
                 .map(s => s.trim())
                 .filter(s => s.length > 0);
@@ -511,7 +514,7 @@ document.addEventListener("alpine:init", () => {
      * numeric ports / "start-end" ranges, or service names from /Network/Services.
      * Same hidden-input pattern so server-side parsing stays unchanged.
      */
-    Alpine.data("portPicker", (initialCsv) => ({
+    Alpine.data("portPicker", () => ({
         tags: [],
         input: "",
         suggestions: [],
@@ -520,7 +523,8 @@ document.addEventListener("alpine:init", () => {
         _searchTimer: null,
 
         init() {
-            this.tags = (initialCsv || "")
+            // Initial CSV via data-initial (see addressPicker for rationale).
+            this.tags = (this.$el.dataset.initial || "")
                 .split(",")
                 .map(s => s.trim())
                 .filter(s => s.length > 0);
@@ -681,6 +685,9 @@ document.addEventListener("alpine:init", () => {
                 const target = document.getElementById("drawer-body");
                 if (target) target.innerHTML = html;
                 if (window.htmx) window.htmx.process(target);
+                // Manual injection bypasses htmx:afterSwap, so init Alpine on the
+                // new subtree ourselves (x-data/x-init pickers, etc.).
+                if (target && window.Alpine?.initTree) window.Alpine.initTree(target);
             } catch (err) {
                 window.Alpine?.store("toasts")?.error(`Failed to load: ${err.message}`);
                 this.close();
@@ -906,4 +913,48 @@ document.addEventListener("htmx:sendError", async () => {
     const store = window.Alpine?.store("toasts");
     if (!store) return;
     store.error("Network error — check your connection.");
+});
+
+/* JSON envelope responses must never be painted into the DOM.
+ * Drawer forms (filter / NAT / port-forward / mangle rule editors) post with
+ * hx-swap="outerHTML", but their save endpoints return a ServiceResponse<T> as
+ * application/json plus an HX-Trigger header (showToast + refresh<X>). HTMX
+ * swaps any 2xx body by default, so without this it would dump the raw JSON
+ * into the drawer. Here we suppress the swap for JSON responses — the toast and
+ * list-refresh already ride on HX-Trigger — and on success we close the drawer.
+ * On error (4xx/422) we keep the drawer open so the user can correct input;
+ * the error toast is already triggered server-side. */
+document.addEventListener("htmx:beforeSwap", (event) => {
+    const xhr = event.detail?.xhr;
+    const ct = xhr?.getResponseHeader?.("Content-Type") ?? "";
+    if (!ct.includes("application/json")) return;
+
+    const status = xhr?.status ?? 0;
+
+    // 401 + showElevationModal is the step-up TOTP challenge, not a failure:
+    // the elevation modal opens (via HX-Trigger) and replays the original
+    // request after the code is verified. Mark it non-error so HTMX stops
+    // logging a scary "Response Status Error Code 401" to the console.
+    if (status === 401) {
+        const trigger = xhr?.getResponseHeader?.("HX-Trigger") ?? "";
+        if (trigger.includes("showElevationModal")) event.detail.isError = false;
+    }
+
+    event.detail.shouldSwap = false;          // never paint JSON
+    if (status >= 200 && status < 300) {
+        window.Alpine?.store("drawer")?.close();
+    }
+});
+
+/* Initialize Alpine on HTMX-swapped content.
+ * Alpine v3 only scans the DOM on its own start; it does NOT process nodes
+ * that HTMX injects later. Without this, any x-data swapped into the page
+ * (e.g. the address/port pickers in the drawer rule editors) never runs its
+ * init(), so pre-filled tag chips never render and the field looks empty.
+ * htmx:afterSwap fires after the new subtree is in the DOM — hand it to
+ * Alpine.initTree so x-data/x-init on the swapped element take effect.
+ * initTree skips nodes Alpine has already initialized, so this is idempotent. */
+document.addEventListener("htmx:afterSwap", (event) => {
+    const target = event.detail?.target;
+    if (target && window.Alpine?.initTree) window.Alpine.initTree(target);
 });

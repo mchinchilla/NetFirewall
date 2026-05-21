@@ -9,7 +9,8 @@
 }
 
 <div class="space-y-1.5"
-     x-data="portPicker(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Value ?? string.Empty)))"
+     data-initial="@(Model.Value ?? string.Empty)"
+     x-data="portPicker()"
      x-init="$nextTick(() => $refs.hidden.value = csv)">
     <label for="@fieldId" class="block text-xs font-medium text-surface-fg">
         @Model.Label

@@ -13,7 +13,8 @@
 }
 
 <div class="space-y-1.5"
-     x-data="addressPicker(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Value ?? string.Empty)))"
+     data-initial="@(Model.Value ?? string.Empty)"
+     x-data="addressPicker()"
      x-init="$nextTick(() => $refs.hidden.value = csv)">
     <label for="@fieldId" class="block text-xs font-medium text-surface-fg">
         @Model.Label
