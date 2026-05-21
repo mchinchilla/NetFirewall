@@ -120,6 +120,79 @@ NetFirewall/
 - 🔧 Paquetes `nftables`, `iproute2`, `wireguard-tools`, `conntrack`
 - 🌐 nginx (o cualquier reverse proxy) para terminar TLS
 
+### Instalar las dependencias del sistema
+
+`deploy/install.sh` **no** instala paquetes del SO — solo verifica que estén
+presentes (`systemctl`, `dotnet`, `psql`, `openssl`) y aborta si falta alguno.
+Instala primero todo lo que el daemon invoca en tiempo de ejecución: `nft`,
+`ip`, `tc`, `wg` / `wg-quick`, `conntrack`, `ping` y `systemctl`.
+
+**Debian / Ubuntu**
+
+```bash
+# herramientas que el daemon ejecuta en runtime
+apt update
+apt install -y nftables iproute2 wireguard-tools conntrack iputils-ping \
+               openssl curl ca-certificates
+
+# PostgreSQL 14+ (servidor + cliente; el runner de migraciones usa psql)
+apt install -y postgresql postgresql-client
+
+# nginx para terminar TLS (omítelo si usas otro reverse proxy)
+apt install -y nginx
+
+# .NET 10 SDK — feed de Microsoft (Debian/Ubuntu)
+#   ver https://learn.microsoft.com/dotnet/core/install/linux según tu release
+apt install -y dotnet-sdk-10.0      # o baja el tarball y agrégalo al PATH
+```
+
+**Rocky / Alma / RHEL 9**
+
+```bash
+dnf install -y nftables iproute-tc wireguard-tools conntrack-tools iputils \
+               openssl curl postgresql-server postgresql nginx dotnet-sdk-10.0
+postgresql-setup --initdb        # init del cluster PG la primera vez (familia RHEL)
+systemctl enable --now postgresql
+```
+
+**openSUSE**
+
+```bash
+zypper install -y nftables iproute2 wireguard-tools conntrack-tools iputils \
+                  openssl curl postgresql-server postgresql nginx dotnet-sdk-10.0
+```
+
+> Nombres de paquete: `conntrack` (Debian) = `conntrack-tools` (RHEL/SUSE);
+> `tc` viene en `iproute2` (Debian) pero en `iproute-tc` (RHEL); `ping` está en
+> `iputils-ping` (Debian) / `iputils` (RHEL/SUSE).
+
+### Habilitar funciones del kernel
+
+El firewall es un router, así que el forwarding IPv4 debe estar activo, y el
+panel de top-talkers necesita contabilidad de bytes en conntrack (`conntrack -L`
+solo emite `bytes=` cuando `nf_conntrack_acct=1`). El instalador deja
+`/etc/sysctl.d/netfirewall.conf` con `nf_conntrack_acct`, pero **el forwarding
+es decisión tuya** — actívalo explícitamente:
+
+```bash
+# persistente: escribe un drop-in de sysctl y aplícalo
+cat >/etc/sysctl.d/99-netfirewall-router.conf <<'EOF'
+net.ipv4.ip_forward = 1
+net.netfilter.nf_conntrack_acct = 1
+EOF
+sysctl --system
+
+# verificar
+sysctl net.ipv4.ip_forward net.netfilter.nf_conntrack_acct
+```
+
+> **Policy routing + `rp_filter`:** el filtrado estricto de ruta inversa
+> (`net.ipv4.conf.*.rp_filter=1`) descarta silenciosamente tráfico enrutado por
+> fwmark cuya ruta de respuesta difiere de la interfaz de entrada. Si el tráfico
+> marcado no sale por la WAN/VPN esperada aunque `ip rule` + la tabla de rutas
+> se vean bien, relájalo: `sysctl -w net.ipv4.conf.all.rp_filter=2` (modo loose).
+> Ver diagnóstico abajo.
+
 ### Instalación
 
 ```bash
@@ -222,6 +295,108 @@ curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply
 curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-qos
 curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-policy-routing
 curl --unix-socket "$SOCK" -X POST http://daemon/v1/wireguard/apply
+```
+
+### Republicar tras un cambio de código
+
+Editar el código **no** cambia nada en el kernel hasta republicar los binarios,
+reiniciar los servicios y volver a aplicar. El generador de nftables vive en
+`NetFirewall.Services`, que enlazan tanto el daemon como el web → republica
+ambos:
+
+```bash
+cd /opt/tekium/src && git pull        # trae los cambios
+dotnet publish -c Release -r linux-x64 -o /opt/tekium/daemon NetFirewall.Daemon
+dotnet publish -c Release -r linux-x64 -o /opt/tekium/web    NetFirewall.Web
+systemctl restart netfirewall-daemon netfirewall-web
+# luego: UI → Firewall → Apply (TOTP), o el curl de "Apply manual" de arriba
+```
+
+### Diagnóstico
+
+Cuando algo "está configurado pero no funciona", recorre la cadena desde el
+kernel hacia abajo. Todo es de solo lectura — seguro en un equipo en producción.
+
+**Servicios y sockets**
+
+```bash
+systemctl status netfirewall-daemon netfirewall-web
+journalctl -u netfirewall-daemon -n 100 --no-pager
+journalctl -u netfirewall-web    -n 100 --no-pager
+ls -l /run/netfirewall/control.sock                    # socket Unix del daemon (0660 root:netfirewall)
+curl --unix-socket /run/netfirewall/control.sock http://daemon/v1/health
+```
+
+**nftables — ¿el ruleset es el esperado?**
+
+```bash
+nft list ruleset                       # todo
+nft list table ip filter
+nft list table ip nat                  # DNAT / masquerade
+nft list table ip mangle               # marcado fwmark (policy routing)
+nft -c -f /etc/nftables.conf           # valida el archivo generado SIN aplicarlo
+```
+
+> Trampa del mangle: cada regla de marcado debe terminar en `... meta mark set
+> 0xNNN return`. `meta mark set` **no** es terminal — sin `return`, una regla
+> más amplia posterior (p.ej. `192.168.99.0/24 → WAN1`) sobreescribe la marca de
+> un host específico de arriba, y ese host sale por el enlace equivocado.
+
+**Policy routing — ¿la marca llega a la tabla y device correctos?**
+
+```bash
+ip rule show                                       # mapeos fwmark → tabla
+ip route show table all | grep -i wg0
+ip route show table wg0                            # una tabla nombrada (o: table <id>)
+cat /etc/iproute2/rt_tables
+
+# LA prueba definitiva: ¿por qué device saldría un paquete marcado del host X?
+ip route get 8.8.8.8 from 192.168.99.66 mark 0x500   # esperado: dev wg0
+```
+
+**Conntrack / top-talkers (panel del dashboard vacío)**
+
+```bash
+# el binario debe existir (Debian: conntrack · RHEL/SUSE: conntrack-tools)
+which conntrack || apt install -y conntrack
+which conntrack && conntrack -V
+
+# la contabilidad de bytes DEBE estar en 1, si no `bytes=` no aparece y el panel queda vacío
+sysctl net.netfilter.nf_conntrack_acct
+sysctl -w net.netfilter.nf_conntrack_acct=1          # activar en caliente si está en 0
+
+# ¿hay flujos y traen bytes=?
+conntrack -L -o extended 2>/dev/null | head -5
+conntrack -L -o extended 2>/dev/null | wc -l
+conntrack -L -o extended 2>/dev/null | head -3 | grep -o "bytes=[0-9]*"
+conntrack -L -s 192.168.99.66 2>/dev/null | head     # flujos desde un origen
+
+# ¿el sampler del daemon está leyendo conntrack?
+journalctl -u netfirewall-daemon --since "10 min ago" | grep -i "conntrack\|sampler\|lan_traffic"
+```
+
+**WireGuard**
+
+```bash
+wg show                                  # peers, handshakes, transferencia
+wg show wg0 allowed-ips
+ip -br addr show wg0
+wg-quick up wg0                          # levantar manualmente (normalmente lo hace el daemon)
+```
+
+**WAN / forwarding**
+
+```bash
+sysctl net.ipv4.ip_forward               # debe ser 1 para un router
+ping -I ens192 -c2 1.1.1.1               # probar una WAN específica
+ip route show default
+```
+
+**Apply history (DB)**
+
+```sql
+SELECT kind, success, applied_at, applied_by, message
+FROM fw_apply_history ORDER BY applied_at DESC LIMIT 20;
 ```
 
 ### Migraciones
