@@ -1520,7 +1520,13 @@ public sealed class FirewallService : IFirewallService
         // Port forwards (DNAT)
         foreach (var pf in portForwards.Where(p => p.Enabled))
         {
-            sb.AppendLine(GeneratePortForwardRule(pf, ifaceMap));
+            var line = GeneratePortForwardRule(pf, ifaceMap);
+            if (line is null)
+            {
+                sb.AppendLine($"        # SKIP port-forward {pf.Id} — incomplete (protocol/port/target missing)");
+                continue;
+            }
+            sb.AppendLine(line);
         }
 
         sb.AppendLine("    }");
@@ -1539,7 +1545,13 @@ public sealed class FirewallService : IFirewallService
             }
             foreach (var src in sources)
             {
-                sb.AppendLine(GenerateNatRule(nat, src, ifaceMap));
+                var line = GenerateNatRule(nat, src, ifaceMap);
+                if (line is null)
+                {
+                    sb.AppendLine($"        # SKIP nat {nat.Id} — unrenderable (unknown type, or snat without snat_address)");
+                    continue;
+                }
+                sb.AppendLine(line);
             }
         }
 
@@ -1840,8 +1852,21 @@ public sealed class FirewallService : IFirewallService
         return sb.ToString();
     }
 
-    private static string GeneratePortForwardRule(FwPortForward pf, Dictionary<Guid, string> ifaceMap)
+    /// <summary>
+    /// Emit one DNAT rule, or <c>null</c> when the row is too incomplete to make
+    /// a valid nft statement. A malformed rule (empty protocol, no port, no
+    /// target) would produce a line without a verdict — and `nft -f` rejects the
+    /// WHOLE ruleset on a single syntax error, so one bad DB row would take the
+    /// entire firewall apply down. Returning null lets the caller emit a `# SKIP`
+    /// comment instead, keeping the rest of the ruleset valid.
+    /// </summary>
+    private static string? GeneratePortForwardRule(FwPortForward pf, Dictionary<Guid, string> ifaceMap)
     {
+        // Guard: a DNAT needs a protocol, an external port, and a target.
+        if (string.IsNullOrWhiteSpace(pf.Protocol)) return null;
+        if (pf.ExternalPortStart <= 0) return null;
+        if (pf.InternalIp is null || pf.InternalIp.Equals(IPAddress.None) || pf.InternalPort <= 0) return null;
+
         var sb = new StringBuilder("        ");
 
         // Interface
@@ -1900,8 +1925,27 @@ public sealed class FirewallService : IFirewallService
     /// from <see cref="ResolveNatSourcesAsync"/> — this generator is called
     /// once per resolved source, so a group of N members produces N rules.
     /// </summary>
-    private static string GenerateNatRule(FwNatRule nat, string sourceCidr, Dictionary<Guid, string> ifaceMap)
+    private static string? GenerateNatRule(FwNatRule nat, string sourceCidr, Dictionary<Guid, string> ifaceMap)
     {
+        // Determine the verdict first — if we can't form a valid one, skip the
+        // rule entirely rather than emit `ip saddr X oif Y` with no action.
+        // nft rejects the whole ruleset on one bad line, so a misconfigured row
+        // (e.g. snat type with a null snat_address) must NOT reach the script.
+        string action;
+        if (nat.Type.Equals("masquerade", StringComparison.OrdinalIgnoreCase))
+        {
+            action = "masquerade";
+        }
+        else if (nat.Type.Equals("snat", StringComparison.OrdinalIgnoreCase)
+                 && nat.SnatAddress is not null && !nat.SnatAddress.Equals(IPAddress.None))
+        {
+            action = $"snat to {nat.SnatAddress}";
+        }
+        else
+        {
+            return null; // unknown type, or snat without an address — not renderable
+        }
+
         var sb = new StringBuilder("        ");
 
         // Source network (resolved — could be a literal CIDR or one of N from a group)
@@ -1913,15 +1957,7 @@ public sealed class FirewallService : IFirewallService
             sb.Append($"oif {iface} ");
         }
 
-        // NAT action
-        if (nat.Type.Equals("masquerade", StringComparison.OrdinalIgnoreCase))
-        {
-            sb.Append("masquerade");
-        }
-        else if (nat.Type.Equals("snat", StringComparison.OrdinalIgnoreCase) && nat.SnatAddress != null)
-        {
-            sb.Append($"snat to {nat.SnatAddress}");
-        }
+        sb.Append(action);
 
         // Comment
         if (!string.IsNullOrEmpty(nat.Description))
