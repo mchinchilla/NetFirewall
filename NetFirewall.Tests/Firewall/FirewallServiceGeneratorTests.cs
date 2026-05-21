@@ -333,6 +333,53 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         Assert.DoesNotContain("table ip mangle", cfg);
     }
 
+    [Fact]
+    public async Task Generate_MangleRule_EmitsMarkThenReturn()
+    {
+        var mark = await _svc.CreateTrafficMarkAsync(new FwTrafficMark
+        {
+            Name = "VPN_WG0", MarkValue = 0x500, RouteTable = "wg0"
+        });
+        await _svc.CreateMangleRuleAsync(new FwMangleRule
+        {
+            Chain = "prerouting", Priority = 80, Enabled = true,
+            MarkId = mark.Id, SourceAddresses = new[] { "192.168.99.66" },
+            Description = "host → VPN"
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        // The mark must be followed by `return` so a later, broader rule can't
+        // overwrite it (regression: 0.0.0.0/0 → WAN1 clobbered specific marks).
+        Assert.Contains("meta mark set 0x500 return", cfg);
+    }
+
+    [Fact]
+    public async Task Generate_MangleRules_SpecificRuleOrderedBeforeBroaderByPriority()
+    {
+        var vpn  = await _svc.CreateTrafficMarkAsync(new FwTrafficMark { Name = "VPN_WG0", MarkValue = 0x500 });
+        var wan1 = await _svc.CreateTrafficMarkAsync(new FwTrafficMark { Name = "WAN1",    MarkValue = 0x100 });
+
+        // Insert the broad rule first to prove ordering is by Priority, not insert order.
+        await _svc.CreateMangleRuleAsync(new FwMangleRule
+        {
+            Chain = "prerouting", Priority = 100, Enabled = true,
+            MarkId = wan1.Id, SourceAddresses = new[] { "192.168.99.0/24" }, Description = "LAN → WAN1"
+        });
+        await _svc.CreateMangleRuleAsync(new FwMangleRule
+        {
+            Chain = "prerouting", Priority = 80, Enabled = true,
+            MarkId = vpn.Id, SourceAddresses = new[] { "192.168.99.66" }, Description = "host → VPN"
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        var vpnPos  = cfg.IndexOf("meta mark set 0x500 return", StringComparison.Ordinal);
+        var wan1Pos = cfg.IndexOf("meta mark set 0x100 return", StringComparison.Ordinal);
+        Assert.True(vpnPos >= 0 && wan1Pos >= 0, "both marks must be rendered");
+        Assert.True(vpnPos < wan1Pos, "lower priority value (VPN, 80) must precede the broader WAN1 (100)");
+    }
+
     // ── helpers ────────────────────────────────────────────────────────
 
     /// <summary>

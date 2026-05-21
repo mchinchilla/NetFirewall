@@ -1969,10 +1969,15 @@ public sealed class FirewallService : IFirewallService
                 sb.Append($"{rule.Protocol} dport {{ {string.Join(", ", rule.DestinationPorts)} }} ");
         }
 
-        // Mark action
+        // Mark action. `meta mark set` is an action, not a verdict — packet
+        // evaluation continues, so any later rule whose match also fits would
+        // overwrite the mark (e.g. a broad "LAN → WAN1" 0.0.0.0/0 rule clobbers
+        // a specific "host → VPN" mark set just above it). Emit `return` right
+        // after marking so the first matching rule (lowest priority value) wins
+        // and the packet leaves the chain with its intended mark intact.
         if (rule.MarkId.HasValue && markMap.TryGetValue(rule.MarkId.Value, out var mark))
         {
-            sb.Append($"meta mark set 0x{mark.MarkValue:x}");
+            sb.Append($"meta mark set 0x{mark.MarkValue:x} return");
         }
 
         // Comment
