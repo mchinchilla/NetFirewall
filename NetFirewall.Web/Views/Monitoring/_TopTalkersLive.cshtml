@@ -64,7 +64,9 @@
                                 }
                             </div>
                             <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
-                                ↓ @FmtBytes(h.BytesIn) · ↑ @FmtBytes(h.BytesOut)
+                                @* bytes_in is the conntrack forward tuple (LAN→outside = upload);
+                                   bytes_out is the reply tuple (outside→LAN = download). Swap for display. *@
+                                ↓ @FmtBytes(h.BytesOut) · ↑ @FmtBytes(h.BytesIn)
                             </div>
                         </div>
                         <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
@@ -104,7 +106,8 @@
                                 }
                             </div>
                             <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
-                                ↓ @FmtBytes(s.BytesIn) · ↑ @FmtBytes(s.BytesOut)
+                                @* See note above: bytes_in = upload, bytes_out = download. Swap for display. *@
+                                ↓ @FmtBytes(s.BytesOut) · ↑ @FmtBytes(s.BytesIn)
                             </div>
                         </div>
                         <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
