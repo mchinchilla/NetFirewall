@@ -217,6 +217,42 @@ public sealed class MetricsCollectorService : BackgroundService
         cmd.Parameters.AddWithValue("diskJson", diskJson);
 
         await cmd.ExecuteNonQueryAsync(ct);
+
+        // Per-interface rows (excluding loopback) — lets the dashboard count only
+        // the WAN side and avoid the routed-packet double-count. Best-effort: a
+        // failure here must not lose the aggregate sample above.
+        try
+        {
+            await StorePerInterfaceAsync(conn, snapshot, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Per-interface metrics insert failed (table may not exist yet)");
+        }
+    }
+
+    private static async Task StorePerInterfaceAsync(
+        NpgsqlConnection conn, SystemMetricsSnapshot snapshot, CancellationToken ct)
+    {
+        const string sql = @"
+            INSERT INTO system_metrics_net
+                (timestamp, hostname, interface_name, rx_bytes, tx_bytes, rx_rate, tx_rate)
+            VALUES (@ts, @host, @iface, @rx, @tx, @rxRate, @txRate)";
+
+        foreach (var n in snapshot.Network)
+        {
+            if (string.Equals(n.InterfaceName, "lo", StringComparison.OrdinalIgnoreCase)) continue;
+
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("ts", snapshot.Timestamp);
+            cmd.Parameters.AddWithValue("host", snapshot.System.Hostname);
+            cmd.Parameters.AddWithValue("iface", n.InterfaceName);
+            cmd.Parameters.AddWithValue("rx", n.BytesReceived);
+            cmd.Parameters.AddWithValue("tx", n.BytesSent);
+            cmd.Parameters.AddWithValue("rxRate", n.BytesReceivedPerSecond);
+            cmd.Parameters.AddWithValue("txRate", n.BytesSentPerSecond);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private async Task RunMaintenanceTasksAsync(CancellationToken ct)
@@ -289,6 +325,45 @@ public sealed class MetricsCollectorService : BackgroundService
 
         if (rows > 0)
             _logger.LogDebug("Hourly aggregation: {Rows} rows", rows);
+
+        // Per-interface hourly rollup (best-effort; new table may not exist yet).
+        try
+        {
+            await RunHourlyNetAggregationAsync(conn, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Per-interface hourly aggregation failed (table may not exist yet)");
+        }
+    }
+
+    private static async Task RunHourlyNetAggregationAsync(NpgsqlConnection conn, CancellationToken ct)
+    {
+        const string sql = @"
+            INSERT INTO system_metrics_net_hourly
+                (hour_bucket, hostname, interface_name, rx_total, tx_total, rx_rate_avg, tx_rate_avg, sample_count)
+            SELECT
+                date_trunc('hour', timestamp) AS hour_bucket,
+                hostname,
+                interface_name,
+                MAX(rx_bytes) - MIN(rx_bytes),
+                MAX(tx_bytes) - MIN(tx_bytes),
+                AVG(rx_rate),
+                AVG(tx_rate),
+                COUNT(*)
+            FROM system_metrics_net
+            WHERE timestamp >= date_trunc('hour', NOW() - INTERVAL '1 hour')
+              AND timestamp <  date_trunc('hour', NOW())
+            GROUP BY date_trunc('hour', timestamp), hostname, interface_name
+            ON CONFLICT (hour_bucket, hostname, interface_name) DO UPDATE SET
+                rx_total = EXCLUDED.rx_total,
+                tx_total = EXCLUDED.tx_total,
+                rx_rate_avg = EXCLUDED.rx_rate_avg,
+                tx_rate_avg = EXCLUDED.tx_rate_avg,
+                sample_count = EXCLUDED.sample_count";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private async Task RunDailyAggregationAsync(CancellationToken ct)
@@ -358,6 +433,16 @@ public sealed class MetricsCollectorService : BackgroundService
                     deleted, rawCutoff, rawHours);
         }
 
+        // Same retention for the per-interface raw table (best-effort).
+        try
+        {
+            await using var cmd = new NpgsqlCommand(
+                "DELETE FROM system_metrics_net WHERE timestamp < @cutoff", conn);
+            cmd.Parameters.AddWithValue("cutoff", rawCutoff);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Per-interface raw cleanup skipped"); }
+
         // Delete old hourly data
         var hourlyCutoff = DateTime.UtcNow - TimeSpan.FromDays(hourlyDays);
         await using (var cmd = new NpgsqlCommand(
@@ -368,6 +453,16 @@ public sealed class MetricsCollectorService : BackgroundService
             if (deleted > 0)
                 _logger.LogInformation("Cleaned up {Count} hourly metrics ({Days}d retention)", deleted, hourlyDays);
         }
+
+        // Same retention for the per-interface hourly rollup (best-effort).
+        try
+        {
+            await using var cmd = new NpgsqlCommand(
+                "DELETE FROM system_metrics_net_hourly WHERE hour_bucket < @cutoff", conn);
+            cmd.Parameters.AddWithValue("cutoff", hourlyCutoff);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Per-interface hourly cleanup skipped"); }
 
         // Delete old daily data
         var dailyCutoff = DateTime.UtcNow - _options.DailyDataRetention;

@@ -138,10 +138,26 @@ public class HomeController : Controller
     {
         try
         {
-            var snap = await _monitor.GetSnapshotAsync(ct);
+            var snapTask = _monitor.GetSnapshotAsync(ct);
+            var ifacesTask = _firewall.GetInterfacesAsync(ct);
+            await Task.WhenAll(snapTask, ifacesTask);
+            var snap = snapTask.Result;
+
+            // Count ONLY WAN interfaces. Summing every NIC double-counts every
+            // routed packet (it's RX on the LAN NIC and TX on the WAN NIC),
+            // which made in≈out. WAN RX = real download, WAN TX = real upload.
+            var wanNames = ifacesTask.Result
+                .Where(i => string.Equals(i.Type, "WAN", StringComparison.OrdinalIgnoreCase))
+                .Select(i => i.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             const double bytesToMbps = 8.0 / 1_000_000;
+            // Fall back to all-non-loopback only if no WAN is configured, so the
+            // panel still shows something rather than going blank.
             var nics = snap.Network
-                .Where(n => !string.Equals(n.InterfaceName, "lo", StringComparison.OrdinalIgnoreCase))
+                .Where(n => wanNames.Count > 0
+                    ? wanNames.Contains(n.InterfaceName)
+                    : !string.Equals(n.InterfaceName, "lo", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             var perIface = nics
@@ -276,11 +292,27 @@ public class HomeController : Controller
         {
             var to = DateTime.UtcNow;
             var from = to.AddHours(-24);
+            const double bytesToMbps = 8.0 / 1_000_000;
+
+            // Preferred: WAN-only per-interface data — real download/upload, no
+            // NAT double-count (which made in≈out on the all-NIC sum).
+            var wan = await _query.GetWanTrafficHourlyAsync(from, to, ct);
+            if (wan.Count > 0)
+            {
+                return new TrafficHistory(
+                    Labels: wan.Select(r => r.Bucket.ToLocalTime().ToString("HH:mm")).ToArray(),
+                    RxMbps: wan.Select(r => Math.Round(r.RxBytes * bytesToMbps / 3600, 1)).ToArray(),
+                    TxMbps: wan.Select(r => Math.Round(r.TxBytes * bytesToMbps / 3600, 1)).ToArray(),
+                    TotalBytes: wan.Sum(r => r.RxBytes + r.TxBytes));
+            }
+
+            // Fallback (no per-interface hour yet, or no WAN configured): the old
+            // summed series. Double-counted, but better than a blank chart until
+            // the new pipeline has collected an hour.
             var rows = await _query.GetHourlyMetricsAsync(from, to, hostname: null, ct);
             if (rows.Count == 0)
                 return TrafficHistory.Empty;
 
-            const double bytesToMbps = 8.0 / 1_000_000;
             return new TrafficHistory(
                 Labels: rows.Select(r => r.Bucket.ToLocalTime().ToString("HH:mm")).ToArray(),
                 RxMbps: rows.Select(r => Math.Round(r.NetworkRxTotal * bytesToMbps / 3600, 1)).ToArray(),

@@ -25,6 +25,18 @@ public interface IMetricsQueryService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Hourly WAN traffic (rx/tx bytes per hour), summing ONLY interfaces marked
+    /// type='WAN' in fw_interfaces. This is the real Internet download/upload —
+    /// it avoids the routed-packet double-count that summing every NIC produced
+    /// (a packet is RX on the LAN NIC and TX on the WAN NIC, so all-NIC sums make
+    /// in≈out). Reads system_metrics_net_hourly. Empty if the per-interface
+    /// pipeline hasn't collected an hour yet.
+    /// </summary>
+    Task<IReadOnlyList<WanTrafficPoint>> GetWanTrafficHourlyAsync(
+        DateTime from, DateTime to,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Get daily aggregated metrics.
     /// </summary>
     Task<IReadOnlyList<MetricAggregate>> GetDailyMetricsAsync(
@@ -54,6 +66,9 @@ public record MetricPoint
     public double NetworkRxRate { get; init; }
     public double NetworkTxRate { get; init; }
 }
+
+/// <summary>One hour bucket of WAN-only traffic (real Internet rx/tx bytes).</summary>
+public sealed record WanTrafficPoint(DateTime Bucket, long RxBytes, long TxBytes);
 
 /// <summary>
 /// Aggregated metric data.
@@ -191,6 +206,37 @@ public sealed class MetricsQueryService : IMetricsQueryService
             cmd.Parameters.AddWithValue("host", hostname);
 
         return await ReadAggregatesAsync(cmd, ct);
+    }
+
+    public async Task<IReadOnlyList<WanTrafficPoint>> GetWanTrafficHourlyAsync(
+        DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        // Sum per-interface hourly totals across WAN interfaces only. The join to
+        // fw_interfaces (type='WAN', case-insensitive) is what excludes the LAN
+        // side and kills the double-count.
+        const string sql = @"
+            SELECT n.hour_bucket,
+                   SUM(n.rx_total)::bigint AS rx,
+                   SUM(n.tx_total)::bigint AS tx
+            FROM system_metrics_net_hourly n
+            JOIN fw_interfaces fi
+              ON lower(fi.name) = lower(n.interface_name)
+             AND upper(fi.type) = 'WAN'
+            WHERE n.hour_bucket >= @from AND n.hour_bucket <= @to
+            GROUP BY n.hour_bucket
+            ORDER BY n.hour_bucket ASC";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("from", from);
+        cmd.Parameters.AddWithValue("to", to);
+
+        var list = new List<WanTrafficPoint>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new WanTrafficPoint(r.GetFieldValue<DateTime>(0), r.GetInt64(1), r.GetInt64(2)));
+        return list;
     }
 
     public async Task<IReadOnlyList<MetricAggregate>> GetDailyMetricsAsync(
