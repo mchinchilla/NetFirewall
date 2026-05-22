@@ -131,9 +131,41 @@
     }
 </div>
 
-@* Traffic chart + critical events — second row, right after KPIs. *@
-<div class="grid gap-4 grid-cols-1 xl:grid-cols-3 mb-6">
-    <section class="card xl:col-span-2" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
+@* System-health row: live sparklines — CPU | Memory | Network — last 60 min,
+   one point per minute, each updating its Chart.js sparkline in place every 10s
+   (no canvas re-create = no leak). Sits right under the KPI cards. *@
+<div class="grid gap-4 grid-cols-1 sm:grid-cols-3 mb-6" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
+    <section class="card" x-data="liveStat('/Home/SystemSeries', 'cpu', 10000)">
+        <div class="flex items-baseline justify-between mb-2">
+            <h2 class="text-sm font-semibold">CPU</h2>
+            <span class="text-2xl font-semibold tabular-nums" x-text="current + '%'">—</span>
+        </div>
+        <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
+        <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · % used</p>
+    </section>
+
+    <section class="card" x-data="liveStat('/Home/SystemSeries', 'mem', 10000)">
+        <div class="flex items-baseline justify-between mb-2">
+            <h2 class="text-sm font-semibold">Memory</h2>
+            <span class="text-2xl font-semibold tabular-nums" x-text="current + '%'">—</span>
+        </div>
+        <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
+        <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · % used</p>
+    </section>
+
+    <section class="card" x-data="liveSparkline('/Home/ThroughputSeries', 10000)">
+        <div class="flex items-baseline justify-between mb-2">
+            <h2 class="text-sm font-semibold">Network</h2>
+            <span class="text-xs text-surface-fg-muted">WAN ↓ in / ↑ out</span>
+        </div>
+        <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
+        <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · Mbps</p>
+    </section>
+</div>
+
+@* Traffic chart — full-width 24h history with the live throughput KPI on top. *@
+<div class="mb-6">
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 45ms;">
         <header class="flex items-center justify-between mb-4">
             <div>
                 <h2 class="text-base font-semibold">Traffic — last 24h</h2>
@@ -142,8 +174,7 @@
             <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
         </header>
 
-        @* Live throughput pulse — polls every 5s, independent of the static 24h
-           canvas below. Pauses when the tab is hidden to avoid pointless work. *@
+        @* Live throughput pulse — polls every 5s. Pauses when the tab is hidden. *@
         <div class="pb-4 mb-4 border-b" style="border-color: var(--surface-border);"
              x-data="{ paused: false }"
              x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
@@ -178,26 +209,6 @@
             </div>
         }
     </section>
-
-    @* Where traffic is going — LAN-wide top destinations, ASN-enriched, polled
-       every 30s (the sampler cadence). Replaces the old auth-events panel that
-       was almost always empty. Pauses when the tab is hidden. *@
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;"
-             x-data="{ paused: false }"
-             x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
-        <header class="flex items-center justify-between mb-3">
-            <div>
-                <h2 class="text-base font-semibold">Where traffic is going</h2>
-                <p class="text-xs text-surface-fg-muted">Top destinations (24h) — all hosts, by ASN</p>
-            </div>
-            <a href="@Url.Action("Index", "Monitoring")" class="text-xs hover:underline text-accent">Monitoring →</a>
-        </header>
-        <div hx-get="/Home/TopDestinations"
-             :hx-trigger="paused ? 'load' : 'load, every 30s'"
-             hx-swap="innerHTML">
-            <p class="text-sm py-6 text-center text-surface-fg-muted">Loading destinations…</p>
-        </div>
-    </section>
 </div>
 
 @* Pending-changes banner: only renders when there's drift from kernel state. *@
@@ -223,8 +234,8 @@
     </div>
 }
 
-@* Operational health row: systemd services + WAN reachability. *@
-<div class="grid gap-4 grid-cols-1 xl:grid-cols-2 mb-6"
+@* Operational row: systemd services + WAN reachability + where traffic goes. *@
+<div class="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 mb-6"
      style="animation: var(--animate-slide-up); animation-delay: 40ms;">
     @* Services *@
     <section class="card">
@@ -382,6 +393,25 @@
         {
             <p class="text-sm text-surface-fg-muted">No WAN interfaces configured. Add monitor targets in wan_health_config.</p>
         }
+    </section>
+
+    @* Where traffic is going — LAN-wide top destinations, ASN-enriched, polled
+       every 30s. Pauses when the tab is hidden. *@
+    <section class="card"
+             x-data="{ paused: false }"
+             x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
+        <header class="flex items-center justify-between mb-3">
+            <div>
+                <h2 class="text-base font-semibold">Where traffic is going</h2>
+                <p class="text-xs text-surface-fg-muted">Top destinations (24h) — all hosts, by ASN</p>
+            </div>
+            <a href="@Url.Action("Index", "Monitoring")" class="text-xs hover:underline text-accent">Monitoring →</a>
+        </header>
+        <div hx-get="/Home/TopDestinations"
+             :hx-trigger="paused ? 'load' : 'load, every 30s'"
+             hx-swap="innerHTML">
+            <p class="text-sm py-6 text-center text-surface-fg-muted">Loading destinations…</p>
+        </div>
     </section>
 </div>
 

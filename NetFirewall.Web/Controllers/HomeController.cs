@@ -218,6 +218,52 @@ public class HomeController : Controller
         return PartialView("_TopDestinations", vm);
     }
 
+    // Live throughput sparkline series — last 60 min of WAN rates, per minute.
+    // Returned as JSON so the client updates the existing Chart.js instance
+    // in-place (no canvas re-creation = no Chart.js instance leak).
+    [HttpGet("/Home/ThroughputSeries")]
+    public async Task<IActionResult> ThroughputSeries(CancellationToken ct)
+    {
+        const double bytesToMbps = 8.0 / 1_000_000;
+        try
+        {
+            var rows = await _query.GetWanRatePerMinuteAsync(60, ct);
+            return Json(new
+            {
+                labels = rows.Select(r => r.Bucket.ToLocalTime().ToString("HH:mm")).ToArray(),
+                inSeries = rows.Select(r => Math.Round(r.RxBytesPerSec * bytesToMbps, 2)).ToArray(),
+                outSeries = rows.Select(r => Math.Round(r.TxBytesPerSec * bytesToMbps, 2)).ToArray(),
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Throughput series unavailable");
+            return Json(new { labels = Array.Empty<string>(), inSeries = Array.Empty<double>(), outSeries = Array.Empty<double>() });
+        }
+    }
+
+    // Live CPU% / Memory% sparkline series — last 60 min, per minute. JSON so the
+    // client updates the Chart.js sparklines in place (no canvas leak).
+    [HttpGet("/Home/SystemSeries")]
+    public async Task<IActionResult> SystemSeries(CancellationToken ct)
+    {
+        try
+        {
+            var rows = await _query.GetSystemRatePerMinuteAsync(60, ct);
+            return Json(new
+            {
+                labels = rows.Select(r => r.Bucket.ToLocalTime().ToString("HH:mm")).ToArray(),
+                cpu = rows.Select(r => Math.Round(r.CpuPercent, 1)).ToArray(),
+                mem = rows.Select(r => Math.Round(r.MemoryPercent, 1)).ToArray(),
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "System series unavailable");
+            return Json(new { labels = Array.Empty<string>(), cpu = Array.Empty<double>(), mem = Array.Empty<double>() });
+        }
+    }
+
     public IActionResult Privacy() => View();
 
     [AllowAnonymous]

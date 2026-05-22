@@ -380,6 +380,134 @@ window.NetFw.charts = {
             chart.options.scales.y.grid.color = bd;
         });
         return chart;
+    },
+
+    /**
+     * Live throughput sparkline — a compact in/out line chart updated IN PLACE
+     * (no canvas re-creation), so a polling caller can refresh it every few
+     * seconds without leaking Chart.js instances. Returns the chart; feed it new
+     * data via updateSparkline(chart, data).
+     * data = { labels: string[], inSeries: number[], outSeries: number[] }
+     */
+    makeSparkline(canvasEl, data) {
+        const ctx = canvasEl.getContext("2d");
+        const accent = this.readColor("accent");
+        const secondary = this.readColor("jordy-blue-500");
+        const fgMuted = this.readColor("surface-fg-muted");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [
+                    {
+                        label: "In", data: data.inSeries,
+                        borderColor: accent,
+                        backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, accent),
+                        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2
+                    },
+                    {
+                        label: "Out", data: data.outSeries,
+                        borderColor: secondary, backgroundColor: "transparent",
+                        borderDash: [4, 4], tension: 0.35, pointRadius: 0, borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,                       // live updates shouldn't animate
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted,
+                        borderColor: this.readColor("surface-border"), borderWidth: 1, padding: 8,
+                        callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y} Mbps` }
+                    }
+                },
+                scales: {
+                    x: { display: false },
+                    y: { display: false, beginAtZero: true }
+                }
+            }
+        });
+
+        this.register(chart, () => {
+            chart.data.datasets[0].borderColor = this.readColor("accent");
+            chart.data.datasets[0].backgroundColor =
+                this._verticalGradient(ctx, canvasEl.clientHeight, this.readColor("accent"));
+            chart.data.datasets[1].borderColor = this.readColor("jordy-blue-500");
+        });
+        return chart;
+    },
+
+    /** Replace a sparkline's data in place (no re-create). */
+    updateSparkline(chart, data) {
+        if (!chart) return;
+        chart.data.labels = data.labels;
+        chart.data.datasets[0].data = data.inSeries;
+        chart.data.datasets[1].data = data.outSeries;
+        chart.update("none");
+    },
+
+    /**
+     * Single-series sparkline (e.g. CPU% or Memory%) updated in place. y-axis is
+     * fixed 0-100 when `percent` is true so the line reflects real load, not a
+     * rescaled view. data = { labels: string[], values: number[] }.
+     */
+    makeSparklineSingle(canvasEl, data, percent) {
+        const ctx = canvasEl.getContext("2d");
+        const accent = this.readColor("accent");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+        const fgMuted = this.readColor("surface-fg-muted");
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    data: data.values,
+                    borderColor: accent,
+                    backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, accent),
+                    fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted,
+                        borderColor: this.readColor("surface-border"), borderWidth: 1, padding: 8,
+                        callbacks: { label: (c) => `${c.parsed.y}${percent ? "%" : ""}` }
+                    }
+                },
+                scales: {
+                    x: { display: false },
+                    y: { display: false, beginAtZero: true, max: percent ? 100 : undefined }
+                }
+            }
+        });
+
+        this.register(chart, () => {
+            const a = this.readColor("accent");
+            chart.data.datasets[0].borderColor = a;
+            chart.data.datasets[0].backgroundColor = this._verticalGradient(ctx, canvasEl.clientHeight, a);
+        });
+        return chart;
+    },
+
+    /** Replace a single-series sparkline's data in place. */
+    updateSparklineSingle(chart, data) {
+        if (!chart) return;
+        chart.data.labels = data.labels;
+        chart.data.datasets[0].data = data.values;
+        chart.update("none");
     }
 };
 
@@ -405,6 +533,86 @@ document.addEventListener("alpine:init", () => {
         },
         get clock()  { return window.NetFw.formatLocalDateTime(new Date(this.nowMs)); },
         get uptime() { return window.NetFw.formatUptime(this.nowMs - this.startedAtMs); }
+    }));
+
+    /* ---------- liveSparkline ---------- polls a JSON series endpoint and
+     * updates a Chart.js sparkline IN PLACE every `intervalMs`. Pauses while the
+     * tab is hidden. Cleans up its chart + timer on destroy so HTMX swaps and
+     * navigations don't leak. Usage:
+     *   x-data="liveSparkline('/Home/ThroughputSeries', 10000)"
+     *   <canvas x-ref="spark"></canvas>
+     */
+    Alpine.data("liveSparkline", (url, intervalMs) => ({
+        _chart: null,
+        _timer: null,
+        async init() {
+            const data = await this._fetch();
+            this._chart = window.NetFw.charts.makeSparkline(this.$refs.spark, data);
+            this._timer = window.setInterval(() => {
+                if (!document.hidden) this._refresh();
+            }, Number(intervalMs) || 10000);
+        },
+        destroy() {
+            if (this._timer) window.clearInterval(this._timer);
+            try { this._chart?.destroy(); } catch { /* already gone */ }
+        },
+        async _fetch() {
+            try {
+                const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                if (!r.ok) return { labels: [], inSeries: [], outSeries: [] };
+                return await r.json();
+            } catch {
+                return { labels: [], inSeries: [], outSeries: [] };
+            }
+        },
+        async _refresh() {
+            const data = await this._fetch();
+            window.NetFw.charts.updateSparkline(this._chart, data);
+        }
+    }));
+
+    /* ---------- liveStat ---------- like liveSparkline but for a single metric
+     * (CPU% / Memory%). Polls a JSON endpoint, reads `field` from the response,
+     * shows the latest value reactively (x-text="current") and keeps a fixed
+     * 0-100 sparkline updated in place. Usage:
+     *   x-data="liveStat('/Home/SystemSeries', 'cpu', 10000)"
+     *   <span x-text="current + '%'"></span>
+     *   <canvas x-ref="spark"></canvas>
+     */
+    Alpine.data("liveStat", (url, field, intervalMs) => ({
+        current: "—",
+        _chart: null,
+        _timer: null,
+        async init() {
+            const data = await this._series();
+            this._chart = window.NetFw.charts.makeSparklineSingle(this.$refs.spark, data, true);
+            this._setCurrent(data.values);
+            this._timer = window.setInterval(() => {
+                if (!document.hidden) this._refresh();
+            }, Number(intervalMs) || 10000);
+        },
+        destroy() {
+            if (this._timer) window.clearInterval(this._timer);
+            try { this._chart?.destroy(); } catch { /* already gone */ }
+        },
+        async _series() {
+            try {
+                const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                if (!r.ok) return { labels: [], values: [] };
+                const j = await r.json();
+                return { labels: j.labels || [], values: (j[field] || []) };
+            } catch {
+                return { labels: [], values: [] };
+            }
+        },
+        _setCurrent(values) {
+            this.current = values.length ? values[values.length - 1] : "—";
+        },
+        async _refresh() {
+            const data = await this._series();
+            window.NetFw.charts.updateSparklineSingle(this._chart, data);
+            this._setCurrent(data.values);
+        }
     }));
 
     /* ---------- addressPicker ---------- tag input with object autocomplete.

@@ -37,6 +37,24 @@ public interface IMetricsQueryService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Per-minute WAN throughput RATES (Mbps in/out) over the last
+    /// <paramref name="minutes"/> minutes, WAN interfaces only. Powers the live
+    /// sparkline on the dashboard — a moving line, unlike the hourly chart.
+    /// Reads the raw per-interface samples (system_metrics_net) and averages the
+    /// instantaneous rates per minute bucket.
+    /// </summary>
+    Task<IReadOnlyList<WanRatePoint>> GetWanRatePerMinuteAsync(
+        int minutes, CancellationToken ct = default);
+
+    /// <summary>
+    /// Per-minute CPU% and memory% over the last <paramref name="minutes"/>
+    /// minutes, for the dashboard's live CPU/Mem sparklines. Averages the raw
+    /// system_metrics samples per minute bucket.
+    /// </summary>
+    Task<IReadOnlyList<SystemRatePoint>> GetSystemRatePerMinuteAsync(
+        int minutes, CancellationToken ct = default);
+
+    /// <summary>
     /// Get daily aggregated metrics.
     /// </summary>
     Task<IReadOnlyList<MetricAggregate>> GetDailyMetricsAsync(
@@ -69,6 +87,12 @@ public record MetricPoint
 
 /// <summary>One hour bucket of WAN-only traffic (real Internet rx/tx bytes).</summary>
 public sealed record WanTrafficPoint(DateTime Bucket, long RxBytes, long TxBytes);
+
+/// <summary>One minute bucket of WAN-only throughput RATES (avg bytes/sec in/out).</summary>
+public sealed record WanRatePoint(DateTime Bucket, double RxBytesPerSec, double TxBytesPerSec);
+
+/// <summary>One minute bucket of avg CPU% and memory%.</summary>
+public sealed record SystemRatePoint(DateTime Bucket, double CpuPercent, double MemoryPercent);
 
 /// <summary>
 /// Aggregated metric data.
@@ -236,6 +260,69 @@ public sealed class MetricsQueryService : IMetricsQueryService
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
             list.Add(new WanTrafficPoint(r.GetFieldValue<DateTime>(0), r.GetInt64(1), r.GetInt64(2)));
+        return list;
+    }
+
+    public async Task<IReadOnlyList<WanRatePoint>> GetWanRatePerMinuteAsync(
+        int minutes, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        // Two-step: average each WAN interface's instantaneous rate within a
+        // minute, then SUM across interfaces for that minute. (Summing first then
+        // averaging would be equivalent here, but per-interface avg is clearer and
+        // robust to interfaces having different sample counts in a minute.)
+        const string sql = @"
+            WITH per_iface AS (
+                SELECT date_trunc('minute', n.timestamp) AS minute,
+                       n.interface_name,
+                       AVG(n.rx_rate) AS rx_rate,
+                       AVG(n.tx_rate) AS tx_rate
+                FROM system_metrics_net n
+                JOIN fw_interfaces fi
+                  ON lower(fi.name) = lower(n.interface_name)
+                 AND upper(fi.type) = 'WAN'
+                WHERE n.timestamp > now() - make_interval(mins => @minutes)
+                GROUP BY date_trunc('minute', n.timestamp), n.interface_name
+            )
+            SELECT minute, SUM(rx_rate) AS rx, SUM(tx_rate) AS tx
+            FROM per_iface
+            GROUP BY minute
+            ORDER BY minute ASC";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("minutes", minutes);
+
+        var list = new List<WanRatePoint>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new WanRatePoint(r.GetFieldValue<DateTime>(0), r.GetDouble(1), r.GetDouble(2)));
+        return list;
+    }
+
+    public async Task<IReadOnlyList<SystemRatePoint>> GetSystemRatePerMinuteAsync(
+        int minutes, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        const string sql = @"
+            SELECT date_trunc('minute', timestamp) AS minute,
+                   AVG(cpu_usage_percent) AS cpu,
+                   AVG(CASE WHEN memory_total_bytes > 0
+                            THEN memory_used_bytes::float8 / memory_total_bytes * 100
+                            ELSE 0 END) AS mem
+            FROM system_metrics
+            WHERE timestamp > now() - make_interval(mins => @minutes)
+            GROUP BY date_trunc('minute', timestamp)
+            ORDER BY minute ASC";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("minutes", minutes);
+
+        var list = new List<SystemRatePoint>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new SystemRatePoint(r.GetFieldValue<DateTime>(0), r.GetDouble(1), r.GetDouble(2)));
         return list;
     }
 
