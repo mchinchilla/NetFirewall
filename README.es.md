@@ -22,7 +22,14 @@ nftables · DHCP · WireGuard · failover dual-WAN · QoS · policy routing — 
 
 ![Panel de NetFirewall](docs/images/dashboard.png)
 
-Vista única consolidada: KPIs arriba, gráfica de tráfico + eventos críticos en segunda fila, salud de servicios + WAN, subnets, top talkers y atajos operativos.
+Vista única consolidada, actualizada en vivo sin recargar la página:
+
+- **Tarjetas KPI** — leases activos, interfaces, filter rules, throughput en vivo, clientes VPN.
+- **Sparklines de salud del sistema en vivo** — CPU %, memoria % y throughput de red WAN, cada uno un sparkline de 60 minutos que se actualiza in-place cada 10s.
+- **Tráfico — últimas 24h** — throughput horario solo-WAN (Internet real in/out, sin doble conteo del NAT), con un pulso live de in/out arriba.
+- **Servicios · Salud WAN · A dónde va el tráfico** — salud de unidades systemd, alcance por WAN, y los destinos más activos de toda la LAN **enriquecidos con ASN / organización / país** (ej. "Amazon", "Cloudflare").
+- **Top hosts / servicios** — totales de bytes por host y por servicio desde el sampler de conntrack, con un **drill-down de destinos por host** (clic en un host para ver exactamente a dónde va su tráfico, por ASN).
+- Utilización de subnets & pools, y atajos operativos de un click.
 
 ## ✨ Qué hace
 
@@ -34,7 +41,8 @@ Vista única consolidada: KPIs arriba, gráfica de tráfico + eventos críticos 
 | 🔐 **VPN WireGuard** | Ambos modos: hub-server con N peers Y cliente-saliente a un servidor remoto. Importación de archivos `/etc/wireguard/*.conf` existentes hacia la DB. |
 | 📊 **QoS (tc HTB)** | Hierarchical Token Bucket por interface con porcentajes de banda por traffic mark. |
 | 🛣️ **Policy routing** | `fw_route_tables` + `fw_policy_rules` modelan `ip rule` + `ip route` declarativamente. El daemon reconcilia `/etc/iproute2/rt_tables` + estado del kernel. |
-| 📈 **Monitoreo** | Health de servicios systemd, alcance WAN, top talkers (sampler de conntrack), gráficas de tráfico, detector de pending changes. |
+| 📈 **Monitoreo** | Health de servicios systemd, alcance WAN, sparklines en vivo de CPU/memoria/red, gráficas de tráfico solo-WAN (sin doble conteo del NAT), detector de pending changes. |
+| 🌍 **Tráfico por destino** | El sampler de conntrack registra *a dónde* va el tráfico de cada host de la LAN (top-N destinos por host), enriquecido con ASN/org/país vía [ip.guide](https://ip.guide) (cacheado por prefijo). Haz drill-down en cualquier host para ver sus destinos. |
 | 👤 **Auth** | Session cookies, enrollment TOTP + recovery codes, elevation para ops destructivas, audit log completo. |
 
 ## 🏗️ Arquitectura
@@ -53,6 +61,7 @@ graph TB
         D[NetFirewall.Daemon]
         D --> HM[WanHealthMonitorService]
         D --> CS[ConntrackSamplerService]
+        D --> AR[IpAsnResolver · ip.guide]
         D --> SW[ScheduleWatcherService]
         D --> MC[MetricsCollectorService]
         D --> AP[AuditPrunerService]
