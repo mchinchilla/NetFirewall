@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
-using NetFirewall.Services.Auth;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
@@ -24,7 +23,6 @@ public class HomeController : Controller
     private readonly IWireGuardService _wg;
     private readonly IDaemonClient _daemon;
     private readonly IScheduleService _schedules;
-    private readonly IAuthAuditService _authAudit;
     private readonly ILogger<HomeController> _logger;
 
     public HomeController(
@@ -35,7 +33,6 @@ public class HomeController : Controller
         IWireGuardService wg,
         IDaemonClient daemon,
         IScheduleService schedules,
-        IAuthAuditService authAudit,
         ILogger<HomeController> logger)
     {
         _dhcp = dhcp;
@@ -45,7 +42,6 @@ public class HomeController : Controller
         _wg = wg;
         _daemon = daemon;
         _schedules = schedules;
-        _authAudit = authAudit;
         _logger = logger;
     }
 
@@ -371,64 +367,6 @@ public class HomeController : Controller
     {
         var b = ip.GetAddressBytes();
         return ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
-    }
-
-    // Event types we surface on the dashboard. Routine successes (login.success,
-    // totp.verified, profile.updated) are noise here — they go to the full
-    // audit log page. The dashboard shows only operationally interesting items.
-    private static readonly HashSet<string> CriticalEvents = new(StringComparer.Ordinal)
-    {
-        AuthAuditEvents.LoginFailed,
-        AuthAuditEvents.LoginLocked,
-        AuthAuditEvents.TotpFailed,
-        AuthAuditEvents.TotpReplayed,
-        AuthAuditEvents.ElevationDenied,
-        AuthAuditEvents.RecoveryUsed,
-        AuthAuditEvents.BootstrapUsed,
-        AuthAuditEvents.UserDisabled,
-        AuthAuditEvents.SessionRevoked,
-    };
-
-    private async Task<IReadOnlyList<RecentActivity>> SafeQueryCriticalEventsAsync(CancellationToken ct)
-    {
-        try
-        {
-            var recent = await _authAudit.RecentAsync(50, ct);
-            return recent
-                .Where(e => CriticalEvents.Contains(e.EventType))
-                .Take(6)
-                .Select(MapAuthEvent)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Auth audit query failed");
-            return Array.Empty<RecentActivity>();
-        }
-    }
-
-    private static RecentActivity MapAuthEvent(AuthAuditEntry e)
-    {
-        var sev = e.EventType switch
-        {
-            AuthAuditEvents.LoginLocked      => ActivitySeverity.Danger,
-            AuthAuditEvents.LoginFailed      => ActivitySeverity.Warning,
-            AuthAuditEvents.TotpFailed       => ActivitySeverity.Warning,
-            AuthAuditEvents.TotpReplayed     => ActivitySeverity.Danger,
-            AuthAuditEvents.ElevationDenied  => ActivitySeverity.Warning,
-            AuthAuditEvents.RecoveryUsed     => ActivitySeverity.Warning,
-            AuthAuditEvents.BootstrapUsed    => ActivitySeverity.Info,
-            AuthAuditEvents.UserDisabled     => ActivitySeverity.Danger,
-            AuthAuditEvents.SessionRevoked   => ActivitySeverity.Warning,
-            _                                => ActivitySeverity.Neutral
-        };
-        return new RecentActivity
-        {
-            Title = e.EventType.Replace('.', ' '),
-            Detail = string.IsNullOrEmpty(e.Username) ? (e.Ip?.ToString() ?? "—") : $"{e.Username}  ·  {e.Ip}",
-            Severity = sev,
-            Timestamp = e.OccurredAt.UtcDateTime,
-        };
     }
 
     private async Task<IReadOnlyList<SystemServiceStatus>> SafeQueryServicesAsync(CancellationToken ct)

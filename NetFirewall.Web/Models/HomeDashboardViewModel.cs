@@ -34,7 +34,6 @@ public sealed class HomeDashboardViewModel
     public double TrafficAvgOutMbps { get; init; }
     public long TrafficTotalBytes { get; init; }
 
-    public IReadOnlyList<RecentActivity> RecentActivity { get; init; } = [];
     public IReadOnlyList<SubnetSummary> Subnets { get; init; } = [];
 
     /// <summary>systemd units (daemon, web, nginx, postgres, …) with active/failed state.</summary>
@@ -119,16 +118,6 @@ public sealed class PendingApplySummary
     public int PendingCount { get; init; }
     public bool HasPending => PendingCount > 0;
 }
-
-public sealed class RecentActivity
-{
-    public required string Title { get; init; }
-    public required string Detail { get; init; }
-    public required ActivitySeverity Severity { get; init; }
-    public required DateTime Timestamp { get; init; }
-}
-
-public enum ActivitySeverity { Success, Info, Warning, Danger, Neutral }
 
 public sealed class SubnetSummary
 {
