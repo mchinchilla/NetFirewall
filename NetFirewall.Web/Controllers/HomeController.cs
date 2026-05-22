@@ -115,6 +115,16 @@ public class HomeController : Controller
             TrafficAvgOutMbps = history.TxMbps.Length > 0 ? Math.Round(history.TxMbps.Average(), 1) : 0,
             TrafficTotalBytes = history.TotalBytes,
 
+            Host = new HostInfo
+            {
+                Hostname = snapshot.System.Hostname,
+                OsName = snapshot.System.OsName,
+                KernelVersion = snapshot.System.KernelVersion,
+                Virtualization = snapshot.System.Virtualization,
+                CoreCount = snapshot.Cpu.CoreCount,
+                TotalMemoryBytes = snapshot.Memory.TotalBytes,
+                Uptime = snapshot.System.Uptime,
+            },
             Subnets = subnetSummaries,
             Services = services,
             WanStatus = wanStatus,

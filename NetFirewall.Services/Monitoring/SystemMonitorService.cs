@@ -465,9 +465,11 @@ public sealed class SystemMonitorService : ISystemMonitorService
         var load5 = 0.0;
         var load15 = 0.0;
         var processCount = 0;
+        var virtualization = "";
 
         if (_isLinux)
         {
+            virtualization = await DetectVirtualizationAsync(ct);
             try
             {
                 // Read uptime
@@ -523,6 +525,7 @@ public sealed class SystemMonitorService : ISystemMonitorService
             Hostname = hostname,
             KernelVersion = kernelVersion,
             OsName = osName,
+            Virtualization = virtualization,
             Uptime = uptime,
             LoadAverage1Min = load1,
             LoadAverage5Min = load5,
@@ -530,6 +533,56 @@ public sealed class SystemMonitorService : ISystemMonitorService
             ProcessCount = processCount,
             BootTime = DateTime.UtcNow - uptime
         };
+    }
+
+    /// <summary>
+    /// Best-effort virtualization detection from DMI (/sys). No process spawn —
+    /// readable under the daemon's sandbox. Recognises the common hypervisors;
+    /// returns "bare-metal" when DMI looks like real hardware, or "" if unknown.
+    /// </summary>
+    private async Task<string> DetectVirtualizationAsync(CancellationToken ct)
+    {
+        try
+        {
+            // product_name + sys_vendor cover the common cases. We lowercase and
+            // match substrings against known hypervisor signatures.
+            var product = await ReadDmiAsync("/sys/class/dmi/id/product_name", ct);
+            var vendor = await ReadDmiAsync("/sys/class/dmi/id/sys_vendor", ct);
+            var hay = $"{product} {vendor}".ToLowerInvariant();
+
+            if (hay.Contains("kvm") || hay.Contains("qemu")) return "KVM";
+            if (hay.Contains("vmware")) return "VMware";
+            if (hay.Contains("virtualbox") || hay.Contains("oracle")) return "VirtualBox";
+            if (hay.Contains("microsoft") && hay.Contains("virtual")) return "Hyper-V";
+            if (hay.Contains("hyper-v") || hay.Contains("hyperv")) return "Hyper-V";
+            if (hay.Contains("xen")) return "Xen";
+            if (hay.Contains("bochs")) return "Bochs";
+            if (hay.Contains("bhyve")) return "bhyve";
+            if (hay.Contains("amazon") || hay.Contains("ec2")) return "AWS";
+            if (hay.Contains("google")) return "GCP";
+            if (hay.Contains("alibaba")) return "Alibaba";
+            if (hay.Contains("droplet") || hay.Contains("digitalocean")) return "DigitalOcean";
+
+            // Container hint: no DMI but a container marker file exists.
+            if (File.Exists("/.dockerenv")) return "container";
+
+            // DMI present and not a known hypervisor → assume physical.
+            return string.IsNullOrWhiteSpace(hay) ? "" : "bare-metal";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Virtualization detection failed");
+            return "";
+        }
+    }
+
+    private static async Task<string> ReadDmiAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            return File.Exists(path) ? (await File.ReadAllTextAsync(path, ct)).Trim() : "";
+        }
+        catch { return ""; }
     }
 
     #endregion

@@ -29,7 +29,7 @@ Single overview pane, updated live without page reloads:
 - **Traffic — last 24h** — WAN-only hourly throughput (real Internet in/out, no NAT double-count), with a live in/out pulse on top.
 - **Services · WAN health · Where traffic is going** — systemd unit health, per-WAN reachability, and the busiest destinations across the LAN **enriched with ASN / organisation / country** (e.g. "Amazon", "Cloudflare").
 - **Top hosts / services** — per-host and per-service byte totals from the conntrack sampler, with a per-host **destination drill-down** (click a host to see exactly where its traffic goes, by ASN).
-- Subnets & pools utilisation, plus one-click operational shortcuts.
+- Subnets & pools utilisation, one-click operational shortcuts, and a **host-facts footer** (OS, kernel, virtualization type, CPU cores, RAM, uptime).
 
 ## ✨ What it does
 

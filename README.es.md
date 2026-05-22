@@ -29,7 +29,7 @@ Vista única consolidada, actualizada en vivo sin recargar la página:
 - **Tráfico — últimas 24h** — throughput horario solo-WAN (Internet real in/out, sin doble conteo del NAT), con un pulso live de in/out arriba.
 - **Servicios · Salud WAN · A dónde va el tráfico** — salud de unidades systemd, alcance por WAN, y los destinos más activos de toda la LAN **enriquecidos con ASN / organización / país** (ej. "Amazon", "Cloudflare").
 - **Top hosts / servicios** — totales de bytes por host y por servicio desde el sampler de conntrack, con un **drill-down de destinos por host** (clic en un host para ver exactamente a dónde va su tráfico, por ASN).
-- Utilización de subnets & pools, y atajos operativos de un click.
+- Utilización de subnets & pools, atajos operativos de un click, y un **footer con datos del host** (OS, kernel, tipo de virtualización, cores de CPU, RAM, uptime).
 
 ## ✨ Qué hace
 

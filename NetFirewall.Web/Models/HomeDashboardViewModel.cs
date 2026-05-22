@@ -43,6 +43,9 @@ public sealed class HomeDashboardViewModel
     /// <summary>Per-kind (nftables/tc/wireguard) pending change counts vs last successful Apply.</summary>
     public IReadOnlyList<PendingApplySummary> PendingChanges { get; init; } = [];
 
+    /// <summary>Physical/VM host facts shown in the dashboard footer.</summary>
+    public HostInfo Host { get; init; } = new();
+
     // Top talkers (hosts/services) are no longer fetched here — the home
     // dashboard loads them via HTMX from /Monitoring/toptalkers (shared
     // _TopTalkersLive partial) so the window selector works. See Home/Index.cshtml.
@@ -81,6 +84,18 @@ public sealed class TopTalkerRow
     public required long BytesIn { get; init; }
     public required long BytesOut { get; init; }
     public long TotalBytes => BytesIn + BytesOut;
+}
+
+/// <summary>Host facts for the dashboard footer — OS, kernel, virt, cores, RAM, uptime.</summary>
+public sealed class HostInfo
+{
+    public string Hostname { get; init; } = "";
+    public string OsName { get; init; } = "";
+    public string KernelVersion { get; init; } = "";
+    public string Virtualization { get; init; } = "";   // "KVM", "bare-metal", …
+    public int CoreCount { get; init; }
+    public long TotalMemoryBytes { get; init; }
+    public TimeSpan Uptime { get; init; }
 }
 
 public sealed class SystemServiceStatus

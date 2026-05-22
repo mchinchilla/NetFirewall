@@ -26,6 +26,13 @@
         return $"{(int)d.TotalDays} d ago";
     }
 
+    static string FmtUptime(TimeSpan t)
+    {
+        if (t.TotalDays >= 1) return $"{(int)t.TotalDays}d {t.Hours}h";
+        if (t.TotalHours >= 1) return $"{(int)t.TotalHours}h {t.Minutes}m";
+        return $"{(int)t.TotalMinutes}m";
+    }
+
     var kpis = new List<KpiCardViewModel>
     {
         new KpiCardViewModel
@@ -541,3 +548,31 @@
         </a>
     </div>
 </section>
+
+@* Host facts footer — physical/VM context. Static (changes rarely); refreshed
+   on page load. Empty fields are omitted so the line stays clean. *@
+@{
+    var hostParts = new List<string>();
+    if (!string.IsNullOrWhiteSpace(Model.Host.Hostname)) hostParts.Add(Model.Host.Hostname);
+    if (!string.IsNullOrWhiteSpace(Model.Host.OsName)) hostParts.Add(Model.Host.OsName);
+    if (!string.IsNullOrWhiteSpace(Model.Host.KernelVersion)) hostParts.Add($"kernel {Model.Host.KernelVersion}");
+    if (!string.IsNullOrWhiteSpace(Model.Host.Virtualization)) hostParts.Add(Model.Host.Virtualization);
+    if (Model.Host.CoreCount > 0) hostParts.Add($"{Model.Host.CoreCount} core{(Model.Host.CoreCount == 1 ? "" : "s")}");
+    if (Model.Host.TotalMemoryBytes > 0) hostParts.Add($"{FmtBytes(Model.Host.TotalMemoryBytes)} RAM");
+    if (Model.Host.Uptime > TimeSpan.Zero) hostParts.Add($"up {FmtUptime(Model.Host.Uptime)}");
+}
+@if (hostParts.Count > 0)
+{
+    <div class="mt-6 pt-4 border-t text-xs text-surface-fg-muted flex flex-wrap items-center gap-x-2 gap-y-1"
+         style="border-color: var(--surface-border);">
+        <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3.75h.008v.008h-.008v-.008Zm0-3.75h.008v.008h-.008v-.008Zm-3 3.75h.008v.008h-.008v-.008Z"/></svg>
+        @for (var i = 0; i < hostParts.Count; i++)
+        {
+            <span class="font-mono">@hostParts[i]</span>
+            @if (i < hostParts.Count - 1)
+            {
+                <span aria-hidden="true">·</span>
+            }
+        }
+    </div>
+}

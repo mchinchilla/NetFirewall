@@ -164,6 +164,9 @@ public record SystemInfo
     public string Hostname { get; init; } = "";
     public string KernelVersion { get; init; } = "";
     public string OsName { get; init; } = "";
+    /// <summary>Virtualization type: "KVM", "VMware", "Hyper-V", "Xen",
+    /// "bare-metal", or "" if undetermined.</summary>
+    public string Virtualization { get; init; } = "";
     public TimeSpan Uptime { get; init; }
     public double LoadAverage1Min { get; init; }
     public double LoadAverage5Min { get; init; }
