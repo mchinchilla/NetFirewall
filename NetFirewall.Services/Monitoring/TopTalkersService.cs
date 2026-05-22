@@ -160,4 +160,50 @@ public sealed class TopTalkersService : ITopTalkersService
         }
         return list;
     }
+
+    public async Task<IReadOnlyList<TopTalkerDestination>> GetTopDestinationsGlobalAsync(
+        int hours, int limit, CancellationToken ct = default)
+    {
+        // Same enrichment as the per-host query, but aggregated across ALL hosts.
+        // dst_ip IS NOT NULL excludes the per-host "others" rollup rows so the
+        // dashboard shows concrete destinations, not a meaningless merged tail.
+        const string sql = @"
+            SELECT s.dst_ip,
+                   SUM(s.bytes_in)::bigint  AS bin,
+                   SUM(s.bytes_out)::bigint AS bout,
+                   SUM(s.flow_count)::int   AS flows,
+                   c.asn, c.org, c.country
+            FROM lan_traffic_samples s
+            LEFT JOIN LATERAL (
+                SELECT asn, org, country
+                FROM ip_asn_cache
+                WHERE prefix >>= s.dst_ip AND ok
+                ORDER BY masklen(prefix) DESC
+                LIMIT 1
+            ) c ON true
+            WHERE s.dst_ip IS NOT NULL
+              AND s.sampled_at > now() - make_interval(hours => @hours)
+            GROUP BY s.dst_ip, c.asn, c.org, c.country
+            ORDER BY (SUM(s.bytes_in) + SUM(s.bytes_out)) DESC
+            LIMIT @limit";
+
+        var list = new List<TopTalkerDestination>();
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("hours", hours);
+        cmd.Parameters.AddWithValue("limit", limit);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            list.Add(new TopTalkerDestination(
+                DstIp: r.IsDBNull(0) ? null : r.GetFieldValue<IPAddress>(0),
+                BytesIn: r.GetInt64(1),
+                BytesOut: r.GetInt64(2),
+                FlowCount: r.GetInt32(3),
+                Asn: r.IsDBNull(4) ? null : r.GetString(4),
+                Org: r.IsDBNull(5) ? null : r.GetString(5),
+                Country: r.IsDBNull(6) ? null : r.GetString(6)));
+        }
+        return list;
+    }
 }

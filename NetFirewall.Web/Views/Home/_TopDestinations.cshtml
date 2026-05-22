@@ -1,0 +1,54 @@
+@model NetFirewall.Web.Models.Monitoring.TopDestinationsViewModel
+@{
+    static string FmtBytes(long bytes)
+    {
+        string[] u = ["B", "KB", "MB", "GB", "TB", "PB"];
+        var i = 0; var x = (double)bytes;
+        while (x >= 1024 && i < u.Length - 1) { x /= 1024; i++; }
+        return $"{x:0.##} {u[i]}";
+    }
+}
+
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <p class="text-sm py-6 text-center text-surface-fg-muted">@Model.Error</p>
+}
+else if (Model.Destinations.Count == 0)
+{
+    <p class="text-sm py-6 text-center text-surface-fg-muted">No destinations recorded yet. Daemon needs ~30s of warm-up.</p>
+}
+else
+{
+    var maxBytes = Model.Destinations.Max(d => d.TotalBytes);
+    <ul class="space-y-3">
+        @foreach (var d in Model.Destinations)
+        {
+            var pct = maxBytes > 0 ? (double)d.TotalBytes / maxBytes * 100 : 0;
+            <li>
+                <div class="flex items-baseline justify-between text-sm">
+                    <div class="min-w-0 flex items-baseline gap-2">
+                        <span class="font-mono font-medium truncate">@d.DstIp</span>
+                        @if (!string.IsNullOrEmpty(d.Org))
+                        {
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
+                                  style="background-color: var(--surface-muted); color: var(--surface-fg-muted);">
+                                @d.Org@(string.IsNullOrEmpty(d.Country) ? "" : $" · {d.Country}")
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="text-[10px] text-surface-fg-muted shrink-0">resolving…</span>
+                        }
+                    </div>
+                    <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
+                        @* bytes_in = upload (LAN→outside), bytes_out = download. Swap for display. *@
+                        ↓ @FmtBytes(d.BytesOut) · ↑ @FmtBytes(d.BytesIn)
+                    </div>
+                </div>
+                <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
+                    <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
+                </div>
+            </li>
+        }
+    </ul>
+}

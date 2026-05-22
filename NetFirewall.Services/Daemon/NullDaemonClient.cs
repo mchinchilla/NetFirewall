@@ -146,6 +146,12 @@ public sealed class NullDaemonClient : IDaemonClient
                 Array.Empty<NetFirewall.Services.Monitoring.TopTalkerDestination>()),
             "Daemon disabled."));
 
+    public Task<ServiceResponse<TopDestinationsDto>> GetTopDestinationsAsync(
+        int hours = 24, int limit = 8, CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<TopDestinationsDto>.Ok(
+            new TopDestinationsDto(Array.Empty<NetFirewall.Services.Monitoring.TopTalkerDestination>()),
+            "Daemon disabled."));
+
     public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<WanHealthDto>.Ok(
             new WanHealthDto(Array.Empty<NetFirewall.Models.WanMonitor.WanHealthState>(),

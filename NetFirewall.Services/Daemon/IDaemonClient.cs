@@ -140,6 +140,11 @@ public interface IDaemonClient
     Task<ServiceResponse<HostDestinationsDto>> GetHostDestinationsAsync(
         string srcIp, int hours = 24, int limit = 10, CancellationToken ct = default);
 
+    /// <summary><c>GET /v1/system/top-destinations</c> — busiest destinations across
+    /// the whole LAN, ASN-enriched. Powers the home dashboard panel.</summary>
+    Task<ServiceResponse<TopDestinationsDto>> GetTopDestinationsAsync(
+        int hours = 24, int limit = 8, CancellationToken ct = default);
+
     /// <summary><c>GET /v1/system/wan-health</c> — per-WAN health state + recent transition events.</summary>
     Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default);
 }
@@ -160,6 +165,10 @@ public sealed record TopTalkersDto(
 /// <summary>Wire shape of the per-host destination drill-down.</summary>
 public sealed record HostDestinationsDto(
     System.Net.IPAddress SrcIp,
+    IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerDestination> Destinations);
+
+/// <summary>Wire shape of the LAN-wide top-destinations panel.</summary>
+public sealed record TopDestinationsDto(
     IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerDestination> Destinations);
 
 public sealed record WanHealthDto(

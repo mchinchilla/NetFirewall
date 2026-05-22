@@ -22,6 +22,15 @@ public interface ITopTalkersService
     /// </summary>
     Task<IReadOnlyList<TopTalkerDestination>> GetTopDestinationsForHostAsync(
         IPAddress srcIp, int hours, int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Top N destinations across the WHOLE LAN (all hosts combined) in the last
+    /// <paramref name="hours"/> hours, enriched with ASN/org. Powers the home
+    /// dashboard's "where traffic is going" panel. Excludes the per-host "others"
+    /// rollup rows (dst_ip NULL) so the list is concrete destinations only.
+    /// </summary>
+    Task<IReadOnlyList<TopTalkerDestination>> GetTopDestinationsGlobalAsync(
+        int hours, int limit, CancellationToken ct = default);
 }
 
 public sealed record TopTalkerHost(

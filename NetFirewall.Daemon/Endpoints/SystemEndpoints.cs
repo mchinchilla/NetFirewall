@@ -87,10 +87,27 @@ public static class SystemEndpoints
             return Results.Json(ServiceResponse<HostDestinationsDto>.Ok(
                 new HostDestinationsDto(ip, rows), "OK"));
         });
+
+        // GET /v1/system/top-destinations?hours=24&limit=8 — busiest destinations
+        // across the whole LAN, ASN-enriched. Powers the home dashboard panel.
+        grp.MapGet("/top-destinations", async (
+                ITopTalkersService svc,
+                int? hours,
+                int? limit,
+                CancellationToken ct) =>
+        {
+            var h = Math.Clamp(hours ?? 24, 1, 168);
+            var n = Math.Clamp(limit ?? 8, 1, 50);
+            var rows = await svc.GetTopDestinationsGlobalAsync(h, n, ct);
+            return Results.Json(ServiceResponse<TopDestinationsDto>.Ok(new TopDestinationsDto(rows), "OK"));
+        });
     }
 
     public sealed record HostDestinationsDto(
         System.Net.IPAddress SrcIp,
+        IReadOnlyList<TopTalkerDestination> Destinations);
+
+    public sealed record TopDestinationsDto(
         IReadOnlyList<TopTalkerDestination> Destinations);
 
     public sealed record TopTalkersDto(

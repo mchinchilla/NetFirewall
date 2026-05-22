@@ -1,0 +1,43 @@
+@model NetFirewall.Web.Models.LiveThroughputViewModel
+@{
+    static string Fmt(double mbps) => mbps >= 1000
+        ? $"{mbps / 1000:0.##} Gbps"
+        : $"{mbps:0.#} Mbps";
+}
+
+@* Live throughput pulse — swapped every 5s. No Chart.js here, so re-swapping is
+   cheap and leak-free (the 24h canvas stays untouched alongside it). *@
+@if (Model.Unavailable)
+{
+    <div class="text-xs text-surface-fg-muted">Live throughput unavailable.</div>
+}
+else
+{
+    <div class="flex items-center gap-6">
+        <div class="flex items-baseline gap-1.5">
+            <span class="text-surface-fg-muted text-sm">↓</span>
+            <span class="text-2xl font-semibold tabular-nums">@Fmt(Model.InMbps)</span>
+            <span class="text-xs text-surface-fg-muted">in</span>
+        </div>
+        <div class="flex items-baseline gap-1.5">
+            <span class="text-surface-fg-muted text-sm">↑</span>
+            <span class="text-2xl font-semibold tabular-nums">@Fmt(Model.OutMbps)</span>
+            <span class="text-xs text-surface-fg-muted">out</span>
+        </div>
+        <span class="flex items-center gap-1.5 text-xs text-surface-fg-muted ml-auto">
+            <span class="h-2 w-2 rounded-full" style="background-color: var(--feedback-success-bd);"
+                  x-data x-init="$el.animate([{opacity:1},{opacity:0.3},{opacity:1}],{duration:2000,iterations:Infinity})"></span>
+            live · all NICs
+        </span>
+    </div>
+
+    @if (Model.PerInterface.Count > 0)
+    {
+        <div class="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-surface-fg-muted">
+            @foreach (var i in Model.PerInterface)
+            {
+                <span class="font-mono">@i.Name <span class="text-surface-fg">↓@Fmt(i.InMbps) ↑@Fmt(i.OutMbps)</span></span>
+            }
+        </div>
+    }
+}

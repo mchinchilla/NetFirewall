@@ -231,6 +231,10 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         => GetAsync<HostDestinationsDto>(
             $"/v1/system/top-talkers/host/{Uri.EscapeDataString(srcIp)}/destinations?hours={hours}&limit={limit}", ct);
 
+    public Task<ServiceResponse<TopDestinationsDto>> GetTopDestinationsAsync(
+        int hours = 24, int limit = 8, CancellationToken ct = default)
+        => GetAsync<TopDestinationsDto>($"/v1/system/top-destinations?hours={hours}&limit={limit}", ct);
+
     public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
         => GetAsync<WanHealthDto>("/v1/system/wan-health", ct);
 

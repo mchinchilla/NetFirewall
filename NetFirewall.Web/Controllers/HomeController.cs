@@ -67,12 +67,11 @@ public class HomeController : Controller
         var servicesTask   = SafeQueryServicesAsync(ct);
         var wanTask        = SafeQueryWanAsync(ct);
         var pendingTask    = SafeQueryPendingAsync(ct);
-        var eventsTask     = SafeQueryCriticalEventsAsync(ct);
         var wanHealthTask  = SafeQueryWanHealthAsync(ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
                            filterTask, snapshotTask, historyTask, wgTask, schedulesTask,
-                           servicesTask, wanTask, pendingTask, eventsTask, wanHealthTask);
+                           servicesTask, wanTask, pendingTask, wanHealthTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -86,7 +85,6 @@ public class HomeController : Controller
         var services  = servicesTask.Result;
         var wanStatus = wanTask.Result;
         var pending   = pendingTask.Result;
-        var events    = eventsTask.Result;
         var wanHealth = wanHealthTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
@@ -121,7 +119,6 @@ public class HomeController : Controller
             TrafficAvgOutMbps = history.TxMbps.Length > 0 ? Math.Round(history.TxMbps.Average(), 1) : 0,
             TrafficTotalBytes = history.TotalBytes,
 
-            RecentActivity = events,
             Subnets = subnetSummaries,
             Services = services,
             WanStatus = wanStatus,
@@ -131,6 +128,82 @@ public class HomeController : Controller
         };
 
         return View(vm);
+    }
+
+    // Live throughput pulse — polled every ~5s by the dashboard via HTMX. Reads
+    // the same /proc snapshot the KPI uses, but as a standalone partial so it can
+    // refresh without touching the (hourly, static) 24h Chart.js canvas.
+    [HttpGet("/Home/Throughput")]
+    public async Task<IActionResult> Throughput(CancellationToken ct)
+    {
+        try
+        {
+            var snap = await _monitor.GetSnapshotAsync(ct);
+            const double bytesToMbps = 8.0 / 1_000_000;
+            var nics = snap.Network
+                .Where(n => !string.Equals(n.InterfaceName, "lo", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var perIface = nics
+                .Select(n => new InterfaceRate(
+                    n.InterfaceName,
+                    Math.Round(n.BytesReceivedPerSecond * bytesToMbps, 1),
+                    Math.Round(n.BytesSentPerSecond * bytesToMbps, 1)))
+                .Where(i => i.InMbps > 0 || i.OutMbps > 0)
+                .OrderByDescending(i => i.InMbps + i.OutMbps)
+                .ToList();
+
+            return PartialView("_LiveThroughput", new LiveThroughputViewModel
+            {
+                InMbps = Math.Round(nics.Sum(n => n.BytesReceivedPerSecond) * bytesToMbps, 1),
+                OutMbps = Math.Round(nics.Sum(n => n.BytesSentPerSecond) * bytesToMbps, 1),
+                PerInterface = perIface,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Live throughput snapshot unavailable");
+            return PartialView("_LiveThroughput", new LiveThroughputViewModel { Unavailable = true });
+        }
+    }
+
+    // LAN-wide top destinations — polled every ~30s by the dashboard. Replaces
+    // the old auth-events "Recent activity" panel. Delegates to the daemon.
+    [HttpGet("/Home/TopDestinations")]
+    public async Task<IActionResult> TopDestinations(CancellationToken ct)
+    {
+        var vm = new NetFirewall.Web.Models.Monitoring.TopDestinationsViewModel();
+        try
+        {
+            var env = await _daemon.GetTopDestinationsAsync(24, 8, ct);
+            if (env.Success && env.Data is not null)
+            {
+                vm = new NetFirewall.Web.Models.Monitoring.TopDestinationsViewModel
+                {
+                    Destinations = env.Data.Destinations.Select(d => new NetFirewall.Web.Models.Monitoring.HostDestinationRow
+                    {
+                        DstIp = d.DstIp?.ToString(),
+                        Asn = d.Asn,
+                        Org = d.Org,
+                        Country = d.Country,
+                        BytesIn = d.BytesIn,
+                        BytesOut = d.BytesOut,
+                        FlowCount = d.FlowCount,
+                    }).ToList(),
+                };
+            }
+            else
+            {
+                vm = new NetFirewall.Web.Models.Monitoring.TopDestinationsViewModel { Error = env.Message };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Top destinations unavailable");
+            vm = new NetFirewall.Web.Models.Monitoring.TopDestinationsViewModel { Error = "Could not reach the daemon." };
+        }
+
+        return PartialView("_TopDestinations", vm);
     }
 
     public IActionResult Privacy() => View();

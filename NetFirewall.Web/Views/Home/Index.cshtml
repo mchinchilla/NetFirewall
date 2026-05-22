@@ -142,6 +142,18 @@
             <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
         </header>
 
+        @* Live throughput pulse — polls every 5s, independent of the static 24h
+           canvas below. Pauses when the tab is hidden to avoid pointless work. *@
+        <div class="pb-4 mb-4 border-b" style="border-color: var(--surface-border);"
+             x-data="{ paused: false }"
+             x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
+            <div hx-get="/Home/Throughput"
+                 :hx-trigger="paused ? 'load' : 'load, every 5s'"
+                 hx-swap="innerHTML">
+                <div class="text-xs text-surface-fg-muted">Loading live throughput…</div>
+            </div>
+        </div>
+
         @if (Model.TrafficLabels.Length == 0)
         {
             <div class="h-56 flex flex-col items-center justify-center text-center">
@@ -167,37 +179,24 @@
         }
     </section>
 
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    @* Where traffic is going — LAN-wide top destinations, ASN-enriched, polled
+       every 30s (the sampler cadence). Replaces the old auth-events panel that
+       was almost always empty. Pauses when the tab is hidden. *@
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;"
+             x-data="{ paused: false }"
+             x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
         <header class="flex items-center justify-between mb-3">
-            <h2 class="text-base font-semibold">Recent activity</h2>
-            <a href="@Url.Action("Index", "FwAuditLog")" class="text-xs hover:underline text-accent">View all</a>
+            <div>
+                <h2 class="text-base font-semibold">Where traffic is going</h2>
+                <p class="text-xs text-surface-fg-muted">Top destinations (24h) — all hosts, by ASN</p>
+            </div>
+            <a href="@Url.Action("Index", "Monitoring")" class="text-xs hover:underline text-accent">Monitoring →</a>
         </header>
-        @if (Model.RecentActivity.Count == 0)
-        {
-            <p class="text-sm py-6 text-center text-surface-fg-muted">No firewall activity logged yet.</p>
-        }
-        else
-        {
-            <ol class="relative space-y-4 pl-5">
-                @foreach (var a in Model.RecentActivity)
-                {
-                    var dotColor = a.Severity switch
-                    {
-                        ActivitySeverity.Success => "var(--feedback-success-bd)",
-                        ActivitySeverity.Info    => "var(--feedback-info-bd)",
-                        ActivitySeverity.Warning => "var(--feedback-warning-bd)",
-                        ActivitySeverity.Danger  => "var(--feedback-danger-bd)",
-                        _                        => "var(--surface-fg-muted)"
-                    };
-                    <li class="relative">
-                        <span class="absolute -left-5 top-1 h-3 w-3 rounded-full ring-4"
-                              style="background-color: @dotColor; --tw-ring-color: var(--surface-elevated);"></span>
-                        <p class="text-sm font-medium">@a.Title</p>
-                        <p class="text-xs text-surface-fg-muted">@a.Detail · @AgoFromNow(a.Timestamp)</p>
-                    </li>
-                }
-            </ol>
-        }
+        <div hx-get="/Home/TopDestinations"
+             :hx-trigger="paused ? 'load' : 'load, every 30s'"
+             hx-swap="innerHTML">
+            <p class="text-sm py-6 text-center text-surface-fg-muted">Loading destinations…</p>
+        </div>
     </section>
 </div>
 
