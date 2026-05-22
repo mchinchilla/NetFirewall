@@ -135,6 +135,11 @@ public interface IDaemonClient
     /// <summary><c>GET /v1/system/top-talkers</c> — top N LAN hosts + services by bytes in the last N hours.</summary>
     Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default);
 
+    /// <summary><c>GET /v1/system/top-talkers/host/{srcIp}/destinations</c> — per-destination
+    /// drill-down for one LAN host, enriched with ASN/org.</summary>
+    Task<ServiceResponse<HostDestinationsDto>> GetHostDestinationsAsync(
+        string srcIp, int hours = 24, int limit = 10, CancellationToken ct = default);
+
     /// <summary><c>GET /v1/system/wan-health</c> — per-WAN health state + recent transition events.</summary>
     Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default);
 }
@@ -151,6 +156,11 @@ public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string?
 public sealed record TopTalkersDto(
     IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerHost> Hosts,
     IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerService> Services);
+
+/// <summary>Wire shape of the per-host destination drill-down.</summary>
+public sealed record HostDestinationsDto(
+    System.Net.IPAddress SrcIp,
+    IReadOnlyList<NetFirewall.Services.Monitoring.TopTalkerDestination> Destinations);
 
 public sealed record WanHealthDto(
     IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,

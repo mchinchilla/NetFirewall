@@ -54,23 +54,33 @@
                 @foreach (var h in Model.Hosts)
                 {
                     var pct = maxHostBytes > 0 ? (double)h.TotalBytes / maxHostBytes * 100 : 0;
-                    <li>
-                        <div class="flex items-baseline justify-between text-sm">
-                            <div class="min-w-0">
-                                <span class="font-mono font-medium">@h.Label</span>
-                                @if (!string.IsNullOrEmpty(h.Sublabel))
-                                {
-                                    <span class="text-xs text-surface-fg-muted ml-2">@h.Sublabel</span>
-                                }
+                    @* Each host row is an Alpine toggle. Clicking lazily fetches the
+                       per-destination drill-down once (loaded flag) and shows/hides it. *@
+                    <li x-data="{ open: false, loaded: false }">
+                        <button type="button" class="w-full text-left group"
+                                @@click="open = !open; if (open && !loaded) { loaded = true; htmx.ajax('GET', '/Monitoring/host-destinations?ip=@Uri.EscapeDataString(h.Label)&range=@Model.Range&hostname=@Uri.EscapeDataString(h.Sublabel ?? "")', { target: $refs.dests, swap: 'innerHTML' }) }">
+                            <div class="flex items-baseline justify-between text-sm">
+                                <div class="min-w-0 flex items-baseline gap-1.5">
+                                    <span class="text-surface-fg-muted transition-transform text-[10px]"
+                                          x-bind:class="open ? 'rotate-90' : ''">▶</span>
+                                    <span class="font-mono font-medium">@h.Label</span>
+                                    @if (!string.IsNullOrEmpty(h.Sublabel))
+                                    {
+                                        <span class="text-xs text-surface-fg-muted ml-1">@h.Sublabel</span>
+                                    }
+                                </div>
+                                <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
+                                    @* bytes_in is the conntrack forward tuple (LAN→outside = upload);
+                                       bytes_out is the reply tuple (outside→LAN = download). Swap for display. *@
+                                    ↓ @FmtBytes(h.BytesOut) · ↑ @FmtBytes(h.BytesIn)
+                                </div>
                             </div>
-                            <div class="font-mono text-xs text-surface-fg-muted shrink-0 ml-2">
-                                @* bytes_in is the conntrack forward tuple (LAN→outside = upload);
-                                   bytes_out is the reply tuple (outside→LAN = download). Swap for display. *@
-                                ↓ @FmtBytes(h.BytesOut) · ↑ @FmtBytes(h.BytesIn)
+                            <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
+                                <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
                             </div>
-                        </div>
-                        <div class="h-1.5 mt-1 rounded-full overflow-hidden bg-surface-muted">
-                            <div class="h-full rounded-full bg-accent" style="width: @(pct.ToString("0.#"))%;"></div>
+                        </button>
+                        <div x-show="open" x-cloak x-ref="dests">
+                            <p class="text-xs py-3 text-center text-surface-fg-muted">Loading destinations…</p>
                         </div>
                     </li>
                 }

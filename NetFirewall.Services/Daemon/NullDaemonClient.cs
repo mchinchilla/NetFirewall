@@ -138,6 +138,14 @@ public sealed class NullDaemonClient : IDaemonClient
                               Array.Empty<NetFirewall.Services.Monitoring.TopTalkerService>()),
             "Daemon disabled."));
 
+    public Task<ServiceResponse<HostDestinationsDto>> GetHostDestinationsAsync(
+        string srcIp, int hours = 24, int limit = 10, CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<HostDestinationsDto>.Ok(
+            new HostDestinationsDto(
+                System.Net.IPAddress.TryParse(srcIp, out var ip) ? ip : System.Net.IPAddress.None,
+                Array.Empty<NetFirewall.Services.Monitoring.TopTalkerDestination>()),
+            "Daemon disabled."));
+
     public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<WanHealthDto>.Ok(
             new WanHealthDto(Array.Empty<NetFirewall.Models.WanMonitor.WanHealthState>(),

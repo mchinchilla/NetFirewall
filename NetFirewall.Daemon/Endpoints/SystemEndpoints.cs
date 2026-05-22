@@ -68,7 +68,30 @@ public static class SystemEndpoints
             return Results.Json(ServiceResponse<TopTalkersDto>.Ok(
                 new TopTalkersDto(hostsTask.Result, servicesTask.Result), "OK"));
         });
+
+        // GET /v1/system/top-talkers/host/{srcIp}/destinations?hours=24&limit=10
+        // — the per-destination drill-down for one LAN host, ASN-enriched.
+        grp.MapGet("/top-talkers/host/{srcIp}/destinations", async (
+                ITopTalkersService svc,
+                string srcIp,
+                int? hours,
+                int? limit,
+                CancellationToken ct) =>
+        {
+            if (!System.Net.IPAddress.TryParse(srcIp, out var ip))
+                return Results.Json(ServiceResponse<HostDestinationsDto>.Fail("Invalid source IP"));
+
+            var h = Math.Clamp(hours ?? 24, 1, 168);
+            var n = Math.Clamp(limit ?? 10, 1, 50);
+            var rows = await svc.GetTopDestinationsForHostAsync(ip, h, n, ct);
+            return Results.Json(ServiceResponse<HostDestinationsDto>.Ok(
+                new HostDestinationsDto(ip, rows), "OK"));
+        });
     }
+
+    public sealed record HostDestinationsDto(
+        System.Net.IPAddress SrcIp,
+        IReadOnlyList<TopTalkerDestination> Destinations);
 
     public sealed record TopTalkersDto(
         IReadOnlyList<TopTalkerHost> Hosts,

@@ -124,6 +124,22 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.ITopTalkersService,
                            NetFirewall.Services.Monitoring.TopTalkersService>();
 builder.Services.Configure<NetFirewall.Services.Monitoring.ConntrackSamplerOptions>(
     builder.Configuration.GetSection(NetFirewall.Services.Monitoring.ConntrackSamplerOptions.SectionName));
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ILocalAddressProvider,
+                              NetFirewall.Services.Monitoring.LocalAddressProvider>();
+
+// IP→ASN enrichment: one IpAsnResolver instance is BOTH the IIpAsnResolver the
+// sampler enqueues into AND the BackgroundService that drains the queue. Register
+// the concrete singleton once, then forward both roles to it. AddHttpClient gives
+// it a typed HttpClient (ServiceDefaults adds the resilience handler by default).
+builder.Services.Configure<NetFirewall.Services.Monitoring.IpAsnResolverOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Monitoring.IpAsnResolverOptions.SectionName));
+builder.Services.AddHttpClient(NetFirewall.Services.Monitoring.IpAsnResolver.HttpClientName);
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.IpAsnResolver>();
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.IIpAsnResolver>(
+    sp => sp.GetRequiredService<NetFirewall.Services.Monitoring.IpAsnResolver>());
+builder.Services.AddHostedService(
+    sp => sp.GetRequiredService<NetFirewall.Services.Monitoring.IpAsnResolver>());
+
 builder.Services.AddHostedService<NetFirewall.Services.Monitoring.ConntrackSamplerService>();
 
 // WAN health monitor — absorbs the standalone NetFirewall.WanMonitor process.

@@ -33,6 +33,8 @@ public sealed partial class ConntrackSamplerService : BackgroundService
 {
     private readonly NpgsqlDataSource _ds;
     private readonly IProcessRunner _runner;
+    private readonly ILocalAddressProvider _localAddresses;
+    private readonly IIpAsnResolver _asnResolver;
     private readonly ILogger<ConntrackSamplerService> _logger;
     private readonly ConntrackSamplerOptions _opts;
 
@@ -40,14 +42,22 @@ public sealed partial class ConntrackSamplerService : BackgroundService
     // compute deltas across sample windows.
     private readonly Dictionary<FlowKey, FlowBytes> _last = new();
 
+    // The firewall's own IPs — destinations matching these are NAT reply tuples
+    // leaking our WAN IP, not real egress. Snapshotted at startup.
+    private IReadOnlySet<IPAddress> _ownIps = new HashSet<IPAddress>();
+
     public ConntrackSamplerService(
         NpgsqlDataSource ds,
         IProcessRunner runner,
+        ILocalAddressProvider localAddresses,
+        IIpAsnResolver asnResolver,
         IOptions<ConntrackSamplerOptions> opts,
         ILogger<ConntrackSamplerService> logger)
     {
         _ds = ds;
         _runner = runner;
+        _localAddresses = localAddresses;
+        _asnResolver = asnResolver;
         _opts = opts.Value;
         _logger = logger;
     }
@@ -86,6 +96,12 @@ public sealed partial class ConntrackSamplerService : BackgroundService
 
         var lan = IPNetwork.Parse(_opts.LanCidr);
 
+        // Snapshot our own IPs once at startup so SNAT reply tuples (which carry
+        // our WAN IP as dst) are never recorded as a traffic destination.
+        _ownIps = _localAddresses.GetLocalAddresses();
+        _logger.LogInformation("Conntrack sampler: {N} local addresses excluded as destinations: {Ips}",
+            _ownIps.Count, string.Join(", ", _ownIps));
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -114,7 +130,7 @@ public sealed partial class ConntrackSamplerService : BackgroundService
             return;
         }
 
-        // Aggregate this snapshot by (src, proto, dport) buckets.
+        // Aggregate this snapshot by (src, dst, proto, dport) buckets.
         var buckets = new Dictionary<BucketKey, BucketAgg>();
         var seenFlows = new HashSet<FlowKey>();
 
@@ -122,9 +138,9 @@ public sealed partial class ConntrackSamplerService : BackgroundService
         {
             if (!TryParseFlow(line, out var flow)) continue;
 
-            // Skip flows where the LAN side isn't involved as source. We track
-            // outbound from LAN, inbound is mirrored in the reverse tuple.
-            if (!IsLanSrc(flow, lan, out var lanSrc, out var serverPort, out var proto)) continue;
+            // Keep only outbound flows initiated by a LAN host, attributed to the
+            // real (forward-tuple) destination and the port the host connected to.
+            if (!ClassifyFlow(flow, lan, _ownIps, out var lanSrc, out var dstIp, out var serverPort, out var proto)) continue;
 
             seenFlows.Add(flow.Key);
 
@@ -137,10 +153,13 @@ public sealed partial class ConntrackSamplerService : BackgroundService
 
             if (deltaIn == 0 && deltaOut == 0) continue;
 
-            var key = new BucketKey(lanSrc, proto, serverPort);
+            var key = new BucketKey(lanSrc, dstIp, proto, serverPort);
             if (!buckets.TryGetValue(key, out var agg))
                 agg = new BucketAgg(0, 0, 0);
             buckets[key] = new BucketAgg(agg.BytesIn + deltaIn, agg.BytesOut + deltaOut, agg.Flows + 1);
+
+            // Off-hot-path enrichment: queue the destination for ASN lookup.
+            _asnResolver.Enqueue(dstIp);
         }
 
         // Garbage-collect flows we no longer see — prevents the dictionary
@@ -150,8 +169,51 @@ public sealed partial class ConntrackSamplerService : BackgroundService
 
         if (buckets.Count == 0) return;
 
-        await InsertAsync(buckets, ct);
+        // Cap per-host cardinality: keep the heaviest N destinations per host,
+        // fold the tail into one rollup row (dst_ip NULL). A chatty host can talk
+        // to thousands of IPs/day; without this the table explodes.
+        var capped = ApplyTopNPerHost(buckets, _opts.TopDestinationsPerHost);
+
+        await InsertAsync(capped, ct);
         await PruneOldAsync(ct);
+    }
+
+    /// <summary>
+    /// Per host (src_ip), keep the <paramref name="topN"/> destinations with the
+    /// most total bytes and merge everything else into a single bucket with
+    /// DstIp = null (the "others" rollup). Pure function — unit-testable.
+    /// </summary>
+    internal static Dictionary<BucketKey, BucketAgg> ApplyTopNPerHost(
+        Dictionary<BucketKey, BucketAgg> buckets, int topN)
+    {
+        if (topN <= 0) return buckets;
+
+        var result = new Dictionary<BucketKey, BucketAgg>();
+        foreach (var byHost in buckets.GroupBy(kv => kv.Key.SrcIp))
+        {
+            // Rank this host's (dst,proto,port) buckets by total bytes desc.
+            var ranked = byHost
+                .OrderByDescending(kv => kv.Value.BytesIn + kv.Value.BytesOut)
+                .ToList();
+
+            foreach (var kv in ranked.Take(topN))
+                result[kv.Key] = kv.Value;
+
+            // Fold the tail into one rollup keyed (host, null dst, null proto/port).
+            var tail = ranked.Skip(topN).ToList();
+            if (tail.Count == 0) continue;
+
+            var rollupKey = new BucketKey(byHost.Key, null, null, null);
+            long bin = 0, bout = 0; int flows = 0;
+            foreach (var kv in tail)
+            {
+                bin += kv.Value.BytesIn;
+                bout += kv.Value.BytesOut;
+                flows += kv.Value.Flows;
+            }
+            result[rollupKey] = new BucketAgg(bin, bout, flows);
+        }
+        return result;
     }
 
     private async Task InsertAsync(Dictionary<BucketKey, BucketAgg> buckets, CancellationToken ct)
@@ -160,15 +222,16 @@ public sealed partial class ConntrackSamplerService : BackgroundService
         await using var tx = await conn.BeginTransactionAsync(ct);
         const string sql = @"
             INSERT INTO lan_traffic_samples
-                (sampled_at, src_ip, proto, dst_port, bytes_in, bytes_out, flow_count)
+                (sampled_at, src_ip, dst_ip, proto, dst_port, bytes_in, bytes_out, flow_count)
             VALUES
-                (@at, @src, @proto, @dport, @bin, @bout, @flows)";
+                (@at, @src, @dst, @proto, @dport, @bin, @bout, @flows)";
         var now = DateTime.UtcNow;
         foreach (var (k, agg) in buckets)
         {
             await using var cmd = new NpgsqlCommand(sql, conn, tx);
             cmd.Parameters.AddWithValue("at", now);
             cmd.Parameters.AddWithValue("src", k.SrcIp);
+            cmd.Parameters.AddWithValue("dst", (object?)k.DstIp ?? DBNull.Value);
             cmd.Parameters.AddWithValue("proto", (object?)k.Proto ?? DBNull.Value);
             cmd.Parameters.AddWithValue("dport", k.DstPort is int dp ? (object)dp : DBNull.Value);
             cmd.Parameters.AddWithValue("bin", agg.BytesIn);
@@ -203,13 +266,14 @@ public sealed partial class ConntrackSamplerService : BackgroundService
 
     // ───────────────────────── conntrack parsing ─────────────────────────
 
-    private readonly record struct FlowKey(IPAddress Src, IPAddress Dst, int SrcPort, int DstPort, string Proto);
+    internal readonly record struct FlowKey(IPAddress Src, IPAddress Dst, int SrcPort, int DstPort, string Proto);
     private readonly record struct FlowBytes(long OutgoingBytes, long IncomingBytes);
-    private readonly record struct BucketKey(IPAddress SrcIp, string? Proto, int? DstPort);
-    private readonly record struct BucketAgg(long BytesIn, long BytesOut, int Flows);
-    private readonly record struct Flow(FlowKey Key, long OutgoingBytes, long IncomingBytes);
+    // DstIp NULL = the per-host "others" rollup bucket (tail beyond Top-N).
+    internal readonly record struct BucketKey(IPAddress SrcIp, IPAddress? DstIp, string? Proto, int? DstPort);
+    internal readonly record struct BucketAgg(long BytesIn, long BytesOut, int Flows);
+    internal readonly record struct Flow(FlowKey Key, long OutgoingBytes, long IncomingBytes);
 
-    private static bool TryParseFlow(string line, out Flow flow)
+    internal static bool TryParseFlow(string line, out Flow flow)
     {
         flow = default;
 
@@ -252,24 +316,45 @@ public sealed partial class ConntrackSamplerService : BackgroundService
         return true;
     }
 
-    private static bool IsLanSrc(Flow flow, IPNetwork lan, out IPAddress lanSrc, out int? serverPort, out string proto)
+    /// <summary>
+    /// Decides whether a parsed conntrack flow counts as outbound LAN traffic and,
+    /// if so, what to attribute it to. Pure function — no IO, fully unit-testable.
+    /// </summary>
+    /// <param name="flow">Parsed flow. <c>flow.Key</c> holds the FORWARD tuple
+    /// (src=connection initiator, dst=real pre-NAT destination, dport=service port).</param>
+    /// <param name="lan">Configured LAN network.</param>
+    /// <param name="ownIps">The firewall's own IP addresses (all interfaces +
+    /// loopback). A flow whose recorded destination is one of these is the NAT
+    /// reply tuple leaking our WAN IP, or host-bound traffic — not a real egress
+    /// destination, so we reject it.</param>
+    /// <param name="lanSrc">The LAN source IP (the top-talker host).</param>
+    /// <param name="dstIp">The REAL destination (forward-tuple dst), for per-dest
+    /// accounting. Never the reply tuple's dst (= our WAN IP).</param>
+    /// <param name="serverPort">The service port the LAN host connected to
+    /// (forward-tuple dport), or null when neither side has a meaningful port.</param>
+    /// <param name="proto">L4 protocol.</param>
+    internal static bool ClassifyFlow(
+        Flow flow, IPNetwork lan, IReadOnlySet<IPAddress> ownIps,
+        out IPAddress lanSrc, out IPAddress dstIp, out int? serverPort, out string proto)
     {
         lanSrc = flow.Key.Src;
+        dstIp = flow.Key.Dst;
         serverPort = null;
         proto = flow.Key.Proto;
 
-        // Both src and dst could be in LAN (intra-LAN traffic). We only want
-        // outbound flows for top-talkers (else everything double-counts).
-        var srcInLan = lan.Contains(flow.Key.Src);
-        var dstInLan = lan.Contains(flow.Key.Dst);
-        if (!srcInLan || dstInLan) return false;
+        // We only want outbound flows initiated by a LAN host. Reject if the
+        // source isn't in the LAN, or if the destination is also internal —
+        // intra-LAN traffic, the firewall's own IPs (NAT reply tuple carries our
+        // WAN IP as dst after SNAT), or any RFC1918 address. Counting those
+        // double-counts and pollutes per-destination stats with our own address.
+        if (!lan.Contains(flow.Key.Src)) return false;
+        if (lan.Contains(dstIp) || ownIps.Contains(dstIp) || IpRanges.IsPrivate(dstIp)) return false;
 
-        // Heuristic: "server" port is the lower of the two — well-known ports
-        // are < 1024 and ephemeral start at 32768. Works for HTTPS/HTTP/SIP/DNS.
-        if (flow.Key.SrcPort > 0 && flow.Key.DstPort > 0)
-            serverPort = Math.Min(flow.Key.SrcPort, flow.Key.DstPort);
-        else if (flow.Key.DstPort > 0)
-            serverPort = flow.Key.DstPort;
+        // The service port is the port the LAN host CONNECTED TO — i.e. the
+        // forward tuple's dport. (Old code used Math.Min(sport,dport), which
+        // mislabels media/ephemeral-vs-ephemeral flows with a bogus high port.)
+        // dport==0 (e.g. ICMP) → null, "no service attribution".
+        if (flow.Key.DstPort > 0) serverPort = flow.Key.DstPort;
 
         return true;
     }
@@ -297,4 +382,8 @@ public sealed class ConntrackSamplerOptions
 
     /// <summary>LAN CIDR — flows whose src isn't in this range are ignored.</summary>
     public string LanCidr { get; set; } = "192.168.99.0/24";
+
+    /// <summary>Max distinct destinations recorded per host per sample window;
+    /// the tail is folded into one "others" rollup row (dst_ip NULL). 0 = unlimited.</summary>
+    public int TopDestinationsPerHost { get; set; } = 20;
 }

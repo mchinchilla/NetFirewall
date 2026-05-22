@@ -13,6 +13,15 @@ public interface ITopTalkersService
 
     /// <summary>Top N services by total bytes in the last <paramref name="hours"/> hours.</summary>
     Task<IReadOnlyList<TopTalkerService>> GetTopServicesAsync(int hours, int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Top N destinations a single host talked to in the last <paramref name="hours"/>
+    /// hours, enriched with ASN/org from <c>ip_asn_cache</c>. A row with a null
+    /// <see cref="TopTalkerDestination.DstIp"/> is the "others" rollup (the tail
+    /// beyond the sampler's per-host Top-N).
+    /// </summary>
+    Task<IReadOnlyList<TopTalkerDestination>> GetTopDestinationsForHostAsync(
+        IPAddress srcIp, int hours, int limit, CancellationToken ct = default);
 }
 
 public sealed record TopTalkerHost(
@@ -26,6 +35,15 @@ public sealed record TopTalkerService(
     string Proto,
     int? DstPort,
     string? ServiceName,    // "https", "http", "sip", "dns" — null if unknown port
+    long BytesIn,
+    long BytesOut,
+    int FlowCount);
+
+public sealed record TopTalkerDestination(
+    IPAddress? DstIp,       // null = the "others" rollup row
+    string? Asn,            // "AS14618" — null if not resolved / rollup
+    string? Org,            // "Amazon.com, Inc." — null if not resolved / rollup
+    string? Country,        // ISO-3166 alpha-2 — null if not resolved / rollup
     long BytesIn,
     long BytesOut,
     int FlowCount);

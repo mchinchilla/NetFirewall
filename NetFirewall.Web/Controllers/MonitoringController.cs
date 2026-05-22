@@ -136,6 +136,67 @@ public sealed class MonitoringController : Controller
         return PartialView("_TopTalkersLive", vm);
     }
 
+    // Per-host destination drill-down. Triggered by expanding a row in the
+    // "Top hosts" panel (HTMX hx-get). Delegates to the daemon — no SQL here.
+    [HttpGet("host-destinations")]
+    public async Task<IActionResult> HostDestinations(string ip, string? range, string? hostname, CancellationToken ct)
+    {
+        var window = TopTalkersLiveViewModel.Ranges.Contains(range) ? range! : "24h";
+        var hours = TopTalkersLiveViewModel.RangeToHours(window);
+
+        // Validate the IP server-side before hitting the daemon (rule 4).
+        if (string.IsNullOrWhiteSpace(ip) || !System.Net.IPAddress.TryParse(ip, out _))
+        {
+            return PartialView("_HostDestinations", new HostDestinationsViewModel
+            {
+                SrcIp = ip ?? "", Range = window, Error = "Invalid host address.",
+            });
+        }
+
+        HostDestinationsViewModel vm;
+        try
+        {
+            var env = await _daemon.GetHostDestinationsAsync(ip, hours, 10, ct);
+            if (env.Success && env.Data is not null)
+            {
+                var rows = env.Data.Destinations.Select(d => new HostDestinationRow
+                {
+                    DstIp = d.DstIp?.ToString(),
+                    Asn = d.Asn,
+                    Org = d.Org,
+                    Country = d.Country,
+                    BytesIn = d.BytesIn,
+                    BytesOut = d.BytesOut,
+                    FlowCount = d.FlowCount,
+                }).ToList();
+
+                vm = new HostDestinationsViewModel
+                {
+                    SrcIp = ip, Hostname = hostname, Range = window, Destinations = rows,
+                };
+            }
+            else
+            {
+                vm = new HostDestinationsViewModel
+                {
+                    SrcIp = ip, Hostname = hostname, Range = window,
+                    Error = env.Message ?? "Could not load destinations.",
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Host-destinations query failed for {Ip}", ip);
+            vm = new HostDestinationsViewModel
+            {
+                SrcIp = ip, Hostname = hostname, Range = window,
+                Error = "Could not reach the daemon.",
+            };
+        }
+
+        return PartialView("_HostDestinations", vm);
+    }
+
     [HttpGet("schedules")]
     public async Task<IActionResult> Schedules(CancellationToken ct)
     {
