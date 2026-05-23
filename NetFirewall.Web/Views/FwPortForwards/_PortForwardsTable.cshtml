@@ -17,6 +17,7 @@ else
                     <th class="px-5 py-2 font-medium">Interface</th>
                     <th class="px-5 py-2 font-medium">External</th>
                     <th class="px-5 py-2 font-medium">→ Internal</th>
+                    <th class="px-5 py-2 font-medium">Allowed sources</th>
                     <th class="px-5 py-2 font-medium">Status</th>
                     <th class="px-5 py-2 font-medium text-right">Actions</th>
                 </tr>
@@ -28,12 +29,20 @@ else
                     var ext = pf.ExternalPortEnd.HasValue && pf.ExternalPortEnd.Value > pf.ExternalPortStart
                         ? $"{pf.ExternalPortStart}-{pf.ExternalPortEnd.Value}"
                         : pf.ExternalPortStart.ToString();
+                    // Allowed sources: empty/null = open to the internet. We show
+                    // "any" for that case so the operator never has to wonder
+                    // whether the column failed to render.
+                    var sources = pf.SourceAddresses is { Length: > 0 }
+                        ? string.Join(", ", pf.SourceAddresses)
+                        : "any";
+                    var sourcesShort = sources.Length > 28 ? sources.Substring(0, 27) + "…" : sources;
                     <tr>
                         <td class="px-5 py-3 font-mono text-xs">@pf.Priority</td>
                         <td class="px-5 py-3 font-mono text-xs uppercase">@pf.Protocol</td>
                         <td class="px-5 py-3 font-mono text-xs">@ifname</td>
                         <td class="px-5 py-3 font-mono text-xs">:@ext</td>
                         <td class="px-5 py-3 font-mono text-xs">@pf.InternalIp:@pf.InternalPort</td>
+                        <td class="px-5 py-3 font-mono text-xs" title="@sources">@sourcesShort</td>
                         <td class="px-5 py-3">
                             @if (pf.Enabled)
                             {
