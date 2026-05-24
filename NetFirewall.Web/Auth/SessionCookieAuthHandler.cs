@@ -101,13 +101,40 @@ public sealed class SessionCookieAuthHandler : AuthenticationHandler<Authenticat
         if (Request.Headers.ContainsKey("HX-Request"))
         {
             // HTMX: 401 + HX-Redirect so the browser navigates instead of swapping a 401 body.
+            // Prefer HX-Current-URL (the page the user is viewing) over Request.Path
+            // (which is often a partial-only polling endpoint like /Home/Throughput).
+            // Returning to a partial endpoint as a full navigation renders the bare
+            // partial with no layout, which looks broken.
             Response.StatusCode = 401;
-            Response.Headers["HX-Redirect"] = $"/login?returnUrl={Uri.EscapeDataString(Request.Path + Request.QueryString)}";
+            Response.Headers["HX-Redirect"] = $"/login?returnUrl={Uri.EscapeDataString(ResolveReturnUrl())}";
             return Task.CompletedTask;
         }
 
-        Response.Redirect($"/login?returnUrl={Uri.EscapeDataString(Request.Path + Request.QueryString)}");
+        Response.Redirect($"/login?returnUrl={Uri.EscapeDataString(ResolveReturnUrl())}");
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Returns the URL the user should land on after re-authenticating. For HTMX
+    /// requests, prefers HX-Current-URL (the user's actual page) over Request.Path
+    /// (which may be a partial-only endpoint). Falls back to "/" when neither
+    /// yields a safe local path.
+    /// </summary>
+    private string ResolveReturnUrl()
+    {
+        var currentUrl = Request.Headers["HX-Current-URL"].ToString();
+        if (!string.IsNullOrEmpty(currentUrl) && Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri))
+        {
+            // Only honor same-host URLs and never bounce back to /login itself.
+            if (string.Equals(uri.Host, Request.Host.Host, StringComparison.OrdinalIgnoreCase)
+                && !uri.AbsolutePath.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
+            {
+                return uri.PathAndQuery;
+            }
+        }
+
+        var path = Request.Path + Request.QueryString;
+        return string.IsNullOrEmpty(path) ? "/" : path;
     }
 
     /// <summary>Authenticated but lacks the required role → 403.</summary>
