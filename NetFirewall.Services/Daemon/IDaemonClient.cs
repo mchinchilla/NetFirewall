@@ -1,6 +1,7 @@
 using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Models.Network;
 using NetFirewall.Models.System;
 
 namespace NetFirewall.Services.Daemon;
@@ -104,6 +105,12 @@ public interface IDaemonClient
 
     /// <summary><c>POST /v1/wireguard/stop</c> — wg-quick down.</summary>
     Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>POST /v1/dns/apply</c> — render <c>/etc/unbound/unbound.conf.d/netfirewall.conf</c>
+    /// from <paramref name="config"/> and restart unbound. Elevation required.
+    /// </summary>
+    Task<ServiceResponse<NetworkApplyResult>> ApplyDnsAsync(DnsForwarderConfig config, CancellationToken ct = default);
 
     /// <summary><c>GET /v1/wireguard/status</c> — wg show dump parsed into per-peer stats.</summary>
     Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default);

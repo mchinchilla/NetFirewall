@@ -1,11 +1,22 @@
 @model NetFirewall.Web.Models.Setup.Step2ViewModel
 @using NetFirewall.Web.Models
+@using System.Text.Json
+
+@*
+    Step 2 — one card per LAN-marked interface. Smart defaults arrive from
+    WizardMappers.ToViewModel: each new LAN gets the lowest free /24 that
+    doesn't collide with the WAN we saw in Step 1.
+
+    Live validation: the wizardStep2Lan() Alpine factory holds the WAN CIDRs
+    so each row can paint borders red and surface a warning the moment the
+    operator types something that overlaps the WAN or another LAN row.
+*@
 
 <header class="mb-5">
     <h2 class="text-lg font-semibold">Step 2 — LAN &amp; DHCP</h2>
     <p class="text-sm mt-1 text-surface-fg-muted">
-        For every interface marked LAN in step 1, choose its address space and the DHCP range it should hand out to clients.
-        Defaults are sensible if you have no preference.
+        For every LAN interface from step 1, pick a subnet and the DHCP range it should hand out.
+        Defaults avoid your WAN range automatically.
     </p>
 </header>
 
@@ -16,74 +27,116 @@
     </div>
 }
 
-@* Sibling form purely for the Back button — keeps it out of the main Continue form
-   so the browser doesn't ignore it (forms cannot be nested). *@
 <form id="wizard-back-2" method="post" action="/setup/wizard/back/2" class="hidden">
     @Html.AntiForgeryToken()
 </form>
 
-<form id="wizard-step-2" method="post" action="/setup/wizard/step/2">
+<form id="wizard-step-2" method="post" action="/setup/wizard/step/2"
+      x-data='wizardStep2Lan({ wans: @Html.Raw(JsonSerializer.Serialize(Model.WanCidrs)), rows: @Model.Lans.Count })'>
     @Html.AntiForgeryToken()
+
+    @if (Model.WanCidrs.Count > 0)
+    {
+        <div class="mb-4 rounded-md border-l-2 px-3 py-2 text-xs flex items-center gap-2 bg-feedback-info-bg text-feedback-info-fg border-feedback-info-bd">
+            <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg>
+            <span>WAN subnets in use: <span class="font-mono font-medium">@string.Join(", ", Model.WanCidrs)</span></span>
+        </div>
+    }
 
     @if (Model.Lans.Count == 0)
     {
-        <div class="rounded-lg border p-6 text-sm text-center border-surface-border text-surface-fg-muted">
-            No LAN interfaces selected in step 1 — go back and mark at least one as LAN, or skip this step.
+        <div class="rounded-lg border border-dashed p-6 text-sm text-center border-surface-border text-surface-fg-muted">
+            No LAN interfaces selected in step 1. Go back and mark at least one NIC as <span class="font-mono">LAN</span>, or skip this step.
         </div>
     }
     else
     {
-        <div class="space-y-5">
+        <div class="space-y-4">
             @for (var i = 0; i < Model.Lans.Count; i++)
             {
                 var lan = Model.Lans[i];
-                <div class="rounded-lg border p-4 border-surface-border">
+                var rowIdx = i;
+                <article class="rounded-lg border p-4 border-surface-border"
+                         style="background-color: var(--surface-elevated);"
+                         x-data='{
+                             cidr: @Html.Raw(JsonSerializer.Serialize(lan.NetworkCidr ?? string.Empty)),
+                             rangeStart: @Html.Raw(JsonSerializer.Serialize(lan.DhcpRangeStart ?? string.Empty)),
+                             rangeEnd:   @Html.Raw(JsonSerializer.Serialize(lan.DhcpRangeEnd ?? string.Empty)),
+                             dhcp: @(lan.EnableDhcp ? "true" : "false")
+                         }'
+                         x-init="$root.setRowCidr(@rowIdx, cidr); $watch('cidr', v => $root.setRowCidr(@rowIdx, v))">
+
                     <input type="hidden" name="Lans[@i].InterfaceName" value="@lan.InterfaceName" />
 
-                    <div class="flex items-center justify-between mb-3">
+                    <header class="flex items-center justify-between gap-3 mb-3">
                         <div>
-                            <p class="font-mono text-sm font-medium">@lan.InterfaceName</p>
-                            <p class="text-xs text-surface-fg-muted">LAN configuration</p>
+                            <p class="font-mono text-sm font-semibold">@lan.InterfaceName</p>
+                            <p class="text-xs text-surface-fg-muted">LAN segment</p>
                         </div>
-                        <label class="flex items-center gap-2 text-xs">
-                            <input type="checkbox" name="Lans[@i].EnableDhcp" value="true" @(lan.EnableDhcp ? "checked" : "") class="h-4 w-4 rounded" />
+                        <label class="flex items-center gap-2 text-xs cursor-pointer select-none">
+                            <input type="checkbox" name="Lans[@i].EnableDhcp" value="true" x-model="dhcp" class="h-4 w-4 rounded" />
                             <span>Hand out DHCP leases</span>
                         </label>
+                    </header>
+
+                    <!-- WAN overlap warning (live) -->
+                    <div x-show="$root.wanOverlap(cidr)" x-cloak
+                         class="mb-3 rounded-md border-l-2 px-3 py-2 text-xs flex items-start gap-2 bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+                        <svg class="h-4 w-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126Z"/></svg>
+                        <span>This subnet overlaps with a configured WAN. The firewall won't know which interface to route through.</span>
+                    </div>
+                    <div x-show="!$root.wanOverlap(cidr) && $root.peerOverlap(cidr, @rowIdx)" x-cloak
+                         class="mb-3 rounded-md border-l-2 px-3 py-2 text-xs flex items-start gap-2 bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+                        <svg class="h-4 w-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126Z"/></svg>
+                        <span>This subnet overlaps with another LAN above. DHCP leases will conflict.</span>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                            Name = $"Lans[{i}].NetworkCidr", Label = "Network CIDR", Required = true, Value = lan.NetworkCidr,
+                            Placeholder = "192.168.10.0/24",
+                            Pattern = @"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$",
+                            AlpineModel = "cidr"
+                        })
+                        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                             Name = $"Lans[{i}].ServerIp", Label = "Server IP (gateway)", Required = true, Value = lan.ServerIp,
-                            Placeholder = "192.168.99.1"
+                            Placeholder = "192.168.10.1"
                         })
                         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                             Name = $"Lans[{i}].SubnetMask", Label = "Subnet mask", Required = true, Value = lan.SubnetMask,
                             Placeholder = "255.255.255.0"
                         })
                         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                            Name = $"Lans[{i}].NetworkCidr", Label = "Network CIDR", Required = true, Value = lan.NetworkCidr,
-                            Placeholder = "192.168.99.0/24",
-                            Pattern = @"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"
-                        })
-                        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                             Name = $"Lans[{i}].DomainName", Label = "Domain name (optional)", Value = lan.DomainName,
                             Placeholder = "lan.local"
                         })
-                        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                            Name = $"Lans[{i}].DhcpRangeStart", Label = "DHCP range start", Required = true, Value = lan.DhcpRangeStart,
-                            Placeholder = "192.168.99.10"
-                        })
-                        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                            Name = $"Lans[{i}].DhcpRangeEnd", Label = "DHCP range end", Required = true, Value = lan.DhcpRangeEnd,
-                            Placeholder = "192.168.99.250"
-                        })
-                        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                            Name = $"Lans[{i}].LeaseTime", Label = "Lease time (seconds)", Kind = FormFieldKind.Number, Required = true,
-                            Value = lan.LeaseTime.ToString(), Min = "60", Max = "604800",
-                            Help = "86400 = 1 day · 604800 = 7 days"
-                        })
                     </div>
-                </div>
+
+                    <fieldset class="mt-4 rounded-md border p-3 border-surface-border"
+                              x-show="dhcp" x-cloak>
+                        <legend class="px-1 text-[11px] uppercase tracking-wider text-surface-fg-muted">DHCP pool</legend>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-1">
+                            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                                Name = $"Lans[{i}].DhcpRangeStart", Label = "Range start", Required = true, Value = lan.DhcpRangeStart,
+                                Placeholder = "192.168.10.10",
+                                AlpineModel = "rangeStart"
+                            })
+                            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                                Name = $"Lans[{i}].DhcpRangeEnd", Label = "Range end", Required = true, Value = lan.DhcpRangeEnd,
+                                Placeholder = "192.168.10.250",
+                                AlpineModel = "rangeEnd"
+                            })
+                            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                                Name = $"Lans[{i}].LeaseTime", Label = "Lease (seconds)", Kind = FormFieldKind.Number, Required = true,
+                                Value = lan.LeaseTime.ToString(), Min = "60", Max = "604800",
+                                Help = "86400 = 1 day · 604800 = 7 days"
+                            })
+                        </div>
+                        <p class="mt-2 text-xs text-surface-fg-muted">
+                            <span class="badge badge-info" x-text="$root.rangeSize(rangeStart, rangeEnd) + ' usable IPs'"></span>
+                        </p>
+                    </fieldset>
+                </article>
             }
         </div>
     }

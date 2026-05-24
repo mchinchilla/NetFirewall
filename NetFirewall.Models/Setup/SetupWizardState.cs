@@ -65,10 +65,14 @@ public class WizardInterfaceConfig
 {
     public string Name { get; set; } = string.Empty;
     public string Role { get; set; } = "disabled"; // wan_primary, wan_secondary, lan, vpn, disabled
+
+    /// <summary>"dhcp" | "static" | "disabled" — aligned with FwInterface.AddressingMode.</summary>
+    public string AddressingMode { get; set; } = "dhcp";
+
     public string? IpAddress { get; set; }
     public string? SubnetMask { get; set; }
     public string? Gateway { get; set; }
-    public bool UseDhcp { get; set; }
+    public int? Mtu { get; set; }
 }
 
 /// <summary>

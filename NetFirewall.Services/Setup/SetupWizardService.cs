@@ -5,9 +5,14 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Dhcp;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Models.Network;
 using NetFirewall.Models.Setup;
+using NetFirewall.Models.Vpn;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
+using NetFirewall.Services.Network;
+using NetFirewall.Services.Vpn;
 using Npgsql;
 
 namespace NetFirewall.Services.Setup;
@@ -20,6 +25,9 @@ public class SetupWizardService : ISetupWizardService
     private readonly NpgsqlDataSource _dataSource;
     private readonly IFirewallService _firewallService;
     private readonly IDhcpSubnetService _subnetService;
+    private readonly ILinuxDistroService _distro;
+    private readonly IDaemonClient _daemon;
+    private readonly IWireGuardService _wireguard;
     private readonly ILogger<SetupWizardService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -32,11 +40,17 @@ public class SetupWizardService : ISetupWizardService
         NpgsqlDataSource dataSource,
         IFirewallService firewallService,
         IDhcpSubnetService subnetService,
+        ILinuxDistroService distro,
+        IDaemonClient daemon,
+        IWireGuardService wireguard,
         ILogger<SetupWizardService> logger)
     {
         _dataSource = dataSource;
         _firewallService = firewallService;
         _subnetService = subnetService;
+        _distro = distro;
+        _daemon = daemon;
+        _wireguard = wireguard;
         _logger = logger;
     }
 
@@ -141,65 +155,74 @@ public class SetupWizardService : ISetupWizardService
         return state;
     }
 
-    public Task<IReadOnlyList<DetectedNetworkInterface>> DetectNetworkInterfacesAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<DetectedNetworkInterface>> DetectNetworkInterfacesAsync(CancellationToken ct = default)
     {
-        var interfaces = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(ni => ni.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
-                        ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel &&
-                        !ni.Name.StartsWith("docker") &&
-                        !ni.Name.StartsWith("br-") &&
-                        !ni.Name.StartsWith("veth"))
-            .Select(ni =>
-            {
-                var ipProps = ni.GetIPProperties();
-                var ipv4Address = ipProps.UnicastAddresses
-                    .FirstOrDefault(a => a.Address.AddressFamily == AddressFamily.InterNetwork);
-                var gateway = ipProps.GatewayAddresses
-                    .FirstOrDefault(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
+        // We deliberately avoid System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces():
+        // on Linux hosts with IPv6 disabled at the kernel level (e.g. /proc/sys/net/ipv6/conf/all/disable_ipv6=1),
+        // the runtime throws NetworkInformationException(97, EAFNOSUPPORT) from LinuxNetworkInterface
+        // (dotnet/runtime#40305). Firewall appliances commonly disable IPv6, so the broken API would crash
+        // the wizard on exactly the hosts that need it. Sysfs (/sys/class/net) has no IPv6 dependency.
+        IReadOnlyList<Models.System.InterfaceSuggestion> suggestions;
+        try
+        {
+            suggestions = await _distro.DiscoverInterfacesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            // Defense in depth: if even sysfs reads fail (non-Linux host, restricted FS), render the wizard
+            // with an empty list rather than a 500. The Step 1 view already has an empty-state message.
+            _logger.LogError(ex, "Interface discovery failed; falling back to empty list so the wizard still renders");
+            return Array.Empty<DetectedNetworkInterface>();
+        }
 
-                return new DetectedNetworkInterface
-                {
-                    Name = ni.Name,
-                    Description = ni.Description,
-                    MacAddress = FormatMacAddress(ni.GetPhysicalAddress()),
-                    Type = ni.NetworkInterfaceType,
-                    Status = ni.OperationalStatus,
-                    CurrentIpAddress = ipv4Address?.Address.ToString(),
-                    CurrentSubnetMask = ipv4Address?.IPv4Mask?.ToString(),
-                    CurrentGateway = gateway?.Address.ToString(),
-                    HasCarrier = ni.OperationalStatus == OperationalStatus.Up,
-                    SpeedMbps = ni.Speed / 1_000_000,
-                    SuggestedRole = SuggestRole(ni, gateway != null)
-                };
+        var interfaces = suggestions
+            .Where(s => !string.IsNullOrEmpty(s.Name))
+            .Where(s => !s.Name.StartsWith("docker", StringComparison.OrdinalIgnoreCase)
+                     && !s.Name.StartsWith("br-",    StringComparison.OrdinalIgnoreCase)
+                     && !s.Name.StartsWith("veth",   StringComparison.OrdinalIgnoreCase))
+            .Select(s => new DetectedNetworkInterface
+            {
+                Name = s.Name,
+                Description = s.Reason ?? string.Empty,
+                MacAddress = (s.MacAddress ?? string.Empty).ToUpperInvariant(),
+                Type = s.IsVirtual ? NetworkInterfaceType.Tunnel : NetworkInterfaceType.Ethernet,
+                Status = s.IsUp ? OperationalStatus.Up : OperationalStatus.Down,
+                CurrentIpAddress = s.CurrentIp?.ToString(),
+                CurrentSubnetMask = CidrToDottedMask(s.CurrentSubnet),
+                CurrentGateway = s.CurrentGateway?.ToString(),
+                HasCarrier = s.IsUp,
+                SpeedMbps = 0,
+                SuggestedRole = MapSuggestedRole(s),
+                Confidence = s.Confidence,
+                Reason = s.Reason,
+                Mtu = s.Mtu,
+                IsVirtual = s.IsVirtual
             })
             .OrderBy(i => i.Name)
             .ToList();
 
-        _logger.LogInformation("Detected {Count} network interfaces", interfaces.Count);
-        return Task.FromResult<IReadOnlyList<DetectedNetworkInterface>>(interfaces);
+        _logger.LogInformation("Detected {Count} network interfaces via sysfs", interfaces.Count);
+        return interfaces;
     }
 
-    private static string FormatMacAddress(PhysicalAddress address)
+    private static string MapSuggestedRole(Models.System.InterfaceSuggestion s) => (s.SuggestedType, s.SuggestedRole) switch
     {
-        var bytes = address.GetAddressBytes();
-        return string.Join(":", bytes.Select(b => b.ToString("X2")));
-    }
+        ("WAN", "secondary_wan") => "wan_secondary",
+        ("WAN", _)               => "wan_primary",
+        ("VPN", _)               => "vpn",
+        ("LAN", _)               => "lan",
+        _                        => s.CurrentGateway != null ? "wan_primary" : "lan"
+    };
 
-    private static string SuggestRole(NetworkInterface ni, bool hasGateway)
+    /// <summary>Convert "192.168.1.0/24" → "255.255.255.0" so the form pre-fills a valid IPv4 mask.</summary>
+    private static string? CidrToDottedMask(string? cidr)
     {
-        // Suggest WAN if it has a gateway (connected to external network)
-        if (hasGateway)
-            return "wan_primary";
-
-        // Suggest LAN for ethernet without gateway
-        if (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet)
-            return "lan";
-
-        // WireGuard interfaces
-        if (ni.Name.StartsWith("wg"))
-            return "vpn";
-
-        return "disabled";
+        if (string.IsNullOrEmpty(cidr)) return null;
+        var slash = cidr.IndexOf('/');
+        if (slash < 0 || !int.TryParse(cidr.AsSpan(slash + 1), out var prefix) || prefix < 0 || prefix > 32)
+            return null;
+        var mask = prefix == 0 ? 0u : 0xFFFFFFFFu << (32 - prefix);
+        return $"{(byte)(mask >> 24)}.{(byte)(mask >> 16)}.{(byte)(mask >> 8)}.{(byte)mask}";
     }
 
     public async Task ApplyInterfaceConfigAsync(List<WizardInterfaceConfig> configs, CancellationToken ct = default)
@@ -222,17 +245,27 @@ public class SetupWizardService : ISetupWizardService
             };
             iface.Role = config.Role;
             iface.Enabled = true;
+            iface.Mtu = config.Mtu;
 
-            if (!config.UseDhcp && !string.IsNullOrEmpty(config.IpAddress))
+            iface.AddressingMode = config.AddressingMode switch
+            {
+                "static" => "static",
+                "disabled" => "disabled",
+                _ => "dhcp"
+            };
+
+            if (iface.AddressingMode == "static" && !string.IsNullOrEmpty(config.IpAddress))
             {
                 iface.IpAddress = IPAddress.Parse(config.IpAddress);
                 iface.SubnetMask = string.IsNullOrEmpty(config.SubnetMask) ? null : IPAddress.Parse(config.SubnetMask);
                 iface.Gateway = string.IsNullOrEmpty(config.Gateway) ? null : IPAddress.Parse(config.Gateway);
-                iface.AddressingMode = "static";
             }
-            else
+            else if (iface.AddressingMode == "dhcp")
             {
-                iface.AddressingMode = "dhcp";
+                // DHCP: clear any prior static values so reconfig doesn't leave stale IP rows.
+                iface.IpAddress = null;
+                iface.SubnetMask = null;
+                iface.Gateway = null;
             }
 
             if (existing != null)
@@ -546,32 +579,128 @@ public class SetupWizardService : ISetupWizardService
         }
     }
 
-    public Task ApplyServicesConfigAsync(WizardServicesConfig config, CancellationToken ct = default)
+    public async Task ApplyServicesConfigAsync(WizardServicesConfig config, CancellationToken ct = default)
     {
-        _logger.LogInformation("Applying services configuration");
+        _logger.LogInformation("Applying services configuration (DNS={Dns}, WG={Wg}, QoS={Qos})",
+            config.EnableDnsForwarder, config.EnableWireGuard, config.EnableQos);
 
-        // For now, just log the configuration
-        // Actual implementation would configure DNS forwarder, WireGuard, QoS
-
+        // ── DNS forwarder ───────────────────────────────────────────────
         if (config.EnableDnsForwarder)
         {
-            _logger.LogInformation("DNS Forwarder enabled with upstream: {Dns1}, {Dns2}",
-                config.UpstreamDns1, config.UpstreamDns2);
+            var dnsResp = await _daemon.ApplyDnsAsync(new DnsForwarderConfig
+            {
+                Enabled = true,
+                UpstreamDns1 = config.UpstreamDns1,
+                UpstreamDns2 = config.UpstreamDns2
+            }, ct);
+
+            if (!dnsResp.Success)
+                throw new InvalidOperationException($"DNS forwarder apply failed: {dnsResp.Message}");
+
+            _logger.LogInformation("DNS forwarder applied: {Msg}", dnsResp.Message);
         }
 
+        // ── WireGuard ───────────────────────────────────────────────────
         if (config.EnableWireGuard)
         {
-            _logger.LogInformation("WireGuard enabled on port {Port} with subnet {Subnet}",
-                config.WireGuardPort, config.WireGuardSubnet);
+            if (string.IsNullOrWhiteSpace(config.WireGuardSubnet))
+                throw new InvalidOperationException("WireGuard subnet is required when WireGuard is enabled.");
+
+            // First-class server IP inside the WG /24 = .1 (e.g. 10.100.0.1/24).
+            // We don't reuse an existing server here — the wizard is the bootstrap path;
+            // editing an existing server happens via the dedicated VPN page later.
+            var addressCidr = NormalizeWireGuardServerAddress(config.WireGuardSubnet);
+
+            var keypair = await _daemon.GenerateWireGuardKeyPairAsync(ct);
+            if (!keypair.Success || keypair.Data is null)
+                throw new InvalidOperationException($"WireGuard keypair generation failed: {keypair.Message}");
+
+            var server = await _wireguard.GetServerAsync(ct) ?? new WgServer { Name = "wg0", Mode = "server" };
+            server.Mode = "server";
+            server.PrivateKey = keypair.Data.PrivateKey;
+            server.PublicKey  = keypair.Data.PublicKey;
+            server.AddressCidr = addressCidr;
+            server.ListenPort = config.WireGuardPort;
+            server.Enabled = true;
+            await _wireguard.SaveServerAsync(server, ct);
+
+            var wgResp = await _daemon.ApplyWireGuardAsync(ct);
+            if (!wgResp.Success)
+                throw new InvalidOperationException($"WireGuard apply failed: {wgResp.Message}");
+
+            _logger.LogInformation("WireGuard server applied on port {Port}, address {Addr}", server.ListenPort, server.AddressCidr);
         }
 
+        // ── QoS / tc HTB ────────────────────────────────────────────────
         if (config.EnableQos)
         {
-            _logger.LogInformation("QoS enabled with Download: {Down}Mbps, Upload: {Up}Mbps",
-                config.DownloadBandwidthMbps, config.UploadBandwidthMbps);
-        }
+            if (config.DownloadBandwidthMbps is null || config.UploadBandwidthMbps is null)
+                throw new InvalidOperationException("Download + upload bandwidth are required when QoS is enabled.");
 
-        return Task.CompletedTask;
+            // Apply egress shaping on each WAN interface — total upload bw is what
+            // the kernel can actually control on egress. Download shaping (ingress)
+            // needs IFB and is left as a follow-up.
+            var wans = (await _firewallService.GetInterfacesAsync(ct))
+                .Where(i => string.Equals(i.Type, "WAN", StringComparison.OrdinalIgnoreCase) && i.Enabled)
+                .ToList();
+            if (wans.Count == 0)
+            {
+                _logger.LogWarning("QoS enabled but no WAN interfaces configured — skipping tc apply.");
+            }
+            else
+            {
+                foreach (var wan in wans)
+                {
+                    var qosConfig = new FwQosConfig
+                    {
+                        Id = Guid.NewGuid(),
+                        InterfaceId = wan.Id,
+                        TotalBandwidthMbps = config.UploadBandwidthMbps.Value,
+                        Enabled = true
+                    };
+                    var saved = await _firewallService.CreateQosConfigAsync(qosConfig, ct);
+
+                    // Two HTB classes — operator refines later in Firewall → QoS.
+                    await _firewallService.CreateQosClassAsync(new FwQosClass
+                    {
+                        Id = Guid.NewGuid(),
+                        QosConfigId = saved.Id,
+                        Name = "high-priority",
+                        GuaranteedMbps = Math.Max(1, config.UploadBandwidthMbps.Value / 2),
+                        CeilingMbps = config.UploadBandwidthMbps.Value,
+                        Priority = 1
+                    }, ct);
+                    await _firewallService.CreateQosClassAsync(new FwQosClass
+                    {
+                        Id = Guid.NewGuid(),
+                        QosConfigId = saved.Id,
+                        Name = "default",
+                        GuaranteedMbps = Math.Max(1, config.UploadBandwidthMbps.Value / 2),
+                        CeilingMbps = config.UploadBandwidthMbps.Value,
+                        Priority = 2
+                    }, ct);
+                }
+
+                var qosResp = await _daemon.ApplyQosAsync(ct);
+                if (!qosResp.Success)
+                    throw new InvalidOperationException($"QoS apply failed: {qosResp.Message}");
+
+                _logger.LogInformation("QoS applied to {Count} WAN interface(s) at {Up}Mbps", wans.Count, config.UploadBandwidthMbps);
+            }
+        }
+    }
+
+    /// <summary>"10.100.0.0/24" → "10.100.0.1/24" so the wg interface gets an address that isn't the network base.</summary>
+    private static string NormalizeWireGuardServerAddress(string subnet)
+    {
+        var slash = subnet.IndexOf('/');
+        if (slash < 0) return subnet;
+        if (!IPAddress.TryParse(subnet[..slash], out var net)) return subnet;
+        var b = net.GetAddressBytes();
+        if (b.Length != 4) return subnet;
+        // Server takes .1 of the network — unless the operator already set a host bit.
+        if (b[3] == 0) b[3] = 1;
+        return $"{new IPAddress(b)}{subnet[slash..]}";
     }
 
     public async Task CompleteWizardAsync(CancellationToken ct = default)

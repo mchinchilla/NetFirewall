@@ -1,6 +1,7 @@
 using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Models.Network;
 using NetFirewall.Models.System;
 using NetFirewall.Models.Vpn;
 
@@ -102,6 +103,9 @@ public sealed class NullDaemonClient : IDaemonClient
 
     public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default)
         => Task.FromResult(Disabled<NftApplyResultDto>());
+
+    public Task<ServiceResponse<NetworkApplyResult>> ApplyDnsAsync(DnsForwarderConfig config, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetworkApplyResult>());
 
     public Task<ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>.Ok(

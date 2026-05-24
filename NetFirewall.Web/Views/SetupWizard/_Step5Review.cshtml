@@ -1,102 +1,171 @@
 @model NetFirewall.Web.Models.Setup.WizardPageViewModel
 
+@*
+    Step 5 — final review + apply.
+
+    Layout: one summary card per upcoming sub-step (Interfaces / DHCP / Firewall / Services)
+    with a count badge so the operator sees what's queued. The big Apply button opens a
+    modal that shows each sub-step transitioning from "pending" → "running" → "ok|fail".
+    The actual work happens server-side in one POST; the modal is an optimistic UI that
+    flips to "ok" on a successful response (or reveals the failing sub-step from the
+    fail message) so the user sees progress instead of a frozen button.
+*@
+
 @{
     var roles = Model.Step1.Interfaces.Where(i => i.Role != "disabled").ToList();
+    var lans  = Model.Step2.Lans.Where(l => l.EnableDhcp).ToList();
+
+    var fwToggles = new List<string>();
+    if (Model.Step3.EnableNat)            fwToggles.Add("NAT");
+    if (Model.Step3.ForwardLanToWan)      fwToggles.Add("Forward LAN→WAN");
+    if (Model.Step3.AllowSsh)             fwToggles.Add("SSH");
+    if (Model.Step3.AllowIcmp)            fwToggles.Add("ICMP");
+    if (Model.Step3.AllowDhcp)            fwToggles.Add("DHCP");
+    if (Model.Step3.AllowDns)             fwToggles.Add("DNS");
+    if (Model.Step3.AllowWebInterface)    fwToggles.Add($"Web admin:{Model.Step3.WebInterfacePort}");
+    if (Model.Step3.BlockInvalidPackets)  fwToggles.Add("Drop invalid");
+
+    var svcToggles = new List<string>();
+    if (Model.Step4.EnableDnsForwarder)   svcToggles.Add("DNS forwarder");
+    if (Model.Step4.EnableWireGuard)      svcToggles.Add($"WireGuard {Model.Step4.WireGuardSubnet}:{Model.Step4.WireGuardPort}");
+    if (Model.Step4.EnableQos)            svcToggles.Add($"QoS {Model.Step4.UploadBandwidthMbps}Mbps↑");
 }
 
 <header class="mb-5">
     <h2 class="text-lg font-semibold">Step 5 — Review &amp; apply</h2>
     <p class="text-sm mt-1 text-surface-fg-muted">
-        Final preview. Apply writes to <code class="text-[11px] px-1 rounded bg-surface-muted">fw_interfaces</code>,
-        <code class="text-[11px] px-1 rounded bg-surface-muted">dhcp_subnets</code>,
-        <code class="text-[11px] px-1 rounded bg-surface-muted">fw_filter_rules</code>, etc.
-        Networking is NOT restarted automatically — you'll get a button after apply.
+        Apply writes DB rows for each enabled subsystem, generates configs, and (for services) calls the daemon to bring them up. Networking is NOT restarted automatically — a button appears after Apply.
     </p>
 </header>
 
-<div class="space-y-5">
-    @* ----- Interfaces ----- *@
-    <section>
-        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Interfaces</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <!-- Interfaces -->
+    <article class="rounded-lg border p-4 border-surface-border" style="background-color: var(--surface-elevated);">
+        <header class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold">Interfaces</h3>
+            <span class="badge @(roles.Count == 0 ? "badge-muted" : "badge-accent")">@roles.Count</span>
+        </header>
         @if (roles.Count == 0)
         {
-            <p class="text-sm text-surface-fg-muted">All interfaces disabled — nothing to apply.</p>
+            <p class="text-xs text-surface-fg-muted">All NICs marked disabled — nothing to apply.</p>
         }
         else
         {
-            <ul class="text-sm space-y-1">
+            <ul class="text-xs space-y-1">
                 @foreach (var i in roles)
                 {
-                    <li class="flex items-center gap-2">
-                        <span class="font-mono text-xs">@i.Name</span>
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent">@i.Role</span>
-                        @if (!string.IsNullOrEmpty(i.IpAddress))
+                    <li class="flex items-center gap-2 flex-wrap">
+                        <span class="font-mono">@i.Name</span>
+                        <span class="badge badge-info">@i.Role</span>
+                        <span class="text-surface-fg-muted">@i.AddressingMode</span>
+                        @if (i.AddressingMode == "static" && !string.IsNullOrEmpty(i.IpAddress))
                         {
-                            <span class="text-xs font-mono text-surface-fg-muted">@i.IpAddress</span>
+                            <span class="font-mono text-surface-fg-muted">@i.IpAddress</span>
                         }
                     </li>
                 }
             </ul>
         }
-    </section>
+    </article>
 
-    @* ----- LANs / DHCP ----- *@
-    @if (Model.Step2.Lans.Any(l => l.EnableDhcp))
-    {
-        <section>
-            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">DHCP scopes</h3>
-            <ul class="text-sm space-y-1">
-                @foreach (var l in Model.Step2.Lans.Where(l => l.EnableDhcp))
+    <!-- LAN / DHCP -->
+    <article class="rounded-lg border p-4 border-surface-border" style="background-color: var(--surface-elevated);">
+        <header class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold">DHCP scopes</h3>
+            <span class="badge @(lans.Count == 0 ? "badge-muted" : "badge-accent")">@lans.Count</span>
+        </header>
+        @if (lans.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">No DHCP scopes — clients on LAN need static addressing.</p>
+        }
+        else
+        {
+            <ul class="text-xs space-y-1">
+                @foreach (var l in lans)
                 {
-                    <li class="font-mono text-xs">
-                        @l.InterfaceName · @l.NetworkCidr · range @l.DhcpRangeStart–@l.DhcpRangeEnd
-                        <span class="text-surface-fg-muted"> · @(l.DomainName ?? "(no domain)") · @(l.LeaseTime / 3600)h</span>
+                    <li class="font-mono">
+                        @l.InterfaceName · @l.NetworkCidr
+                        <span class="text-surface-fg-muted"> · @l.DhcpRangeStart–@l.DhcpRangeEnd · @(l.LeaseTime / 3600)h</span>
                     </li>
                 }
             </ul>
-        </section>
-    }
+        }
+    </article>
 
-    @* ----- Firewall ----- *@
-    <section>
-        <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Firewall</h3>
-        <p class="text-sm text-surface-fg-muted">
-            @{
-                var on = new List<string>();
-                if (Model.Step3.EnableNat)            on.Add("NAT");
-                if (Model.Step3.ForwardLanToWan)      on.Add("LAN→WAN forward");
-                if (Model.Step3.AllowSsh)             on.Add("SSH");
-                if (Model.Step3.AllowIcmp)            on.Add("ICMP");
-                if (Model.Step3.AllowDhcp)            on.Add("DHCP");
-                if (Model.Step3.AllowDns)             on.Add("DNS");
-                if (Model.Step3.AllowWebInterface)    on.Add($"Web on :{Model.Step3.WebInterfacePort}");
-                if (Model.Step3.BlockInvalidPackets)  on.Add("drop invalid");
-            }
-            @(on.Count == 0 ? "(no rules selected)" : string.Join(" · ", on))
-        </p>
-    </section>
+    <!-- Firewall -->
+    <article class="rounded-lg border p-4 border-surface-border" style="background-color: var(--surface-elevated);">
+        <header class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold">Firewall</h3>
+            <span class="badge @(fwToggles.Count == 0 ? "badge-muted" : "badge-accent")">@fwToggles.Count rule sets</span>
+        </header>
+        @if (fwToggles.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">No firewall rules selected.</p>
+        }
+        else
+        {
+            <div class="flex flex-wrap gap-1">
+                @foreach (var t in fwToggles)
+                {
+                    <span class="badge badge-info">@t</span>
+                }
+            </div>
+        }
+    </article>
 
-    @* ----- Services ----- *@
-    @if (Model.Step4.EnableDnsForwarder || Model.Step4.EnableWireGuard || Model.Step4.EnableQos)
-    {
-        <section>
-            <h3 class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Optional services</h3>
-            <ul class="text-sm space-y-1 text-surface-fg-muted">
-                @if (Model.Step4.EnableDnsForwarder)
+    <!-- Services -->
+    <article class="rounded-lg border p-4 border-surface-border" style="background-color: var(--surface-elevated);">
+        <header class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold">Optional services</h3>
+            <span class="badge @(svcToggles.Count == 0 ? "badge-muted" : "badge-accent")">@svcToggles.Count</span>
+        </header>
+        @if (svcToggles.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">All services disabled — add later from their pages.</p>
+        }
+        else
+        {
+            <ul class="text-xs space-y-1 text-surface-fg-muted">
+                @foreach (var s in svcToggles)
                 {
-                    <li>DNS forwarder → @Model.Step4.UpstreamDns1@(string.IsNullOrEmpty(Model.Step4.UpstreamDns2) ? "" : $", {Model.Step4.UpstreamDns2}")</li>
-                }
-                @if (Model.Step4.EnableWireGuard)
-                {
-                    <li>WireGuard @Model.Step4.WireGuardSubnet on UDP/@Model.Step4.WireGuardPort</li>
-                }
-                @if (Model.Step4.EnableQos)
-                {
-                    <li>QoS down @Model.Step4.DownloadBandwidthMbps Mbps · up @Model.Step4.UploadBandwidthMbps Mbps</li>
+                    <li>· @s</li>
                 }
             </ul>
-        </section>
-    }
+        }
+    </article>
+</div>
+
+@* Apply progress modal — fed by the @@apply-progress event from the buttons below. *@
+<div x-data="wizardApplyProgress()"
+     x-show="visible"
+     x-cloak
+     x-on:apply-progress.window="onStart($event)"
+     x-on:wizard-apply-done.window="onDone($event)"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div class="rounded-lg shadow-xl max-w-md w-full p-6"
+         style="background-color: var(--surface-bg); color: var(--surface-fg); border: 1px solid var(--surface-border);">
+        <h3 class="text-base font-semibold mb-3">Applying setup</h3>
+        <ul class="space-y-2">
+            <template x-for="step in steps" :key="step.key">
+                <li class="flex items-center gap-3 text-sm">
+                    <!-- pending: dim circle -->
+                    <span x-show="step.state === 'pending'" class="h-4 w-4 rounded-full" style="border: 1px solid var(--surface-fg-muted);"></span>
+                    <!-- running: spinner -->
+                    <span x-show="step.state === 'running'" class="loading-spinner-sm"></span>
+                    <!-- ok: checkmark -->
+                    <svg x-show="step.state === 'ok'" class="h-4 w-4 text-feedback-success-fg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                    <!-- fail: x -->
+                    <svg x-show="step.state === 'fail'" class="h-4 w-4 text-feedback-danger-fg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                    <span :class="step.state === 'fail' ? 'text-feedback-danger-fg' : (step.state === 'ok' ? '' : 'text-surface-fg-muted')"
+                          x-text="step.label"></span>
+                </li>
+            </template>
+        </ul>
+        <div class="mt-4 flex justify-end gap-2" x-show="done">
+            <button type="button" class="btn btn-ghost text-xs" @@click="visible = false">Close</button>
+        </div>
+    </div>
 </div>
 
 <div class="mt-6 pt-4 border-t flex items-center justify-between gap-2 border-surface-border">
@@ -125,10 +194,12 @@
                 x-ref="applyBtn"
                 hx-post="/setup/wizard/complete"
                 hx-trigger="confirmed-apply, doApply"
+                hx-on::before-request="window.dispatchEvent(new CustomEvent('apply-progress'))"
+                hx-on::after-request="window.dispatchEvent(new CustomEvent('wizard-apply-done', { detail: { ok: event.detail.successful, response: event.detail.xhr.responseText } }))"
                 @@click.prevent="(async () => {
                     const ok = await $store.confirm.ask({
                         title: 'Apply setup?',
-                        message: 'Writes interfaces, DHCP scopes, firewall rules and optional services to the database. You can edit any of these afterwards from their dedicated pages.',
+                        message: 'Writes DB rows for interfaces / DHCP / firewall, then asks the daemon to bring up enabled services. You can edit any of these afterwards.',
                         confirmLabel: 'Apply now',
                         level: 'warning'
                     });

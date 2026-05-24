@@ -21,7 +21,7 @@
             // Reachable when the wizard service has unlocked it AND it's not the current step.
             var clickable = n <= Model.MaxUnlockedStep && !current;
             var bg = done ? "background-color: var(--accent); color: var(--accent-fg);"
-                  : current ? "background-color: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);"
+                  : current ? "background-color: var(--accent-soft); color: var(--accent); animation: step-pulse 2.4s ease-in-out infinite;"
                   : "background-color: var(--surface-muted); color: var(--surface-fg-muted);";
             var labelStyle = current ? "color: var(--surface-fg);"
                           : done ? "color: var(--accent);"

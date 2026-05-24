@@ -814,6 +814,121 @@ document.addEventListener("alpine:init", () => {
         }
     }));
 
+    /* ---------- wizardStep2Lan ----------
+     * Live overlap detection + DHCP range sizing for the Setup Wizard's Step 2.
+     *
+     *   <form x-data='wizardStep2Lan({ wans: @Json.Serialize(Model.WanCidrs), rows: N })'>
+     *     <article x-data="{ cidr: '...', rangeStart: '...', rangeEnd: '...' }">
+     *       ... :class="{ 'input-error': $root.wanOverlap(cidr) || $root.peerOverlap(cidr, index) }"
+     *       <span x-text="$root.rangeSize(rangeStart, rangeEnd) + ' usable IPs'"></span>
+     *
+     * Helpers are pure functions over CIDR strings — no DOM access — so individual
+     * rows can call them from per-card Alpine state without coordination.
+     */
+    Alpine.data("wizardStep2Lan", ({ wans = [], rows = 0 } = {}) => ({
+        wans: Array.isArray(wans) ? wans : [],
+        rowCidrs: Array.from({ length: rows }, () => ""),
+
+        _ipv4ToInt(ip) {
+            const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(ip || "").trim());
+            if (!m) return null;
+            const parts = m.slice(1, 5).map(Number);
+            if (parts.some(p => p < 0 || p > 255)) return null;
+            return (parts[0] << 24 >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
+        },
+
+        _parseCidr(cidr) {
+            const s = String(cidr || "").trim();
+            const slash = s.indexOf("/");
+            if (slash < 0) return null;
+            const ip = this._ipv4ToInt(s.slice(0, slash));
+            const prefix = parseInt(s.slice(slash + 1), 10);
+            if (ip === null || isNaN(prefix) || prefix < 0 || prefix > 32) return null;
+            return { ip, prefix };
+        },
+
+        cidrOverlap(a, b) {
+            const pa = this._parseCidr(a), pb = this._parseCidr(b);
+            if (!pa || !pb) return false;
+            const min = Math.min(pa.prefix, pb.prefix);
+            const mask = min === 0 ? 0 : (0xFFFFFFFF << (32 - min)) >>> 0;
+            return ((pa.ip & mask) >>> 0) === ((pb.ip & mask) >>> 0);
+        },
+
+        wanOverlap(cidr) {
+            if (!cidr) return false;
+            return this.wans.some(w => this.cidrOverlap(cidr, w));
+        },
+
+        peerOverlap(cidr, idx) {
+            if (!cidr) return false;
+            return this.rowCidrs.some((c, i) => i !== idx && c && this.cidrOverlap(cidr, c));
+        },
+
+        setRowCidr(idx, cidr) { this.rowCidrs[idx] = cidr || ""; },
+
+        /** "192.168.1.10" "192.168.1.250" → 241 usable IPs. Returns "—" on bad input. */
+        rangeSize(start, end) {
+            const s = this._ipv4ToInt(start), e = this._ipv4ToInt(end);
+            if (s === null || e === null || e < s) return "—";
+            return String(e - s + 1);
+        }
+    }));
+
+    /* ---------- wizardApplyProgress ----------
+     * Modal that tracks the four sub-steps of /setup/wizard/complete. Server-side
+     * the four ApplyXAsync calls happen inline in one POST, so we can't stream
+     * per-step events without a refactor. Instead we paint the modal optimistically
+     * and reconcile on response:
+     *   - apply-progress  → reset, mark first step running, show modal
+     *   - wizard-apply-done with ok=true → all four become "ok"
+     *   - wizard-apply-done with ok=false → find which step the error message
+     *       names (e.g. "WireGuard apply failed") and mark it "fail"; earlier
+     *       steps become "ok" since the server runs them sequentially.
+     */
+    Alpine.data("wizardApplyProgress", () => ({
+        visible: false,
+        done:    false,
+        steps: [
+            { key: "interfaces", label: "Interfaces → fw_interfaces", state: "pending", match: /interface/i },
+            { key: "lan",        label: "DHCP scopes → dhcp_subnets",  state: "pending", match: /(lan|dhcp|subnet)/i },
+            { key: "firewall",   label: "Firewall rules → fw_filter_rules / fw_nat_rules", state: "pending", match: /(firewall|nft|filter|nat)/i },
+            { key: "services",   label: "Services (DNS / WireGuard / QoS)", state: "pending", match: /(dns|wireguard|wg|qos|tc)/i }
+        ],
+
+        onStart() {
+            this.done = false;
+            this.visible = true;
+            this.steps.forEach((s, i) => { s.state = i === 0 ? "running" : "pending"; });
+        },
+
+        onDone(e) {
+            const ok = !!(e?.detail?.ok);
+            const body = e?.detail?.response || "";
+
+            if (ok) {
+                this.steps.forEach(s => s.state = "ok");
+            } else {
+                // Find which step the failure message points at. Default to the
+                // last step still pending/running so the user sees the failure
+                // somewhere even if our regex misses.
+                let msg = "";
+                try { msg = JSON.parse(body)?.message || ""; } catch { msg = body; }
+
+                let failIdx = this.steps.findIndex(s => s.match.test(msg));
+                if (failIdx < 0) failIdx = this.steps.findIndex(s => s.state !== "ok");
+                if (failIdx < 0) failIdx = this.steps.length - 1;
+
+                this.steps.forEach((s, i) => {
+                    if (i <  failIdx) s.state = "ok";
+                    else if (i === failIdx) s.state = "fail";
+                    else s.state = "pending";
+                });
+            }
+            this.done = true;
+        }
+    }));
+
     Alpine.store("ui", {
         ...DEFAULT_STATE,
         palettes: PALETTES,

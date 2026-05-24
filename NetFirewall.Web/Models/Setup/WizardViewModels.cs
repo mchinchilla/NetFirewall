@@ -29,23 +29,46 @@ public sealed class Step1ViewModel
     public List<Step1RowViewModel> Interfaces { get; set; } = new();
 }
 
-public sealed class Step1RowViewModel
+public sealed class Step1RowViewModel : IValidatableObject
 {
     [Required] public string Name { get; set; } = string.Empty;
     public string? MacAddress { get; set; }
     public string? CurrentIp { get; set; }
     public string? CurrentGateway { get; set; }
     public string? SuggestedRole { get; set; }
+    public int Confidence { get; set; }
+    public string? Reason { get; set; }
     public bool IsUp { get; set; }
+    public bool IsVirtual { get; set; }
 
     [Required, RegularExpression("^(disabled|wan_primary|wan_secondary|lan|vpn)$")]
     public string Role { get; set; } = "disabled";
 
-    public bool UseDhcp { get; set; }
+    /// <summary>"dhcp" | "static" | "disabled". Backs the addressing radio in the form.</summary>
+    [Required, RegularExpression("^(dhcp|static|disabled)$")]
+    public string AddressingMode { get; set; } = "dhcp";
 
     [IPv4(AllowEmpty = true)] public string? IpAddress { get; set; }
     [IPv4(AllowEmpty = true)] public string? SubnetMask { get; set; }
     [IPv4(AllowEmpty = true)] public string? Gateway { get; set; }
+
+    [Range(576, 9216, ErrorMessage = "MTU must be between 576 and 9216.")]
+    public int? Mtu { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext context)
+    {
+        // Static addressing must include an IP + mask. Gateway is required for WAN
+        // (no gateway → no default route → the firewall can't reach the internet).
+        if (AddressingMode == "static" && Role != "disabled")
+        {
+            if (string.IsNullOrWhiteSpace(IpAddress))
+                yield return new ValidationResult("IP address is required for static addressing.", new[] { nameof(IpAddress) });
+            if (string.IsNullOrWhiteSpace(SubnetMask))
+                yield return new ValidationResult("Subnet mask is required for static addressing.", new[] { nameof(SubnetMask) });
+            if (Role is "wan_primary" or "wan_secondary" && string.IsNullOrWhiteSpace(Gateway))
+                yield return new ValidationResult("Gateway is required for WAN interfaces with static addressing.", new[] { nameof(Gateway) });
+        }
+    }
 }
 
 // ---------------- Step 2 — LAN / DHCP per LAN interface ----------------
@@ -54,9 +77,12 @@ public sealed class Step2ViewModel : IValidatableObject
 {
     public List<Step2RowViewModel> Lans { get; set; } = new();
 
+    /// <summary>WAN CIDRs detected/configured in Step 1, so the view can warn on overlap.</summary>
+    public List<string> WanCidrs { get; set; } = new();
+
     public IEnumerable<ValidationResult> Validate(ValidationContext context)
     {
-        // Disallow overlapping CIDRs across LANs (very common foot-gun).
+        // Foot-gun #1: same CIDR on two LAN interfaces — DHCP/routing breaks silently.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var lan in Lans.Where(l => l.EnableDhcp && !string.IsNullOrEmpty(l.NetworkCidr)))
         {
@@ -65,6 +91,43 @@ public sealed class Step2ViewModel : IValidatableObject
                     $"Subnet {lan.NetworkCidr} is configured on more than one LAN interface.",
                     new[] { nameof(Lans) });
         }
+
+        // Foot-gun #2: LAN subnet overlaps the WAN — the firewall can't decide which iface to route through.
+        foreach (var lan in Lans.Where(l => l.EnableDhcp && !string.IsNullOrEmpty(l.NetworkCidr)))
+        {
+            foreach (var wan in WanCidrs)
+            {
+                if (CidrOverlap(lan.NetworkCidr, wan))
+                {
+                    yield return new ValidationResult(
+                        $"LAN subnet {lan.NetworkCidr} overlaps with WAN subnet {wan}.",
+                        new[] { nameof(Lans) });
+                }
+            }
+        }
+    }
+
+    /// <summary>True when two CIDR ranges share at least one address.</summary>
+    public static bool CidrOverlap(string a, string b)
+    {
+        if (!TryParseCidr(a, out var aNet, out var aPrefix)) return false;
+        if (!TryParseCidr(b, out var bNet, out var bPrefix)) return false;
+        var minPrefix = Math.Min(aPrefix, bPrefix);
+        var mask = minPrefix == 0 ? 0u : 0xFFFFFFFFu << (32 - minPrefix);
+        return (aNet & mask) == (bNet & mask);
+    }
+
+    private static bool TryParseCidr(string s, out uint network, out int prefix)
+    {
+        network = 0; prefix = 0;
+        var slash = s.IndexOf('/');
+        if (slash < 0) return false;
+        if (!System.Net.IPAddress.TryParse(s[..slash], out var ip)) return false;
+        if (!int.TryParse(s[(slash + 1)..], out prefix) || prefix < 0 || prefix > 32) return false;
+        var bytes = ip.GetAddressBytes();
+        if (bytes.Length != 4) return false;
+        network = ((uint)bytes[0] << 24) | ((uint)bytes[1] << 16) | ((uint)bytes[2] << 8) | bytes[3];
+        return true;
     }
 }
 
@@ -146,10 +209,11 @@ public static class WizardMappers
         {
             Name = r.Name,
             Role = r.Role,
-            UseDhcp = r.UseDhcp,
+            AddressingMode = r.AddressingMode,
             IpAddress = r.IpAddress,
             SubnetMask = r.SubnetMask,
-            Gateway = r.Gateway
+            Gateway = r.Gateway,
+            Mtu = r.Mtu
         }).ToList();
 
     public static List<WizardLanConfig> ToServiceModel(this Step2ViewModel vm) =>
@@ -195,50 +259,138 @@ public static class WizardMappers
     public static Step1ViewModel ToViewModel(this List<WizardInterfaceConfig>? saved, IReadOnlyList<DetectedNetworkInterface> detected)
     {
         // Merge saved choices with currently-detected interfaces so the form
-        // shows every NIC that's plugged in, with role pre-selected from prior runs.
-        var savedByName = (saved ?? new List<WizardInterfaceConfig>()).ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
-        var rows = detected.Select(d => new Step1RowViewModel
+        // shows every NIC the kernel sees, with role pre-selected from prior runs.
+        // If a NIC was saved but is no longer plugged in, we still keep it as a
+        // disabled-grey row so the operator can decide what to do with the stale entry.
+        var savedByName = (saved ?? new List<WizardInterfaceConfig>())
+            .ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        var detectedByName = detected.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+
+        var rows = detected.Select(d =>
         {
-            Name = d.Name,
-            MacAddress = d.MacAddress,
-            CurrentIp = d.CurrentIpAddress,
-            CurrentGateway = d.CurrentGateway,
-            SuggestedRole = d.SuggestedRole,
-            IsUp = d.HasCarrier,
-            Role = savedByName.TryGetValue(d.Name, out var s) ? s.Role : d.SuggestedRole,
-            UseDhcp = savedByName.TryGetValue(d.Name, out var s2) ? s2.UseDhcp : false,
-            IpAddress = savedByName.TryGetValue(d.Name, out var s3) ? s3.IpAddress : d.CurrentIpAddress,
-            SubnetMask = savedByName.TryGetValue(d.Name, out var s4) ? s4.SubnetMask : d.CurrentSubnetMask,
-            Gateway = savedByName.TryGetValue(d.Name, out var s5) ? s5.Gateway : d.CurrentGateway
+            savedByName.TryGetValue(d.Name, out var s);
+            return new Step1RowViewModel
+            {
+                Name = d.Name,
+                MacAddress = d.MacAddress,
+                CurrentIp = d.CurrentIpAddress,
+                CurrentGateway = d.CurrentGateway,
+                SuggestedRole = d.SuggestedRole,
+                Confidence = d.Confidence,
+                Reason = d.Reason,
+                IsUp = d.HasCarrier,
+                IsVirtual = d.IsVirtual,
+                Role = s?.Role ?? d.SuggestedRole,
+                AddressingMode = s?.AddressingMode ?? SuggestAddressingMode(d),
+                IpAddress = s?.IpAddress ?? d.CurrentIpAddress,
+                SubnetMask = s?.SubnetMask ?? d.CurrentSubnetMask,
+                Gateway = s?.Gateway ?? d.CurrentGateway,
+                Mtu = s?.Mtu ?? d.Mtu
+            };
         }).ToList();
+
+        // Surface saved-but-missing NICs at the end so the operator notices.
+        foreach (var s in savedByName.Values.Where(c => !detectedByName.ContainsKey(c.Name)))
+        {
+            rows.Add(new Step1RowViewModel
+            {
+                Name = s.Name,
+                Role = s.Role,
+                AddressingMode = s.AddressingMode,
+                IpAddress = s.IpAddress,
+                SubnetMask = s.SubnetMask,
+                Gateway = s.Gateway,
+                Mtu = s.Mtu,
+                SuggestedRole = "disabled",
+                Confidence = 0,
+                Reason = "Saved configuration; kernel no longer reports this NIC.",
+                IsUp = false
+            });
+        }
+
         return new Step1ViewModel { Interfaces = rows };
     }
 
+    /// <summary>WAN with a current gateway → DHCP (typical ISP). Otherwise default to static so the form prompts for an IP.</summary>
+    private static string SuggestAddressingMode(DetectedNetworkInterface d) =>
+        d.SuggestedRole.StartsWith("wan", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(d.CurrentGateway)
+            ? "dhcp"
+            : (d.SuggestedRole == "disabled" ? "disabled" : "static");
+
     public static Step2ViewModel ToViewModel(this List<WizardLanConfig>? saved, Step1ViewModel step1)
     {
-        // One row per LAN-marked iface in step 1; pre-populate sensible defaults.
-        var savedByName = (saved ?? new List<WizardLanConfig>()).ToDictionary(c => c.InterfaceName, StringComparer.OrdinalIgnoreCase);
+        var savedByName = (saved ?? new List<WizardLanConfig>())
+            .ToDictionary(c => c.InterfaceName, StringComparer.OrdinalIgnoreCase);
+
+        // Pre-compute "occupied" CIDRs from Step 1 so LAN defaults pick a slot
+        // that doesn't collide with the WAN. Saved-LAN choices keep their CIDR;
+        // newly-suggested LANs walk 192.168.10..254 looking for a free /24.
+        var occupied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var wanCidrs = new List<string>();
+        foreach (var i in step1.Interfaces.Where(x => x.AddressingMode == "static" && !string.IsNullOrEmpty(x.IpAddress)))
+        {
+            var cidr = CidrFromIpMask(i.IpAddress, i.SubnetMask);
+            if (cidr is null) continue;
+            occupied.Add(cidr);
+            if (i.Role is "wan_primary" or "wan_secondary") wanCidrs.Add(cidr);
+        }
+        // Saved LAN CIDRs are already taken even if not present in Step 1 static config.
+        foreach (var s in savedByName.Values.Where(v => !string.IsNullOrEmpty(v.NetworkCidr)))
+            occupied.Add(s.NetworkCidr);
+
+        int nextThird = 10;
+        string NextFreeSlash24()
+        {
+            while (nextThird < 255)
+            {
+                var candidate = $"192.168.{nextThird}.0/24";
+                nextThird++;
+                if (!occupied.Any(o => Step2ViewModel.CidrOverlap(o, candidate)))
+                {
+                    occupied.Add(candidate);
+                    return candidate;
+                }
+            }
+            return "10.99.0.0/24"; // unlikely fallback when 192.168 space is exhausted
+        }
+
         var lans = step1.Interfaces
             .Where(i => string.Equals(i.Role, "lan", StringComparison.OrdinalIgnoreCase))
-            .Select((i, idx) =>
+            .Select(i =>
             {
                 if (savedByName.TryGetValue(i.Name, out var s)) return Map(i.Name, s);
-                // Sensible defaults: 192.168.{99-idx}.0/24, server is .1, range is .10–.250
-                var third = 99 + idx;
+
+                var cidr = NextFreeSlash24();
+                var third = int.Parse(cidr.Split('.')[2]);
                 return new Step2RowViewModel
                 {
                     InterfaceName = i.Name,
                     EnableDhcp = true,
                     ServerIp = $"192.168.{third}.1",
                     SubnetMask = "255.255.255.0",
-                    NetworkCidr = $"192.168.{third}.0/24",
+                    NetworkCidr = cidr,
                     DhcpRangeStart = $"192.168.{third}.10",
                     DhcpRangeEnd = $"192.168.{third}.250",
                     DomainName = "lan.local",
                     LeaseTime = 86400
                 };
             }).ToList();
-        return new Step2ViewModel { Lans = lans };
+
+        return new Step2ViewModel { Lans = lans, WanCidrs = wanCidrs };
+    }
+
+    /// <summary>"10.0.0.5" + "255.255.255.0" → "10.0.0.0/24". Returns null on parse failure.</summary>
+    private static string? CidrFromIpMask(string? ip, string? mask)
+    {
+        if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(mask)) return null;
+        if (!System.Net.IPAddress.TryParse(ip, out var ipAddr) || !System.Net.IPAddress.TryParse(mask, out var maskAddr)) return null;
+        var ipB = ipAddr.GetAddressBytes();
+        var mB = maskAddr.GetAddressBytes();
+        if (ipB.Length != 4 || mB.Length != 4) return null;
+        var netB = new byte[4];
+        for (int k = 0; k < 4; k++) netB[k] = (byte)(ipB[k] & mB[k]);
+        var prefix = mB.Sum(b => System.Numerics.BitOperations.PopCount(b));
+        return $"{new System.Net.IPAddress(netB)}/{prefix}";
     }
 
     public static Step3ViewModel ToViewModel(this WizardFirewallConfig? saved) => saved is null

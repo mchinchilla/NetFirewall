@@ -1,9 +1,13 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NetFirewall.Models.Setup;
+using NetFirewall.Models.System;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Services.Firewall;
+using NetFirewall.Services.Network;
 using NetFirewall.Services.Setup;
+using NetFirewall.Services.Vpn;
 using NetFirewall.Tests.Infra;
 using Xunit;
 
@@ -20,6 +24,9 @@ public sealed class SetupWizardServiceTests : IAsyncLifetime
     private readonly PostgresFixture _pg;
     private readonly Mock<IFirewallService> _firewall = new();
     private readonly Mock<IDhcpSubnetService> _subnets = new();
+    private readonly Mock<ILinuxDistroService> _distro = new();
+    private readonly Mock<IDaemonClient> _daemon = new();
+    private readonly Mock<IWireGuardService> _wireguard = new();
     private SetupWizardService _svc = null!;
 
     public SetupWizardServiceTests(PostgresFixture pg) => _pg = pg;
@@ -28,8 +35,11 @@ public sealed class SetupWizardServiceTests : IAsyncLifetime
     {
         await _pg.ResetSchemaAsync();
         await _pg.BootstrapApplicationSchemaAsync();
+        _distro.Setup(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(Array.Empty<InterfaceSuggestion>());
         _svc = new SetupWizardService(
-            _pg.DataSource, _firewall.Object, _subnets.Object,
+            _pg.DataSource, _firewall.Object, _subnets.Object, _distro.Object,
+            _daemon.Object, _wireguard.Object,
             NullLogger<SetupWizardService>.Instance);
     }
 
@@ -95,8 +105,8 @@ public sealed class SetupWizardServiceTests : IAsyncLifetime
     {
         var input = new List<WizardInterfaceConfig>
         {
-            new() { Name = "eth0", Role = "wan_primary", UseDhcp = true },
-            new() { Name = "eth1", Role = "lan", IpAddress = "10.0.0.1", SubnetMask = "255.255.255.0" }
+            new() { Name = "eth0", Role = "wan_primary", AddressingMode = "dhcp" },
+            new() { Name = "eth1", Role = "lan", AddressingMode = "static", IpAddress = "10.0.0.1", SubnetMask = "255.255.255.0" }
         };
 
         await _svc.SaveStep1InterfacesAsync(input);
@@ -106,8 +116,9 @@ public sealed class SetupWizardServiceTests : IAsyncLifetime
         Assert.Equal(2, fetched!.Count);
         Assert.Equal("eth0", fetched[0].Name);
         Assert.Equal("wan_primary", fetched[0].Role);
-        Assert.True(fetched[0].UseDhcp);
+        Assert.Equal("dhcp", fetched[0].AddressingMode);
         Assert.Equal("eth1", fetched[1].Name);
+        Assert.Equal("static", fetched[1].AddressingMode);
         Assert.Equal("10.0.0.1", fetched[1].IpAddress);
     }
 

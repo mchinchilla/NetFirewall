@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
+using NetFirewall.Models.Network;
 using NetFirewall.Models.System;
 
 namespace NetFirewall.Services.Daemon;
@@ -184,6 +185,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
 
     public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default)
         => PostAsync<NftApplyResultDto>("/v1/wireguard/stop", ct);
+
+    public Task<ServiceResponse<NetworkApplyResult>> ApplyDnsAsync(DnsForwarderConfig config, CancellationToken ct = default)
+        => PostJsonAsync<DnsForwarderConfig, NetworkApplyResult>("/v1/dns/apply", config, ct);
 
     public async Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
     {

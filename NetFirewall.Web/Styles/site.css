@@ -473,6 +473,14 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* Soft halo pulse for the currently-active wizard stepper node. The ring is the
+ * stepper's existing box-shadow; this just breathes the surrounding spread so
+ * the user's eye finds the current step without it being aggressive. */
+@keyframes step-pulse {
+    0%, 100% { box-shadow: 0 0 0 0   color-mix(in srgb, var(--accent) 0%,  transparent); }
+    50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); }
+}
+
 /* =====================================================================
  * BASE — applies semantic colors to the document and smooths transitions.
  * ===================================================================== */

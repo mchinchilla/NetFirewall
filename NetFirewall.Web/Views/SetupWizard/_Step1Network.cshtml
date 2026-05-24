@@ -1,72 +1,186 @@
 @model NetFirewall.Web.Models.Setup.Step1ViewModel
 
+@*
+    Step 1 — one card per NIC. The kernel-reported state stays read-only on the
+    left; the operator-editable role + addressing pane lives on the right.
+
+    Alpine state per-row tracks Role + AddressingMode so the static IP fields show
+    up only when (a) role ≠ disabled AND (b) mode = static. We never hide inputs
+    with display:none alone — we use x-show so they're excluded from form submission
+    when collapsed (server-side validation still passes because of conditional
+    IValidatableObject in Step1RowViewModel).
+*@
+
 <header class="mb-5">
     <h2 class="text-lg font-semibold">Step 1 — Network interfaces</h2>
     <p class="text-sm mt-1 text-surface-fg-muted">
-        Assign each detected NIC a role. Disabled interfaces won't be touched by NetFirewall.
-        WAN secondary lets the WAN Monitor fail over automatically.
+        Pick a role for each NIC. WAN secondary enables automatic failover when the primary loses reachability.
+        Suggestions come from the kernel — confidence reflects how sure we are.
     </p>
 </header>
 
-<form method="post" action="/setup/wizard/step/1" x-data="{}">
+<form method="post" action="/setup/wizard/step/1">
     @Html.AntiForgeryToken()
-
-    <div class="overflow-x-auto -mx-5">
-        <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Interface</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">MAC</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Current IP</th>
-                    <th class="px-5 py-2 font-medium">Suggested</th>
-                    <th class="px-5 py-2 font-medium">Role</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @for (var i = 0; i < Model.Interfaces.Count; i++)
-                {
-                    var row = Model.Interfaces[i];
-                    <tr>
-                        <td class="px-5 py-3 align-top">
-                            <input type="hidden" name="Interfaces[@i].Name" value="@row.Name" />
-                            <div class="flex items-center gap-2">
-                                <span class="inline-block h-2 w-2 rounded-full"
-                                      style="background-color: @(row.IsUp ? "var(--feedback-success-bd)" : "var(--surface-fg-muted)");"></span>
-                                <span class="font-medium font-mono text-xs">@row.Name</span>
-                            </div>
-                        </td>
-                        <td class="px-5 py-3 align-top hidden md:table-cell font-mono text-xs text-surface-fg-muted">@(row.MacAddress ?? "—")</td>
-                        <td class="px-5 py-3 align-top hidden lg:table-cell font-mono text-xs text-surface-fg-muted">@(row.CurrentIp ?? "—")</td>
-                        <td class="px-5 py-3 align-top">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent">@(row.SuggestedRole ?? "—")</span>
-                        </td>
-                        <td class="px-5 py-3 align-top w-44">
-                            <select name="Interfaces[@i].Role" class="input py-1.5 text-sm">
-                                <option value="disabled"      selected="@(row.Role == "disabled")">Disabled</option>
-                                <option value="wan_primary"   selected="@(row.Role == "wan_primary")">WAN primary</option>
-                                <option value="wan_secondary" selected="@(row.Role == "wan_secondary")">WAN secondary</option>
-                                <option value="lan"           selected="@(row.Role == "lan")">LAN</option>
-                                <option value="vpn"           selected="@(row.Role == "vpn")">VPN</option>
-                            </select>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
 
     @if (Model.Interfaces.Count == 0)
     {
-        <div class="text-sm py-10 text-center text-surface-fg-muted">
-            No network interfaces detected. Plug in a NIC and reload.
+        <div class="rounded-md border border-dashed py-12 text-center text-sm text-surface-fg-muted border-surface-border"
+             style="background-color: var(--surface-muted);">
+            No network interfaces detected. Plug in a NIC and reload — or check that the daemon can read <span class="font-mono">/sys/class/net</span>.
         </div>
     }
 
-    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
-        <a href="/" class="btn btn-ghost">Cancel</a>
-        <button type="submit" class="btn btn-primary">
-            Continue
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/></svg>
-        </button>
+    <div class="space-y-3">
+        @for (var i = 0; i < Model.Interfaces.Count; i++)
+        {
+            var row = Model.Interfaces[i];
+            var statusBg     = row.IsUp ? "badge-success" : "badge-muted";
+            var statusLabel  = row.IsUp ? "Link up" : (row.IsVirtual ? "Virtual" : "No link");
+            var confidenceCls = row.Confidence >= 70 ? "badge-success"
+                              : row.Confidence >= 40 ? "badge-info"
+                              : "badge-muted";
+
+            <article class="rounded-lg border p-4 transition border-surface-border"
+                     style="background-color: var(--surface-elevated);"
+                     x-data="{ role: '@row.Role', mode: '@row.AddressingMode' }"
+                     :class="{ 'opacity-60': role === 'disabled' }">
+
+                <input type="hidden" name="Interfaces[@i].Name"      value="@row.Name" />
+                <input type="hidden" name="Interfaces[@i].MacAddress" value="@row.MacAddress" />
+                <input type="hidden" name="Interfaces[@i].CurrentIp"  value="@row.CurrentIp" />
+
+                <div class="grid grid-cols-1 lg:grid-cols-[1fr,1.4fr] gap-5">
+
+                    <!-- LEFT: kernel-reported facts -->
+                    <div class="space-y-2 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-mono text-sm font-semibold">@row.Name</span>
+                            <span class="badge @statusBg">@statusLabel</span>
+                            @if (!string.IsNullOrEmpty(row.SuggestedRole) && row.SuggestedRole != "disabled")
+                            {
+                                <span class="badge @confidenceCls" title="Confidence in the suggested role">
+                                    Suggests @row.SuggestedRole · @row.Confidence%
+                                </span>
+                            }
+                        </div>
+
+                        <dl class="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+                            @if (!string.IsNullOrEmpty(row.MacAddress))
+                            {
+                                <dt class="text-surface-fg-muted">MAC</dt>
+                                <dd class="font-mono">@row.MacAddress</dd>
+                            }
+                            @if (!string.IsNullOrEmpty(row.CurrentIp))
+                            {
+                                <dt class="text-surface-fg-muted">Current IP</dt>
+                                <dd class="font-mono">@row.CurrentIp</dd>
+                            }
+                            @if (!string.IsNullOrEmpty(row.CurrentGateway))
+                            {
+                                <dt class="text-surface-fg-muted">Gateway</dt>
+                                <dd class="font-mono">@row.CurrentGateway</dd>
+                            }
+                            @if (row.Mtu.HasValue)
+                            {
+                                <dt class="text-surface-fg-muted">MTU</dt>
+                                <dd class="font-mono">@row.Mtu</dd>
+                            }
+                        </dl>
+
+                        @if (!string.IsNullOrEmpty(row.Reason))
+                        {
+                            <p class="text-[11px] mt-1 text-surface-fg-muted italic">@row.Reason</p>
+                        }
+                    </div>
+
+                    <!-- RIGHT: operator-editable -->
+                    <div class="space-y-3 min-w-0">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">Role</span>
+                                <select name="Interfaces[@i].Role" x-model="role" class="input py-1.5 text-sm mt-1">
+                                    <option value="disabled">Disabled</option>
+                                    <option value="wan_primary">WAN primary</option>
+                                    <option value="wan_secondary">WAN secondary</option>
+                                    <option value="lan">LAN</option>
+                                    <option value="vpn">VPN</option>
+                                </select>
+                            </label>
+
+                            <label class="block" x-show="role !== 'disabled'">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">Addressing</span>
+                                <select name="Interfaces[@i].AddressingMode" x-model="mode" class="input py-1.5 text-sm mt-1">
+                                    <option value="dhcp">DHCP (auto)</option>
+                                    <option value="static">Static IP</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"
+                             x-show="role !== 'disabled' && mode === 'static'"
+                             x-transition.opacity>
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">IP address</span>
+                                <input type="text" name="Interfaces[@i].IpAddress" value="@row.IpAddress"
+                                       placeholder="192.168.10.1"
+                                       class="input py-1.5 text-sm mt-1 font-mono"
+                                       :required="role !== 'disabled' && mode === 'static'" />
+                            </label>
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">Subnet mask</span>
+                                <input type="text" name="Interfaces[@i].SubnetMask" value="@row.SubnetMask"
+                                       placeholder="255.255.255.0"
+                                       class="input py-1.5 text-sm mt-1 font-mono"
+                                       :required="role !== 'disabled' && mode === 'static'" />
+                            </label>
+                            <label class="block" x-show="role === 'wan_primary' || role === 'wan_secondary'">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">Gateway</span>
+                                <input type="text" name="Interfaces[@i].Gateway" value="@row.Gateway"
+                                       placeholder="192.168.1.1"
+                                       class="input py-1.5 text-sm mt-1 font-mono" />
+                            </label>
+                            <label class="block">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">MTU <span class="opacity-60">(optional)</span></span>
+                                <input type="number" name="Interfaces[@i].Mtu" value="@row.Mtu"
+                                       min="576" max="9216" placeholder="1500"
+                                       class="input py-1.5 text-sm mt-1 font-mono" />
+                            </label>
+                        </div>
+
+                        @* Server-side validation errors for this row. *@
+                        @{
+                            var prefix = $"Interfaces[{i}]";
+                            var rowErrors = ViewData.ModelState
+                                .Where(kv => kv.Key.StartsWith(prefix) && kv.Value!.Errors.Count > 0)
+                                .SelectMany(kv => kv.Value!.Errors.Select(e => e.ErrorMessage))
+                                .Distinct()
+                                .ToList();
+                        }
+                        @if (rowErrors.Count > 0)
+                        {
+                            <ul class="text-xs space-y-0.5 mt-1 text-feedback-danger-fg">
+                                @foreach (var err in rowErrors)
+                                {
+                                    <li>· @err</li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            </article>
+        }
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-between gap-2 border-surface-border">
+        <p class="text-xs text-surface-fg-muted">
+            <span class="font-semibold">Tip:</span> mark unused NICs as <span class="font-mono">Disabled</span> so they're skipped on Apply.
+        </p>
+        <div class="flex items-center gap-2">
+            <a href="/" class="btn btn-ghost">Cancel</a>
+            <button type="submit" class="btn btn-primary">
+                Continue
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/></svg>
+            </button>
+        </div>
     </div>
 </form>

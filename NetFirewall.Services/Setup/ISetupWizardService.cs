@@ -94,8 +94,18 @@ public class DetectedNetworkInterface
     public bool HasCarrier { get; set; }
     public long SpeedMbps { get; set; }
 
-    /// <summary>
-    /// Suggested role based on interface characteristics.
-    /// </summary>
+    /// <summary>Suggested role based on interface characteristics.</summary>
     public string SuggestedRole { get; set; } = "disabled";
+
+    /// <summary>0-100 confidence in the suggested role from the distro analyzer.</summary>
+    public int Confidence { get; set; }
+
+    /// <summary>Human-readable explanation of why this role was suggested (semicolon-joined heuristics).</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>MTU read from sysfs (typically 1500 for Ethernet, 1420 for WireGuard).</summary>
+    public int? Mtu { get; set; }
+
+    /// <summary>True when the kernel reports the iface as virtual (no /sys/class/net/X/device).</summary>
+    public bool IsVirtual { get; set; }
 }

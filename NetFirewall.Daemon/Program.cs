@@ -85,6 +85,8 @@ builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
 builder.Services.AddScoped<INftApplyService, NftApplyService>();
 builder.Services.AddScoped<ITcApplyService, TcApplyService>();
+builder.Services.AddScoped<NetFirewall.Services.Network.IDnsForwarderService,
+                           NetFirewall.Services.Network.UnboundForwarderService>();
 builder.Services.AddScoped<IScheduleService, ScheduleService>();
 builder.Services.Configure<NftApplyOptions>(builder.Configuration.GetSection("Nft"));
 builder.Services.Configure<TcApplyOptions>(builder.Configuration.GetSection("Tc"));
@@ -244,6 +246,7 @@ app.MapFirewallEndpoints();
 app.MapCryptoEndpoints();
 app.MapSystemEndpoints();
 app.MapWireGuardEndpoints();
+app.MapDnsEndpoints();
 
 // Kestrel only creates the Unix socket once the host has started, so chmod
 // must run from the ApplicationStarted callback. Running it inline before
