@@ -98,43 +98,44 @@ public sealed class SessionCookieAuthHandler : AuthenticationHandler<Authenticat
     /// <summary>Unauthenticated access → redirect to /login (or 401 for HTMX).</summary>
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
     {
+        var returnUrl = ResolveReturnUrl();
+
         if (Request.Headers.ContainsKey("HX-Request"))
         {
             // HTMX: 401 + HX-Redirect so the browser navigates instead of swapping a 401 body.
-            // Prefer HX-Current-URL (the page the user is viewing) over Request.Path
-            // (which is often a partial-only polling endpoint like /Home/Throughput).
-            // Returning to a partial endpoint as a full navigation renders the bare
-            // partial with no layout, which looks broken.
             Response.StatusCode = 401;
-            Response.Headers["HX-Redirect"] = $"/login?returnUrl={Uri.EscapeDataString(ResolveReturnUrl())}";
+            Response.Headers["HX-Redirect"] = $"/login?returnUrl={Uri.EscapeDataString(returnUrl)}";
             return Task.CompletedTask;
         }
 
-        Response.Redirect($"/login?returnUrl={Uri.EscapeDataString(ResolveReturnUrl())}");
+        Response.Redirect($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Returns the URL the user should land on after re-authenticating. For HTMX
-    /// requests, prefers HX-Current-URL (the user's actual page) over Request.Path
-    /// (which may be a partial-only endpoint). Falls back to "/" when neither
-    /// yields a safe local path.
+    /// Resolves the URL the user should land on after re-authenticating.
+    /// HTMX requests: trust ONLY HX-Current-URL (the page in the browser);
+    /// Request.Path is the polled partial and would render layout-less if used.
+    /// Non-HTMX requests: use Request.Path, but also fetch() calls from
+    /// Alpine helpers (no HTMX headers) can hit JSON-only endpoints — so
+    /// every candidate flows through <see cref="ReturnUrlGuard.Sanitize"/>,
+    /// which downgrades known partial / JSON paths to "/".
     /// </summary>
     private string ResolveReturnUrl()
     {
-        var currentUrl = Request.Headers["HX-Current-URL"].ToString();
-        if (!string.IsNullOrEmpty(currentUrl) && Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri))
+        if (Request.Headers.ContainsKey("HX-Request"))
         {
-            // Only honor same-host URLs and never bounce back to /login itself.
-            if (string.Equals(uri.Host, Request.Host.Host, StringComparison.OrdinalIgnoreCase)
-                && !uri.AbsolutePath.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
+            var currentUrl = Request.Headers["HX-Current-URL"].ToString();
+            if (!string.IsNullOrEmpty(currentUrl)
+                && Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri)
+                && string.Equals(uri.Host, Request.Host.Host, StringComparison.OrdinalIgnoreCase))
             {
-                return uri.PathAndQuery;
+                return ReturnUrlGuard.Sanitize(uri.PathAndQuery);
             }
+            return "/";
         }
 
-        var path = Request.Path + Request.QueryString;
-        return string.IsNullOrEmpty(path) ? "/" : path;
+        return ReturnUrlGuard.Sanitize(Request.Path + Request.QueryString);
     }
 
     /// <summary>Authenticated but lacks the required role → 403.</summary>

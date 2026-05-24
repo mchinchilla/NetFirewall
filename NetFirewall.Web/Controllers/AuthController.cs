@@ -52,7 +52,8 @@ public sealed class AuthController : Controller
     // ---------------------------------------------------------------- /login
 
     [HttpGet("/login"), AllowAnonymous]
-    public IActionResult Login(string? returnUrl = null) => View(new LoginViewModel { ReturnUrl = returnUrl });
+    public IActionResult Login(string? returnUrl = null)
+        => View(new LoginViewModel { ReturnUrl = ReturnUrlGuard.Sanitize(returnUrl) });
 
     [HttpPost("/login"), ValidateAntiForgeryToken, AllowAnonymous]
     public async Task<IActionResult> Login(LoginViewModel model, CancellationToken ct)
@@ -109,12 +110,13 @@ public sealed class AuthController : Controller
 
         // Step 2: TOTP. If the user hasn't enrolled yet, force enrollment now.
         var hasTotp = await _totp.HasEnrolledAsync(user.Id, ct);
-        _pending.Issue(user.Id, model.ReturnUrl);
+        var safeReturnUrl = ReturnUrlGuard.Sanitize(model.ReturnUrl);
+        _pending.Issue(user.Id, safeReturnUrl);
 
         if (!hasTotp)
             return RedirectToAction("EnrollTotp", "Account");
 
-        return RedirectToAction(nameof(LoginTotp), new { returnUrl = model.ReturnUrl });
+        return RedirectToAction(nameof(LoginTotp), new { returnUrl = safeReturnUrl });
     }
 
     // ---------------------------------------------------------- /login/totp
@@ -124,7 +126,7 @@ public sealed class AuthController : Controller
     {
         if (!_pending.TryRead(out _, out var stashedReturn, out _))
             return RedirectToAction(nameof(Login), new { returnUrl });
-        return View(new LoginTotpViewModel { ReturnUrl = returnUrl ?? stashedReturn });
+        return View(new LoginTotpViewModel { ReturnUrl = ReturnUrlGuard.Sanitize(returnUrl ?? stashedReturn) });
     }
 
     [HttpPost("/login/totp"), ValidateAntiForgeryToken, AllowAnonymous]
@@ -165,7 +167,7 @@ public sealed class AuthController : Controller
         await _cookieIssuer.IssueAsync(HttpContext, user, ct);
         _pending.Clear();
 
-        return LocalRedirect(string.IsNullOrEmpty(model.ReturnUrl) ? "/" : model.ReturnUrl);
+        return LocalRedirect(ReturnUrlGuard.Sanitize(model.ReturnUrl));
     }
 
     // ----------------------------------------------------------- /auth/elevate

@@ -129,7 +129,7 @@ public sealed class AccountController : Controller
         _pending.Clear();
         TempData.Remove("EnrollRecoveryCodes");
 
-        return LocalRedirect(string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl);
+        return LocalRedirect(ReturnUrlGuard.Sanitize(returnUrl));
     }
 
     // -------------------------------------------------- /account/security
