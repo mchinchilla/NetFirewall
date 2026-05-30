@@ -1,14 +1,22 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpLease>
 @{
     var includeExpired = (bool)(ViewBag.IncludeExpired ?? false);
+    var query = ViewBag.Query as string;
+    var hasFilter = !string.IsNullOrWhiteSpace(query);
     var now = DateTime.UtcNow;
 }
 
 @if (Model.Count == 0)
 {
     <div class="text-sm py-10 text-center text-surface-fg-muted">
-        No @(includeExpired ? "leases on record" : "active leases").
-        Plug something in and watch this page repaint.
+        @if (hasFilter)
+        {
+            <text>No @(includeExpired ? "leases" : "active leases") match &ldquo;<span class="font-mono">@query</span>&rdquo;.</text>
+        }
+        else
+        {
+            <text>No @(includeExpired ? "leases on record" : "active leases"). Plug something in and watch this page repaint.</text>
+        }
     </div>
 }
 else

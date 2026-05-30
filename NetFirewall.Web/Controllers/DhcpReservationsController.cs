@@ -28,9 +28,10 @@ public sealed class DhcpReservationsController : Controller
     public IActionResult Index() => View();
 
     [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
+    public async Task<IActionResult> Table([FromQuery] string? q, CancellationToken ct)
     {
-        var rows = await _admin.GetReservationsAsync(ct);
+        var rows = await _admin.GetReservationsAsync(filter: q, ct: ct);
+        ViewBag.Query = q;
         return PartialView("_ReservationsTable", rows);
     }
 

@@ -11,7 +11,6 @@
 --   - bytes_in/out are deltas WITHIN the sample window (not flow-total),
 --     so we can SUM() across windows without double counting.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS lan_traffic_samples (
     id          bigserial                PRIMARY KEY,
@@ -30,4 +29,3 @@ CREATE INDEX IF NOT EXISTS idx_lan_traffic_sampled_at  ON lan_traffic_samples (s
 CREATE INDEX IF NOT EXISTS idx_lan_traffic_src         ON lan_traffic_samples (src_ip, sampled_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lan_traffic_service     ON lan_traffic_samples (proto, dst_port, sampled_at DESC);
 
-COMMIT;

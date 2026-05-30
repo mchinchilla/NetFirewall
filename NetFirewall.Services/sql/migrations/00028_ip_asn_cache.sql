@@ -11,7 +11,6 @@
 -- row (ok=false, single /32) so we don't hammer the API; they're retried only
 -- after the resolver's fail-TTL.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS ip_asn_cache (
     prefix      cidr                     PRIMARY KEY,   -- e.g. 154.12.104.0/21
@@ -28,4 +27,3 @@ CREATE INDEX IF NOT EXISTS idx_ip_asn_prefix_gist ON ip_asn_cache USING gist (pr
 -- For the resolver's TTL sweep / retry of stale failures.
 CREATE INDEX IF NOT EXISTS idx_ip_asn_resolved_at ON ip_asn_cache (resolved_at);
 
-COMMIT;

@@ -10,7 +10,9 @@
         "mangle_rule"     => "Mangle rule",
         "network_object"  => "Network object",
         "network_service" => "Network service",
-        "dhcp_subnet"    => "DHCP subnet",
+        "dhcp_subnet"     => "DHCP subnet",
+        "dhcp_reservation" => "DHCP reservation",
+        "dhcp_lease"      => "DHCP lease",
         "wg_peer"        => "WireGuard peer",
         _                 => t
     };
@@ -22,7 +24,7 @@
         "filter_rule" or "nat_rule" or "port_forward" or "mangle_rule" => "text-accent",
         "network_object"  => "text-feedback-info-fg",
         "network_service" => "text-feedback-info-fg",
-        "dhcp_subnet"     => "text-feedback-success-fg",
+        "dhcp_subnet" or "dhcp_reservation" or "dhcp_lease" => "text-feedback-success-fg",
         "wg_peer"         => "text-feedback-warning-fg",
         _                 => "text-surface-fg-muted"
     };

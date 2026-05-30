@@ -29,12 +29,13 @@ public sealed class DhcpLeasesController : Controller
     public IActionResult Index() => View();
 
     [HttpGet("table")]
-    public async Task<IActionResult> Table([FromQuery] bool includeExpired = false, CancellationToken ct = default)
+    public async Task<IActionResult> Table([FromQuery] bool includeExpired = false, [FromQuery] string? q = null, CancellationToken ct = default)
     {
         var leases = includeExpired
-            ? await _admin.GetAllLeasesAsync(includeExpired: true, ct)
-            : await _admin.GetActiveLeasesAsync(ct);
+            ? await _admin.GetAllLeasesAsync(includeExpired: true, filter: q, ct: ct)
+            : await _admin.GetActiveLeasesAsync(filter: q, ct: ct);
         ViewBag.IncludeExpired = includeExpired;
+        ViewBag.Query = q;
         return PartialView("_LeasesTable", leases);
     }
 

@@ -12,9 +12,7 @@
 -- 512/0x200 for wan2, etc.). NULL = fall back to -I (legacy behavior;
 -- works fine when the probe target is L2-adjacent like the gateway).
 
-BEGIN;
 
 ALTER TABLE wan_health_config
     ADD COLUMN IF NOT EXISTS probe_fwmark bigint;
 
-COMMIT;

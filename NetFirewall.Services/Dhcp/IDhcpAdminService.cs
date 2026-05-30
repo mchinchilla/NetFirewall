@@ -24,15 +24,19 @@ public interface IDhcpAdminService
     Task<DhcpPool> UpdatePoolAsync(DhcpPool pool, CancellationToken ct = default);
     Task<bool> DeletePoolAsync(Guid id, CancellationToken ct = default);
 
-    // Lease operations
-    Task<IReadOnlyList<DhcpLease>> GetActiveLeasesAsync(CancellationToken ct = default);
-    Task<IReadOnlyList<DhcpLease>> GetAllLeasesAsync(bool includeExpired = false, CancellationToken ct = default);
+    // Lease operations. <paramref name="filter"/> is a free-text substring match
+    // (case-insensitive) against the displayed IP, MAC, and hostname; null/blank
+    // returns everything.
+    Task<IReadOnlyList<DhcpLease>> GetActiveLeasesAsync(string? filter = null, CancellationToken ct = default);
+    Task<IReadOnlyList<DhcpLease>> GetAllLeasesAsync(bool includeExpired = false, string? filter = null, CancellationToken ct = default);
     Task<DhcpLease?> GetLeaseByMacAsync(string macAddress, CancellationToken ct = default);
     Task<bool> ReleaseLeaseAsync(Guid leaseId, CancellationToken ct = default);
     Task<int> CleanupExpiredLeasesAsync(CancellationToken ct = default);
 
-    // Reservation operations
-    Task<IReadOnlyList<DhcpMacReservation>> GetReservationsAsync(CancellationToken ct = default);
+    // Reservation operations. <paramref name="filter"/> is a free-text substring
+    // match (case-insensitive) against the displayed MAC, reserved IP, and
+    // description; null/blank returns everything.
+    Task<IReadOnlyList<DhcpMacReservation>> GetReservationsAsync(string? filter = null, CancellationToken ct = default);
     Task<DhcpMacReservation?> GetReservationByIdAsync(Guid id, CancellationToken ct = default);
     Task<DhcpMacReservation> CreateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default);
     Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default);

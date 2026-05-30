@@ -6,7 +6,6 @@
 -- because monitor_targets is a multi-row concept and we want to keep the
 -- main interface table lean.
 
-BEGIN;
 
 -- ───────────── per-interface health config ─────────────
 CREATE TABLE IF NOT EXISTS wan_health_config (
@@ -61,4 +60,3 @@ ALTER TABLE fw_apply_history DROP CONSTRAINT IF EXISTS chk_apply_kind;
 ALTER TABLE fw_apply_history ADD CONSTRAINT chk_apply_kind
     CHECK (kind IN ('nftables','tc','wireguard','routing','failover'));
 
-COMMIT;

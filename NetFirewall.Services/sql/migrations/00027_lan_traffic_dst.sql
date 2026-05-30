@@ -10,7 +10,6 @@
 --     dst_ip IS NULL ("others"), so a chatty IoT/browser host doesn't explode
 --     the table into thousands of rows per sample window.
 
-BEGIN;
 
 ALTER TABLE lan_traffic_samples
     ADD COLUMN IF NOT EXISTS dst_ip inet;
@@ -19,4 +18,3 @@ ALTER TABLE lan_traffic_samples
 CREATE INDEX IF NOT EXISTS idx_lan_traffic_src_dst
     ON lan_traffic_samples (src_ip, dst_ip, sampled_at DESC);
 
-COMMIT;

@@ -48,7 +48,7 @@ public class HomeController : Controller
     public async Task<IActionResult> Index(CancellationToken ct)
     {
         // Fan-out: every source is independent so parallel awaits cut latency.
-        var leasesTask     = _dhcp.GetActiveLeasesAsync(ct);
+        var leasesTask     = _dhcp.GetActiveLeasesAsync(ct: ct);
         var subnetsTask    = _dhcp.GetSubnetsAsync(ct);
         var poolsTask      = _dhcp.GetPoolsAsync(null, ct);
         var ifacesTask     = _firewall.GetInterfacesAsync(ct);

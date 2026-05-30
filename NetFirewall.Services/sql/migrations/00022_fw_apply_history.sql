@@ -6,7 +6,6 @@
 -- We don't store the rendered config — that already lives in
 -- /var/lib/netfirewall/backups (the daemon's pre-apply snapshot).
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS fw_apply_history (
     id          uuid                     PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -22,4 +21,3 @@ CREATE TABLE IF NOT EXISTS fw_apply_history (
 CREATE INDEX IF NOT EXISTS idx_fw_apply_history_kind_applied
     ON fw_apply_history (kind, applied_at DESC);
 
-COMMIT;

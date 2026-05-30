@@ -3,29 +3,35 @@
     Layout = "_Layout";
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Reservations</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
-            Static MAC → IP bindings. Reserved IPs are taken out of the pool's general circulation.
-        </p>
+<div x-data="{ q: '' }">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Reservations</h1>
+            <p class="text-sm mt-1 text-surface-fg-muted">
+                Static MAC → IP bindings. Reserved IPs are taken out of the pool's general circulation.
+            </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "reservations-table", Placeholder = "Filter by MAC, IP, description…" })
+            <button type="button" class="btn btn-primary"
+                    hx-get="/Dhcp/Reservations/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add reservation')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add reservation
+            </button>
+        </div>
     </div>
-    <button type="button" class="btn btn-primary"
-            hx-get="/Dhcp/Reservations/edit"
-            hx-target="#drawer-body" hx-swap="innerHTML"
-            @@click="$store.drawer.openRaw('Add reservation')">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-        Add reservation
-    </button>
-</div>
 
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-    <div id="reservations-table"
-         hx-get="/Dhcp/Reservations/table"
-         hx-trigger="load, refreshReservations from:body"
-         hx-swap="innerHTML">
-         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-    </div>
-</section>
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="reservations-table"
+             hx-get="/Dhcp/Reservations/table"
+             :hx-vals="JSON.stringify({ q })"
+             hx-trigger="load, refreshReservations from:body, manual-refresh"
+             hx-swap="innerHTML">
+            @(await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder }))
+        </div>
+    </section>
+</div>

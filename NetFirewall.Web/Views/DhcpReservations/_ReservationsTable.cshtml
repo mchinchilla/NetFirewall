@@ -1,9 +1,20 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpMacReservation>
+@{
+    var query = ViewBag.Query as string;
+    var hasFilter = !string.IsNullOrWhiteSpace(query);
+}
 
 @if (Model.Count == 0)
 {
     <div class="text-sm py-10 text-center text-surface-fg-muted">
-        No reservations yet. Add one to permanently bind a MAC address to an IP.
+        @if (hasFilter)
+        {
+            <text>No reservations match &ldquo;<span class="font-mono">@query</span>&rdquo;.</text>
+        }
+        else
+        {
+            <text>No reservations yet. Add one to permanently bind a MAC address to an IP.</text>
+        }
     </div>
 }
 else

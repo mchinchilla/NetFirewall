@@ -10,7 +10,6 @@
 -- the hourly rollup takes MAX-MIN to get the delta for the hour, same as the
 -- existing aggregation. rx_rate/tx_rate are the instantaneous bytes/sec.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS system_metrics_net (
     id             bigserial                PRIMARY KEY,
@@ -41,4 +40,3 @@ CREATE TABLE IF NOT EXISTS system_metrics_net_hourly (
 CREATE INDEX IF NOT EXISTS idx_sysmetrics_net_hourly_bucket
     ON system_metrics_net_hourly (hour_bucket DESC);
 
-COMMIT;

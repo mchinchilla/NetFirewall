@@ -5,7 +5,7 @@
 
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);"
-     x-data="{ includeExpired: false }">
+     x-data="{ includeExpired: false, q: '' }">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
         <h1 class="text-2xl font-semibold tracking-tight">Active leases</h1>
@@ -13,7 +13,8 @@
             Live view from the running DHCP server. Auto-refreshes every 30 seconds.
         </p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "leases-table", Placeholder = "Filter by IP, MAC, hostname…" })
         <label class="flex items-center gap-2 text-xs cursor-pointer">
             <input type="checkbox" x-model="includeExpired" class="h-4 w-4 rounded"
                    @@change="htmx.trigger(document.getElementById('leases-table'), 'manual-refresh')" />
@@ -37,10 +38,10 @@
         <section class="card mt-3" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
             <div id="leases-table"
                  hx-get="/Dhcp/Leases/table"
-                 :hx-vals="JSON.stringify({ includeExpired })"
+                 :hx-vals="JSON.stringify({ includeExpired, q })"
                  hx-trigger="load, refreshLeases from:body, manual-refresh, every 30s"
                  hx-swap="innerHTML">
-                 Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+                @(await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder }))
             </div>
         </section>
     </div>

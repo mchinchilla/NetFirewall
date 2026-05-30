@@ -10,7 +10,6 @@
 -- New columns are nullable / defaulted so existing rows stay valid and keep
 -- behaving exactly as before. Forward-only migration — to undo, write a new one.
 
-BEGIN;
 
 -- wg_servers: add mode + client-only knobs (DNS, MTU, Table=off for wg-quick).
 ALTER TABLE wg_servers
@@ -35,4 +34,3 @@ END $$;
 ALTER TABLE wg_peers
     ADD COLUMN IF NOT EXISTS endpoint text;
 
-COMMIT;

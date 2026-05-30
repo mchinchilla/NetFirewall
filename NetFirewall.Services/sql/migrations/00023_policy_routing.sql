@@ -10,7 +10,6 @@
 --
 -- A NetFirewall apply-policy-routing diffs DB → kernel and reconciles.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS fw_route_tables (
     id          uuid                     PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -49,4 +48,3 @@ ALTER TABLE fw_apply_history
 ALTER TABLE fw_apply_history
     ADD CONSTRAINT chk_apply_kind CHECK (kind IN ('nftables','tc','wireguard','routing'));
 
-COMMIT;

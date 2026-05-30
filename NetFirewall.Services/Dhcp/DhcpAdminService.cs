@@ -306,12 +306,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
     #region Lease Operations
 
-    public async Task<IReadOnlyList<DhcpLease>> GetActiveLeasesAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<DhcpLease>> GetActiveLeasesAsync(string? filter = null, CancellationToken ct = default)
     {
-        return await GetAllLeasesAsync(includeExpired: false, ct);
+        return await GetAllLeasesAsync(includeExpired: false, filter: filter, ct: ct);
     }
 
-    public async Task<IReadOnlyList<DhcpLease>> GetAllLeasesAsync(bool includeExpired = false, CancellationToken ct = default)
+    public async Task<IReadOnlyList<DhcpLease>> GetAllLeasesAsync(bool includeExpired = false, string? filter = null, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
@@ -338,7 +338,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
             });
         }
 
-        return list;
+        if (!TryNormalizeFilter(filter, out var needle, out var macNeedle)) return list;
+        return list.Where(l =>
+                Contains(l.IpAddress?.ToString(), needle) ||
+                Contains(l.Hostname, needle) ||
+                ContainsMac(l.MacAddress, needle, macNeedle))
+            .ToList();
     }
 
     public async Task<DhcpLease?> GetLeaseByMacAsync(string macAddress, CancellationToken ct = default)
@@ -400,7 +405,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
     #region Reservation Operations
 
-    public async Task<IReadOnlyList<DhcpMacReservation>> GetReservationsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<DhcpMacReservation>> GetReservationsAsync(string? filter = null, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         const string sql = "SELECT * FROM dhcp_mac_reservations ORDER BY reserved_ip";
@@ -420,13 +425,43 @@ public sealed class DhcpAdminService : IDhcpAdminService
             });
         }
 
-        return list;
+        if (!TryNormalizeFilter(filter, out var needle, out var macNeedle)) return list;
+        return list.Where(r =>
+                Contains(r.ReservedIp?.ToString(), needle) ||
+                Contains(r.Description, needle) ||
+                ContainsMac(r.MacAddress, needle, macNeedle))
+            .ToList();
     }
 
     public async Task<DhcpMacReservation?> GetReservationByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var reservations = await GetReservationsAsync(ct);
+        var reservations = await GetReservationsAsync(ct: ct);
         return reservations.FirstOrDefault(r => r.Id == id);
+    }
+
+    // ---- Free-text filter helpers (match what the UI renders, case-insensitive) ----
+
+    /// <summary>
+    /// Trims the raw filter and derives a separator-stripped variant for MAC
+    /// matching (the UI shows "B08BA8286D69" while users may type "b0:8b:a8").
+    /// Returns false when the filter is blank — caller should skip filtering.
+    /// </summary>
+    private static bool TryNormalizeFilter(string? filter, out string needle, out string macNeedle)
+    {
+        needle = (filter ?? string.Empty).Trim();
+        macNeedle = needle.Replace(":", string.Empty).Replace("-", string.Empty).Replace(".", string.Empty);
+        return needle.Length > 0;
+    }
+
+    private static bool Contains(string? haystack, string needle) =>
+        haystack is not null && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsMac(PhysicalAddress? mac, string needle, string macNeedle)
+    {
+        if (mac is null) return false;
+        var text = mac.ToString(); // "B08BA8286D69" — no separators, upper-case
+        return text.Contains(needle, StringComparison.OrdinalIgnoreCase)
+            || (macNeedle.Length > 0 && text.Contains(macNeedle, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<DhcpMacReservation> CreateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
