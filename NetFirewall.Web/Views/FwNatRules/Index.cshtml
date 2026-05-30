@@ -9,13 +9,16 @@
         <h1 class="text-2xl font-semibold tracking-tight">NAT rules</h1>
         <p class="text-sm mt-1 text-surface-fg-muted">Source NAT (SNAT) and masquerade. Outgoing packets get rewritten on the WAN side.</p>
     </div>
-    <button type="button" class="btn btn-primary"
-            hx-get="/Firewall/NatRules/edit"
-            hx-target="#drawer-body" hx-swap="innerHTML"
-            @@click="$store.drawer.openRaw('Add NAT rule')">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-        Add NAT rule
-    </button>
+    <div class="flex flex-wrap items-center gap-2">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "nat-rules-table", Placeholder = "Filter by type, network, address…", ClientSide = true })
+        <button type="button" class="btn btn-primary"
+                hx-get="/Firewall/NatRules/edit"
+                hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('Add NAT rule')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add NAT rule
+        </button>
+    </div>
 </div>
 <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
     <div id="nat-rules-table"

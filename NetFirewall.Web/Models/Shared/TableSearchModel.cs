@@ -25,4 +25,15 @@ public sealed class TableSearchModel
 
     /// <summary>Client-side max length guard (also enforced server-side).</summary>
     public int MaxLength { get; init; } = 64;
+
+    /// <summary>
+    /// When true, filtering happens entirely in the browser via
+    /// <c>window.NetFw.filterTable</c> — hides non-matching <c>&lt;tbody&gt;</c>
+    /// rows of the target table, no server round-trip. Use for list pages that
+    /// render all rows and don't poll. When false (default), the input triggers
+    /// a <c>manual-refresh</c> on the table container so the server re-renders a
+    /// filtered partial (use for polling tables whose filter must ride on
+    /// <c>:hx-vals</c>, e.g. DHCP leases).
+    /// </summary>
+    public bool ClientSide { get; init; }
 }

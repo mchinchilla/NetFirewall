@@ -11,12 +11,28 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.3-4.3m1.8-5.2a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
         </svg>
     </span>
-    <input type="search"
-           class="input pl-8"
-           placeholder="@Model.Placeholder"
-           autocomplete="off"
-           maxlength="@Model.MaxLength"
-           aria-label="@Model.Placeholder"
-           x-model.trim="@Model.Var"
-           @@input.debounce.300ms="htmx.trigger(document.getElementById('@Model.TableId'), 'manual-refresh')" />
+    @if (Model.ClientSide)
+    {
+        @* Client-side: hide non-matching rows in the browser, no round-trip.
+           Survives HTMX swaps via the re-apply hook in site.js. *@
+        <input type="search"
+               class="input pl-8"
+               placeholder="@Model.Placeholder"
+               autocomplete="off"
+               maxlength="@Model.MaxLength"
+               aria-label="@Model.Placeholder"
+               @@input.debounce.200ms="window.NetFw.filterTable('@Model.TableId', $event.target.value)" />
+    }
+    else
+    {
+        @* Server-side: carry the value on :hx-vals and re-render the partial. *@
+        <input type="search"
+               class="input pl-8"
+               placeholder="@Model.Placeholder"
+               autocomplete="off"
+               maxlength="@Model.MaxLength"
+               aria-label="@Model.Placeholder"
+               x-model.trim="@Model.Var"
+               @@input.debounce.300ms="htmx.trigger(document.getElementById('@Model.TableId'), 'manual-refresh')" />
+    }
 </label>

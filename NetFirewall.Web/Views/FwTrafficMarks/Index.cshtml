@@ -9,13 +9,16 @@
         <h1 class="text-2xl font-semibold tracking-tight">Traffic marks</h1>
         <p class="text-sm mt-1 text-surface-fg-muted">Named fwmark values — used by mangle rules + QoS classes + policy routing.</p>
     </div>
-    <button type="button" class="btn btn-primary"
-            hx-get="/Firewall/TrafficMarks/edit"
-            hx-target="#drawer-body" hx-swap="innerHTML"
-            @@click="$store.drawer.openRaw('Add mark')">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-        Add mark
-    </button>
+    <div class="flex flex-wrap items-center gap-2">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "traffic-marks-table", Placeholder = "Filter by name, value, route table…", ClientSide = true })
+        <button type="button" class="btn btn-primary"
+                hx-get="/Firewall/TrafficMarks/edit"
+                hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('Add mark')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add mark
+        </button>
+    </div>
 </div>
 <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
     <div id="traffic-marks-table"

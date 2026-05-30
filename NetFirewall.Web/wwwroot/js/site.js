@@ -135,6 +135,50 @@ window.NetFw.downloadRecoveryCodes = function (codes) {
 };
 
 /* =====================================================================
+ * Client-side table filter — backs _TableSearch.cshtml in ClientSide mode.
+ * Hides <tbody> rows of a target table whose text doesn't contain the query.
+ * Used by the non-polling list pages (firewall rules, NAT, port forwards,
+ * traffic marks, QoS, schedules, static routes, interfaces, network
+ * objects/services). The active query per table id is remembered so it
+ * survives HTMX swaps (add/delete refresh, server-side dropdown filters) —
+ * see the htmx:afterSwap hook at the bottom of this file. Polling lists
+ * (DHCP leases/reservations) filter server-side instead.
+ * ===================================================================== */
+window.NetFw._tableFilters = window.NetFw._tableFilters || {};
+
+window.NetFw.filterTable = function (tableId, query) {
+    window.NetFw._tableFilters[tableId] = query || "";
+    window.NetFw._applyTableFilter(tableId);
+};
+
+window.NetFw._applyTableFilter = function (tableId) {
+    const root = document.getElementById(tableId);
+    if (!root) return;
+    const q = (window.NetFw._tableFilters[tableId] || "").trim().toLowerCase();
+    const rows = root.querySelectorAll("tbody > tr");
+    let shown = 0;
+    rows.forEach((tr) => {
+        const hit = q === "" || tr.textContent.toLowerCase().includes(q);
+        tr.classList.toggle("hidden", !hit);
+        if (hit) shown++;
+    });
+    // "No matches" feedback (rule #6) when a query hides every row.
+    let notice = root.querySelector("[data-filter-empty]");
+    if (q !== "" && rows.length > 0 && shown === 0) {
+        if (!notice) {
+            notice = document.createElement("div");
+            notice.setAttribute("data-filter-empty", "");
+            notice.className = "text-sm py-10 text-center text-surface-fg-muted";
+            root.appendChild(notice);
+        }
+        notice.textContent = `No matches for “${window.NetFw._tableFilters[tableId]}”.`;
+        notice.classList.remove("hidden");
+    } else if (notice) {
+        notice.classList.add("hidden");
+    }
+};
+
+/* =====================================================================
  * Chart.js integration — exposed as window.NetFw.charts
  * Centralized so views never construct Chart() inline (rule #3 — single
  * JS file). Charts auto-retint when the user changes theme/mode.
@@ -1280,4 +1324,10 @@ document.addEventListener("htmx:beforeSwap", (event) => {
 document.addEventListener("htmx:afterSwap", (event) => {
     const target = event.detail?.target;
     if (target && window.Alpine?.initTree) window.Alpine.initTree(target);
+    // Re-apply any active client-side table filter to the freshly-swapped rows
+    // (a list-refresh after add/delete, or a server-side dropdown filter, wipes
+    // the rows the filter was hiding — restore the active query's effect).
+    if (target?.id && window.NetFw._tableFilters && target.id in window.NetFw._tableFilters) {
+        window.NetFw._applyTableFilter(target.id);
+    }
 });

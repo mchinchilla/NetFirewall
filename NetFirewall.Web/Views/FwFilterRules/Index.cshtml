@@ -13,7 +13,8 @@
             Stateful packet filter — input / forward / output chains. Lower priority = checked first.
         </p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "filter-rules-table", Placeholder = "Filter by action, address, port…", ClientSide = true })
         <label class="text-xs flex items-center gap-2">
             Chain
             <select x-model="chain"

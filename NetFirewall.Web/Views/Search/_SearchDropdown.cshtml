@@ -36,6 +36,33 @@
         "wg_peer"         => "text-feedback-warning-fg",
         _                 => "text-surface-fg-muted"
     };
+    // Entity types whose record is edited through the shared drawer at
+    // "{Url}/edit/{id}" (every such controller exposes [HttpGet("edit/{id:guid?}")]).
+    // For these we open the edit drawer in place instead of navigating to the
+    // list page. Others (dhcp_lease has no editor; interfaces/subnets/wg use
+    // their own pages) fall back to a plain link to their section.
+    var drawerEditable = new HashSet<string>
+    {
+        "filter_rule", "nat_rule", "port_forward", "mangle_rule", "traffic_mark",
+        "qos_config", "qos_class", "fw_schedule", "static_route",
+        "network_object", "network_service", "dhcp_reservation"
+    };
+    static string EditTitle(string t) => t switch
+    {
+        "filter_rule"      => "Edit filter rule",
+        "nat_rule"         => "Edit NAT rule",
+        "port_forward"     => "Edit port forward",
+        "mangle_rule"      => "Edit mangle rule",
+        "traffic_mark"     => "Edit traffic mark",
+        "qos_config"       => "Edit QoS config",
+        "qos_class"        => "Edit QoS class",
+        "fw_schedule"      => "Edit schedule",
+        "static_route"     => "Edit static route",
+        "network_object"   => "Edit object",
+        "network_service"  => "Edit service",
+        "dhcp_reservation" => "Edit reservation",
+        _                  => "Edit"
+    };
     var grouped = Model.GroupBy(h => h.EntityType).OrderByDescending(g => g.First().Rank).ToList();
 }
 
@@ -65,13 +92,34 @@ else
                 </p>
                 @foreach (var h in group)
                 {
-                    <a href="@h.Url" class="block px-4 py-2 text-sm transition hover:bg-surface-muted">
-                        <p class="font-medium truncate">@h.Title</p>
-                        @if (!string.IsNullOrEmpty(h.Subtitle))
-                        {
-                            <p class="text-xs font-mono truncate text-surface-fg-muted">@h.Subtitle</p>
-                        }
-                    </a>
+                    if (drawerEditable.Contains(h.EntityType))
+                    {
+                        @* Open the record's edit drawer in place (#drawer-body is global
+                           in the layout). href stays as a no-JS fallback to the section. *@
+                        <a href="@h.Url"
+                           hx-get="@($"{h.Url}/edit/{h.EntityId}")"
+                           hx-target="#drawer-body" hx-swap="innerHTML"
+                           @@click.prevent="$store.drawer.openRaw('@EditTitle(h.EntityType)'); open = false"
+                           class="block px-4 py-2 text-sm transition hover:bg-surface-muted cursor-pointer">
+                            <p class="font-medium truncate">@h.Title</p>
+                            @if (!string.IsNullOrEmpty(h.Subtitle))
+                            {
+                                <p class="text-xs font-mono truncate text-surface-fg-muted">@h.Subtitle</p>
+                            }
+                        </a>
+                    }
+                    else
+                    {
+                        <a href="@h.Url"
+                           @@click="open = false"
+                           class="block px-4 py-2 text-sm transition hover:bg-surface-muted">
+                            <p class="font-medium truncate">@h.Title</p>
+                            @if (!string.IsNullOrEmpty(h.Subtitle))
+                            {
+                                <p class="text-xs font-mono truncate text-surface-fg-muted">@h.Subtitle</p>
+                            }
+                        </a>
+                    }
                 }
             </div>
         }

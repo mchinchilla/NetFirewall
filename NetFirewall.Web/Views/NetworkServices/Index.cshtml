@@ -12,7 +12,8 @@
             Named L4 catalog (port + protocol). Reference these by name in firewall rule destination ports — change the port once, every rule that uses the service picks it up at next apply.
         </p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "services-table", Placeholder = "Filter by name, protocol, port…", ClientSide = true })
         <label class="text-xs flex items-center gap-2">
             Category
             <select x-model="category"
