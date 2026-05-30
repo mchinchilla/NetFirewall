@@ -10,6 +10,12 @@
         "mangle_rule"     => "Mangle rule",
         "network_object"  => "Network object",
         "network_service" => "Network service",
+        "traffic_mark"    => "Traffic mark",
+        "qos_config"      => "QoS",
+        "qos_class"       => "QoS class",
+        "static_route"    => "Static route",
+        "fw_interface"    => "Interface",
+        "fw_schedule"     => "Schedule",
         "dhcp_subnet"     => "DHCP subnet",
         "dhcp_reservation" => "DHCP reservation",
         "dhcp_lease"      => "DHCP lease",
@@ -21,9 +27,11 @@
     // any inline style="..." escape hatches.
     static string TypeTextCls(string t) => t switch
     {
-        "filter_rule" or "nat_rule" or "port_forward" or "mangle_rule" => "text-accent",
+        "filter_rule" or "nat_rule" or "port_forward" or "mangle_rule"
+            or "traffic_mark" or "qos_config" or "qos_class" or "fw_schedule" => "text-accent",
         "network_object"  => "text-feedback-info-fg",
         "network_service" => "text-feedback-info-fg",
+        "static_route" or "fw_interface" => "text-feedback-info-fg",
         "dhcp_subnet" or "dhcp_reservation" or "dhcp_lease" => "text-feedback-success-fg",
         "wg_peer"         => "text-feedback-warning-fg",
         _                 => "text-surface-fg-muted"
