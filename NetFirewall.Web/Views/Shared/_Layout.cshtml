@@ -20,6 +20,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - NetFirewall</title>
     @await Html.PartialAsync("_HeadStyles")
+    @* Optional per-page <head> assets (e.g. a vendored stylesheet like xterm.css).
+       For authored styles use Tailwind utilities / tokens in site.css — never a
+       per-page CSS file (rule #3). *@
+    @await RenderSectionAsync("Styles", required: false)
 </head>
 <body class="flex flex-col min-h-screen relative overflow-x-hidden"
       x-data="{ mobileNav: false }">

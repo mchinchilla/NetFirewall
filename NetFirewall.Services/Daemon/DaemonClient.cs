@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,7 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     };
 
     private readonly HttpClient _http;
+    private readonly SocketsHttpHandler _handler; // shared by _http AND the terminal ClientWebSocket
     private readonly DaemonClientOptions _opts;
     private readonly IDaemonSessionTokenProvider _tokenProvider;
     private readonly ILogger<DaemonClient> _logger;
@@ -38,7 +40,7 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         _logger = logger;
 
         var socketPath = ResolveSocketPath(_opts.SocketPath);
-        var handler = new SocketsHttpHandler
+        _handler = new SocketsHttpHandler
         {
             ConnectCallback = async (ctx, ct) =>
             {
@@ -47,7 +49,7 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
                 return new NetworkStream(s, ownsSocket: true);
             }
         };
-        _http = new HttpClient(handler)
+        _http = new HttpClient(_handler)
         {
             // The Host header is irrelevant over a Unix socket but required by Kestrel.
             BaseAddress = new Uri("http://daemon"),
@@ -261,6 +263,39 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     }
 
     private sealed record CryptoCallResult(string Data);
+
+    // ---- Terminal (root PTY) ----------------------------------------------------
+
+    public Task<ServiceResponse<TerminalTicketDto>> OpenTerminalAsync(string totpCode, CancellationToken ct = default)
+        => PostJsonAsync<TerminalOpenBody, TerminalTicketDto>(
+            "/v1/terminal/open", new TerminalOpenBody(totpCode), ct);
+
+    public async Task<WebSocket> ConnectTerminalAsync(string ticket, CancellationToken ct = default)
+    {
+        // ClientWebSocket over the SAME Unix-socket handler the HttpClient uses
+        // (validated in the Phase 3a spike). The session token authenticates the
+        // upgrade; the one-time ticket (query string) authorizes the attach.
+        var cws = new ClientWebSocket();
+        var token = _tokenProvider.GetCurrentToken();
+        if (!string.IsNullOrEmpty(token))
+            cws.Options.SetRequestHeader(_opts.SessionHeader, token);
+
+        var uri = new Uri($"ws://daemon/v1/terminal/attach?ticket={Uri.EscapeDataString(ticket)}");
+        try
+        {
+            // Reuse the handler (not the HttpClient) via a lightweight invoker so the
+            // UDS ConnectCallback is honored for the WS upgrade.
+            await cws.ConnectAsync(uri, new HttpMessageInvoker(_handler, disposeHandler: false), ct);
+            return cws;
+        }
+        catch
+        {
+            cws.Dispose();
+            throw;
+        }
+    }
+
+    private sealed record TerminalOpenBody(string Code);
 
     /// <summary>
     /// Send a POST, forward the current session token from the provider,

@@ -1,0 +1,72 @@
+@*
+    Terminal panel. Two states driven by the Alpine "terminal" component (site.js):
+      - "auth"     : fresh-TOTP confirm form. POSTs /terminal/open, gets a ticket.
+      - "connected": xterm mounted, WebSocket to /terminal/ws streaming.
+    The TOTP form posts via fetch (so we can read the ticket from the JSON body);
+    the antiforgery token is read from the <meta name="request-token"> site.js exposes.
+*@
+<div x-data="terminal()" x-init="init()" class="space-y-4">
+
+    @* ---- State: TOTP confirm ---- *@
+    <div x-show="state === 'auth'"
+         class="max-w-md rounded-xl border p-5 bg-surface-elevated border-surface-border">
+        <div class="flex items-start gap-3">
+            <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+            </span>
+            <div class="flex-1">
+                <h2 class="text-base font-semibold text-surface-fg">Confirm with TOTP</h2>
+                <p class="text-xs mt-1 text-surface-fg-muted">
+                    A root shell needs a fresh authenticator code each time it's opened.
+                </p>
+            </div>
+        </div>
+
+        <form @@submit.prevent="open()" class="mt-4 space-y-3">
+            <div class="space-y-1.5">
+                <label for="term-code" class="block text-xs font-medium text-surface-fg">6-digit code</label>
+                <input id="term-code" type="text" inputmode="numeric" pattern="^\d{6}$" maxlength="6"
+                       autocomplete="one-time-code" autofocus
+                       x-model="code"
+                       class="input text-center tracking-widest font-mono"
+                       :class="error ? 'input-error' : ''"
+                       placeholder="123456" />
+                <p x-show="error" x-text="error" class="text-xs text-feedback-danger-fg"></p>
+            </div>
+            <button type="submit" class="btn btn-primary w-full" :disabled="busy">
+                <span x-show="!busy">Open terminal</span>
+                <span x-show="busy" x-cloak>Authorizing…</span>
+            </button>
+        </form>
+    </div>
+
+    @* ---- State: connected terminal ---- *@
+    <div x-show="state === 'connected' || state === 'closed'" x-cloak class="space-y-2">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xs">
+                <span class="relative flex h-2 w-2">
+                    <span x-show="state === 'connected'" class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 bg-feedback-success-bd"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2"
+                          :class="state === 'connected' ? 'bg-feedback-success-bd' : 'bg-surface-fg-muted'"></span>
+                </span>
+                <span class="font-medium text-surface-fg"
+                      x-text="state === 'connected' ? 'Connected — root@@firewall' : 'Session ended'"></span>
+            </div>
+            <button type="button" class="btn btn-ghost text-xs" @@click="close()" x-show="state === 'connected'">
+                Disconnect
+            </button>
+            <button type="button" class="btn btn-ghost text-xs" @@click="reset()" x-show="state === 'closed'">
+                Reopen
+            </button>
+        </div>
+
+        @* xterm mounts here. Fixed height; the fit addon sizes columns/rows to width.
+           Background uses the semantic surface token so it matches the theme. *@
+        <div x-ref="term"
+             class="rounded-xl border overflow-hidden p-2 border-surface-border"
+             style="height: 70vh; background-color: var(--surface-bg);"></div>
+        <p class="text-[11px] text-surface-fg-muted">
+            Idle sessions close automatically after 10 minutes; max session length is 60 minutes.
+        </p>
+    </div>
+</div>

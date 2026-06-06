@@ -72,6 +72,17 @@ After install
    the one-time token to create the first admin user.
 
 3. Configure your reverse proxy (see nginx/netfirewall.conf for nginx).
+   NOTE: the web terminal (admin-only root shell) uses a WebSocket at
+   /terminal/ws. The shipped nginx config supports it via the
+   `map $http_upgrade $connection_upgrade` block + a dedicated
+   `location = /terminal/ws` with a long proxy_read_timeout. If you use a
+   different proxy, it MUST forward the Upgrade/Connection headers and NOT
+   apply a short read timeout to that path, or live terminals get dropped.
+   No systemd unit change is needed for the terminal: PTY allocation
+   (openpty + posix_spawn) was verified to work under the daemon's existing
+   hardened sandbox (PrivateDevices=yes + the SystemCallFilter) — see the
+   Phase 3a spike. The terminal runs in the daemon (root); the Web only
+   proxies bytes.
 
 4. Browse to https://your-host/setup/bootstrap?token=<...>
 

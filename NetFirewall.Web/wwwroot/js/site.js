@@ -973,6 +973,166 @@ document.addEventListener("alpine:init", () => {
         }
     }));
 
+    /* ---------- terminal ---------- interactive root PTY via xterm.js.
+     * Flow: TOTP confirm -> POST /terminal/open (gets a one-time ticket) ->
+     * open WebSocket to /terminal/ws?ticket=... -> pump bytes <-> xterm.
+     * Binary frames carry shell I/O; a JSON text frame {"t":"resize",...} carries
+     * window size. Themed from the live semantic CSS tokens so it matches the app.
+     * All async/await, no .then() (rule #2). Requires window.Terminal + window.FitAddon
+     * (loaded by the Terminal view's Scripts section). */
+    Alpine.data("terminal", () => ({
+        state: "auth",      // auth | connected | closed
+        code: "",
+        error: "",
+        busy: false,
+        _term: null,
+        _fit: null,
+        _ws: null,
+        _onResize: null,
+        _dataDisposable: null,
+
+        init() {
+            // Clean up on navigation away / HTMX swap.
+            this.$el.addEventListener("alpine:destroyed", () => this._teardown());
+        },
+
+        async open() {
+            const code = (this.code || "").trim();
+            if (!/^\d{6}$/.test(code)) {
+                this.error = "Enter the 6-digit code from your authenticator.";
+                return;
+            }
+            this.error = "";
+            this.busy = true;
+
+            const meta = document.querySelector('meta[name="request-token"]');
+            const form = new FormData();
+            form.append("code", code);
+            try {
+                const res = await fetch("/terminal/open", {
+                    method: "POST",
+                    body: form,
+                    credentials: "same-origin",
+                    headers: {
+                        "HX-Request": "true",
+                        "RequestVerificationToken": meta?.getAttribute("content") ?? ""
+                    }
+                });
+                const env = await res.json().catch(() => null);
+                if (!res.ok || !env?.success || !env?.data?.ticket) {
+                    this.error = env?.message || `Authorization failed (HTTP ${res.status}).`;
+                    this.busy = false;
+                    return;
+                }
+                this.code = "";
+                await this._connect(env.data.ticket);
+            } catch (err) {
+                this.error = `Network error: ${err.message}`;
+                this.busy = false;
+            }
+        },
+
+        async _connect(ticket) {
+            const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            const url = `${scheme}://${window.location.host}/terminal/ws?ticket=${encodeURIComponent(ticket)}`;
+
+            const term = new window.Terminal({
+                cursorBlink: true,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                fontSize: 13,
+                theme: this._theme()
+            });
+            const fit = new window.FitAddon.FitAddon();
+            term.loadAddon(fit);
+            this._term = term;
+            this._fit = fit;
+
+            this.state = "connected";
+            // Wait a tick so x-show reveals the container before we open/fit into it.
+            await this.$nextTick();
+            term.open(this.$refs.term);
+            fit.fit();
+            term.focus();
+
+            const ws = new WebSocket(url);
+            ws.binaryType = "arraybuffer";
+            this._ws = ws;
+
+            ws.addEventListener("open", () => {
+                this._sendResize();
+            });
+            ws.addEventListener("message", (ev) => {
+                if (typeof ev.data === "string") {
+                    term.write(ev.data);
+                } else {
+                    term.write(new Uint8Array(ev.data));
+                }
+            });
+            ws.addEventListener("close", () => { this._onClosed(); });
+            ws.addEventListener("error", () => { this._onClosed(); });
+
+            // Keystrokes -> shell.
+            this._dataDisposable = term.onData((d) => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(d);
+            });
+
+            // Window resize -> fit -> control frame.
+            this._onResize = () => {
+                try { fit.fit(); } catch { /* container hidden */ }
+                this._sendResize();
+            };
+            window.addEventListener("resize", this._onResize);
+        },
+
+        _sendResize() {
+            if (!this._term || !this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+            this._ws.send(JSON.stringify({ t: "resize", rows: this._term.rows, cols: this._term.cols }));
+        },
+
+        _theme() {
+            // Read the live semantic tokens so the terminal matches the active
+            // theme/mode (rule #9 — no hardcoded hex).
+            const css = getComputedStyle(document.documentElement);
+            const v = (name, fallback) => (css.getPropertyValue(name).trim() || fallback);
+            return {
+                background: v("--surface-bg", "#0b0f14"),
+                foreground: v("--surface-fg", "#e6e6e6"),
+                cursor: v("--accent", "#7dd3fc"),
+                selectionBackground: v("--accent-soft", "rgba(125,211,252,0.3)")
+            };
+        },
+
+        _onClosed() {
+            if (this.state === "closed") return;
+            this.state = "closed";
+            this._teardown(/* keepTerm */ true);
+        },
+
+        close() {
+            try { this._ws?.close(); } catch { /* noop */ }
+            this._onClosed();
+        },
+
+        reset() {
+            this._teardown();
+            this.state = "auth";
+            this.error = "";
+        },
+
+        _teardown(keepTerm) {
+            if (this._onResize) { window.removeEventListener("resize", this._onResize); this._onResize = null; }
+            try { this._dataDisposable?.dispose(); } catch { /* noop */ }
+            this._dataDisposable = null;
+            try { this._ws?.close(); } catch { /* noop */ }
+            this._ws = null;
+            if (!keepTerm) {
+                try { this._term?.dispose(); } catch { /* noop */ }
+                this._term = null;
+                this._fit = null;
+            }
+        }
+    }));
+
     Alpine.store("ui", {
         ...DEFAULT_STATE,
         palettes: PALETTES,

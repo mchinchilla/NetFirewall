@@ -39,4 +39,11 @@ public static class AuthAuditEvents
     public const string UserCreated      = "user.created";
     public const string UserDisabled     = "user.disabled";
     public const string ProfileUpdated   = "profile.updated";
+
+    // Web terminal (root PTY). Open requires a fresh TOTP; attach redeems a
+    // one-time ticket. All four are security-relevant — a root shell in a browser.
+    public const string TerminalOpened   = "terminal.opened";   // TOTP verified, ticket minted
+    public const string TerminalDenied   = "terminal.denied";   // TOTP failed / not admin / busy
+    public const string TerminalAttached = "terminal.attached"; // WS connected, PTY spawned
+    public const string TerminalClosed   = "terminal.closed";   // PTY ended (user/idle/shell-exit)
 }

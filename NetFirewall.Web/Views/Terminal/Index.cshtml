@@ -1,0 +1,27 @@
+@{
+    ViewData["Title"] = "Terminal";
+}
+
+@section Styles {
+    @* Vendored xterm stylesheet — loaded only on this page (like any vendored lib,
+       not an authored per-page CSS file). Terminal colors are themed from the
+       semantic tokens in site.js, not here. *@
+    <link rel="stylesheet" href="~/lib/xterm/xterm.css" asp-append-version="true" />
+}
+
+<div class="mb-4">
+    <h1 class="text-2xl font-semibold tracking-tight text-surface-fg">Terminal</h1>
+    <p class="text-sm mt-1 text-surface-fg-muted">
+        Interactive root shell. Opening requires a fresh code from your authenticator —
+        every session is audited.
+    </p>
+</div>
+
+@await Html.PartialAsync("_TerminalPanel")
+
+@section Scripts {
+    @* xterm UMD bundles expose window.Terminal / window.FitAddon. Loaded at
+       end-of-body so they're present before Alpine initializes the component. *@
+    <script src="~/lib/xterm/xterm.js" asp-append-version="true"></script>
+    <script src="~/lib/xterm/addon-fit.js" asp-append-version="true"></script>
+}

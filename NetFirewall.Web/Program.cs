@@ -196,6 +196,12 @@ builder.Services.Configure<NetFirewall.Services.Monitoring.IpAsnResolverOptions>
 builder.Services.AddSingleton<NetFirewall.Services.Monitoring.IGeoIpLookupService,
                               NetFirewall.Services.Monitoring.GeoIpLookupService>();
 
+// Web terminal: relays the browser WebSocket to the daemon's root-PTY socket.
+// Stateless; depends on the singleton IDaemonClient (which forwards the
+// per-request session token via IHttpContextAccessor).
+builder.Services.AddSingleton<NetFirewall.Web.Services.ITerminalProxyService,
+                              NetFirewall.Web.Services.TerminalProxyService>();
+
 // Read-only catalog of /Bash reference scripts (nftables conf, rt_tables, etc).
 builder.Services.Configure<NetFirewall.Web.Services.BashScriptCatalogOptions>(
     builder.Configuration.GetSection("BashCatalog"));
@@ -234,6 +240,11 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// WebSocket support for the terminal proxy (/terminal/ws). Before routing so the
+// Upgrade is handled; the endpoint still runs through auth/authorization below.
+app.UseWebSockets();
+
 app.UseRouting();
 
 // Auth must run after routing so authorization sees the matched endpoint.

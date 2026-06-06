@@ -92,6 +92,12 @@ public sealed class NullDaemonClient : IDaemonClient
         throw new InvalidOperationException(
             "DecryptTotpAsync called on NullDaemonClient — TOTP cipher should be AesGcmTotpSecretCipher when daemon is disabled. Misconfigured DI?");
 
+    public Task<ServiceResponse<TerminalTicketDto>> OpenTerminalAsync(string totpCode, CancellationToken ct = default)
+        => Task.FromResult(Disabled<TerminalTicketDto>());
+
+    public Task<System.Net.WebSockets.WebSocket> ConnectTerminalAsync(string ticket, CancellationToken ct = default)
+        => throw new InvalidOperationException(DisabledMessage);
+
     public Task<ServiceResponse<WireGuardKeyPairDto>> GenerateWireGuardKeyPairAsync(CancellationToken ct = default)
         => Task.FromResult(Disabled<WireGuardKeyPairDto>());
 

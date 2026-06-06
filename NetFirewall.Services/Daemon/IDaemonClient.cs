@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
@@ -94,6 +95,20 @@ public interface IDaemonClient
     /// <summary><c>POST /v1/crypto/decrypt</c> — daemon holds the master key, returns plaintext. Throws on failure.</summary>
     Task<byte[]> DecryptTotpAsync(byte[] ciphertext, CancellationToken ct = default);
 
+    /// <summary>
+    /// <c>POST /v1/terminal/open</c> — admin + fresh TOTP. Returns a one-time attach
+    /// ticket (in the envelope's <c>Data</c>) bound to the current session.
+    /// </summary>
+    Task<ServiceResponse<TerminalTicketDto>> OpenTerminalAsync(string totpCode, CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>GET /v1/terminal/attach</c> (WebSocket) — opens a raw byte stream to a
+    /// freshly-spawned root PTY, authenticated by the session header + the one-time
+    /// <paramref name="ticket"/>. The caller pumps bytes between this socket and the
+    /// browser. The returned <see cref="WebSocket"/> is owned by the caller (dispose it).
+    /// </summary>
+    Task<WebSocket> ConnectTerminalAsync(string ticket, CancellationToken ct = default);
+
     /// <summary><c>POST /v1/wireguard/genkey</c> — returns a fresh X25519 keypair. Used when adding a new peer.</summary>
     Task<ServiceResponse<WireGuardKeyPairDto>> GenerateWireGuardKeyPairAsync(CancellationToken ct = default);
 
@@ -155,6 +170,8 @@ public interface IDaemonClient
     /// <summary><c>GET /v1/system/wan-health</c> — per-WAN health state + recent transition events.</summary>
     Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default);
 }
+
+public sealed record TerminalTicketDto(string Ticket);
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);
 public sealed record WireGuardPskDto(string PresharedKey);

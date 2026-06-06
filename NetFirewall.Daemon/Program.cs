@@ -188,6 +188,15 @@ builder.Services.AddScoped<IRecoveryCodeService, RecoveryCodeService>();
 // because the AES-256-GCM key never changes during process lifetime.
 builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
 
+// Web terminal (root PTY). The PTY runs HERE (daemon is root with the caps; the
+// Web is a zero-cap nologin user). IPtyService is the only thing touching the
+// libc PTY P/Invokes; the registry enforces one concurrent terminal + one-time
+// attach tickets. Both singletons — the registry holds process-wide state.
+builder.Services.AddSingleton<NetFirewall.Services.Processes.IPtyService,
+                              NetFirewall.Daemon.Pty.LinuxPtyService>();
+builder.Services.AddSingleton<NetFirewall.Daemon.Pty.ITerminalSessionRegistry,
+                              NetFirewall.Daemon.Pty.TerminalSessionRegistry>();
+
 // WireGuard — daemon owns key generation + apply (needs CAP_NET_ADMIN to
 // bring the wg interface up). Web reads/writes the catalog over the same
 // IWireGuardService and posts to /v1/wireguard/* for privileged ops.
@@ -216,6 +225,12 @@ app.UseSerilogRequestLogging();
 
 // First gate: peer UID. Defense-in-depth on top of FS perms.
 app.UseMiddleware<PeerCredentialMiddleware>();
+
+// WebSocket support for the terminal attach endpoint (/v1/terminal/attach). Must
+// be in the pipeline before routing so the Upgrade is handled; the endpoint still
+// runs through auth/authorization below (the upgrade request carries the session
+// header).
+app.UseWebSockets();
 
 app.UseRouting();
 app.UseAuthentication();
@@ -247,6 +262,7 @@ app.MapCryptoEndpoints();
 app.MapSystemEndpoints();
 app.MapWireGuardEndpoints();
 app.MapDnsEndpoints();
+app.MapTerminalEndpoints();
 
 // Kestrel only creates the Unix socket once the host has started, so chmod
 // must run from the ApplicationStarted callback. Running it inline before
