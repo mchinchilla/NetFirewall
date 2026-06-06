@@ -25,6 +25,7 @@ public sealed class AuthController : Controller
     private readonly IPasswordHasher _hasher;
     private readonly IAuthAuditService _audit;
     private readonly IPendingAuthTicket _pending;
+    private readonly NetFirewall.Services.Monitoring.IGeoIpLookupService _geo;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -36,6 +37,7 @@ public sealed class AuthController : Controller
         IPasswordHasher hasher,
         IAuthAuditService audit,
         IPendingAuthTicket pending,
+        NetFirewall.Services.Monitoring.IGeoIpLookupService geo,
         ILogger<AuthController> logger)
     {
         _users = users;
@@ -46,6 +48,7 @@ public sealed class AuthController : Controller
         _hasher = hasher;
         _audit = audit;
         _pending = pending;
+        _geo = geo;
         _logger = logger;
     }
 
@@ -221,6 +224,19 @@ public sealed class AuthController : Controller
             User.Identity?.Name, ClientIp(), Request.Headers.UserAgent.ToString(), ct: ct);
 
         return Redirect("/login");
+    }
+
+    // ------------------------------------------------------------- /auth/geo
+
+    // Lazy-loaded fragment for the login system-info card. Rendered out-of-band via
+    // HTMX (hx-get on load) so a slow/unreachable ip.guide never blocks the login
+    // page — the card shows IP/clock/uptime/version instantly, geo fills in after.
+    // AllowAnonymous: the login page is pre-auth.
+    [HttpGet("/auth/geo"), AllowAnonymous]
+    public async Task<IActionResult> Geo(CancellationToken ct)
+    {
+        var info = await _geo.LookupForClientAsync(ClientIp(), ct);
+        return PartialView("_GeoInfoFragment", info);
     }
 
     // ---------------------------------------------------------- helpers

@@ -185,6 +185,17 @@ builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFi
 // Runtime metadata for the login system-info card.
 builder.Services.AddSingleton<IAppInfoService, AppInfoService>();
 
+// On-demand GeoIP/ASN enrichment for the login + signed-in cards. Reuses the
+// same named HttpClient + config section as the background IpAsnResolver so the
+// third-party-disclosure switch (IpAsnResolver:Enabled) governs both. In-memory
+// cached, so MemoryCache must be available.
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient(NetFirewall.Services.Monitoring.IpAsnResolver.HttpClientName);
+builder.Services.Configure<NetFirewall.Services.Monitoring.IpAsnResolverOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Monitoring.IpAsnResolverOptions.SectionName));
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.IGeoIpLookupService,
+                              NetFirewall.Services.Monitoring.GeoIpLookupService>();
+
 // Read-only catalog of /Bash reference scripts (nftables conf, rt_tables, etc).
 builder.Services.Configure<NetFirewall.Web.Services.BashScriptCatalogOptions>(
     builder.Configuration.GetSection("BashCatalog"));

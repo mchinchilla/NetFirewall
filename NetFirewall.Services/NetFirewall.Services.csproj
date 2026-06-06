@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="AmpScm.RepoDb.PostgreSql.BulkOperations" Version="1.2026.412.489" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />

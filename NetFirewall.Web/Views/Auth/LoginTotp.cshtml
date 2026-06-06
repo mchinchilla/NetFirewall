@@ -51,4 +51,8 @@
             <span x-show="recovery" x-cloak>Use authenticator app instead</span>
         </button>
     </form>
+
+    <div class="mt-8">
+        @await Html.PartialAsync("_SystemInfoCard")
+    </div>
 </div>

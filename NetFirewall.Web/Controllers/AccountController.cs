@@ -26,6 +26,8 @@ public sealed class AccountController : Controller
     private readonly IPasswordHasher _hasher;
     private readonly IAuthAuditService _audit;
     private readonly IPendingAuthTicket _pending;
+    private readonly NetFirewall.Services.Monitoring.IGeoIpLookupService _geo;
+    private readonly IAppInfoService _appInfo;
 
     public AccountController(
         IUserService users,
@@ -36,7 +38,9 @@ public sealed class AccountController : Controller
         ISessionCookieIssuer cookieIssuer,
         IPasswordHasher hasher,
         IAuthAuditService audit,
-        IPendingAuthTicket pending)
+        IPendingAuthTicket pending,
+        NetFirewall.Services.Monitoring.IGeoIpLookupService geo,
+        IAppInfoService appInfo)
     {
         _users = users;
         _rawTotp = rawTotp;
@@ -47,6 +51,26 @@ public sealed class AccountController : Controller
         _hasher = hasher;
         _audit = audit;
         _pending = pending;
+        _geo = geo;
+        _appInfo = appInfo;
+    }
+
+    // -------------------------------------------------- connection info
+
+    // Lazy-loaded fragment for the "Connecting from" card in the account dropdown.
+    // Loaded on demand (HTMX hx-get when the dropdown opens) so the geo lookup
+    // doesn't run on every authenticated page render. For a LAN client the geo
+    // describes the firewall's WAN egress (see IGeoIpLookupService.LookupForClientAsync).
+    [HttpGet("/account/connection")]
+    public async Task<IActionResult> Connection(CancellationToken ct)
+    {
+        var clientIp = HttpContext.Connection.RemoteIpAddress;
+        var displayIp = clientIp?.ToString() ?? "—";
+        if (displayIp == "::1") displayIp = "127.0.0.1";
+
+        var geo = await _geo.LookupForClientAsync(clientIp, ct);
+        var vm = new ConnectionInfoViewModel(displayIp, geo, _appInfo.StartedAt, _appInfo.Uptime);
+        return PartialView("_ConnectingFromCard", vm);
     }
 
     // -------------------------------------------------- TOTP enrollment

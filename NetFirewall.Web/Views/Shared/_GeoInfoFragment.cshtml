@@ -1,0 +1,41 @@
+@model NetFirewall.Models.System.GeoIpInfo
+@{
+    // Compose display strings, each falling back to an em-dash when unknown.
+    string Dash(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s!;
+
+    var place = Model.City is { Length: > 0 } && (Model.Country is { Length: > 0 } || Model.CountryName is { Length: > 0 })
+        ? $"{Model.City}, {Model.Country ?? Model.CountryName}"
+        : Dash(Model.City ?? Model.CountryName);
+
+    var asnLine = Model is { Asn: { Length: > 0 }, Org: { Length: > 0 } }
+        ? $"{Model.Org}"
+        : Dash(Model.Org ?? Model.Asn);
+
+    // When we enriched the firewall's own egress (private/LAN client) make that clear.
+    var ipLabel = Model.ForSelf ? "Egress IP" : "Public IP";
+}
+
+@* Three rows mirroring the existing System-info card's dl layout + iconography. *@
+<div class="flex items-center gap-1.5" title="@ipLabel @(Model.ForSelf ? "(firewall uplink)" : "")">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3"/></svg>
+    <dt class="sr-only">@ipLabel</dt>
+    <dd class="font-mono text-surface-fg truncate" title="@Dash(Model.Ip)">@Dash(Model.Ip)</dd>
+</div>
+
+<div class="flex items-center gap-1.5" title="Location">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/></svg>
+    <dt class="sr-only">Location</dt>
+    <dd class="text-surface-fg truncate" title="@place">@place</dd>
+</div>
+
+<div class="flex items-center gap-1.5" title="ASN / network">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z"/></svg>
+    <dt class="sr-only">Network</dt>
+    <dd class="text-surface-fg truncate" title="@(Model.Asn is { Length: >0 } ? Model.Asn : "")">@asnLine</dd>
+</div>
+
+<div class="flex items-center gap-1.5" title="Timezone">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+    <dt class="sr-only">Timezone</dt>
+    <dd class="font-mono text-surface-fg truncate" title="@Dash(Model.Timezone)">@Dash(Model.Timezone)</dd>
+</div>

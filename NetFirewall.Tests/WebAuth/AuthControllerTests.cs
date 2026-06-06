@@ -30,13 +30,14 @@ public class AuthControllerTests
     private readonly Mock<IPasswordHasher> _hasher = new();
     private readonly Mock<IAuthAuditService> _audit = new();
     private readonly Mock<IPendingAuthTicket> _pending = new();
+    private readonly Mock<NetFirewall.Services.Monitoring.IGeoIpLookupService> _geo = new();
 
     private AuthController CreateController(HttpContext? ctx = null)
     {
         var c = new AuthController(
             _users.Object, _totp.Object, _recovery.Object, _sessions.Object,
             _cookieIssuer.Object, _hasher.Object, _audit.Object, _pending.Object,
-            NullLogger<AuthController>.Instance);
+            _geo.Object, NullLogger<AuthController>.Instance);
         c.ControllerContext = new ControllerContext { HttpContext = ctx ?? MakeHttpContext() };
         return c;
     }

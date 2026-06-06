@@ -37,6 +37,8 @@ public class AccountControllerEnrollTotpTests
     private readonly Mock<IPasswordHasher> _hasher = new();
     private readonly Mock<IAuthAuditService> _audit = new();
     private readonly Mock<IPendingAuthTicket> _pending = new();
+    private readonly Mock<NetFirewall.Services.Monitoring.IGeoIpLookupService> _geo = new();
+    private readonly Mock<NetFirewall.Web.Auth.IAppInfoService> _appInfo = new();
 
     private readonly Guid _uid = Guid.NewGuid();
     private readonly User _user;
@@ -80,7 +82,8 @@ public class AccountControllerEnrollTotpTests
     {
         var c = new AccountController(
             _users.Object, _rawTotp, _userTotp.Object, _recovery.Object,
-            _sessions.Object, _cookieIssuer.Object, _hasher.Object, _audit.Object, _pending.Object);
+            _sessions.Object, _cookieIssuer.Object, _hasher.Object, _audit.Object, _pending.Object,
+            _geo.Object, _appInfo.Object);
 
         var ctx = new DefaultHttpContext();
         c.ControllerContext = new ControllerContext { HttpContext = ctx };
