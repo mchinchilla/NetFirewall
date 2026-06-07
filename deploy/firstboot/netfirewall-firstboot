@@ -164,7 +164,9 @@ render_web_env() {
     sed -e "s|Password=__REPLACE__|Password=$PG_PASSWORD|" \
         -e "s|NETFIREWALL_MASTER_KEY=__REPLACE_MASTER_KEY__|NETFIREWALL_MASTER_KEY=$MASTER_KEY|" \
         "$TPL_DIR/web.env.template" > "$WEB_ENV.tmp"
-    install -m 0640 -o root -g "$WEB_USER" "$WEB_ENV.tmp" "$WEB_ENV"
+    # Group is the netfirewall GROUP (web user is a member), NOT the web user —
+    # there is no group named netfirewall-web.
+    install -m 0640 -o root -g "$GROUP_NAME" "$WEB_ENV.tmp" "$WEB_ENV"
     rm -f "$WEB_ENV.tmp"
 }
 

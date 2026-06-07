@@ -49,7 +49,10 @@ case "$1" in
             install -m 0600 -o root -g root "$TPL_DIR/daemon.env.template" "$ETC_DIR/daemon.env"
         fi
         if [ ! -e "$ETC_DIR/web.env" ]; then
-            install -m 0640 -o root -g "$WEB_USER" "$TPL_DIR/web.env.template" "$ETC_DIR/web.env"
+            # Group is the netfirewall GROUP (the web user is a member), NOT the
+            # web user — there is no group named netfirewall-web (adduser used
+            # --ingroup netfirewall, so no homonymous group was created).
+            install -m 0640 -o root -g "$GROUP_NAME" "$TPL_DIR/web.env.template" "$ETC_DIR/web.env"
         fi
         if [ ! -e "$ETC_DIR/dhcp.env" ]; then
             install -m 0640 -o root -g root "$TPL_DIR/dhcp.env.template" "$ETC_DIR/dhcp.env"
