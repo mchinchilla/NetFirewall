@@ -1,8 +1,13 @@
-namespace NetFirewall.Daemon;
+namespace NetFirewall.Services.Daemon;
 
 /// <summary>
 /// Configuration for the daemon. Bound from the <c>Daemon</c> section of
 /// <c>appsettings.json</c> + environment overrides.
+///
+/// Lives in NetFirewall.Services (not the daemon assembly) because it's a pure
+/// config POCO with no platform-specific behavior — keeping it out of the
+/// linux-marked daemon assembly lets cross-platform callers (TUI, tests, the
+/// Doctor validator) bind it without spurious CA1416 warnings.
 /// </summary>
 public sealed class DaemonOptions
 {

@@ -39,6 +39,7 @@ rm -f /etc/sysctl.d/netfirewall.conf
 
 log "Removing TUI symlink + manpage + completion (if present)"
 rm -f /usr/local/bin/netfirewall-tui
+rm -f /usr/local/bin/netfirewall-doctor
 rm -f /usr/local/share/man/man1/netfirewall-tui.1
 rm -f /etc/bash_completion.d/netfirewall-tui
 

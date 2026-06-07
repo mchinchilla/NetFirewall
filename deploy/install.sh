@@ -150,6 +150,11 @@ if [[ $SKIP_PUBLISH -eq 0 ]]; then
     dotnet publish -c Release -r linux-x64 --self-contained false \
         -o "$PREFIX/tui" \
         "$REPO_DIR/NetFirewall.Tui/NetFirewall.Tui.csproj" >/dev/null
+
+    log "Publishing Doctor (requirements validator)"
+    dotnet publish -c Release -r linux-x64 --self-contained false \
+        -o "$PREFIX/doctor" \
+        "$REPO_DIR/NetFirewall.Doctor/NetFirewall.Doctor.csproj" >/dev/null
 fi
 
 # Web's wwwroot lives under the publish output already; chmod for nginx-alike
@@ -166,12 +171,41 @@ install -m 0640 -o root -g "$GROUP_NAME" \
 
 log "Writing environment files"
 
-# Daemon env (root-only — peer UID + DB password live here).
-# Two REPLACE tokens in the template: the DB password (first) and the Web UID
-# for AcceptedPeerUids[0] (second). Use a positional sed to hit them in order.
+WEB_ENV="$ETC_DIR/web.env"
 DAEMON_ENV="$ETC_DIR/daemon.env"
+
+# ── Master key: resolve ONCE, then write the SAME value into BOTH env files. ──
+# The daemon AND the Web must hold the identical AES-256 key: the Web enrolls TOTP
+# secrets and (with Daemon:UseForTotp=true) the daemon decrypts/verifies them
+# (login crypto endpoints + the web terminal's TOTP gate). A drift between the two
+# files is silent — every valid TOTP code gets rejected daemon-side. So we compute
+# it before writing either file. Preference order for an UPGRADE (preserve, never
+# rotate — rotating invalidates all enrollments): existing web.env, then daemon.env.
+resolve_existing_key() {
+    local f
+    for f in "$WEB_ENV" "$DAEMON_ENV"; do
+        if [[ -f "$f" ]] && grep -q '^NETFIREWALL_MASTER_KEY=' "$f" \
+                && ! grep -qE '^NETFIREWALL_MASTER_KEY=(__REPLACE__|__REPLACE_MASTER_KEY__|placeholder)$' "$f"; then
+            grep '^NETFIREWALL_MASTER_KEY=' "$f" | head -1 | cut -d= -f2-
+            return 0
+        fi
+    done
+    return 1
+}
+
+if MASTER_KEY=$(resolve_existing_key); then
+    log "Preserving existing master key"
+else
+    log "Generating new AES-256 master key"
+    MASTER_KEY=$(openssl rand -base64 32)
+fi
+
+# Daemon env (root-only — peer UID + DB password + master key live here).
+# REPLACE tokens in the template: DB password (first __REPLACE__), the Web UID
+# for AcceptedPeerUids[0], and the master key (__REPLACE_MASTER_KEY__).
 sed -e "0,/__REPLACE__/{s|__REPLACE__|$PG_PASSWORD|}" \
     -e "s|Daemon__AcceptedPeerUids__0=__REPLACE__|Daemon__AcceptedPeerUids__0=$WEB_UID|" \
+    -e "s|NETFIREWALL_MASTER_KEY=__REPLACE_MASTER_KEY__|NETFIREWALL_MASTER_KEY=$MASTER_KEY|" \
     "$SCRIPT_DIR/env/daemon.env.template" > "$DAEMON_ENV.tmp"
 sed -i \
     -e "s|Host=127.0.0.1;Port=5432|Host=$PG_HOST;Port=5432|" \
@@ -181,28 +215,26 @@ sed -i \
 install -m 0600 -o root -g root "$DAEMON_ENV.tmp" "$DAEMON_ENV"
 rm -f "$DAEMON_ENV.tmp"
 
-# Web env. Generate master key only if not already present (preserves TOTP enrollments on upgrade).
-WEB_ENV="$ETC_DIR/web.env"
-if [[ -f "$WEB_ENV" ]] && grep -q '^NETFIREWALL_MASTER_KEY=' "$WEB_ENV" \
-        && ! grep -q '^NETFIREWALL_MASTER_KEY=__REPLACE__' "$WEB_ENV"; then
-    log "Preserving existing master key from $WEB_ENV"
-    MASTER_KEY=$(grep '^NETFIREWALL_MASTER_KEY=' "$WEB_ENV" | head -1 | cut -d= -f2-)
-else
-    log "Generating new AES-256 master key"
-    MASTER_KEY=$(openssl rand -base64 32)
-fi
-
-sed -e "s|__REPLACE__|placeholder|" "$SCRIPT_DIR/env/web.env.template" > "$WEB_ENV.tmp"
-# Two REPLACE tokens: connection string password, and master key. Apply distinctly.
-sed -i \
-    -e "0,/__REPLACE__/{s|__REPLACE__|$PG_PASSWORD|}" \
-    -e "s|NETFIREWALL_MASTER_KEY=placeholder|NETFIREWALL_MASTER_KEY=$MASTER_KEY|" \
+# Web env (root:netfirewall 0640 — Web reads it, group lets the unit load it).
+# Distinct tokens: __REPLACE__ = DB password (only occurrence), and
+# __REPLACE_MASTER_KEY__ = master key. No ordering hazard between the two.
+sed -e "s|Password=__REPLACE__|Password=$PG_PASSWORD|" \
+    -e "s|NETFIREWALL_MASTER_KEY=__REPLACE_MASTER_KEY__|NETFIREWALL_MASTER_KEY=$MASTER_KEY|" \
     -e "s|Host=127.0.0.1;Port=5432|Host=$PG_HOST;Port=5432|" \
     -e "s|Username=netfirewall|Username=$PG_USER|" \
     -e "s|Database=net_firewall|Database=$PG_DATABASE|" \
-    "$WEB_ENV.tmp"
+    "$SCRIPT_DIR/env/web.env.template" > "$WEB_ENV.tmp"
 install -m 0640 -o root -g "$WEB_USER" "$WEB_ENV.tmp" "$WEB_ENV"
 rm -f "$WEB_ENV.tmp"
+
+# Defensive post-condition: both files must carry the SAME real key. Catches any
+# future template/token drift before it becomes a silent prod TOTP outage.
+if ! diff -q \
+        <(grep '^NETFIREWALL_MASTER_KEY=' "$DAEMON_ENV") \
+        <(grep '^NETFIREWALL_MASTER_KEY=' "$WEB_ENV") >/dev/null 2>&1; then
+    echo "FATAL: master key differs between $DAEMON_ENV and $WEB_ENV — daemon TOTP would fail." >&2
+    exit 1
+fi
 
 log "Master key (KEEP A SECURE BACKUP — losing it invalidates all TOTP enrollments):"
 echo "    NETFIREWALL_MASTER_KEY=$MASTER_KEY"
@@ -239,6 +271,18 @@ EOF
     chmod 0755 "$TUI_LAUNCHER"
 fi
 ln -sfn "$TUI_LAUNCHER" "$TUI_SYMLINK"
+
+# Same shim + symlink for the Doctor validator so operators can run
+# `netfirewall-doctor` directly.
+DOCTOR_LAUNCHER="$PREFIX/doctor/netfirewall-doctor"
+if [[ ! -x "$DOCTOR_LAUNCHER" ]]; then
+    cat >"$DOCTOR_LAUNCHER" <<EOF
+#!/usr/bin/env bash
+exec dotnet "$PREFIX/doctor/netfirewall-doctor.dll" "\$@"
+EOF
+    chmod 0755 "$DOCTOR_LAUNCHER"
+fi
+ln -sfn "$DOCTOR_LAUNCHER" /usr/local/bin/netfirewall-doctor
 
 # Manpage + bash completion for the TUI. Both are best-effort: skip silently
 # if the system doesn't have the standard target dirs (some minimal distros
@@ -279,6 +323,18 @@ systemctl enable --now netfirewall-daemon.service
 sleep 1
 systemctl enable --now netfirewall-web.service
 
+# ───────────────────────────── post-install verification ─────────────────────────────
+
+# Give the services a moment to bind sockets / open the DB before validating.
+sleep 2
+log "Running post-install verification (netfirewall-doctor)"
+# Don't abort the install on a Doctor failure — the operator may still be mid-setup
+# (no TLS yet, etc.). But surface problems loudly so issues like a missing/mismatched
+# master key are caught NOW, not on first use.
+if ! "$PREFIX/doctor/netfirewall-doctor"; then
+    log "warning: netfirewall-doctor reported problems above — review them before going live."
+fi
+
 # ───────────────────────────── done ─────────────────────────────
 
 cat <<EOF
@@ -288,6 +344,7 @@ cat <<EOF
   Daemon : systemctl status netfirewall-daemon
   Web    : systemctl status netfirewall-web
   TUI    : sudo netfirewall-tui    (console-only; reaches daemon as root via SO_PEERCRED)
+  Doctor : netfirewall-doctor      (re-run anytime to validate the deployment; --json for CI)
   Logs   : $LOG_DIR/{daemon,web}/
   Config : $ETC_DIR/{daemon,web}.env  (mode 0600/0640)
   Socket : $RUN_DIR/control.sock      (root:netfirewall 0660 — Web UID + root accepted)

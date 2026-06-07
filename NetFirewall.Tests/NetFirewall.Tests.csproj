@@ -29,6 +29,7 @@
     <ProjectReference Include="..\NetFirewall.AppHost\NetFirewall.AppHost.csproj" />
     <ProjectReference Include="..\NetFirewall.Daemon\NetFirewall.Daemon.csproj" />
     <ProjectReference Include="..\NetFirewall.DhcpServer\NetFirewall.DhcpServer.csproj" />
+    <ProjectReference Include="..\NetFirewall.Doctor\NetFirewall.Doctor.csproj" />
     <ProjectReference Include="..\NetFirewall.Migrations\NetFirewall.Migrations.csproj" />
     <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
     <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />

@@ -151,6 +151,42 @@ Troubleshooting
   `EnvironmentFile=/etc/netfirewall/web.env` and the file exists with
   mode 0640.
 
+* Terminal "The daemon cannot verify TOTP — it is missing
+  NETFIREWALL_MASTER_KEY" (or daemon-side /v1/crypto fails) → the DAEMON's
+  env file lacks the key, or it differs from the Web's. The daemon and Web
+  MUST hold the identical key. Fix:
+      grep '^NETFIREWALL_MASTER_KEY=' /etc/netfirewall/web.env \
+        >> /etc/netfirewall/daemon.env
+      chmod 0600 /etc/netfirewall/daemon.env
+      systemctl restart netfirewall-daemon
+  Full reference: docs/master-key.md. The installer now writes the same key
+  to both files and asserts they match; this only bites hosts provisioned
+  before that fix.
+
 * TOTP codes always rejected after restart → the master key was regenerated
-  (the env file was wiped or replaced). Restore the original key from
-  backup, or have every user re-enroll.
+  (the env file was wiped or replaced) OR the daemon's key drifted from the
+  Web's. Restore the original key from backup into BOTH env files, or have
+  every user re-enroll. See docs/master-key.md.
+
+------------------------------------------------------------------------
+Validating a deployment (netfirewall-doctor)
+------------------------------------------------------------------------
+`netfirewall-doctor` checks env vars, master-key sync, paths, systemd
+units, the daemon socket, and the database — one table, with a remedy per
+problem. The installer runs it as the final step; re-run it anytime:
+
+    netfirewall-doctor                 # full check, human-readable
+    netfirewall-doctor --json          # for CI / scripts (exit 1 on failure)
+    netfirewall-doctor --prefix /opt/tekium   # non-default install prefix
+
+Full reference: docs/doctor.md.
+
+------------------------------------------------------------------------
+Master key (NETFIREWALL_MASTER_KEY)
+------------------------------------------------------------------------
+The AES-256 key that encrypts TOTP secrets. The daemon AND the Web must
+hold the byte-for-byte identical key (both decrypt the same secrets). The
+installer generates it once and writes it to both /etc/netfirewall/web.env
+and /etc/netfirewall/daemon.env, then verifies they match. Losing it
+invalidates every TOTP enrollment — keep a secure backup. Full rules,
+diagnostics, and ISO-build guidance: docs/master-key.md.

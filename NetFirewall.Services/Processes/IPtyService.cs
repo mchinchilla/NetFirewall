@@ -38,10 +38,14 @@ public interface IPtyService
 /// </summary>
 public interface IPtySession : IAsyncDisposable
 {
-    /// <summary>The master end. Read shell output, write keystrokes. Async I/O.
-    /// A read returning 0 / throwing on EIO means the child closed the slave
-    /// (shell exited).</summary>
-    Stream Master { get; }
+    /// <summary>Read shell output from the master. Returns 0 on EOF (shell exited).
+    /// Safe to call concurrently with <see cref="WriteAsync"/> — the two directions
+    /// of a PTY are independent.</summary>
+    ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default);
+
+    /// <summary>Write keystrokes to the master. Safe to call concurrently with
+    /// <see cref="ReadAsync"/>.</summary>
+    ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default);
 
     /// <summary>PID of the spawned child.</summary>
     int ProcessId { get; }

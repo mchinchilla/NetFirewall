@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Configuration;
-using NetFirewall.Daemon;
+using NetFirewall.Services.Daemon;
 using Xunit;
 
 namespace NetFirewall.Tests.Tui;

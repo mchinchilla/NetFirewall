@@ -96,12 +96,19 @@ installs and enables both unit files.
   JIT. Switch to `dotnet publish --publish-ready-to-run` or NativeAOT to
   enable it; documented as future work.
 
-**Master key (TOTP secrets cipher)** lives in `/etc/netfirewall/daemon.env`
-(NETFIREWALL_MASTER_KEY=base64key, mode 0600 root:root) and is loaded only
-into the **netfirewall-daemon** process. The Web never sees the key — it
-calls `POST /v1/crypto/{encrypt,decrypt}` over the Unix socket whenever it
-needs to enroll or verify a TOTP secret (`DaemonTotpSecretCipher`). A
-Web-process compromise can no longer decrypt stored TOTP secrets.
+**Master key (TOTP secrets cipher)** — AES-256 key encrypting all TOTP
+secrets. **Full reference: `docs/master-key.md`** (where it lives, the
+daemon↔Web sync rule, diagnostics, ISO-build guidance). The non-negotiable
+rule: **the daemon and the Web must hold the byte-for-byte identical key** —
+both decrypt the same `user_totp_secrets` rows, and a drift silently rejects
+every valid TOTP code. The installer writes the same generated key into BOTH
+`/etc/netfirewall/daemon.env` (0600 root:root) and `web.env`
+(0640 root:netfirewall) and asserts they match. With `Daemon:UseForTotp=true`
+the Web proxies crypto to the daemon (`POST /v1/crypto/{encrypt,decrypt}`,
+`DaemonTotpSecretCipher`) so a Web compromise can't decrypt secrets; the
+daemon also needs the key directly for the web terminal's TOTP gate
+(`/v1/terminal/open`). A daemon missing the key throws on first daemon-side
+TOTP use (now warned at startup in `Program.cs`).
 
 Toggle via `Daemon:UseForTotp` in the Web's appsettings (default `true`):
 - `true` (prod default): Web ↔ daemon for crypto.
@@ -158,6 +165,7 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
 ### Service projects
 
 - **NetFirewall.Migrations** — standalone console (`netfirewall-migrate`) that applies / tracks / drift-checks the SQL files in `NetFirewall.Services/sql/migrations/`. NOT registered with Aspire — invoked via `bin/db.sh` or `dotnet run --project NetFirewall.Migrations`.
+- **NetFirewall.Doctor** — Spectre.Console requirements validator (`netfirewall-doctor` binary). Cross-platform (NO `[assembly: SupportedOSPlatform]`); Linux-only checks Skip off Linux. Validates env vars, **master-key sync between daemon.env and web.env**, paths, systemd units, daemon socket, DB + migrations. Each check is an `ICheck` returning `CheckResult` (Pass/Warn/Fail/Skip + remedy); fail-soft (never throws). `--json` + exit code for CI; `install.sh` publishes it and runs it as the post-install verification step. See `docs/doctor.md`. Pure check logic tested in `NetFirewall.Tests/Doctor/`.
 - **NetFirewall.AppHost** — Aspire orchestrator (ApiService + Web + DhcpServer).
 - **NetFirewall.Tui** — Console UI built on Spectre.Console (`netfirewall-tui` binary). Talks to the same daemon Unix socket the Web does, via the lifted `IDaemonClient` in `NetFirewall.Services/Daemon/`. Auth: single-step login flow (username + password + TOTP/recovery in one screen) via `POST /v1/auth/login` on the daemon, token stored in-memory by `TuiSessionTokenProvider`. **TUI sessions are born elevated** (login already proved TOTP + operator is at console), so destructive endpoints don't re-prompt. Peer-cred middleware on the daemon (`SO_PEERCRED` Linux / `LOCAL_PEERCRED` macOS) gates the socket connection itself. Phases 0-3 shipped: skeleton + daemon ping + login/logout + **NetworkInterfacesScreen** (list, edit IP/mask/gateway/MAC/MTU, add new from physically-detected NICs, apply via daemon) + **RecoveryScreen** (break-glass: reset password, disable TOTP, clear lockout — root-peer-only via `[DaemonRequireRootPeerAttribute]`, no session needed; reachable when a user is locked out of the Web).
 - **NetFirewall.WanMonitor** — Background worker for dual-WAN monitoring/failover. Pings configured IPs through each interface (see `WanMonitorService`) and runs the bash commands listed in `appsettings.json` → `BashCommands.ExtraPrimaryCommands` / `ExtraSecondaryCommands` on state changes. Runs under systemd via `UseSystemd()`.

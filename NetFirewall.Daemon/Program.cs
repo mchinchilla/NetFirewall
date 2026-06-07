@@ -10,6 +10,7 @@ using NetFirewall.Daemon.Auth;
 using NetFirewall.Daemon.Endpoints;
 using NetFirewall.Models.System;
 using NetFirewall.Services.Auth;
+using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Network;
 using NetFirewall.Services.Processes;
@@ -194,8 +195,8 @@ builder.Services.AddSingleton<ITotpSecretCipher, AesGcmTotpSecretCipher>();
 // attach tickets. Both singletons — the registry holds process-wide state.
 builder.Services.AddSingleton<NetFirewall.Services.Processes.IPtyService,
                               NetFirewall.Daemon.Pty.LinuxPtyService>();
-builder.Services.AddSingleton<NetFirewall.Daemon.Pty.ITerminalSessionRegistry,
-                              NetFirewall.Daemon.Pty.TerminalSessionRegistry>();
+builder.Services.AddSingleton<NetFirewall.Services.Processes.ITerminalSessionRegistry,
+                              NetFirewall.Services.Processes.TerminalSessionRegistry>();
 
 // WireGuard — daemon owns key generation + apply (needs CAP_NET_ADMIN to
 // bring the wg interface up). Web reads/writes the catalog over the same
@@ -263,6 +264,20 @@ app.MapSystemEndpoints();
 app.MapWireGuardEndpoints();
 app.MapDnsEndpoints();
 app.MapTerminalEndpoints();
+
+// Fail-fast visibility: in non-Development, the daemon owns the TOTP cipher key.
+// If it's missing, login-via-Web may still work (the Web can hold its own key) but
+// daemon-side TOTP (e.g. the terminal's /v1/terminal/open) will throw on first use.
+// Warn loudly at startup so this is caught at boot, not on first terminal open.
+if (!app.Environment.IsDevelopment()
+    && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NETFIREWALL_MASTER_KEY"))
+    && string.IsNullOrEmpty(app.Configuration["Auth:MasterKey"]))
+{
+    Log.Warning(
+        "NETFIREWALL_MASTER_KEY is NOT set in the daemon's environment. Daemon-side TOTP " +
+        "(terminal open, crypto endpoints) will fail. Set the SAME master key as the Web in " +
+        "the daemon's EnvironmentFile (e.g. /etc/netfirewall/daemon.env) and restart.");
+}
 
 // Kestrel only creates the Unix socket once the host has started, so chmod
 // must run from the ApplicationStarted callback. Running it inline before

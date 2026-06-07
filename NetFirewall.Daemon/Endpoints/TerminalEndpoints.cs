@@ -27,7 +27,6 @@ public static class TerminalEndpoints
     // Daemon-authoritative timeouts (the Web/browser timers are only UX hints).
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan MaxLifetime = TimeSpan.FromMinutes(60);
-    private const string Shell = "/bin/bash";
 
     public static void MapTerminalEndpoints(this IEndpointRouteBuilder app)
     {
@@ -39,40 +38,72 @@ public static class TerminalEndpoints
     }
 
     // ---- POST /v1/terminal/open -------------------------------------------------
+    // Services are resolved from IServiceProvider INSIDE the try/catch rather than
+    // as handler parameters: resolving IUserTotpService pulls in ITotpSecretCipher,
+    // whose AesGcmTotpSecretCipher ctor throws if NETFIREWALL_MASTER_KEY is missing.
+    // As a handler parameter that activation failure escapes as a bare 500 (before
+    // the handler body); resolved here it becomes a clean ServiceResponse with a
+    // pointed message ("daemon is missing the master key").
     private static async Task<IResult> OpenAsync(
         TerminalOpenRequest req,
         HttpContext ctx,
-        IUserTotpService totp,
-        ITerminalSessionRegistry registry,
-        IAuthAuditService audit,
+        IServiceProvider sp,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
-        var (userId, sessionId, username) = Identity(ctx);
-        if (userId is null || sessionId is null)
-            return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail("Not authenticated."), statusCode: 401);
-
-        if (string.IsNullOrWhiteSpace(req.Code))
-            return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail("A TOTP code is required to open the terminal."), statusCode: 400);
-
-        // Fresh TOTP — the daemon owns the cipher key, so it verifies directly.
-        var ok = await totp.VerifyAsync(userId.Value, req.Code, ct);
-        if (!ok)
+        var log = loggerFactory.CreateLogger("TerminalOpen");
+        try
         {
-            await audit.LogAsync(AuthAuditEvents.TerminalDenied, userId, username, ClientIp(ctx),
-                detail: new { reason = "totp_failed" }, ct: ct);
-            return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail("Invalid TOTP code."), statusCode: 403);
+            var (userId, sessionId, username) = Identity(ctx);
+            if (userId is null || sessionId is null)
+                return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail("Not authenticated."), statusCode: 200);
+
+            if (string.IsNullOrWhiteSpace(req?.Code))
+                return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail("A TOTP code is required to open the terminal."), statusCode: 200);
+
+            IUserTotpService totp;
+            try
+            {
+                totp = sp.GetRequiredService<IUserTotpService>();
+            }
+            catch (Exception ex)
+            {
+                // Almost always: the daemon process is missing NETFIREWALL_MASTER_KEY
+                // (set it in the daemon's EnvironmentFile and restart). Surface a
+                // pointed message instead of an opaque 500.
+                log.LogError(ex, "Terminal open: TOTP service could not be activated (master key missing?)");
+                return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail(
+                    "The daemon cannot verify TOTP — it is missing NETFIREWALL_MASTER_KEY. " +
+                    "Set the same master key as the Web in the daemon's environment and restart it."),
+                    statusCode: 200);
+            }
+
+            var registry = sp.GetRequiredService<ITerminalSessionRegistry>();
+            var audit = sp.GetRequiredService<IAuthAuditService>();
+
+            // Fresh TOTP — the daemon owns the cipher key, so it verifies directly.
+            var ok = await totp.VerifyAsync(userId.Value, req.Code, ct);
+            if (!ok)
+            {
+                await audit.LogAsync(AuthAuditEvents.TerminalDenied, userId, username, ClientIp(ctx),
+                    detail: new { reason = "totp_failed" }, ct: ct);
+                return Results.Json(ServiceResponse<TerminalTicketResponse>.Fail("Invalid TOTP code."), statusCode: 200);
+            }
+
+            var ticket = registry.IssueTicket(userId.Value, sessionId.Value);
+            await audit.LogAsync(AuthAuditEvents.TerminalOpened, userId, username, ClientIp(ctx), ct: ct);
+            return Results.Json(ServiceResponse<TerminalTicketResponse>.Ok(
+                new TerminalTicketResponse(ticket), "Terminal authorized."));
         }
-
-        // One terminal at a time — reject early so the user gets a clear message
-        // rather than a ticket that fails at attach. (The slot is truly claimed at
-        // attach; this is a fast pre-check.)
-        // Note: we don't acquire here to avoid leaking the slot if the user never
-        // attaches; the attach path does the authoritative acquire.
-
-        var ticket = registry.IssueTicket(userId.Value, sessionId.Value);
-        await audit.LogAsync(AuthAuditEvents.TerminalOpened, userId, username, ClientIp(ctx), ct: ct);
-        return Results.Json(ServiceResponse<TerminalTicketResponse>.Ok(
-            new TerminalTicketResponse(ticket), "Terminal authorized."));
+        catch (Exception ex)
+        {
+            // Never leak a bare 500 — the daemon contract is always a ServiceResponse
+            // envelope so the Web shows a real message. The detail goes to the log only.
+            log.LogError(ex, "Terminal open failed");
+            return Results.Json(
+                ServiceResponse<TerminalTicketResponse>.Fail("Could not open the terminal — see daemon log."),
+                statusCode: 200);
+        }
     }
 
     // ---- GET /v1/terminal/attach (WebSocket) ------------------------------------
@@ -119,17 +150,38 @@ public static class TerminalEndpoints
 
         IPtySession? session = null;
         // Lifetime + idle control. The lifetime CTS fires at MaxLifetime; the idle
-        // watchdog is reset on every byte either direction.
+        // watchdog is reset on every byte either direction. lastActivity is a long
+        // (UTC ticks) touched by three tasks, so reads/writes go through Volatile/
+        // Interlocked — a DateTimeOffset would tear.
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
         lifetime.CancelAfter(MaxLifetime);
-        var lastActivity = DateTimeOffset.UtcNow;
+        long lastActivityTicks = DateTime.UtcNow.Ticks;
+        void Touch() => Volatile.Write(ref lastActivityTicks, DateTime.UtcNow.Ticks);
 
+        Task ptyToWs = Task.CompletedTask, wsToPty = Task.CompletedTask, idleWatch = Task.CompletedTask;
         try
         {
-            session = pty.Start(Shell, new[] { "-l" }, PtySize.Default);
+            // Interactive shell with a real environment. NOT a login shell (-l):
+            // login shells read /etc/profile + profile.d which, under the daemon's
+            // sandbox, can error out and exit instantly (blank terminal). A normal
+            // interactive shell on a PTY is the robust choice. HOME/USER/etc. must
+            // be set or bash exits immediately when it can't resolve the user env.
+            var (shell, args) = ResolveShell();
+            var env = new Dictionary<string, string>
+            {
+                ["TERM"] = "xterm-256color",
+                ["HOME"] = "/root",
+                ["USER"] = "root",
+                ["LOGNAME"] = "root",
+                ["SHELL"] = shell,
+                ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                ["PS1"] = @"\u@\h:\w\$ ",
+            };
+            session = pty.Start(shell, args, PtySize.Default, env);
+            var pump = session; // non-null capture for the closures
 
             // PTY → WS pump (shell output to browser).
-            var ptyToWs = Task.Run(async () =>
+            ptyToWs = Task.Run(async () =>
             {
                 var buf = new byte[8192];
                 try
@@ -137,19 +189,19 @@ public static class TerminalEndpoints
                     while (!lifetime.IsCancellationRequested)
                     {
                         int n;
-                        try { n = await session.Master.ReadAsync(buf, lifetime.Token); }
+                        try { n = await pump.ReadAsync(buf, lifetime.Token); }
                         catch (IOException) { break; }            // EIO on master = shell exited
                         catch (OperationCanceledException) { break; }
                         if (n <= 0) break;                        // EOF = shell exited
-                        lastActivity = DateTimeOffset.UtcNow;
+                        Touch();
                         await ws.SendAsync(buf.AsMemory(0, n), WebSocketMessageType.Binary, true, lifetime.Token);
                     }
                 }
-                catch (Exception ex) when (ex is OperationCanceledException or WebSocketException) { }
+                catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or ObjectDisposedException) { }
             }, lifetime.Token);
 
             // WS → PTY pump (browser keystrokes + control frames to shell).
-            var wsToPty = Task.Run(async () =>
+            wsToPty = Task.Run(async () =>
             {
                 var buf = new byte[8192];
                 try
@@ -158,34 +210,38 @@ public static class TerminalEndpoints
                     {
                         var result = await ws.ReceiveAsync(buf, lifetime.Token);
                         if (result.MessageType == WebSocketMessageType.Close) { closeReason = "user"; break; }
-                        lastActivity = DateTimeOffset.UtcNow;
+                        Touch();
 
                         if (result.MessageType == WebSocketMessageType.Text)
                         {
                             // Control channel: JSON like {"t":"resize","rows":40,"cols":120}.
-                            if (TryHandleControl(buf.AsSpan(0, result.Count), session)) continue;
+                            if (TryHandleControl(buf.AsSpan(0, result.Count), pump)) continue;
                         }
                         // Otherwise raw keystrokes → shell stdin.
-                        await session.Master.WriteAsync(buf.AsMemory(0, result.Count), lifetime.Token);
-                        await session.Master.FlushAsync(lifetime.Token);
+                        await pump.WriteAsync(buf.AsMemory(0, result.Count), lifetime.Token);
                     }
                 }
-                catch (Exception ex) when (ex is OperationCanceledException or WebSocketException) { }
+                catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or ObjectDisposedException) { }
             }, lifetime.Token);
 
             // Idle watchdog: cancel the whole thing if no traffic for IdleTimeout.
-            var idleWatch = Task.Run(async () =>
+            idleWatch = Task.Run(async () =>
             {
-                while (!lifetime.IsCancellationRequested)
+                try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(15), lifetime.Token);
-                    if (DateTimeOffset.UtcNow - lastActivity > IdleTimeout)
+                    while (!lifetime.IsCancellationRequested)
                     {
-                        closeReason = "idle";
-                        lifetime.Cancel();
-                        break;
+                        await Task.Delay(TimeSpan.FromSeconds(15), lifetime.Token);
+                        var idle = DateTime.UtcNow.Ticks - Volatile.Read(ref lastActivityTicks);
+                        if (idle > IdleTimeout.Ticks)
+                        {
+                            closeReason = "idle";
+                            lifetime.Cancel();
+                            break;
+                        }
                     }
                 }
+                catch (OperationCanceledException) { }
             }, lifetime.Token);
 
             // Whichever finishes first ends the session.
@@ -201,6 +257,11 @@ public static class TerminalEndpoints
         }
         finally
         {
+            // Await the pumps BEFORE disposing the PTY / closing the WS — otherwise
+            // DisposeAsync closes the master fd while a pump is mid read/write
+            // (ObjectDisposedException), and a concurrent ws.Send vs ws.Close throws.
+            lifetime.Cancel();
+            await Task.WhenAll(Swallow(ptyToWs), Swallow(wsToPty), Swallow(idleWatch));
             if (session is not null) await session.DisposeAsync();
             registry.ReleaseSlot();
             try
@@ -214,7 +275,13 @@ public static class TerminalEndpoints
         }
     }
 
-    /// <summary>Parse a JSON control frame; returns true if it was a control message.</summary>
+    /// <summary>Await a task and swallow any fault — used on teardown where the
+    /// pumps fault with cancellation/disposed/WS errors that are expected.</summary>
+    private static async Task Swallow(Task t) { try { await t; } catch { /* expected on teardown */ } }
+
+    /// <summary>Parse a JSON control frame; returns true if it was a control message.
+    /// Tolerant of malformed input from a buggy/hostile client — never throws (the
+    /// caller is on a root shell, so a bad frame must not crash the pump).</summary>
     private static bool TryHandleControl(ReadOnlySpan<byte> bytes, IPtySession session)
     {
         // Cheap guard: control frames start with '{'.
@@ -223,16 +290,18 @@ public static class TerminalEndpoints
         {
             using var doc = JsonDocument.Parse(bytes.ToArray());
             var root = doc.RootElement;
-            if (!root.TryGetProperty("t", out var t)) return false;
+            if (root.ValueKind != JsonValueKind.Object) return false;
+            if (!root.TryGetProperty("t", out var t) || t.ValueKind != JsonValueKind.String) return false;
             if (t.GetString() == "resize" &&
-                root.TryGetProperty("rows", out var r) && root.TryGetProperty("cols", out var c))
+                root.TryGetProperty("rows", out var r) && r.TryGetInt32(out var rows) &&
+                root.TryGetProperty("cols", out var c) && c.TryGetInt32(out var cols))
             {
-                session.Resize(new PtySize((ushort)Math.Clamp(r.GetInt32(), 1, 1000),
-                                           (ushort)Math.Clamp(c.GetInt32(), 1, 1000)));
+                session.Resize(new PtySize((ushort)Math.Clamp(rows, 1, 1000),
+                                           (ushort)Math.Clamp(cols, 1, 1000)));
                 return true;
             }
         }
-        catch (JsonException) { /* not a control frame — treat as keystrokes */ }
+        catch (Exception) { /* malformed → treat as keystrokes, never crash the pump */ }
         return false;
     }
 
@@ -245,6 +314,17 @@ public static class TerminalEndpoints
     }
 
     private static System.Net.IPAddress? ClientIp(HttpContext ctx) => ctx.Connection.RemoteIpAddress;
+
+    /// <summary>Pick an interactive shell, preferring bash, falling back to sh
+    /// (Alpine/busybox ISO target ships /bin/sh, not /bin/bash). The "-i" forces
+    /// interactive mode so the prompt + line editing work even though stdin is a
+    /// PTY (bash usually infers this, but being explicit is harmless and helps sh).</summary>
+    private static (string shell, string[] args) ResolveShell()
+    {
+        if (File.Exists("/bin/bash")) return ("/bin/bash", new[] { "-i" });
+        if (File.Exists("/usr/bin/bash")) return ("/usr/bin/bash", new[] { "-i" });
+        return ("/bin/sh", new[] { "-i" });
+    }
 
     public sealed record TerminalOpenRequest(string? Code);
     public sealed record TerminalTicketResponse(string Ticket);

@@ -4,6 +4,7 @@ using Moq;
 using NetFirewall.Models.Vpn;
 using NetFirewall.Services.Processes;
 using NetFirewall.Services.Vpn;
+using NetFirewall.Tests.Infra;
 using Xunit;
 
 namespace NetFirewall.Tests.Vpn;
@@ -13,6 +14,9 @@ namespace NetFirewall.Tests.Vpn;
 /// Verifies key generation parsing, the apply script's hot-reload-vs-cold-up
 /// branch, and exception swallowing on file/runner errors.
 /// </summary>
+// WireGuardApplyService is [SupportedOSPlatform("linux")]; [LinuxOnlyFact] skips
+// these off Linux. This class attribute keeps CA1416 quiet on the call sites.
+[System.Runtime.Versioning.SupportedOSPlatform("linux")]
 public class WireGuardApplyServiceTests : IDisposable
 {
     private readonly string _tempDir;
@@ -50,7 +54,7 @@ public class WireGuardApplyServiceTests : IDisposable
 
     // ── GenerateKeyPair ────────────────────────────────────────────────
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task GenerateKeyPairAsync_ParsesTwoLineOutputIntoTuple()
     {
         _runner.Setup(r => r.RunAsync("/bin/bash", It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
@@ -62,7 +66,7 @@ public class WireGuardApplyServiceTests : IDisposable
         Assert.Equal("PUB_KEY_BASE64", pub);
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task GenerateKeyPairAsync_NonZeroExit_Throws()
     {
         _runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
@@ -71,7 +75,7 @@ public class WireGuardApplyServiceTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => CreateSvc().GenerateKeyPairAsync());
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task GenerateKeyPairAsync_LessThanTwoLines_Throws()
     {
         _runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
@@ -82,7 +86,7 @@ public class WireGuardApplyServiceTests : IDisposable
 
     // ── GeneratePresharedKey ───────────────────────────────────────────
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task GeneratePresharedKeyAsync_TrimsTrailingNewlineFromOutput()
     {
         _runner.Setup(r => r.RunAsync("wg", "genpsk", It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
@@ -93,7 +97,7 @@ public class WireGuardApplyServiceTests : IDisposable
         Assert.Equal("PSK_BASE64", psk); // newline trimmed
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task GeneratePresharedKeyAsync_NonZeroExit_Throws()
     {
         _runner.Setup(r => r.RunAsync("wg", "genpsk", It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
@@ -104,7 +108,7 @@ public class WireGuardApplyServiceTests : IDisposable
 
     // ── ApplyAsync ─────────────────────────────────────────────────────
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_HappyPath_WritesConfig_AndRunsBash_AndReturnsSuccess()
     {
         _config.Setup(c => c.GenerateServerConfig(It.IsAny<WgServer>(), It.IsAny<IReadOnlyList<WgPeer>>()))
@@ -131,7 +135,7 @@ public class WireGuardApplyServiceTests : IDisposable
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_BashFails_ResultCarriesExitCodeAndErrorOutput()
     {
         _config.Setup(c => c.GenerateServerConfig(It.IsAny<WgServer>(), It.IsAny<IReadOnlyList<WgPeer>>()))
@@ -146,7 +150,7 @@ public class WireGuardApplyServiceTests : IDisposable
         Assert.Contains("interface already exists", result.Error);
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_RunnerThrows_CaughtAndReturnedAsResult()
     {
         _config.Setup(c => c.GenerateServerConfig(It.IsAny<WgServer>(), It.IsAny<IReadOnlyList<WgPeer>>()))
@@ -163,7 +167,7 @@ public class WireGuardApplyServiceTests : IDisposable
 
     // ── StopAsync ──────────────────────────────────────────────────────
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task StopAsync_RunsWgQuickDown_AndPropagatesResult()
     {
         _runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))

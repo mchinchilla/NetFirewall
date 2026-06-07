@@ -25,8 +25,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _container = new PostgreSqlBuilder()
-            .WithImage("postgres:16-alpine")
+        // Image passed to the ctor (the parameterless PostgreSqlBuilder() is obsolete).
+        _container = new PostgreSqlBuilder("postgres:16-alpine")
             .WithDatabase("netfirewall_tests")
             .WithUsername("nf")
             .WithPassword("nf")

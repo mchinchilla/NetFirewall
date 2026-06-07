@@ -25,7 +25,8 @@ public sealed class LinuxPtyService : IPtyService
     {
         var win = new Native.Winsize { ws_row = size.Rows, ws_col = size.Cols };
 
-        // 1) Allocate the master/slave pair. openpty lives in libutil on glibc.
+        // 1) Allocate the master/slave pair. Native.openpty tries libc (modern
+        //    glibc ≥ 2.34) then falls back to libutil.so.1 (older systems).
         int master, slave;
         int rc = Native.openpty(out master, out slave, IntPtr.Zero, IntPtr.Zero, ref win);
         if (rc != 0)
@@ -41,9 +42,6 @@ public sealed class LinuxPtyService : IPtyService
             Native.posix_spawn_file_actions_init(faPtr);
             Native.posix_spawnattr_init(attrPtr);
 
-            // New session leader so the slave becomes the child's controlling tty.
-            Native.posix_spawnattr_setflags(attrPtr, Native.POSIX_SPAWN_SETSID);
-
             // Wire the slave onto the child's stdio, then close the fds the child
             // doesn't need (the master, and the now-duplicated slave).
             Native.posix_spawn_file_actions_adddup2(faPtr, slave, 0);
@@ -52,10 +50,20 @@ public sealed class LinuxPtyService : IPtyService
             Native.posix_spawn_file_actions_addclose(faPtr, master);
             if (slave > 2) Native.posix_spawn_file_actions_addclose(faPtr, slave);
 
-            var argv = BuildArgv(shell, args);
+            // CONTROLLING TERMINAL: an interactive shell needs the slave to be its
+            // controlling tty, or it exits immediately / has no job control — exactly
+            // the "blank terminal, session ended" symptom. dup2'ing the slave onto fd
+            // 0 does NOT make it the ctty: Linux assigns a ctty only on a real open()
+            // of the tty by a session leader, which posix_spawn can't do (no ioctl in
+            // file_actions). So we exec through `setsid --ctty`, which does setsid() +
+            // ioctl(TIOCSCTTY) natively in the child after fd 0 is the slave.
+            // POSIX_SPAWN_SETSID is therefore NOT set (setsid does it). The returned
+            // pid is setsid's — the session + process-group leader — so dispose's
+            // kill(-pid, …) reaps the whole group.
+            var (spawnPath, argv) = WrapWithSetsid(shell, args);
             var envp = BuildEnvp(env);
 
-            rc = Native.posix_spawn(out pid, shell, faPtr, attrPtr, argv, envp);
+            rc = Native.posix_spawn(out pid, spawnPath, faPtr, attrPtr, argv, envp);
         }
         finally
         {
@@ -77,6 +85,27 @@ public sealed class LinuxPtyService : IPtyService
         Native.close(slave);
 
         return new LinuxPtySession(master, pid);
+    }
+
+    // Prefer `setsid --ctty <shell> <args...>` so the child gets a real controlling
+    // terminal. Falls back to exec'ing the shell directly if setsid is missing (rare
+    // on Debian/util-linux; the shell then runs without a ctty — degraded, not fatal).
+    private static (string path, string?[] argv) WrapWithSetsid(string shell, IReadOnlyList<string> args)
+    {
+        string? setsid = File.Exists("/usr/bin/setsid") ? "/usr/bin/setsid"
+                       : File.Exists("/bin/setsid") ? "/bin/setsid"
+                       : null;
+        if (setsid is null)
+            return (shell, BuildArgv(shell, args));
+
+        // argv: setsid --ctty <shell> <args...> NULL
+        var argv = new string?[args.Count + 4];
+        argv[0] = setsid;
+        argv[1] = "--ctty";
+        argv[2] = shell;
+        for (int i = 0; i < args.Count; i++) argv[i + 3] = args[i];
+        argv[^1] = null;
+        return (setsid, argv);
     }
 
     private static string?[] BuildArgv(string shell, IReadOnlyList<string> args)

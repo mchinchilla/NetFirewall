@@ -4,9 +4,10 @@ using System.Runtime.Versioning;
 namespace NetFirewall.Daemon.Pty;
 
 /// <summary>
-/// libc / libutil P/Invokes for PTY allocation + spawning. Constants and struct
-/// layout are Linux/glibc (the daemon is Linux-only). Validated end-to-end by the
-/// Phase 3a spike under the daemon's systemd sandbox.
+/// libc P/Invokes for PTY allocation + spawning. Constants and struct layout are
+/// Linux/glibc (the daemon is Linux-only). openpty is loaded from libc with a
+/// libutil.so.1 fallback — see <see cref="openpty"/> (libutil.so as a bare name is
+/// gone on modern glibc, which threw DllNotFoundException at runtime).
 /// </summary>
 [SupportedOSPlatform("linux")]
 internal static class Native
@@ -33,9 +34,25 @@ internal static class Native
         public ushort ws_ypixel;
     }
 
-    // ── PTY allocation (libutil on glibc) ──
-    [DllImport("libutil", SetLastError = true, EntryPoint = "openpty")]
-    public static extern int openpty(out int amaster, out int aslave, IntPtr name, IntPtr termp, ref Winsize win);
+    // ── PTY allocation ──
+    // openpty's home moved: on modern glibc (Debian 13 / glibc ≥ 2.34) it lives in
+    // libc.so and "libutil.so" no longer exists as a loadable name → [DllImport("libutil")]
+    // throws DllNotFoundException at runtime (the bug that closed every session). On
+    // older systems it's only in libutil. So: try libc first, fall back to libutil.so.1.
+    // (Two DllImports; OpenPty picks whichever loads.)
+    [DllImport("libc", SetLastError = true, EntryPoint = "openpty")]
+    private static extern int openpty_libc(out int amaster, out int aslave, IntPtr name, IntPtr termp, ref Winsize win);
+
+    [DllImport("libutil.so.1", SetLastError = true, EntryPoint = "openpty")]
+    private static extern int openpty_libutil(out int amaster, out int aslave, IntPtr name, IntPtr termp, ref Winsize win);
+
+    public static int openpty(out int amaster, out int aslave, IntPtr name, IntPtr termp, ref Winsize win)
+    {
+        try { return openpty_libc(out amaster, out aslave, name, termp, ref win); }
+        catch (DllNotFoundException) { /* glibc<2.34 path */ }
+        catch (EntryPointNotFoundException) { /* libc present but no openpty symbol */ }
+        return openpty_libutil(out amaster, out aslave, name, termp, ref win);
+    }
 
     // ── spawn (libc) ──
     [DllImport("libc", SetLastError = true)]

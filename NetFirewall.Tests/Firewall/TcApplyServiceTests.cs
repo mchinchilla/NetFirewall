@@ -3,10 +3,16 @@ using Microsoft.Extensions.Options;
 using Moq;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Processes;
+using NetFirewall.Tests.Infra;
 using Xunit;
 
 namespace NetFirewall.Tests.Firewall;
 
+// Exercises TcApplyService, which is [SupportedOSPlatform("linux")]. The
+// [LinuxOnlyFact] methods skip at runtime off Linux; this class attribute tells
+// the analyzer the call sites are linux-targeted too, so CA1416 stays quiet
+// without a blanket suppression.
+[System.Runtime.Versioning.SupportedOSPlatform("linux")]
 public class TcApplyServiceTests : IDisposable
 {
     private readonly string _tempRoot;
@@ -43,7 +49,7 @@ public class TcApplyServiceTests : IDisposable
             .Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessResult(exitCode, output, error));
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_HappyPath_WritesScript_RunsBash_AndAudits()
     {
         const string script = "#!/bin/bash\ntc qdisc replace dev eth0 root htb default 30\n";
@@ -76,7 +82,7 @@ public class TcApplyServiceTests : IDisposable
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_CreatesParentDirectoryWhenMissing()
     {
         var nested = Path.Combine(_tempRoot, "nested", "deeper", "tc.sh");
@@ -96,7 +102,7 @@ public class TcApplyServiceTests : IDisposable
         Assert.True(File.Exists(nested));
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_PropagatesBashFailure_AndDoesNotAudit()
     {
         _firewall.Setup(f => f.GenerateTcScriptAsync(It.IsAny<CancellationToken>()))
@@ -118,7 +124,7 @@ public class TcApplyServiceTests : IDisposable
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_GenerateThrows_IsCaughtAndReturnedAsResult()
     {
         _firewall.Setup(f => f.GenerateTcScriptAsync(It.IsAny<CancellationToken>()))
@@ -136,7 +142,7 @@ public class TcApplyServiceTests : IDisposable
         Assert.False(File.Exists(_scriptPath));
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_RunnerThrows_IsCaughtAndReturnedAsResult()
     {
         _firewall.Setup(f => f.GenerateTcScriptAsync(It.IsAny<CancellationToken>()))
@@ -153,7 +159,7 @@ public class TcApplyServiceTests : IDisposable
         Assert.Contains("hung up", result.Error);
     }
 
-    [Fact]
+    [LinuxOnlyFact]
     public async Task ApplyAsync_PassesConfiguredTimeoutToRunner()
     {
         _firewall.Setup(f => f.GenerateTcScriptAsync(It.IsAny<CancellationToken>()))

@@ -1,4 +1,4 @@
-using NetFirewall.Daemon.Pty;
+using NetFirewall.Services.Processes;
 using Xunit;
 
 namespace NetFirewall.Tests.Daemon;

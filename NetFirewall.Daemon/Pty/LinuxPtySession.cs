@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
 using NetFirewall.Services.Processes;
@@ -6,47 +5,66 @@ using NetFirewall.Services.Processes;
 namespace NetFirewall.Daemon.Pty;
 
 /// <summary>
-/// A live PTY + child. <see cref="Master"/> is a <see cref="FileStream"/> over the
-/// master fd for async read/write. Teardown (dispose) sends SIGHUP then SIGKILL and
-/// reaps the child, guaranteeing no detached root shell survives a dropped
-/// WebSocket.
+/// A live PTY + child. I/O goes through a SEQUENTIAL, effectively-unbuffered
+/// <see cref="FileStream"/> over the master fd. NOT <see cref="RandomAccess"/>:
+/// RandomAccess uses pread/pwrite, which throw "Stream does not support seeking"
+/// on a PTY master (a non-seekable char device) — that was the regression that
+/// closed every session instantly with reason=shell_exit. bufferSize:1 means no
+/// shared buffer state, so the two pumps (read = shell output, write = keystrokes)
+/// run concurrently safely — a PTY's two directions are independent in the kernel.
+///
+/// Teardown sends SIGHUP then SIGKILL to the child's PROCESS GROUP (negative pid —
+/// setsid made it the session/group leader) so grandchildren don't orphan, then
+/// reaps. The background reaper is cancelled and awaited before the final blocking
+/// reap so only one thread ever calls waitpid on the pid.
 /// </summary>
 [SupportedOSPlatform("linux")]
 internal sealed class LinuxPtySession : IPtySession
 {
     private readonly int _masterFd;
+    private readonly SafeFileHandle _handle;
     private readonly FileStream _master;
-    private readonly object _lock = new();
     private readonly TaskCompletionSource<int> _exited =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _reaperCts = new();
+    private readonly Task _reaper;
     private int _disposed;
 
     public LinuxPtySession(int masterFd, int pid)
     {
         _masterFd = masterFd;
         ProcessId = pid;
-        // ownsHandle:false — we close the fd ourselves in dispose AFTER reaping,
-        // so the FileStream finalizer can't race the close.
-        _master = new FileStream(new SafeFileHandle((IntPtr)masterFd, ownsHandle: false),
-            FileAccess.ReadWrite);
-        // Poll-based reaper: a SIGCHLD handler would fight the .NET runtime, so we
-        // waitpid(WNOHANG) on a background loop. Cheap (250ms) and the master-EOF
-        // detection in the caller is the fast path; this just guarantees the child
-        // is reaped and WaitForExitAsync completes even if no one reads the master.
-        _ = Task.Run(ReaperLoopAsync);
+        // The master is a PTY (character device) — NOT seekable. RandomAccess
+        // (pread/pwrite) fails on it with ESPIPE, which made the first read throw
+        // and the session close instantly. Use a SEQUENTIAL read/write FileStream
+        // instead. bufferSize:1 = effectively unbuffered, so concurrent ReadAsync
+        // (output pump) and WriteAsync (input pump) don't share buffer state — a
+        // PTY's two directions are independent in the kernel. (The spike validated
+        // this exact pattern; RandomAccess was the regression.)
+        // ownsHandle:false on the SafeFileHandle — we close the raw fd ourselves in
+        // dispose AFTER reaping so nothing races the close.
+        _handle = new SafeFileHandle((IntPtr)masterFd, ownsHandle: false);
+        _master = new FileStream(_handle, FileAccess.ReadWrite, bufferSize: 1, isAsync: true);
+        _reaper = Task.Run(ReaperLoopAsync);
     }
 
-    public Stream Master => _master;
     public int ProcessId { get; }
     public bool HasExited => _exited.Task.IsCompleted;
+
+    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        => _master.ReadAsync(buffer, ct);
+
+    public async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        await _master.WriteAsync(buffer, ct);
+        await _master.FlushAsync(ct);
+    }
 
     public void Resize(PtySize size)
     {
         if (HasExited) return;
         var win = new Native.Winsize { ws_row = size.Rows, ws_col = size.Cols };
-        // Best-effort: a resize on a dying tty can fail benignly.
-        Native.ioctl(_masterFd, Native.TIOCSWINSZ, ref win);
+        Native.ioctl(_masterFd, Native.TIOCSWINSZ, ref win); // best-effort
     }
 
     public Task<int> WaitForExitAsync(CancellationToken ct = default)
@@ -62,16 +80,8 @@ internal sealed class LinuxPtySession : IPtySession
             while (!_reaperCts.IsCancellationRequested)
             {
                 int rc = Native.waitpid(ProcessId, out int status, Native.WNOHANG);
-                if (rc == ProcessId)
-                {
-                    _exited.TrySetResult(DecodeStatus(status));
-                    return;
-                }
-                if (rc < 0) // ECHILD etc. — already reaped or gone.
-                {
-                    _exited.TrySetResult(-1);
-                    return;
-                }
+                if (rc == ProcessId) { _exited.TrySetResult(DecodeStatus(status)); return; }
+                if (rc < 0) { _exited.TrySetResult(-1); return; } // ECHILD: already gone
                 await Task.Delay(250, _reaperCts.Token).ConfigureAwait(false);
             }
         }
@@ -89,35 +99,31 @@ internal sealed class LinuxPtySession : IPtySession
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        // Stop reading/writing the master first.
-        try { _master.Dispose(); } catch { /* best effort */ }
-
-        // Terminate the child if it's still alive: SIGHUP (let the shell clean up),
-        // brief grace, then SIGKILL.
+        // Terminate the child's whole PROCESS GROUP if still alive: SIGHUP (let the
+        // shell + its jobs clean up), brief grace, then SIGKILL. Negative pid targets
+        // the group led by bash (POSIX_SPAWN_SETSID made it the session/group leader),
+        // so grandchildren don't orphan into detached root processes.
         if (!HasExited)
         {
-            Native.kill(ProcessId, Native.SIGHUP);
-            try
-            {
-                await _exited.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                Native.kill(ProcessId, Native.SIGKILL);
-            }
+            Native.kill(-ProcessId, Native.SIGHUP);
+            try { await _exited.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+            catch (TimeoutException) { Native.kill(-ProcessId, Native.SIGKILL); }
         }
 
-        // Make sure the reaper observes the exit (so no zombie), then stop it.
+        // Stop the background reaper and AWAIT it, so no two threads ever call
+        // waitpid on this pid concurrently.
+        _reaperCts.Cancel();
+        try { await _reaper.ConfigureAwait(false); } catch { /* cancellation */ }
+
+        // Authoritative final reap if the reaper didn't observe the exit.
         if (!HasExited)
         {
-            // Final synchronous reap attempt (blocking, but bounded — child was SIGKILLed).
-            Native.waitpid(ProcessId, out _, 0);
+            Native.waitpid(ProcessId, out _, 0); // bounded — child was SIGKILLed
             _exited.TrySetResult(-Native.SIGKILL);
         }
-        _reaperCts.Cancel();
-        _reaperCts.Dispose();
 
-        // Close the master fd we kept ownership of.
-        Native.close(_masterFd);
+        _reaperCts.Dispose();
+        _master.Dispose();          // disposes the FileStream + SafeFileHandle...
+        Native.close(_masterFd);    // ...but ownsHandle:false, so we close the fd ourselves.
     }
 }

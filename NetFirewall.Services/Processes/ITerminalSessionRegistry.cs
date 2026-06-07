@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace NetFirewall.Daemon.Pty;
+namespace NetFirewall.Services.Processes;
 
 /// <summary>
 /// Mints and redeems one-time attach tickets for the web terminal, and enforces a
@@ -9,6 +9,10 @@ namespace NetFirewall.Daemon.Pty;
 /// short-lived single-use ticket bound to the caller's (user, session); the WS
 /// <c>GET /v1/terminal/attach</c> redeems it. A WS upgrade can't carry an
 /// antiforgery token, so the unguessable ticket is what authorizes the attach.
+///
+/// Pure in-memory logic (no platform code) — lives in NetFirewall.Services next to
+/// <see cref="IPtyService"/> so it's testable cross-platform without the daemon
+/// assembly's linux marking.
 /// </summary>
 public interface ITerminalSessionRegistry
 {

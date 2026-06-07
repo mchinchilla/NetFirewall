@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.Extensions.Options;
+using NetFirewall.Services.Daemon;
 
 namespace NetFirewall.Daemon.Auth;
 

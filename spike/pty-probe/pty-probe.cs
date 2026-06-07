@@ -77,9 +77,8 @@ IntPtr attr = attrHandle.AddrOfPinnedObject();
 posix_spawn_file_actions_init(fa);
 posix_spawnattr_init(attr);
 
-const short POSIX_SPAWN_SETSID = 0x80; // glibc value
-rc = posix_spawnattr_setflags(attr, POSIX_SPAWN_SETSID);
-if (rc != 0) Bad($"posix_spawnattr_setflags(SETSID) rc={rc} — may be glibc<2.26; child won't get a ctty");
+// No POSIX_SPAWN_SETSID — `setsid --ctty` (in argv) does setsid()+TIOCSCTTY
+// natively in the child, giving it a real controlling terminal.
 
 // dup slave → 0,1,2 ; then close the original master+slave fds in the child.
 posix_spawn_file_actions_adddup2(fa, slave, 0);
@@ -88,10 +87,15 @@ posix_spawn_file_actions_adddup2(fa, slave, 2);
 posix_spawn_file_actions_addclose(fa, master);
 if (slave > 2) posix_spawn_file_actions_addclose(fa, slave);
 
-string?[] argv = { "/bin/sh", "-c", "tty; echo COLUMNS=$(tput cols 2>/dev/null) LINES=$(tput lines 2>/dev/null); echo PTY_CHILD_OK; exit 7", null };
-string?[] envp = { "TERM=xterm-256color", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", null };
+// Step 3 spawns a one-shot via setsid --ctty (mirrors the daemon's real path:
+// the child gets a controlling terminal so an interactive shell would survive).
+// Step 5 below spawns a REAL interactive bash and proves it stays alive.
+string?[] argv = { "/usr/bin/setsid", "--ctty", "/bin/sh", "-c",
+    "tty; echo COLUMNS=$(tput cols 2>/dev/null) LINES=$(tput lines 2>/dev/null); echo PTY_CHILD_OK; exit 7", null };
+string?[] envp = { "TERM=xterm-256color", "HOME=/root", "USER=root",
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", null };
 
-rc = posix_spawn(out int pid, "/bin/sh", fa, attr, argv, envp);
+rc = posix_spawn(out int pid, "/usr/bin/setsid", fa, attr, argv, envp);
 posix_spawn_file_actions_destroy(fa);
 posix_spawnattr_destroy(attr);
 faHandle.Free();
@@ -138,7 +142,101 @@ Console.Write(outp);
 if (!outp.EndsWith("\n")) Console.WriteLine();
 Console.WriteLine("---------------------------------");
 
+// ---- Step 5: INTERACTIVE shell must STAY ALIVE -------------------------------
+// This is the case the daemon's web terminal exercises and that the one-shot
+// above did NOT: an interactive bash on a PTY. The earlier "blank terminal,
+// session ended" symptom = this shell exiting immediately. We spawn it exactly
+// like the daemon now does (setsid --ctty + full env), feed it a command via the
+// master, and verify it's alive enough to echo a marker back.
+Console.WriteLine();
+Console.WriteLine("== Step 5: interactive shell stays alive ==");
+RunInteractive();
+
 Done();
+
+void RunInteractive()
+{
+    var win = new winsize { ws_row = 24, ws_col = 80 };
+    int m = -1, s = -1, rc2;
+    try { rc2 = openpty(out m, out s, IntPtr.Zero, IntPtr.Zero, ref win); }
+    catch (DllNotFoundException) { rc2 = openpty_libc(out m, out s, IntPtr.Zero, IntPtr.Zero, ref win); }
+    if (rc2 != 0) { Bad($"Step5 openpty rc={rc2}"); return; }
+
+    var fa2 = GCHandle.Alloc(new byte[512], GCHandleType.Pinned);
+    var at2 = GCHandle.Alloc(new byte[512], GCHandleType.Pinned);
+    posix_spawn_file_actions_init(fa2.AddrOfPinnedObject());
+    posix_spawnattr_init(at2.AddrOfPinnedObject());
+    posix_spawn_file_actions_adddup2(fa2.AddrOfPinnedObject(), s, 0);
+    posix_spawn_file_actions_adddup2(fa2.AddrOfPinnedObject(), s, 1);
+    posix_spawn_file_actions_adddup2(fa2.AddrOfPinnedObject(), s, 2);
+    posix_spawn_file_actions_addclose(fa2.AddrOfPinnedObject(), m);
+    if (s > 2) posix_spawn_file_actions_addclose(fa2.AddrOfPinnedObject(), s);
+
+    string shell = File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+    string?[] argv2 = { "/usr/bin/setsid", "--ctty", shell, "-i", null };
+    string?[] envp2 = { "TERM=xterm-256color", "HOME=/root", "USER=root", "LOGNAME=root",
+        "SHELL=" + shell, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", null };
+
+    int rc3 = posix_spawn(out int pid2, "/usr/bin/setsid", fa2.AddrOfPinnedObject(), at2.AddrOfPinnedObject(), argv2, envp2);
+    posix_spawn_file_actions_destroy(fa2.AddrOfPinnedObject());
+    posix_spawnattr_destroy(at2.AddrOfPinnedObject());
+    fa2.Free(); at2.Free();
+    if (rc3 != 0) { Bad($"Step5 posix_spawn(setsid {shell} -i) rc={rc3} errno={Marshal.GetLastPInvokeError()}"); close(m); close(s); return; }
+    close(s);
+
+    var fsi = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle((IntPtr)m, ownsHandle: true), FileAccess.ReadWrite);
+
+    // Send a command and read for a short window. If bash is alive it echoes the
+    // marker (and runs the echo). If it died immediately we get little/no output.
+    var cmd = System.Text.Encoding.ASCII.GetBytes("echo SPIKE_INTERACTIVE_OK\n");
+    bool exitedEarly = false;
+    try { fsi.Write(cmd, 0, cmd.Length); fsi.Flush(); }
+    catch (Exception ex) { Bad($"Step5 write to master failed (shell already dead?): {ex.GetType().Name}"); exitedEarly = true; }
+
+    var got = new System.Text.StringBuilder();
+    if (!exitedEarly)
+    {
+        var deadline = Environment.TickCount64 + 1500;
+        var rbuf = new byte[4096];
+        // Non-blocking-ish: poll waitpid + read with a soft deadline.
+        while (Environment.TickCount64 < deadline)
+        {
+            int wr = waitpid(pid2, out _, 1 /*WNOHANG*/);
+            if (wr == pid2) { exitedEarly = true; break; }
+            // best-effort read; FileStream.Read blocks, so guard with a tiny sleep loop
+            try
+            {
+                if (fsi.CanRead)
+                {
+                    var t = fsi.ReadAsync(rbuf, 0, rbuf.Length);
+                    if (t.Wait(300) && t.Result > 0)
+                        got.Append(System.Text.Encoding.UTF8.GetString(rbuf, 0, t.Result));
+                }
+            }
+            catch (IOException) { exitedEarly = true; break; }
+            catch (AggregateException) { exitedEarly = true; break; }
+        }
+    }
+
+    var text = got.ToString();
+    if (text.Contains("SPIKE_INTERACTIVE_OK"))
+        Ok("interactive shell is ALIVE and processed input (controlling tty works)");
+    else if (exitedEarly || text.Length == 0)
+        Bad("interactive shell EXITED IMMEDIATELY or produced no output — this is the 'blank terminal' bug");
+    else
+        Ok($"interactive shell produced output ({text.Length} bytes) — likely alive");
+
+    // Teardown: kill the process group (setsid is the leader), reap.
+    kill(-pid2, 1 /*SIGHUP*/);
+    kill(-pid2, 9 /*SIGKILL*/);
+    waitpid(pid2, out _, 0);
+    try { fsi.Dispose(); } catch { }
+
+    Console.WriteLine("---- step5 output (verbatim) ----");
+    Console.Write(text);
+    if (text.Length > 0 && !text.EndsWith("\n")) Console.WriteLine();
+    Console.WriteLine("---------------------------------");
+}
 
 void Done()
 {
@@ -184,6 +282,8 @@ static extern int ioctl(int fd, ulong request, ref winsize win);
 static extern int close(int fd);
 [DllImport("libc", SetLastError = true)]
 static extern int waitpid(int pid, out int status, int options);
+[DllImport("libc", SetLastError = true)]
+static extern int kill(int pid, int sig);
 [DllImport("libc")]
 static extern uint getuid();
 
