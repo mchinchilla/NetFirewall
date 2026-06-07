@@ -35,16 +35,17 @@ internal sealed class LinuxPtySession : IPtySession
         _masterFd = masterFd;
         ProcessId = pid;
         // The master is a PTY (character device) — NOT seekable. RandomAccess
-        // (pread/pwrite) fails on it with ESPIPE, which made the first read throw
-        // and the session close instantly. Use a SEQUENTIAL read/write FileStream
-        // instead. bufferSize:1 = effectively unbuffered, so concurrent ReadAsync
-        // (output pump) and WriteAsync (input pump) don't share buffer state — a
-        // PTY's two directions are independent in the kernel. (The spike validated
-        // this exact pattern; RandomAccess was the regression.)
-        // ownsHandle:false on the SafeFileHandle — we close the raw fd ourselves in
-        // dispose AFTER reaping so nothing races the close.
+        // (pread/pwrite) fails on it with ESPIPE, so use a SEQUENTIAL FileStream.
+        // isAsync: FALSE — openpty's fd is a plain (synchronous, non-overlapped) fd;
+        // FileStream(isAsync:true) rejects it with "Handle does not support
+        // asynchronous operations". With isAsync:false, ReadAsync/WriteAsync still
+        // work (offloaded to the thread pool) — fine for an interactive terminal.
+        // bufferSize:1 = effectively unbuffered, so the read pump (shell output) and
+        // write pump (keystrokes) don't share buffer state — a PTY's two directions
+        // are independent in the kernel.
+        // ownsHandle:false — we close the raw fd ourselves in dispose after reaping.
         _handle = new SafeFileHandle((IntPtr)masterFd, ownsHandle: false);
-        _master = new FileStream(_handle, FileAccess.ReadWrite, bufferSize: 1, isAsync: true);
+        _master = new FileStream(_handle, FileAccess.ReadWrite, bufferSize: 1, isAsync: false);
         _reaper = Task.Run(ReaperLoopAsync);
     }
 
