@@ -27,11 +27,12 @@ warn() { printf '\033[1;33m!!\033[0m  %s\n' "$*" >&2; }
 [[ $EUID -eq 0 ]] || { echo "must run as root"; exit 1; }
 
 log "Stopping + disabling services"
+systemctl disable --now netfirewall-dhcp.service   2>/dev/null || true
 systemctl disable --now netfirewall-web.service    2>/dev/null || true
 systemctl disable --now netfirewall-daemon.service 2>/dev/null || true
 
 log "Removing systemd units"
-rm -f /etc/systemd/system/netfirewall-{daemon,web}.service
+rm -f /etc/systemd/system/netfirewall-{daemon,web,dhcp}.service
 systemctl daemon-reload
 
 log "Removing sysctl drop-in"

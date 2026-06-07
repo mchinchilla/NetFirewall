@@ -144,6 +144,11 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardService,
                            NetFirewall.Services.Vpn.WireGuardService>();
 builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
                               NetFirewall.Services.Vpn.WireGuardConfigService>();
+// Bridges WireGuard ↔ policy-routing/firewall rows (egress device routing,
+// auto routing scaffold, per-peer NAT/forward). Scoped — pure DB writes via
+// IFirewallService + IPolicyRoutingService.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnRoutingService,
+                           NetFirewall.Services.Vpn.VpnRoutingService>();
 
 // Network objects — alias-style address objects. Filter / NAT / mangle
 // generators resolve names → flat CIDRs through INetworkObjectResolver.

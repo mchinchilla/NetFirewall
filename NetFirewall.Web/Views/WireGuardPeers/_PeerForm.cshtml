@@ -32,6 +32,35 @@
         </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Endpoint), Label = "Endpoint (optional)", Value = Model.Endpoint,
+            Placeholder = "remote.example:51820",
+            Help = "host:port of the remote side. Required when this firewall is in CLIENT mode (the peer is the upstream server); leave empty for inbound road-warrior peers."
+        })
+
+        @* Per-peer routing intent (server mode). Drives the generated NAT/forward +
+           the exported client config's AllowedIPs. *@
+        <div x-data="{ rmode: '@Model.RouteMode' }">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.RouteMode), Label = "Access (what this peer can reach)", Kind = FormFieldKind.Select,
+                Value = Model.RouteMode, AlpineModel = "rmode",
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("full", "Full tunnel — LAN + internet via firewall"),
+                    new FormFieldViewModel.SelectOption("split", "Split tunnel — LAN only"),
+                    new FormFieldViewModel.SelectOption("restricted", "Restricted — only specific subnets/hosts"),
+                    new FormFieldViewModel.SelectOption("site", "Site-to-site — remote LAN behind this peer"),
+                },
+                Help = "Full = client routes everything through the firewall. Restricted/Site need the subnets below."
+            })
+            <div x-show="rmode === 'restricted' || rmode === 'site' || rmode === 'split'" x-cloak class="mt-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.AllowedSubnetsRaw), Label = "Subnets (comma-separated)", Kind = FormFieldKind.Textarea,
+                    Value = Model.AllowedSubnetsRaw, Placeholder = "192.168.99.0/24, 192.168.3.5/32",
+                    Help = "For restricted/site: the LAN targets. For split: optional override of the auto-detected LAN subnets."
+                })
+            </div>
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
             Value = Model.Description
         })

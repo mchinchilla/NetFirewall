@@ -11,6 +11,7 @@ Layout
   systemd/
     netfirewall-daemon.service   Privileged daemon (root, restricted CAPs)
     netfirewall-web.service      Unprivileged Web (netfirewall-web user)
+    netfirewall-dhcp.service     DHCP server (root, CAP_NET_BIND_SERVICE+RAW) — opt-in
 
   config/
     daemon.json.template         Production appsettings for the daemon
@@ -19,6 +20,7 @@ Layout
   env/
     daemon.env.template          DB password + peer UID (mode 0600 root)
     web.env.template             DB password + master key (mode 0640 root:netfirewall-web)
+    dhcp.env.template            DB conn + fallback interface (mode 0640 root) — opt-in
 
   nginx/
     netfirewall.conf             Reverse-proxy example for TLS termination

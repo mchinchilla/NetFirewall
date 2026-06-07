@@ -58,9 +58,14 @@ deploy/
   README.txt                            operational handbook
 ```
 
-The installer publishes **three** runtime targets (daemon, web, tui) plus the
-migration runner. The TUI ships as `/opt/tekium/tui/` with a wrapper at
-`/usr/local/bin/netfirewall-tui`. Daemon's `Daemon__AcceptedPeerUids` is
+The installer publishes the daemon, web, tui and Doctor runtime targets plus the
+migration runner — and, **opt-in**, the DHCP server. The TUI ships as
+`/opt/tekium/tui/` with a wrapper at `/usr/local/bin/netfirewall-tui`. The DHCP
+server is gated behind a prompt (`INSTALL_DHCP=yes`, default no — it binds UDP/67,
+not wanted on every host); when enabled it publishes to `$PREFIX/dhcp-server`,
+writes `/etc/netfirewall/dhcp.env` (DB conn + fallback `DHCP__Interface`), and
+installs+enables `netfirewall-dhcp.service`. Opting back out (`INSTALL_DHCP=no` on
+a re-run) stops and removes that unit. Daemon's `Daemon__AcceptedPeerUids` is
 populated with both the Web UID (so the Web reaches the socket) AND `0` (so
 `sudo netfirewall-tui` from a console reaches it too). The legacy single
 `Daemon__ExpectedPeerUid` is still honored for backward compat — the
@@ -76,9 +81,10 @@ sudo deploy/install.sh
 The installer creates `netfirewall` group + `netfirewall-web` user (system,
 nologin), lays out `/opt/tekium/{daemon,web,dhcp-server,Migrations,tui}`, `/etc/netfirewall/`,
 `/var/lib/netfirewall/{web,daemon}/`, `/var/log/netfirewall/` (with `/run/netfirewall/`
-provided by systemd `RuntimeDirectory=`), publishes both projects + the migration
-runner, generates an AES-256 master key for TOTP encryption, runs migrations,
-installs and enables both unit files.
+provided by systemd `RuntimeDirectory=`), publishes the projects + the migration
+runner (+ the DHCP server when `INSTALL_DHCP=yes`), generates an AES-256 master key
+for TOTP encryption, runs migrations, installs and enables the unit files (daemon +
+web always; `netfirewall-dhcp` when opted in).
 
 **Hardening highlights** (full list in the unit files):
 - Daemon runs as `root` but `CapabilityBoundingSet=CAP_NET_ADMIN
@@ -165,7 +171,7 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
 ### Service projects
 
 - **NetFirewall.Migrations** — standalone console (`netfirewall-migrate`) that applies / tracks / drift-checks the SQL files in `NetFirewall.Services/sql/migrations/`. NOT registered with Aspire — invoked via `bin/db.sh` or `dotnet run --project NetFirewall.Migrations`.
-- **NetFirewall.Doctor** — Spectre.Console requirements validator (`netfirewall-doctor` binary). Cross-platform (NO `[assembly: SupportedOSPlatform]`); Linux-only checks Skip off Linux. Validates env vars, **master-key sync between daemon.env and web.env**, paths, systemd units, daemon socket, DB + migrations. Each check is an `ICheck` returning `CheckResult` (Pass/Warn/Fail/Skip + remedy); fail-soft (never throws). `--json` + exit code for CI; `install.sh` publishes it and runs it as the post-install verification step. See `docs/doctor.md`. Pure check logic tested in `NetFirewall.Tests/Doctor/`.
+- **NetFirewall.Doctor** — Spectre.Console requirements validator (`netfirewall-doctor` binary). Cross-platform (NO `[assembly: SupportedOSPlatform]`); Linux-only checks Skip off Linux. Validates env vars, **master-key sync between daemon.env and web.env**, paths, systemd units, daemon socket, **DHCP server (deployment, config, configured-interface-exists, UDP/67 listener, its own DB connection)**, and **PostgreSQL (reachable, ≥ 14, `__migrations` + core tables present, pending/drifted migrations)**. DHCP is treated as **optional** (installer-gated behind `INSTALL_DHCP=yes`) so its absence Warns, not Fails. Each check is an `ICheck` returning `CheckResult` (Pass/Warn/Fail/Skip + remedy); fail-soft (never throws). `--service web|daemon|dhcp|all` filters; `--json` + exit code for CI; `install.sh` publishes it and runs it as the post-install verification step. See `docs/doctor.md`. Pure check logic tested in `NetFirewall.Tests/Doctor/`.
 - **NetFirewall.AppHost** — Aspire orchestrator (ApiService + Web + DhcpServer).
 - **NetFirewall.Tui** — Console UI built on Spectre.Console (`netfirewall-tui` binary). Talks to the same daemon Unix socket the Web does, via the lifted `IDaemonClient` in `NetFirewall.Services/Daemon/`. Auth: single-step login flow (username + password + TOTP/recovery in one screen) via `POST /v1/auth/login` on the daemon, token stored in-memory by `TuiSessionTokenProvider`. **TUI sessions are born elevated** (login already proved TOTP + operator is at console), so destructive endpoints don't re-prompt. Peer-cred middleware on the daemon (`SO_PEERCRED` Linux / `LOCAL_PEERCRED` macOS) gates the socket connection itself. Phases 0-3 shipped: skeleton + daemon ping + login/logout + **NetworkInterfacesScreen** (list, edit IP/mask/gateway/MAC/MTU, add new from physically-detected NICs, apply via daemon) + **RecoveryScreen** (break-glass: reset password, disable TOTP, clear lockout — root-peer-only via `[DaemonRequireRootPeerAttribute]`, no session needed; reachable when a user is locked out of the Web).
 - **NetFirewall.WanMonitor** — Background worker for dual-WAN monitoring/failover. Pings configured IPs through each interface (see `WanMonitorService`) and runs the bash commands listed in `appsettings.json` → `BashCommands.ExtraPrimaryCommands` / `ExtraSecondaryCommands` on state changes. Runs under systemd via `UseSystemd()`.

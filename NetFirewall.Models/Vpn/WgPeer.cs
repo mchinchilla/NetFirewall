@@ -17,6 +17,13 @@ public class WgPeer
     // Optional for inbound peers in 'server' mode — some site-to-site configs
     // also set Endpoint there for symmetric keepalive.
     [Map("endpoint")]              public string?  Endpoint            { get; set; }
+    // Per-peer routing intent (server mode), drives generated NAT/forward + the
+    // exported client config's AllowedIPs. 'full' = LAN+internet, 'split' = LAN only,
+    // 'restricted' = only AllowedSubnets, 'site' = site-to-site (AllowedSubnets are
+    // the remote LAN). DB CHECK chk_wg_peer_route_mode (migration 00032).
+    [Map("route_mode")]            public string   RouteMode           { get; set; } = "full";
+    // Target subnets for split/restricted/site modes.
+    [Map("allowed_subnets")]       public string[] AllowedSubnets      { get; set; } = Array.Empty<string>();
     [Map("description")]           public string?  Description         { get; set; }
     [Map("enabled")]               public bool     Enabled             { get; set; } = true;
     [Map("created_at")]            public DateTime CreatedAt           { get; set; }

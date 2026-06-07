@@ -26,9 +26,15 @@ var checks = new ICheck[]
         "ConnectionStrings__DefaultConnection", "NETFIREWALL_MASTER_KEY", "ASPNETCORE_URLS", "Daemon__Enabled"),
     new MasterKeySyncCheck(),
     new PathsCheck(),
+    new DhcpPathsCheck(),
     new SystemdUnitsCheck(),
     new DaemonSocketCheck(),
+    new DhcpConfigCheck(),
+    new DhcpInterfaceCheck(),
+    new DhcpListeningCheck(),
     new DatabaseCheck(),
+    new MigrationsPendingCheck(),
+    new DhcpDatabaseCheck(),
 };
 
 var selected = checks.Where(c =>

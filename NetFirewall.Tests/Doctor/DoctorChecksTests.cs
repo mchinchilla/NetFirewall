@@ -116,4 +116,137 @@ public sealed class DoctorChecksTests
         var r = await check.RunAsync(ctx, default);
         Assert.Equal(CheckStatus.Pass, r.Status);
     }
+
+    // ── DhcpConfigCheck ──
+    // A context built straight from init props (no host/DB), simulating resolved DHCP config.
+    private static DoctorContext DhcpCtx(string? conn, params string[] interfaces) => new()
+    {
+        IsLinux = false,
+        DhcpConnectionString = conn,
+        DhcpInterfaces = interfaces,
+        DhcpEnv = Env(("DHCP__Interface", "x")), // non-null so the check doesn't Skip as "no config"
+    };
+
+    [Fact]
+    public async Task DhcpConfig_passes_with_conn_and_interface()
+    {
+        var ctx = DhcpCtx("Host=db;Database=net_firewall", "ens256");
+        var r = await new DhcpConfigCheck().RunAsync(ctx, default);
+        Assert.Equal(CheckStatus.Pass, r.Status);
+        Assert.Contains("ens256", r.Message);
+    }
+
+    [Fact]
+    public async Task DhcpConfig_fails_on_placeholder_conn()
+    {
+        var ctx = DhcpCtx("Host=db;Password=__REPLACE__", "ens256");
+        var r = await new DhcpConfigCheck().RunAsync(ctx, default);
+        Assert.Equal(CheckStatus.Fail, r.Status);
+        Assert.Contains("placeholder", r.Message);
+    }
+
+    [Fact]
+    public async Task DhcpConfig_fails_when_no_interface()
+    {
+        var ctx = DhcpCtx("Host=db;Database=net_firewall");
+        var r = await new DhcpConfigCheck().RunAsync(ctx, default);
+        Assert.Equal(CheckStatus.Fail, r.Status);
+        Assert.Contains("Interface", r.Message);
+    }
+
+    [Fact]
+    public async Task DhcpConfig_skips_when_nothing_configured()
+    {
+        // No appsettings on disk, no dhcp.env, no resolved values → not deployed here.
+        var ctx = new DoctorContext { IsLinux = false, Prefix = "/nonexistent-prefix-xyz" };
+        var r = await new DhcpConfigCheck().RunAsync(ctx, default);
+        Assert.Equal(CheckStatus.Skip, r.Status);
+    }
+
+    // ── DhcpAppsettings.TryParse + interface/connection resolution ──
+    [Fact]
+    public void DhcpAppsettings_parses_conn_and_interface_from_json()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dhcp-appsettings-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, """
+        {
+          "ConnectionStrings": { "DefaultConnection": "Host=h;Database=net_firewall" },
+          "DHCP": { "Interface": "ens256" }
+        }
+        """);
+        try
+        {
+            var parsed = DhcpAppsettings.TryParse(path);
+            Assert.NotNull(parsed);
+            Assert.Equal("Host=h;Database=net_firewall", parsed!.ConnectionString);
+            Assert.Equal("ens256", parsed.Interface);
+            Assert.Empty(parsed.Interfaces);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void DhcpAppsettings_parses_interfaces_array()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dhcp-appsettings-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, """
+        { "DHCP": { "Interfaces": ["ens256", "ens224"] } }
+        """);
+        try
+        {
+            var parsed = DhcpAppsettings.TryParse(path);
+            Assert.NotNull(parsed);
+            Assert.Equal(new[] { "ens256", "ens224" }, parsed!.Interfaces);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void DhcpAppsettings_returns_null_on_missing_or_malformed()
+    {
+        Assert.Null(DhcpAppsettings.TryParse("/no/such/file.json"));
+
+        var bad = Path.Combine(Path.GetTempPath(), $"dhcp-bad-{Guid.NewGuid():N}.json");
+        File.WriteAllText(bad, "{ not json");
+        try { Assert.Null(DhcpAppsettings.TryParse(bad)); }
+        finally { File.Delete(bad); }
+    }
+
+    // ── MigrationsPendingCheck.Compare (pure diff) ──
+    [Fact]
+    public void Migrations_Compare_flags_pending_and_drift()
+    {
+        var onDisk = new (string, string)[]
+        {
+            ("00001_a", "shaA"),
+            ("00002_b", "shaB"),
+            ("00003_c", "shaC"),   // pending — not in applied
+        };
+        var applied = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["00001_a"] = "shaA",        // clean
+            ["00002_b"] = "shaB-OLD",    // drift — content changed
+        };
+
+        var (pending, drifted) = MigrationsPendingCheck.Compare(onDisk, applied);
+
+        Assert.Equal(new[] { "00003_c" }, pending);
+        Assert.Equal(new[] { "00002_b" }, drifted);
+    }
+
+    [Fact]
+    public void Migrations_Compare_clean_when_all_match()
+    {
+        var onDisk = new (string, string)[] { ("00001_a", "x"), ("00002_b", "y") };
+        var applied = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["00001_a"] = "x",
+            ["00002_b"] = "y",
+        };
+
+        var (pending, drifted) = MigrationsPendingCheck.Compare(onDisk, applied);
+
+        Assert.Empty(pending);
+        Assert.Empty(drifted);
+    }
 }

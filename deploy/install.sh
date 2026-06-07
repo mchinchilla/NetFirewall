@@ -100,6 +100,22 @@ prompt PG_DATABASE "PostgreSQL database" "net_firewall"
 PG_USER="${PG_USER:-netfirewall}"
 prompt PG_USER "PostgreSQL user" "netfirewall"
 
+# ── DHCP server (optional) ──
+# Binds UDP/67, so it's opt-in: only install it on hosts that should serve DHCP.
+# INSTALL_DHCP accepts yes/no (env-overridable for CI). DHCP_IFACE is the fallback
+# listening interface written to dhcp.env (enabled DB subnets override it at runtime).
+INSTALL_DHCP="${INSTALL_DHCP:-no}"
+prompt INSTALL_DHCP "Install the DHCP server? (binds UDP/67) [yes/no]" "no"
+case "${INSTALL_DHCP,,}" in
+    y|yes|true|1) INSTALL_DHCP=yes ;;
+    *)            INSTALL_DHCP=no ;;
+esac
+
+DHCP_IFACE="${DHCP_IFACE:-ens256}"
+if [[ "$INSTALL_DHCP" == "yes" ]]; then
+    prompt DHCP_IFACE "DHCP fallback listening interface" "ens256"
+fi
+
 # ───────────────────────────── users + dirs ─────────────────────────────
 
 log "Ensuring group and user accounts"
@@ -122,6 +138,11 @@ install -d -m 0750 -o root -g root              "$STATE_DIR" "$STATE_DIR/daemon"
 install -d -m 0750 -o "$WEB_USER" -g "$GROUP_NAME" "$STATE_DIR/web"
 install -d -m 0750 -o root -g root              "$LOG_DIR" "$LOG_DIR/daemon"
 install -d -m 0750 -o "$WEB_USER" -g "$GROUP_NAME" "$LOG_DIR/web"
+if [[ "$INSTALL_DHCP" == "yes" ]]; then
+    # DHCP runs as root; systemd's LogsDirectory= also provisions this, but create
+    # it here so a --skip-publish re-run or manual start has it ready.
+    install -d -m 0750 -o root -g root          "$LOG_DIR/dhcp"
+fi
 
 # ───────────────────────────── publish ─────────────────────────────
 
@@ -155,6 +176,13 @@ if [[ $SKIP_PUBLISH -eq 0 ]]; then
     dotnet publish -c Release -r linux-x64 --self-contained false \
         -o "$PREFIX/doctor" \
         "$REPO_DIR/NetFirewall.Doctor/NetFirewall.Doctor.csproj" >/dev/null
+
+    if [[ "$INSTALL_DHCP" == "yes" ]]; then
+        log "Publishing DHCP server"
+        dotnet publish -c Release -r linux-x64 --self-contained false \
+            -o "$PREFIX/dhcp-server" \
+            "$REPO_DIR/NetFirewall.DhcpServer/NetFirewall.DhcpServer.csproj" >/dev/null
+    fi
 fi
 
 # Web's wwwroot lives under the publish output already; chmod for nginx-alike
@@ -239,6 +267,22 @@ fi
 log "Master key (KEEP A SECURE BACKUP — losing it invalidates all TOTP enrollments):"
 echo "    NETFIREWALL_MASTER_KEY=$MASTER_KEY"
 
+# DHCP env (root:root 0640 — holds the DB password; DHCP runs as root). Optional
+# file: the unit loads it with EnvironmentFile=- and the server still reads its
+# bundled appsettings.json. We write it so the DHCP connection string + listening
+# interface come from one host-specific place instead of the published JSON.
+if [[ "$INSTALL_DHCP" == "yes" ]]; then
+    DHCP_ENV="$ETC_DIR/dhcp.env"
+    sed -e "s|Password=__REPLACE__|Password=$PG_PASSWORD|" \
+        -e "s|__REPLACE_DHCP_IFACE__|$DHCP_IFACE|" \
+        -e "s|Host=127.0.0.1;Port=5432|Host=$PG_HOST;Port=5432|" \
+        -e "s|Username=netfirewall|Username=$PG_USER|" \
+        -e "s|Database=net_firewall|Database=$PG_DATABASE|" \
+        "$SCRIPT_DIR/env/dhcp.env.template" > "$DHCP_ENV.tmp"
+    install -m 0640 -o root -g root "$DHCP_ENV.tmp" "$DHCP_ENV"
+    rm -f "$DHCP_ENV.tmp"
+fi
+
 # ───────────────────────────── TUI config + symlink ─────────────────────────────
 
 # The TUI runs ad-hoc (no systemd unit) — needs minimal config telling it
@@ -308,6 +352,16 @@ NETFIREWALL_CONN="Host=$PG_HOST;Port=5432;Username=$PG_USER;Password=$PG_PASSWOR
 log "Installing systemd units"
 install -m 0644 "$SCRIPT_DIR/systemd/netfirewall-daemon.service" /etc/systemd/system/
 install -m 0644 "$SCRIPT_DIR/systemd/netfirewall-web.service"    /etc/systemd/system/
+if [[ "$INSTALL_DHCP" == "yes" ]]; then
+    install -m 0644 "$SCRIPT_DIR/systemd/netfirewall-dhcp.service" /etc/systemd/system/
+else
+    # If DHCP was previously installed and is now being opted out, stop + remove
+    # the unit so we don't leave a dangling UDP/67 binder behind.
+    if [[ -f /etc/systemd/system/netfirewall-dhcp.service ]]; then
+        systemctl disable --now netfirewall-dhcp.service 2>/dev/null || true
+        rm -f /etc/systemd/system/netfirewall-dhcp.service
+    fi
+fi
 systemctl daemon-reload
 
 # Kernel tunables — enables conntrack per-flow accounting so the dashboard's
@@ -322,6 +376,10 @@ log "Enabling + starting services"
 systemctl enable --now netfirewall-daemon.service
 sleep 1
 systemctl enable --now netfirewall-web.service
+if [[ "$INSTALL_DHCP" == "yes" ]]; then
+    sleep 1
+    systemctl enable --now netfirewall-dhcp.service
+fi
 
 # ───────────────────────────── post-install verification ─────────────────────────────
 
@@ -337,16 +395,26 @@ fi
 
 # ───────────────────────────── done ─────────────────────────────
 
+DHCP_LINE=""
+DHCP_LOG_LINE="{daemon,web}"
+DHCP_CFG_LINE="{daemon,web}"
+if [[ "$INSTALL_DHCP" == "yes" ]]; then
+    DHCP_LINE="  DHCP   : systemctl status netfirewall-dhcp   (binds UDP/67; fallback iface=$DHCP_IFACE)"
+    DHCP_LOG_LINE="{daemon,web,dhcp}"
+    DHCP_CFG_LINE="{daemon,web,dhcp}"
+fi
+
 cat <<EOF
 
 \033[1;32m✓ NetFirewall installed.\033[0m
 
   Daemon : systemctl status netfirewall-daemon
   Web    : systemctl status netfirewall-web
+$DHCP_LINE
   TUI    : sudo netfirewall-tui    (console-only; reaches daemon as root via SO_PEERCRED)
   Doctor : netfirewall-doctor      (re-run anytime to validate the deployment; --json for CI)
-  Logs   : $LOG_DIR/{daemon,web}/
-  Config : $ETC_DIR/{daemon,web}.env  (mode 0600/0640)
+  Logs   : $LOG_DIR/$DHCP_LOG_LINE/
+  Config : $ETC_DIR/$DHCP_CFG_LINE.env  (mode 0600/0640)
   Socket : $RUN_DIR/control.sock      (root:netfirewall 0660 — Web UID + root accepted)
   Web URL: http://127.0.0.1:$DAEMON_PORT_WEB  (set up TLS via the nginx example in deploy/nginx)
 

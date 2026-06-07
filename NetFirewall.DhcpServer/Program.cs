@@ -16,9 +16,14 @@ class Program
 {
     static async Task Main(string[] args)
     {
+        // Environment variables LAST so the systemd EnvironmentFile (dhcp.env) can
+        // override appsettings.json — e.g. ConnectionStrings__DefaultConnection and
+        // DHCP__Interface. Without this, the connection string read below would ignore
+        // dhcp.env and use the password baked into the published appsettings.json.
         IConfiguration configuration = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddEnvironmentVariables()
             .Build();
 
         Log.Logger = new LoggerConfiguration()
