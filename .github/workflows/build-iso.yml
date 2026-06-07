@@ -35,10 +35,27 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates git rsync \
-            dotnet-sdk-10.0 \
+            ca-certificates curl git rsync \
             debhelper devscripts dpkg-dev lintian \
+            libicu76 \
             file
+
+      # .NET 10 SDK is NOT in Debian apt — install it via Microsoft's official
+      # dotnet-install.sh (no apt repo needed). Defaults to the latest LTS, which
+      # is .NET 10. Installs to /usr/share/dotnet and is added to PATH for all
+      # subsequent steps via $GITHUB_PATH / $GITHUB_ENV.
+      - name: Install .NET 10 SDK
+        run: |
+          set -eux
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          chmod +x /tmp/dotnet-install.sh
+          /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+          # Symlink onto a stable PATH entry so `dotnet` resolves even when
+          # debhelper/fakeroot sanitises PATH while running debian/rules.
+          ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
+          echo "/usr/share/dotnet" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=/usr/share/dotnet" >> "$GITHUB_ENV"
+          /usr/share/dotnet/dotnet --info | head -20
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,7 +99,9 @@ jobs:
         run: |
           set -eux
           # -us -uc: unsigned. -b: binary-only (no source tarball needed).
-          dpkg-buildpackage -us -uc -b
+          # -d: don't fail dpkg-checkbuilddeps — the .NET SDK + tailwindcss are
+          #     installed by earlier steps, not via apt Build-Depends.
+          dpkg-buildpackage -us -uc -b -d
           # dpkg drops the .deb in the PARENT of the source dir.
           mkdir -p dist
           cp ../netfirewall_*.deb dist/

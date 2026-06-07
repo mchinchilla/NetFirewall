@@ -3,8 +3,12 @@ Section: net
 Priority: optional
 Maintainer: NetFirewall Project <noreply@example.invalid>
 Build-Depends:
- debhelper-compat (= 13),
- dotnet-sdk-10.0
+ debhelper-compat (= 13)
+# NOTE: the build also requires the .NET 10 SDK and the standalone `tailwindcss`
+# binary on PATH. Neither is an apt package on Debian (the SDK comes from
+# Microsoft's dotnet-install.sh / feed; tailwindcss is a standalone release), so
+# they are NOT listed here — the CI/build environment installs them first. Build
+# with `dpkg-buildpackage -d` if dpkg-checkbuilddeps complains.
 Standards-Version: 4.6.2
 Homepage: https://github.com/mchinchilla/NetFirewall
 Rules-Requires-Root: no
