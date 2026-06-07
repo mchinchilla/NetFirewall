@@ -156,15 +156,16 @@ override_dh_shlibdeps:
 # DISABLED (operators enable it per host).
 #
 # The units are staged as debian/netfirewall.<unit>.service (see
-# override_dh_auto_install), so dh_installsystemd installs them to
-# /lib/systemd/system AND generates the enable/start snippets (via #DEBHELPER#).
-# The positional arguments are the INSTALLED unit names (no debian/ prefix, no
-# package prefix). Separate invocations so the DHCP unit can be --no-enable while
-# the others enable. None are started at configure time (no DB yet).
+# override_dh_auto_install). A single dh_installsystemd call (no positional unit
+# arguments) installs ALL of them to /lib/systemd/system AND generates the
+# enable + (suppressed) start snippets via #DEBHELPER#. --no-start: nothing
+# starts at configure time (no DB yet — firstboot's Before= gates the real first
+# start). All units are enabled so they come up on the next boot after firstboot.
+#
+# The DHCP unit must be INSTALLED but NOT enabled (it binds UDP/67; operators
+# opt in per host). Since --no-enable is global, we can't express "enable all but
+# one" in dh_installsystemd. So we let it enable everything here, then disable
+# the DHCP unit explicitly in postinst (deb-systemd-helper). The unit file is
+# still installed and an operator can `systemctl enable netfirewall-dhcp`.
 override_dh_installsystemd:
-	dh_installsystemd --no-start netfirewall-firstboot.service
-	dh_installsystemd --no-start netfirewall-daemon.service
-	dh_installsystemd --no-start netfirewall-web.service
-	dh_installsystemd --no-start netfirewall-bootstrap.service
-	dh_installsystemd --no-start netfirewall-issue-banner.service
-	dh_installsystemd --no-start --no-enable netfirewall-dhcp.service
+	dh_installsystemd --no-start
