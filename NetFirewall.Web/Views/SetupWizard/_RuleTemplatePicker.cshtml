@@ -1,0 +1,93 @@
+@using NetFirewall.Models.Setup
+@*
+    Opt-in "starting rule set" picker shown atop Step 3. Choosing a base archetype
+    + capability toggles generates a complete rule set (network objects + fw_*
+    rows) via IRuleTemplateService — idempotent, DB-only (operator Applies later).
+    This is the pfSense/OPNsense-style "pick an arch­etype" shortcut; the manual
+    toggles below remain for fine control. Rules reference NetworkObjects by name
+    (LAN_NETWORKS, BOGONS, MGMT_SOURCES) so values stay editable in one place.
+*@
+<section class="rounded-lg border p-4 mb-4 border-surface-border" style="background-color: var(--surface-elevated);"
+         x-data="{
+             base: '@RuleTemplateBases.Gateway',
+             nat: true, multiWan: false, mgmt: true, webPort: '443',
+             icmp: true, dhcp: true, dns: true, examplePf: false,
+             busy: false
+         }">
+    <header class="mb-3">
+        <h3 class="text-sm font-semibold flex items-center gap-2">
+            <svg class="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+            Quick start from a template
+        </h3>
+        <p class="text-xs text-surface-fg-muted mt-0.5">
+            Generate a complete, sensible rule set for your role. It writes rules + reusable
+            network objects to the database (nothing is pushed to the kernel) — review them in
+            <span class="font-medium text-surface-fg">Firewall</span> and Apply when ready.
+        </p>
+    </header>
+
+    @Html.AntiForgeryToken()
+
+    <!-- Base archetype -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+        @foreach (var b in RuleTemplateBases.All)
+        {
+            <label class="cursor-pointer rounded-md border p-3 transition border-surface-border"
+                   :class="base === '@b' ? 'ring-2 ring-accent' : 'hover:opacity-90'"
+                   style="background-color: var(--surface-muted);">
+                <input type="radio" name="tplBase" value="@b" class="sr-only" x-model="base" />
+                <span class="block text-sm font-medium">@RuleTemplateBases.Label(b)</span>
+                <span class="block text-xs mt-1 text-surface-fg-muted">@RuleTemplateBases.Describe(b)</span>
+            </label>
+        }
+    </div>
+
+    <!-- Capabilities -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        <label class="flex items-center gap-2" x-show="base !== '@RuleTemplateBases.Bastion'">
+            <input type="checkbox" x-model="nat" /> Masquerade LAN → WAN (NAT)
+        </label>
+        <label class="flex items-center gap-2">
+            <input type="checkbox" x-model="multiWan" /> Multi-WAN policy routing (2+ WANs)
+        </label>
+        <label class="flex items-center gap-2">
+            <input type="checkbox" x-model="mgmt" /> Allow management (SSH + web UI) from LAN
+        </label>
+        <label class="flex items-center gap-2" x-show="mgmt" x-cloak>
+            Web UI port:
+            <input type="number" min="1" max="65535" x-model="webPort"
+                   class="w-24 rounded border px-2 py-1 border-surface-border" style="background-color: var(--surface-bg);" />
+        </label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="icmp" /> Allow ICMP (ping)</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="dns" /> Allow DNS from LAN</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="dhcp" /> Allow DHCP on LAN</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="examplePf" /> Seed an example port-forward (disabled)</label>
+    </div>
+
+    <div class="mt-3 rounded-md border-l-2 px-3 py-2 text-xs flex items-start gap-2 bg-feedback-info-bg text-feedback-info-fg border-feedback-info-bd">
+        <svg class="h-4 w-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg>
+        <span>Default-deny posture: WAN is closed except what you open here. Rules reference reusable network objects (<code>LAN_NETWORKS</code>, <code>BOGONS</code>, <code>MGMT_SOURCES</code>) you can refine afterward. Re-running replaces only template rules — your manual rules are untouched.</span>
+    </div>
+
+    <div class="mt-3 flex items-center gap-2">
+        <button type="button" class="btn btn-primary"
+                :disabled="busy"
+                hx-post="/setup/wizard/apply-template"
+                hx-include="closest section"
+                hx-vals='js:{
+                    Base: base, EnableNat: nat, EnableMultiWan: multiWan,
+                    AllowManagement: mgmt, WebInterfacePort: webPort,
+                    AllowIcmp: icmp, AllowDhcp: dhcp, AllowDns: dns,
+                    SeedPortForwardExample: examplePf
+                }'
+                @@htmx:before-request="busy = true" @@htmx:after-request="busy = false">
+            <span x-show="!busy">Generate rule set</span>
+            <span x-show="busy" x-cloak>Generating…</span>
+        </button>
+        <button type="button" class="btn btn-ghost text-xs"
+                hx-post="/setup/wizard/clear-template"
+                hx-headers='js:{"RequestVerificationToken": document.querySelector("input[name=__RequestVerificationToken]").value}'>
+            Clear template rules
+        </button>
+    </div>
+</section>

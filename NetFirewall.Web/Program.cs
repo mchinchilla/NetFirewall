@@ -190,6 +190,7 @@ builder.Services.AddSingleton<NetFirewall.Services.Dhcp.IDhcpCacheNotifier, NetF
 
 // Setup wizard.
 builder.Services.AddScoped<NetFirewall.Services.Setup.ISetupWizardService, NetFirewall.Services.Setup.SetupWizardService>();
+builder.Services.AddScoped<NetFirewall.Services.Setup.IRuleTemplateService, NetFirewall.Services.Setup.RuleTemplateService>();
 
 // Runtime metadata for the login system-info card.
 builder.Services.AddSingleton<IAppInfoService, AppInfoService>();

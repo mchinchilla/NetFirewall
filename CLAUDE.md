@@ -216,7 +216,7 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
   - `Firewall/`: FirewallService, NftApplyService (writes/loads nftables config)
   - `Network/`: LinuxDistroService, DebianInterfacesConfigService, NetplanConfigService (distro-aware interface config writers)
   - `Monitoring/`: SystemMonitorService, MetricsCollectorService, MetricsQueryService
-  - `Setup/`: SetupWizardService
+  - `Setup/`: SetupWizardService, **RuleTemplateService** (wizard "starting rule set" generator: base archetype Gateway/Router/Bastion + capability toggles → network objects + tagged fw_* rows, idempotent, DB-only; rules reference NetworkObjects by name, never raw CIDRs)
 - **NetFirewall.ServiceDefaults** — Aspire-shared OpenTelemetry, service discovery, resilience pipelines.
 - **NetFirewall.Tests** — xUnit + Moq + `Aspire.Hosting.Testing`. Currently covers `Dhcp/DhcpLeasesServiceTests` and `DhcpServerServiceTests`.
 

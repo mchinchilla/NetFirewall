@@ -23,13 +23,14 @@ namespace NetFirewall.Tests.WebAuth;
 public class SetupWizardControllerTests
 {
     private readonly Mock<ISetupWizardService> _wizard = new();
+    private readonly Mock<IRuleTemplateService> _templates = new();
     private readonly Mock<IDaemonClient> _daemon = new();
     private readonly Mock<INetworkConfigResolver> _resolver = new();
 
     private SetupWizardController CreateController()
     {
         var c = new SetupWizardController(
-            _wizard.Object, _daemon.Object, _resolver.Object,
+            _wizard.Object, _templates.Object, _daemon.Object, _resolver.Object,
             NullLogger<SetupWizardController>.Instance);
         c.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
         return c;

@@ -24,6 +24,15 @@
     @Html.AntiForgeryToken()
 </form>
 
+@* Opt-in archetype templates (generate a full rule set with network objects). *@
+@await Html.PartialAsync("_RuleTemplatePicker")
+
+<div class="my-4 flex items-center gap-3 text-xs text-surface-fg-muted">
+    <span class="h-px flex-1" style="background-color: var(--surface-border);"></span>
+    or set a baseline manually
+    <span class="h-px flex-1" style="background-color: var(--surface-border);"></span>
+</div>
+
 <form id="wizard-step-3" method="post" action="/setup/wizard/step/3"
       x-data="{
           ssh:        @(Model.AllowSsh ? "true" : "false"),

@@ -21,17 +21,20 @@ namespace NetFirewall.Web.Controllers;
 public sealed class SetupWizardController : Controller
 {
     private readonly ISetupWizardService _wizard;
+    private readonly IRuleTemplateService _templates;
     private readonly IDaemonClient _daemon;
     private readonly INetworkConfigResolver _resolver;
     private readonly ILogger<SetupWizardController> _logger;
 
     public SetupWizardController(
         ISetupWizardService wizard,
+        IRuleTemplateService templates,
         IDaemonClient daemon,
         INetworkConfigResolver resolver,
         ILogger<SetupWizardController> logger)
     {
         _wizard = wizard;
+        _templates = templates;
         _daemon = daemon;
         _resolver = resolver;
         _logger = logger;
@@ -94,6 +97,51 @@ public sealed class SetupWizardController : Controller
         if (!ModelState.IsValid) return await RenderAtAsync(4, ct, step4: form);
         await _wizard.SaveStep4ServicesAsync(form.ToServiceModel(), ct);
         return RedirectToStep(5);
+    }
+
+    // ----- rule templates (opt-in starting rule set) -----
+
+    /// <summary>
+    /// Generate a starting firewall rule set from a template (base archetype +
+    /// capability toggles). Writes network objects + fw_* rows to the DB ONLY —
+    /// the operator reviews them in Firewall and clicks Apply. Idempotent: a
+    /// re-run replaces only previously template-generated rows.
+    /// </summary>
+    [HttpPost("apply-template"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> ApplyTemplate([FromForm] RuleTemplateForm form, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Invalid template selection."));
+        try
+        {
+            var result = await _templates.ApplyTemplateAsync(form.ToSelection(), ct);
+            var msg = $"Template '{NetFirewall.Models.Setup.RuleTemplateBases.Label(result.Base)}' generated: " +
+                      $"{result.TotalRules} rules, {result.NetworkObjectsCreated} network objects. " +
+                      "Review in Firewall, then Apply.";
+            if (result.Notes.Count > 0) msg += " — " + string.Join("; ", result.Notes);
+            return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, msg));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Rule template apply failed");
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail($"Template failed: {ex.Message}"));
+        }
+    }
+
+    /// <summary>Remove every template-generated rule (leaves hand-made rules).</summary>
+    [HttpPost("clear-template"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> ClearTemplate(CancellationToken ct)
+    {
+        try
+        {
+            var n = await _templates.ClearTemplateRulesAsync(ct);
+            return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, $"Removed {n} template-generated rules."));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clear template rules failed");
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail($"Clear failed: {ex.Message}"));
+        }
     }
 
     // ----- back / jump -----
