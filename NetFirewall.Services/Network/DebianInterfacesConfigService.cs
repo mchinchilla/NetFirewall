@@ -242,6 +242,75 @@ public sealed class DebianInterfacesConfigService : INetworkConfigService
         };
     }
 
+    /// <summary>
+    /// Read the declared mode from /etc/network/interfaces + interfaces.d/*. We
+    /// scan for the last `iface &lt;name&gt; inet &lt;method&gt;` stanza (later files
+    /// win, matching ifupdown's own precedence) and map the method back to our
+    /// vocabulary. Returns null if no stanza names this interface.
+    /// </summary>
+    public async Task<string?> DetectAddressingModeAsync(string interfaceName, CancellationToken ct = default)
+    {
+        try
+        {
+            var files = new List<string>();
+            const string mainConfig = "/etc/network/interfaces";
+            if (File.Exists(mainConfig)) files.Add(mainConfig);
+            if (Directory.Exists(InterfacesDir))
+                files.AddRange(Directory.GetFiles(InterfacesDir).OrderBy(f => f, StringComparer.Ordinal));
+
+            string? mode = null;
+            foreach (var file in files)
+            {
+                string text;
+                try { text = await File.ReadAllTextAsync(file, ct); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Skipping unreadable interfaces file {File}", file); continue; }
+
+                // Later files / later stanzas override (ifupdown precedence). Only
+                // overwrite when this file actually declares the interface.
+                var found = ParseAddressingMode(text, interfaceName);
+                if (found is not null) mode = found;
+            }
+            return mode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not detect addressing mode for {Interface}", interfaceName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Pure parser (no IO): scan one /etc/network/interfaces-format document for
+    /// the addressing method of <paramref name="interfaceName"/>. Returns
+    /// "dhcp"/"static"/"disabled", or null if the interface isn't declared (or
+    /// only as loopback / an unrecognised method). The LAST matching stanza wins.
+    /// Public + static so unit tests can exercise it without touching the filesystem.
+    /// </summary>
+    public static string? ParseAddressingMode(string configText, string interfaceName)
+    {
+        string? mode = null;
+        foreach (var raw in configText.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line[0] == '#') continue;
+            // "iface <name> inet <method>" (inet6 ignored — we only model IPv4 here)
+            if (!line.StartsWith("iface ", StringComparison.Ordinal)) continue;
+            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 4) continue;
+            if (!string.Equals(parts[1], interfaceName, StringComparison.Ordinal)) continue;
+            if (!string.Equals(parts[2], "inet", StringComparison.OrdinalIgnoreCase)) continue;
+
+            mode = parts[3].ToLowerInvariant() switch
+            {
+                "dhcp"   => "dhcp",
+                "static" => "static",
+                "manual" => "disabled",
+                _        => mode, // loopback / ppp / unknown — keep prior finding
+            };
+        }
+        return mode;
+    }
+
     private static int SubnetMaskToCidr(string mask)
     {
         var parts = mask.Split('.');

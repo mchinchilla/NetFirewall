@@ -558,6 +558,17 @@ window.NetFw.charts = {
 /* ---------- Alpine wiring ---------- */
 document.addEventListener("alpine:init", () => {
 
+    /* ---------- store: tpl ---------- shared state for the setup wizard's Step 3.
+     * When the rule-template picker successfully generates a rule set it sets
+     * applied=true; the manual baseline section below collapses (the operator can
+     * still reveal it with "Adjust manually"). Lives in a store so the picker and
+     * the manual <form> — separate x-data scopes — can talk. */
+    Alpine.store("tpl", {
+        applied: false,            // a template was generated this session
+        showManual: false,         // operator chose to reveal manual toggles anyway
+        markApplied() { this.applied = true; this.showManual = false; },
+    });
+
     /* ---------- runtimeMetrics ---------- live clock + uptime for system-info card.
      * Pass the server's startedAt (epoch ms) as a constructor arg:
      *   <div x-data="runtimeMetrics(@startedAtMs)" ...>

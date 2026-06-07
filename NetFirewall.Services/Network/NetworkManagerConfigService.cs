@@ -224,4 +224,50 @@ public sealed class NetworkManagerConfigService : INetworkConfigService
         return cidr;
     }
 
+    /// <summary>
+    /// Read the declared mode via nmcli: find the active connection on the device,
+    /// then read its ipv4.method (auto → dhcp, manual → static). Returns null if
+    /// nmcli isn't usable or the device has no active connection.
+    /// </summary>
+    public async Task<string?> DetectAddressingModeAsync(string interfaceName, CancellationToken ct = default)
+    {
+        try
+        {
+            // Active connection name bound to this device.
+            var dev = await _runner.RunAsync("nmcli",
+                $"-t -f GENERAL.CONNECTION device show {interfaceName}", ct: ct);
+            if (!dev.Success) return null;
+            // Output: "GENERAL.CONNECTION:<name>"
+            var conn = dev.Output
+                .Split('\n').Select(l => l.Trim())
+                .FirstOrDefault(l => l.StartsWith("GENERAL.CONNECTION:", StringComparison.Ordinal))
+                ?["GENERAL.CONNECTION:".Length..].Trim();
+            if (string.IsNullOrEmpty(conn) || conn == "--") return null;
+
+            var method = await _runner.RunAsync("nmcli",
+                $"-t -f ipv4.method connection show {EscapeArg(conn)}", ct: ct);
+            if (!method.Success) return null;
+            // Output: "ipv4.method:auto"
+            var val = method.Output
+                .Split('\n').Select(l => l.Trim())
+                .FirstOrDefault(l => l.StartsWith("ipv4.method:", StringComparison.Ordinal))
+                ?["ipv4.method:".Length..].Trim().ToLowerInvariant();
+
+            return val switch
+            {
+                "auto"   => "dhcp",
+                "manual" => "static",
+                "disabled" => "disabled",
+                _ => null,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not detect NetworkManager addressing mode for {Interface}", interfaceName);
+            return null;
+        }
+    }
+
+    private static string EscapeArg(string s) => s.Contains(' ') ? $"\"{s}\"" : s;
+
 }

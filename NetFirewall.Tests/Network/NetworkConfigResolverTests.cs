@@ -30,6 +30,7 @@ public class NetworkConfigResolverTests
         public Task<NetworkApplyResult> RestartNetworkingAsync() => Task.FromResult(new NetworkApplyResult());
         public Task<bool> ValidateConfigAsync(string config) => Task.FromResult(true);
         public string GetConfigFilePath(NetFirewall.Models.Firewall.FwInterface iface) => "";
+        public Task<string?> DetectAddressingModeAsync(string interfaceName, CancellationToken ct = default) => Task.FromResult<string?>(null);
     }
 
     private static Mock<ILinuxDistroService> DistroReturning(NetworkConfigMethod method)

@@ -1,4 +1,5 @@
 @using NetFirewall.Models.Setup
+@model int
 @*
     Opt-in "starting rule set" picker shown atop Step 3. Choosing a base archetype
     + capability toggles generates a complete rule set (network objects + fw_*
@@ -6,12 +7,18 @@
     This is the pfSense/OPNsense-style "pick an arch­etype" shortcut; the manual
     toggles below remain for fine control. Rules reference NetworkObjects by name
     (LAN_NETWORKS, BOGONS, MGMT_SOURCES) so values stay editable in one place.
+
+    @Model = number of WAN interfaces assigned in Step 1. Multi-WAN needs ≥2 to be
+    meaningful (failover/balancing across links), so the toggle is disabled below
+    that. The backend also skips multi-WAN with <2 WANs as a backstop.
 *@
+@{ var canMultiWan = Model >= 2; }
 <section class="rounded-lg border p-4 mb-4 border-surface-border" style="background-color: var(--surface-elevated);"
          x-data="{
              base: '@RuleTemplateBases.Gateway',
              nat: true, multiWan: false, mgmt: true, webPort: '443',
              icmp: true, dhcp: true, dns: true, examplePf: false,
+             canMultiWan: @(canMultiWan ? "true" : "false"),
              busy: false
          }">
     <header class="mb-3">
@@ -47,8 +54,13 @@
         <label class="flex items-center gap-2" x-show="base !== '@RuleTemplateBases.Bastion'">
             <input type="checkbox" x-model="nat" /> Masquerade LAN → WAN (NAT)
         </label>
-        <label class="flex items-center gap-2">
-            <input type="checkbox" x-model="multiWan" /> Multi-WAN policy routing (2+ WANs)
+        <label class="flex items-center gap-2"
+               :class="canMultiWan ? '' : 'opacity-50 cursor-not-allowed'"
+               :title="canMultiWan ? '' : 'Needs 2 or more WAN interfaces assigned in Step 1'">
+            <input type="checkbox" x-model="multiWan" :disabled="!canMultiWan"
+                   @@change="if (!canMultiWan) multiWan = false" />
+            Multi-WAN policy routing (2+ WANs)
+            <span x-show="!canMultiWan" x-cloak class="text-[11px] text-surface-fg-muted">— assign 2+ WANs in Step 1</span>
         </label>
         <label class="flex items-center gap-2">
             <input type="checkbox" x-model="mgmt" /> Allow management (SSH + web UI) from LAN
@@ -80,13 +92,15 @@
                     AllowIcmp: icmp, AllowDhcp: dhcp, AllowDns: dns,
                     SeedPortForwardExample: examplePf
                 }'
-                @@htmx:before-request="busy = true" @@htmx:after-request="busy = false">
+                @@htmx:before-request="busy = true"
+                @@htmx:after-request="busy = false; if ($event.detail.successful) $store.tpl.markApplied()">
             <span x-show="!busy">Generate rule set</span>
             <span x-show="busy" x-cloak>Generating…</span>
         </button>
         <button type="button" class="btn btn-ghost text-xs"
                 hx-post="/setup/wizard/clear-template"
-                hx-headers='js:{"RequestVerificationToken": document.querySelector("input[name=__RequestVerificationToken]").value}'>
+                hx-headers='js:{"RequestVerificationToken": document.querySelector("input[name=__RequestVerificationToken]").value}'
+                @@htmx:after-request="if ($event.detail.successful) { $store.tpl.applied = false; $store.tpl.showManual = false }">
             Clear template rules
         </button>
     </div>

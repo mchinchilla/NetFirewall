@@ -73,6 +73,9 @@ public class WizardInterfaceConfig
     public string? SubnetMask { get; set; }
     public string? Gateway { get; set; }
     public int? Mtu { get; set; }
+
+    /// <summary>Optional MAC override (clone/spoof). Null/empty keeps the NIC's hardware MAC.</summary>
+    public string? MacAddress { get; set; }
 }
 
 /// <summary>
@@ -105,6 +108,15 @@ public class WizardFirewallConfig
     public int WebInterfacePort { get; set; } = 5000;
     public bool ForwardLanToWan { get; set; } = true;
     public bool BlockInvalidPackets { get; set; } = true;
+
+    /// <summary>
+    /// The operator generated a rule set from a template (IRuleTemplateService)
+    /// instead of the manual toggles. When true, wizard completion SKIPS the
+    /// manual ApplyFirewallConfigAsync — the template already wrote the rules to
+    /// the DB, and re-running the manual generator would lay a second overlapping
+    /// (CIDR-based) rule set on top.
+    /// </summary>
+    public bool UsedTemplate { get; set; }
 }
 
 /// <summary>

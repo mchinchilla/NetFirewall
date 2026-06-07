@@ -16,4 +16,12 @@ public class InterfaceSuggestion
     public bool IsUp { get; set; }
     public bool IsVirtual { get; set; }
     public int? Mtu { get; set; }
+
+    /// <summary>
+    /// The DECLARED addressing mode read from the system network config
+    /// ("dhcp" / "static" / "disabled"), or null if it couldn't be determined.
+    /// Populated by the daemon's discovery (it can read /etc/network/interfaces,
+    /// netplan, nmcli). The wizard prefers this over its WAN/gateway heuristic.
+    /// </summary>
+    public string? AddressingMode { get; set; }
 }

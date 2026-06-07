@@ -55,6 +55,15 @@ public sealed class Step1RowViewModel : IValidatableObject
     [Range(576, 9216, ErrorMessage = "MTU must be between 576 and 9216.")]
     public int? Mtu { get; set; }
 
+    /// <summary>
+    /// Operator-supplied MAC override (clone/spoof). Empty → keep the NIC's
+    /// hardware MAC (<see cref="MacAddress"/> is the detected one, shown read-only).
+    /// Validated as 6 colon/dash-separated hex octets.
+    /// </summary>
+    [RegularExpression(@"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$",
+        ErrorMessage = "MAC must be 6 hex octets, e.g. 00:11:22:33:44:55.")]
+    public string? SpoofMacAddress { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext context)
     {
         // Static addressing must include an IP + mask. Gateway is required for WAN
@@ -167,6 +176,18 @@ public sealed class Step3ViewModel
 
     public bool ForwardLanToWan { get; set; } = true;
     public bool BlockInvalidPackets { get; set; } = true;
+
+    /// <summary>Set by the form when a rule template was generated — completion
+    /// then skips the manual firewall generator (the template already wrote rules).</summary>
+    public bool UsedTemplate { get; set; }
+
+    /// <summary>
+    /// Number of interfaces assigned a WAN role in Step 1. Drives the Multi-WAN
+    /// toggle in the template picker — multi-WAN (failover/balancing) needs ≥2 WAN
+    /// links, so the toggle is disabled below that. Populated by the controller
+    /// from Step 1 (not round-tripped through the saved firewall config).
+    /// </summary>
+    public int WanCount { get; set; }
 }
 
 // ---------------- Step 4 — Optional services ----------------
@@ -213,7 +234,10 @@ public static class WizardMappers
             IpAddress = r.IpAddress,
             SubnetMask = r.SubnetMask,
             Gateway = r.Gateway,
-            Mtu = r.Mtu
+            Mtu = r.Mtu,
+            // Only carry an override if the operator actually typed one (and it
+            // differs from the hardware MAC); else null = keep the NIC's own MAC.
+            MacAddress = string.IsNullOrWhiteSpace(r.SpoofMacAddress) ? null : r.SpoofMacAddress.Trim()
         }).ToList();
 
     public static List<WizardLanConfig> ToServiceModel(this Step2ViewModel vm) =>
@@ -240,7 +264,8 @@ public static class WizardMappers
         AllowWebInterface = vm.AllowWebInterface,
         WebInterfacePort = vm.WebInterfacePort,
         ForwardLanToWan = vm.ForwardLanToWan,
-        BlockInvalidPackets = vm.BlockInvalidPackets
+        BlockInvalidPackets = vm.BlockInvalidPackets,
+        UsedTemplate = vm.UsedTemplate
     };
 
     public static WizardServicesConfig ToServiceModel(this Step4ViewModel vm) => new()
@@ -285,7 +310,8 @@ public static class WizardMappers
                 IpAddress = s?.IpAddress ?? d.CurrentIpAddress,
                 SubnetMask = s?.SubnetMask ?? d.CurrentSubnetMask,
                 Gateway = s?.Gateway ?? d.CurrentGateway,
-                Mtu = s?.Mtu ?? d.Mtu
+                Mtu = s?.Mtu ?? d.Mtu,
+                SpoofMacAddress = s?.MacAddress   // round-trip a saved override
             };
         }).ToList();
 
@@ -311,11 +337,21 @@ public static class WizardMappers
         return new Step1ViewModel { Interfaces = rows };
     }
 
-    /// <summary>WAN with a current gateway → DHCP (typical ISP). Otherwise default to static so the form prompts for an IP.</summary>
-    private static string SuggestAddressingMode(DetectedNetworkInterface d) =>
-        d.SuggestedRole.StartsWith("wan", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(d.CurrentGateway)
+    /// <summary>
+    /// Prefer the DECLARED mode read from the system config (the daemon parses
+    /// /etc/network/interfaces / netplan / nmcli). Only when that's unknown do we
+    /// fall back to the old heuristic (WAN+gateway → DHCP) — which got static vs
+    /// DHCP backwards on real hosts, hence the detection.
+    /// </summary>
+    private static string SuggestAddressingMode(DetectedNetworkInterface d)
+    {
+        if (d.DetectedAddressingMode is "dhcp" or "static" or "disabled")
+            return d.DetectedAddressingMode;
+
+        return d.SuggestedRole.StartsWith("wan", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(d.CurrentGateway)
             ? "dhcp"
             : (d.SuggestedRole == "disabled" ? "disabled" : "static");
+    }
 
     public static Step2ViewModel ToViewModel(this List<WizardLanConfig>? saved, Step1ViewModel step1)
     {
@@ -360,6 +396,17 @@ public static class WizardMappers
             {
                 if (savedByName.TryGetValue(i.Name, out var s)) return Map(i.Name, s);
 
+                // If the LAN interface ALREADY has an address (detected in Step 1),
+                // derive the subnet from THAT real config — never invent a different
+                // range than the one the box is actually on. Only when the LAN has no
+                // IP do we suggest a free 192.168.x.0/24.
+                var existing = DeriveLanFromInterface(i.Name, i.IpAddress, i.SubnetMask);
+                if (existing is not null)
+                {
+                    occupied.Add(existing.NetworkCidr);
+                    return existing;
+                }
+
                 var cidr = NextFreeSlash24();
                 var third = int.Parse(cidr.Split('.')[2]);
                 return new Step2RowViewModel
@@ -378,6 +425,55 @@ public static class WizardMappers
 
         return new Step2ViewModel { Lans = lans, WanCidrs = wanCidrs };
     }
+
+    /// <summary>
+    /// Build a Step 2 LAN row from the interface's ACTUAL current config (IP +
+    /// mask detected in Step 1) instead of inventing a subnet. The LAN's own IP
+    /// becomes the server/gateway; the DHCP pool is derived inside the real
+    /// network. Returns null if the interface has no usable IPv4 address/mask so
+    /// the caller can fall back to a suggested free range.
+    /// </summary>
+    private static Step2RowViewModel? DeriveLanFromInterface(string name, string? ip, string? mask)
+    {
+        if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(mask)) return null;
+        var cidr = CidrFromIpMask(ip, mask);
+        if (cidr is null) return null;
+        if (!System.Net.IPAddress.TryParse(ip, out var ipAddr) || ipAddr.GetAddressBytes().Length != 4) return null;
+
+        var netParts = cidr.Split('/');
+        var prefix = int.Parse(netParts[1]);
+        var netAddr = System.Net.IPAddress.Parse(netParts[0]).GetAddressBytes();
+
+        // Usable host range = network+1 .. broadcast-1. Reserve the LAN IP itself
+        // (the gateway). Pick a pool that excludes the gateway: if the gateway is
+        // the first host (.1), the pool starts a bit higher; otherwise start at .10.
+        uint net = (uint)(netAddr[0] << 24 | netAddr[1] << 16 | netAddr[2] << 8 | netAddr[3]);
+        uint hostCount = prefix >= 31 ? 0u : (1u << (32 - prefix));
+        if (hostCount < 4) return null; // /31, /32 — not a LAN we can hand DHCP on
+
+        uint firstHost = net + 1;
+        uint lastHost = net + hostCount - 2; // exclude broadcast
+        // Default pool: leave the bottom 9 hosts for static/infra, cap near the top.
+        uint poolStart = Math.Min(firstHost + 9, lastHost);
+        uint poolEnd = lastHost > 4 ? lastHost - 4 : lastHost;
+        if (poolEnd < poolStart) { poolStart = firstHost; poolEnd = lastHost; }
+
+        return new Step2RowViewModel
+        {
+            InterfaceName = name,
+            EnableDhcp = true,
+            ServerIp = ip,                 // the LAN's own IP is the gateway/DHCP server
+            SubnetMask = mask,
+            NetworkCidr = cidr,
+            DhcpRangeStart = UintToIp(poolStart),
+            DhcpRangeEnd = UintToIp(poolEnd),
+            DomainName = "lan.local",
+            LeaseTime = 86400
+        };
+    }
+
+    private static string UintToIp(uint v) =>
+        $"{(v >> 24) & 0xFF}.{(v >> 16) & 0xFF}.{(v >> 8) & 0xFF}.{v & 0xFF}";
 
     /// <summary>"10.0.0.5" + "255.255.255.0" → "10.0.0.0/24". Returns null on parse failure.</summary>
     private static string? CidrFromIpMask(string? ip, string? mask)
@@ -405,7 +501,8 @@ public static class WizardMappers
             AllowWebInterface = saved.AllowWebInterface,
             WebInterfacePort = saved.WebInterfacePort,
             ForwardLanToWan = saved.ForwardLanToWan,
-            BlockInvalidPackets = saved.BlockInvalidPackets
+            BlockInvalidPackets = saved.BlockInvalidPackets,
+            UsedTemplate = saved.UsedTemplate
         };
 
     public static Step4ViewModel ToViewModel(this WizardServicesConfig? saved) => saved is null

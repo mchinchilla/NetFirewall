@@ -64,4 +64,8 @@ public sealed class NoOpNetworkConfigService : INetworkConfigService
         });
 
     public Task<bool> ValidateConfigAsync(string config) => Task.FromResult(!string.IsNullOrWhiteSpace(config));
+
+    // Unknown stack — can't determine the declared mode; callers fall back to a heuristic.
+    public Task<string?> DetectAddressingModeAsync(string interfaceName, CancellationToken ct = default) =>
+        Task.FromResult<string?>(null);
 }

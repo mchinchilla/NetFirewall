@@ -111,8 +111,10 @@ public sealed class RuleTemplateServiceTests
         // Management rules use MGMT_SOURCES, not a literal CIDR.
         Assert.Contains(_filterRules, r =>
             r.SourceAddresses is not null && r.SourceAddresses.Contains(RuleTemplateObjects.MgmtSources));
-        // NAT references LAN_NETWORKS as its source.
-        Assert.Contains(_natRules, r => r.SourceNetwork == RuleTemplateObjects.LanNetworks);
+        // NAT source_network is a Postgres `cidr` column, so it carries a literal
+        // LAN CIDR (NOT the object name) — one rule per LAN network.
+        Assert.Contains(_natRules, r => r.SourceNetwork == "192.168.1.0/24");
+        Assert.DoesNotContain(_natRules, r => r.SourceNetwork == RuleTemplateObjects.LanNetworks);
         // The core objects were created.
         Assert.Contains(RuleTemplateObjects.LanNetworks, _objectsByName.Keys);
         Assert.Contains(RuleTemplateObjects.Bogons, _objectsByName.Keys);

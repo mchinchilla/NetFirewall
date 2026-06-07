@@ -45,6 +45,16 @@ public sealed class DaemonNetworkConfigService : INetworkConfigService
     public Task<bool> ValidateConfigAsync(string config) => _localWriter.ValidateConfigAsync(config);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Read-only; delegated to the local reader. In production the Web's sandbox
+    /// may not be able to read the config files, so this can return null — that's
+    /// fine: the wizard gets the authoritative addressing mode through the daemon's
+    /// /interfaces/discover endpoint (which enriches it server-side), not here.
+    /// </remarks>
+    public Task<string?> DetectAddressingModeAsync(string interfaceName, CancellationToken ct = default)
+        => _localWriter.DetectAddressingModeAsync(interfaceName, ct);
+
+    /// <inheritdoc />
     public async Task<NetworkApplyResult> ApplyConfigAsync(FwInterface iface, IEnumerable<FwStaticRoute>? routes = null)
     {
         // The daemon owns the live config — re-fetching routes there avoids

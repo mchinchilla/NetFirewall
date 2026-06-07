@@ -80,6 +80,87 @@ public sealed class SetupWizardServiceTests : IAsyncLifetime
         Assert.NotNull(s.CompletedAt);
     }
 
+    // ── Interface discovery: prefer daemon (live IP/mask/gw), fall back to distro ──
+
+    [Fact]
+    public async Task DetectInterfaces_UsesDaemon_AndCarriesCurrentIpMaskGateway()
+    {
+        // The daemon (root, full PATH) reports the live config — including IP, mask,
+        // and gateway. The Web's in-process `ip` calls can't (sandbox/PATH), so the
+        // service must take the daemon's data and surface it to the form.
+        _daemon.Setup(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(NetFirewall.Models.ServiceResponse<IReadOnlyList<InterfaceSuggestion>>.Ok(
+                   new List<InterfaceSuggestion>
+                   {
+                       new()
+                       {
+                           Name = "ens192", SuggestedType = "WAN", SuggestedRole = "primary_wan",
+                           MacAddress = "00:11:22:33:44:55", IsUp = true, Mtu = 1500,
+                           CurrentIp = System.Net.IPAddress.Parse("203.0.113.10"),
+                           CurrentSubnet = "203.0.113.10/24",
+                           CurrentGateway = System.Net.IPAddress.Parse("203.0.113.1"),
+                       }
+                   }));
+
+        var detected = await _svc.DetectNetworkInterfacesAsync();
+
+        var nic = Assert.Single(detected);
+        Assert.Equal("ens192", nic.Name);
+        Assert.Equal("203.0.113.10", nic.CurrentIpAddress);
+        Assert.Equal("255.255.255.0", nic.CurrentSubnetMask);   // CIDR /24 → dotted
+        Assert.Equal("203.0.113.1", nic.CurrentGateway);
+        Assert.Equal(1500, nic.Mtu);
+        // Must NOT have fallen through to the (empty) local distro mock.
+        _distro.Verify(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DetectInterfaces_ExcludesServiceManagedVirtualInterfaces()
+    {
+        // wg0/tun0/docker0/veth* are owned by services (WireGuard, OpenVPN, Docker),
+        // not the NIC config layer — Step 1 must not offer them (else orphan config).
+        _daemon.Setup(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(NetFirewall.Models.ServiceResponse<IReadOnlyList<InterfaceSuggestion>>.Ok(
+                   new List<InterfaceSuggestion>
+                   {
+                       new() { Name = "ens192", SuggestedType = "WAN", SuggestedRole = "primary_wan", IsUp = true },
+                       new() { Name = "ens256", SuggestedType = "LAN", SuggestedRole = "local_network", IsUp = true },
+                       new() { Name = "wg0",     SuggestedType = "VPN", SuggestedRole = "vpn", IsVirtual = true, IsUp = true },
+                       new() { Name = "tun0",    SuggestedType = "VPN", SuggestedRole = "vpn", IsVirtual = true },
+                       new() { Name = "docker0", SuggestedType = "LAN", SuggestedRole = "local_network", IsVirtual = true },
+                       new() { Name = "veth1a2b",SuggestedType = "LAN", SuggestedRole = "local_network", IsVirtual = true },
+                   }));
+
+        var detected = await _svc.DetectNetworkInterfacesAsync();
+
+        var names = detected.Select(d => d.Name).ToList();
+        Assert.Equal(new[] { "ens192", "ens256" }, names.OrderBy(n => n));
+        Assert.DoesNotContain("wg0", names);
+        Assert.DoesNotContain("tun0", names);
+        Assert.DoesNotContain("docker0", names);
+        Assert.DoesNotContain("veth1a2b", names);
+    }
+
+    [Fact]
+    public async Task DetectInterfaces_DaemonDown_FallsBackToLocalDistro()
+    {
+        _daemon.Setup(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ThrowsAsync(new InvalidOperationException("daemon socket unavailable"));
+        _distro.Setup(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new List<InterfaceSuggestion>
+               {
+                   new() { Name = "eth0", SuggestedType = "LAN", SuggestedRole = "local_network",
+                           CurrentIp = System.Net.IPAddress.Parse("192.168.1.1"), CurrentSubnet = "192.168.1.1/24" }
+               });
+
+        var detected = await _svc.DetectNetworkInterfacesAsync();
+
+        var nic = Assert.Single(detected);
+        Assert.Equal("eth0", nic.Name);
+        Assert.Equal("192.168.1.1", nic.CurrentIpAddress);
+        _distro.Verify(d => d.DiscoverInterfacesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task ResetWizard_ClearsAllStateAndStartsFresh()
     {

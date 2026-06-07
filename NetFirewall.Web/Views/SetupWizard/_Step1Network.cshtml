@@ -147,6 +147,25 @@
                             </label>
                         </div>
 
+                        @* MAC clone / spoof — available for any enabled role, DHCP or
+                           static (changing the L2 address is independent of L3). Empty
+                           keeps the NIC's hardware MAC (@row.MacAddress). *@
+                        <div class="mt-3" x-show="role !== 'disabled'" x-transition.opacity>
+                            <label class="block max-w-sm">
+                                <span class="text-xs uppercase tracking-wider text-surface-fg-muted">
+                                    Clone / spoof MAC <span class="opacity-60">(optional)</span>
+                                </span>
+                                <input type="text" name="Interfaces[@i].SpoofMacAddress" value="@row.SpoofMacAddress"
+                                       placeholder="@(string.IsNullOrEmpty(row.MacAddress) ? "00:11:22:33:44:55" : row.MacAddress)"
+                                       pattern="^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"
+                                       class="input py-1.5 text-sm mt-1 font-mono" />
+                                <span class="text-[11px] text-surface-fg-muted mt-1 block">
+                                    Leave empty to keep the hardware MAC@(string.IsNullOrEmpty(row.MacAddress) ? "" : $" ({row.MacAddress})").
+                                    Set to impersonate another device's MAC (e.g. an ISP-bound modem).
+                                </span>
+                            </label>
+                        </div>
+
                         @* Server-side validation errors for this row. *@
                         @{
                             var prefix = $"Interfaces[{i}]";

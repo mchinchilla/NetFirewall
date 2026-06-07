@@ -262,4 +262,62 @@ public sealed class NetplanConfigService : INetworkConfigService
         return cidr;
     }
 
+    /// <summary>
+    /// Read the declared mode from /etc/netplan/*.yaml. Netplan nests interfaces
+    /// under ethernets:/&lt;name&gt;: with `dhcp4: true|false`. We do a light
+    /// indentation-aware scan (no YAML dependency): find the interface's block,
+    /// then read its dhcp4 value. Returns "dhcp", "static", or null.
+    /// </summary>
+    public async Task<string?> DetectAddressingModeAsync(string interfaceName, CancellationToken ct = default)
+    {
+        try
+        {
+            if (!Directory.Exists(NetplanDir)) return null;
+            // Later files override earlier (lexical order is netplan's merge order).
+            var files = Directory.GetFiles(NetplanDir, "*.yaml").OrderBy(f => f, StringComparer.Ordinal);
+
+            string? mode = null;
+            foreach (var file in files)
+            {
+                string[] lines;
+                try { lines = await File.ReadAllLinesAsync(file, ct); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Skipping unreadable netplan file {File}", file); continue; }
+
+                int ifaceIndent = -1;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    var trimmed = line.TrimStart();
+                    if (trimmed.Length == 0 || trimmed[0] == '#') continue;
+                    int indent = line.Length - trimmed.Length;
+
+                    // Entering the interface's own block: "<name>:" as a mapping key.
+                    if (ifaceIndent < 0 &&
+                        (trimmed.StartsWith(interfaceName + ":", StringComparison.Ordinal)))
+                    {
+                        ifaceIndent = indent;
+                        continue;
+                    }
+                    if (ifaceIndent < 0) continue;
+
+                    // Left the block (dedent to <= the iface key indent on a non-empty line).
+                    if (indent <= ifaceIndent) { ifaceIndent = -1; continue; }
+
+                    if (trimmed.StartsWith("dhcp4:", StringComparison.Ordinal))
+                    {
+                        var val = trimmed["dhcp4:".Length..].Trim().ToLowerInvariant();
+                        if (val is "true" or "yes") mode = "dhcp";
+                        else if (val is "false" or "no") mode = "static";
+                    }
+                }
+            }
+            return mode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not detect netplan addressing mode for {Interface}", interfaceName);
+            return null;
+        }
+    }
+
 }

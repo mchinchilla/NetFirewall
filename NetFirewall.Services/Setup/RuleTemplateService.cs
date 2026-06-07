@@ -65,7 +65,7 @@ public sealed class RuleTemplateService : IRuleTemplateService
             case RuleTemplateBases.Router:
                 prio = await AddForwardRulesAsync(sel, result, lans, prio, ct);
                 if (sel.EnableNat && sel.Base == RuleTemplateBases.Gateway)
-                    await AddNatRulesAsync(sel, result, wans, ct);
+                    await AddNatRulesAsync(sel, result, wans, lans, ct);
                 else if (sel.EnableNat && sel.Base == RuleTemplateBases.Router)
                     result.Notes.Add("NAT requested but base is 'router' (no-NAT) — masquerade was skipped.");
                 break;
@@ -341,23 +341,42 @@ public sealed class RuleTemplateService : IRuleTemplateService
         return prio;
     }
 
-    private async Task AddNatRulesAsync(RuleTemplateSelection sel, RuleTemplateResult r, IReadOnlyList<FwInterface> wans, CancellationToken ct)
+    private async Task AddNatRulesAsync(RuleTemplateSelection sel, RuleTemplateResult r,
+        IReadOnlyList<FwInterface> wans, IReadOnlyList<FwInterface> lans, CancellationToken ct)
     {
+        // fw_nat_rules.source_network is a Postgres `cidr` column — it does NOT
+        // accept a network-object NAME (unlike the text[] address fields on filter
+        // rules). So NAT masquerade rows must carry literal LAN CIDRs. We emit one
+        // rule per (WAN, LAN-CIDR) pair. (The object-by-name indirection still
+        // applies everywhere the column is text[].)
+        var lanCidrs = lans
+            .Select(l => ToCidr(l.IpAddress, l.SubnetMask))
+            .Where(c => c is not null).Select(c => c!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (lanCidrs.Count == 0)
+        {
+            r.Notes.Add("NAT skipped — no LAN network to masquerade.");
+            return;
+        }
+
         foreach (var wan in wans)
         {
-            var nat = new FwNatRule
+            foreach (var cidr in lanCidrs)
             {
-                Type = "masquerade",
-                Description = RuleTemplateTags.Rule(sel.Base, $"Masquerade LAN via {wan.Name}"),
-                // SourceNetwork references the LAN_NETWORKS object by name; the
-                // resolver expands it. (FwNatRule.SourceNetwork is a single string.)
-                SourceNetwork = RuleTemplateObjects.LanNetworks,
-                OutputInterfaceId = wan.Id,
-                Enabled = true,
-                Priority = 100,
-            };
-            await _fw.CreateNatRuleAsync(nat, ct);
-            r.NatRules++;
+                var nat = new FwNatRule
+                {
+                    Type = "masquerade",
+                    Description = RuleTemplateTags.Rule(sel.Base, $"Masquerade {cidr} via {wan.Name}"),
+                    SourceNetwork = cidr,
+                    OutputInterfaceId = wan.Id,
+                    Enabled = true,
+                    Priority = 100,
+                };
+                await _fw.CreateNatRuleAsync(nat, ct);
+                r.NatRules++;
+            }
         }
     }
 

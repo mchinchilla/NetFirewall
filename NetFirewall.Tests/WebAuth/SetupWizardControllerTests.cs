@@ -75,6 +75,48 @@ public class SetupWizardControllerTests
     }
 
     [Fact]
+    public async Task Index_Step3_WanCount_ReflectsAssignedWanInterfaces()
+    {
+        // Two WANs assigned in Step 1 → Step 3's WanCount must be 2 so the picker
+        // enables the Multi-WAN toggle (needs ≥2). Detection drives the Step 1 rows.
+        _wizard.Setup(w => w.GetOrCreateWizardStateAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(State(currentStep: 3, completed: false));
+        StubBuildPageDeps();
+        _wizard.Setup(w => w.DetectNetworkInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new List<DetectedNetworkInterface>
+               {
+                   new() { Name = "ens192", SuggestedRole = "wan_primary" },
+                   new() { Name = "ens224", SuggestedRole = "wan_secondary" },
+                   new() { Name = "ens256", SuggestedRole = "lan" },
+               });
+
+        var result = await CreateController().Index(step: 3);
+
+        var view = Assert.IsType<ViewResult>(result);
+        var vm = Assert.IsType<WizardPageViewModel>(view.Model);
+        Assert.Equal(2, vm.Step3.WanCount);
+    }
+
+    [Fact]
+    public async Task Index_Step3_WanCount_IsOne_WithSingleWan_DisablesMultiWan()
+    {
+        _wizard.Setup(w => w.GetOrCreateWizardStateAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(State(currentStep: 3, completed: false));
+        StubBuildPageDeps();
+        _wizard.Setup(w => w.DetectNetworkInterfacesAsync(It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new List<DetectedNetworkInterface>
+               {
+                   new() { Name = "ens192", SuggestedRole = "wan_primary" },
+                   new() { Name = "ens256", SuggestedRole = "lan" },
+               });
+
+        var result = await CreateController().Index(step: 3);
+
+        var vm = Assert.IsType<WizardPageViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.Equal(1, vm.Step3.WanCount); // < 2 → picker disables Multi-WAN
+    }
+
+    [Fact]
     public async Task Index_WizardCompleted_WithForce_RendersWithIsRerunFlag()
     {
         _wizard.Setup(w => w.GetOrCreateWizardStateAsync(It.IsAny<CancellationToken>()))

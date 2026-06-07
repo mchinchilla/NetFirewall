@@ -115,6 +115,13 @@ public sealed class SetupWizardController : Controller
         try
         {
             var result = await _templates.ApplyTemplateAsync(form.ToSelection(), ct);
+
+            // Record that a template was used so wizard completion skips the manual
+            // firewall generator (avoids a second overlapping rule set).
+            var step3 = await _wizard.GetStep3FirewallAsync(ct) ?? new();
+            step3.UsedTemplate = true;
+            await _wizard.SaveStep3FirewallAsync(step3, ct);
+
             var msg = $"Template '{NetFirewall.Models.Setup.RuleTemplateBases.Label(result.Base)}' generated: " +
                       $"{result.TotalRules} rules, {result.NetworkObjectsCreated} network objects. " +
                       "Review in Firewall, then Apply.";
@@ -135,6 +142,10 @@ public sealed class SetupWizardController : Controller
         try
         {
             var n = await _templates.ClearTemplateRulesAsync(ct);
+            // Clearing the template returns the wizard to the manual baseline path.
+            var step3 = await _wizard.GetStep3FirewallAsync(ct) ?? new();
+            step3.UsedTemplate = false;
+            await _wizard.SaveStep3FirewallAsync(step3, ct);
             return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, $"Removed {n} template-generated rules."));
         }
         catch (Exception ex)
@@ -168,7 +179,11 @@ public sealed class SetupWizardController : Controller
 
             await _wizard.ApplyInterfaceConfigAsync(step1, ct);
             await _wizard.ApplyLanConfigAsync(step2, ct);
-            await _wizard.ApplyFirewallConfigAsync(step3, step1, ct);
+            // If the operator generated a rule set from a template, those rules
+            // already live in the DB — skip the manual generator so we don't lay a
+            // second overlapping (CIDR-based) rule set on top.
+            if (!step3.UsedTemplate)
+                await _wizard.ApplyFirewallConfigAsync(step3, step1, ct);
             await _wizard.ApplyServicesConfigAsync(step4, ct);
             await _wizard.CompleteWizardAsync(ct);
 
@@ -229,6 +244,11 @@ public sealed class SetupWizardController : Controller
         var step1 = overrideStep1 ?? savedStep1.ToViewModel(detected);
         var step2 = overrideStep2 ?? savedStep2.ToViewModel(step1);
 
+        // WAN count drives the Multi-WAN toggle in the Step 3 template picker
+        // (needs ≥2 WAN links). Compute it from the current Step 1 assignments.
+        var step3 = overrideStep3 ?? savedStep3.ToViewModel();
+        step3.WanCount = step1.Interfaces.Count(i => i.Role is "wan_primary" or "wan_secondary");
+
         return new WizardPageViewModel
         {
             CurrentStep = Math.Clamp(step, 1, 5),
@@ -237,7 +257,7 @@ public sealed class SetupWizardController : Controller
             Detected = detected,
             Step1 = step1,
             Step2 = step2,
-            Step3 = overrideStep3 ?? savedStep3.ToViewModel(),
+            Step3 = step3,
             Step4 = overrideStep4 ?? savedStep4.ToViewModel()
         };
     }

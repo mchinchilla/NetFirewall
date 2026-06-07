@@ -34,9 +34,27 @@ public static class NetworkEndpoints
         // have to remember whether their NIC is named eth0 or enp0s3.
         grp.MapGet("/interfaces/discover", async (
                 ILinuxDistroService distro,
+                INetworkConfigResolver configResolver,
                 CancellationToken ct) =>
         {
             var found = await distro.DiscoverInterfacesAsync(ct);
+
+            // Enrich with the DECLARED addressing mode (dhcp/static) read from the
+            // system network config — the daemon runs as root and can read
+            // /etc/network/interfaces / netplan / nmcli. The wizard prefers this
+            // over its WAN+gateway heuristic (which got ens192/ens224 backwards).
+            try
+            {
+                var cfg = await configResolver.ResolveAsync(ct);
+                foreach (var s in found)
+                    s.AddressingMode = await cfg.DetectAddressingModeAsync(s.Name, ct);
+            }
+            catch
+            {
+                // Best-effort: if mode detection fails, leave it null and the
+                // wizard falls back to its heuristic. Never fail discovery over it.
+            }
+
             return Results.Json(ServiceResponse<IReadOnlyList<InterfaceSuggestion>>.Ok(found));
         });
 

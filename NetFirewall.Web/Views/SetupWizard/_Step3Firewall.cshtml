@@ -24,10 +24,27 @@
     @Html.AntiForgeryToken()
 </form>
 
-@* Opt-in archetype templates (generate a full rule set with network objects). *@
-@await Html.PartialAsync("_RuleTemplatePicker")
+@* Seed the shared store from the saved server state so navigating back into
+   Step 3 keeps the collapsed view if a template was already generated. *@
+<div x-init="$store.tpl.applied = @(Model.UsedTemplate ? "true" : "false")" class="hidden"></div>
 
-<div class="my-4 flex items-center gap-3 text-xs text-surface-fg-muted">
+@* Opt-in archetype templates (generate a full rule set with network objects).
+   Pass the WAN count so the picker can gate the Multi-WAN toggle (needs ≥2 WANs). *@
+@await Html.PartialAsync("_RuleTemplatePicker", Model.WanCount)
+
+@* When a template was generated, collapse the manual baseline — the rules are
+   already in the DB. The operator can still reveal the manual toggles. *@
+<div x-show="$store.tpl.applied && !$store.tpl.showManual" x-cloak
+     class="my-4 rounded-md border-l-2 px-3 py-3 text-sm flex items-start justify-between gap-3 bg-feedback-success-bg text-feedback-success-fg border-feedback-success-bd">
+    <div class="flex items-start gap-2">
+        <svg class="h-4 w-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+        <span>Rule set generated. The manual baseline below is hidden — your rules are in the database. Continue to the next step, or adjust manually.</span>
+    </div>
+    <button type="button" class="btn btn-ghost text-xs whitespace-nowrap" @@click="$store.tpl.showManual = true">Adjust manually</button>
+</div>
+
+<div class="my-4 flex items-center gap-3 text-xs text-surface-fg-muted"
+     x-show="!$store.tpl.applied || $store.tpl.showManual">
     <span class="h-px flex-1" style="background-color: var(--surface-border);"></span>
     or set a baseline manually
     <span class="h-px flex-1" style="background-color: var(--surface-border);"></span>
@@ -47,6 +64,18 @@
           preview:    false
       }">
     @Html.AntiForgeryToken()
+
+    @* Carries whether a template was used so the server skips the manual firewall
+       generator at completion. Bound to the shared store; defaults to the saved
+       value so it survives a back/forward navigation. *@
+    <input type="hidden" name="UsedTemplate"
+           x-bind:value="$store.tpl.applied ? 'true' : 'false'"
+           value="@(Model.UsedTemplate ? "true" : "false")" />
+
+    <!-- Manual baseline — hidden once a template has been generated (unless the
+         operator chose "Adjust manually"). The Continue/Back footer stays outside
+         this wrapper so the operator can always advance. -->
+    <div x-show="!$store.tpl.applied || $store.tpl.showManual" x-cloak>
 
     <!-- ── Inbound services ── -->
     <section class="rounded-lg border p-4 border-surface-border" style="background-color: var(--surface-elevated);">
@@ -149,10 +178,17 @@
         </div>
     </section>
 
+    </div><!-- /manual baseline wrapper -->
+
     <div class="mt-6 pt-4 border-t flex items-center justify-between gap-2 border-surface-border">
         <button type="submit" form="wizard-back-3" class="btn btn-ghost">← Back</button>
         <button type="submit" class="btn btn-primary">
-            Continue
+            @* When the manual baseline is collapsed (template generated), the submit
+               still posts the manual form's current values — harmless, since the
+               template rules already live in the DB and the wizard's Apply step
+               reconciles. Label nudges the operator to just continue. *@
+            <span x-show="!$store.tpl.applied || $store.tpl.showManual">Continue</span>
+            <span x-show="$store.tpl.applied && !$store.tpl.showManual" x-cloak>Continue with template</span>
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/></svg>
         </button>
     </div>

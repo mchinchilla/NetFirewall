@@ -108,4 +108,11 @@ public class DetectedNetworkInterface
 
     /// <summary>True when the kernel reports the iface as virtual (no /sys/class/net/X/device).</summary>
     public bool IsVirtual { get; set; }
+
+    /// <summary>
+    /// DECLARED addressing mode ("dhcp"/"static"/"disabled") read from the system
+    /// network config by the daemon, or null if undetermined. The wizard form
+    /// prefers this over its heuristic when pre-selecting the addressing dropdown.
+    /// </summary>
+    public string? DetectedAddressingMode { get; set; }
 }

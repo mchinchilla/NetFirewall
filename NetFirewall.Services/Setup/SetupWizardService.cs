@@ -162,24 +162,49 @@ public class SetupWizardService : ISetupWizardService
         // the runtime throws NetworkInformationException(97, EAFNOSUPPORT) from LinuxNetworkInterface
         // (dotnet/runtime#40305). Firewall appliances commonly disable IPv6, so the broken API would crash
         // the wizard on exactly the hosts that need it. Sysfs (/sys/class/net) has no IPv6 dependency.
+        // Prefer the DAEMON for discovery (rule #8: the Web shouldn't shell out to
+        // `ip`). The Web runs unprivileged under ProtectSystem=strict with a minimal
+        // PATH, so its in-process `ip addr show` / `ip route` calls in
+        // LinuxDistroService.GetIpInfoAsync silently fail (exception swallowed at
+        // Debug) — that's why the current IP / mask / gateway came back empty in the
+        // form even though MAC/MTU (read straight from sysfs) populated. The daemon
+        // runs as root with full PATH, so the same discovery code returns the live
+        // addresses. Fall back to the local distro service if the daemon is down
+        // (e.g. dev without the daemon) so the wizard still renders.
         IReadOnlyList<Models.System.InterfaceSuggestion> suggestions;
         try
         {
-            suggestions = await _distro.DiscoverInterfacesAsync(ct);
+            var daemonResp = await _daemon.DiscoverInterfacesAsync(ct);
+            if (daemonResp.Success && daemonResp.Data is { Count: > 0 })
+            {
+                suggestions = daemonResp.Data;
+            }
+            else
+            {
+                _logger.LogWarning("Daemon interface discovery returned no data ({Msg}); falling back to local sysfs discovery",
+                    daemonResp.Message);
+                suggestions = await _distro.DiscoverInterfacesAsync(ct);
+            }
         }
-        catch (Exception ex)
+        catch (Exception daemonEx)
         {
-            // Defense in depth: if even sysfs reads fail (non-Linux host, restricted FS), render the wizard
-            // with an empty list rather than a 500. The Step 1 view already has an empty-state message.
-            _logger.LogError(ex, "Interface discovery failed; falling back to empty list so the wizard still renders");
-            return Array.Empty<DetectedNetworkInterface>();
+            _logger.LogWarning(daemonEx, "Daemon interface discovery failed; falling back to local sysfs discovery");
+            try
+            {
+                suggestions = await _distro.DiscoverInterfacesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                // Defense in depth: if even sysfs reads fail (non-Linux host, restricted FS), render the wizard
+                // with an empty list rather than a 500. The Step 1 view already has an empty-state message.
+                _logger.LogError(ex, "Interface discovery failed; falling back to empty list so the wizard still renders");
+                return Array.Empty<DetectedNetworkInterface>();
+            }
         }
 
         var interfaces = suggestions
             .Where(s => !string.IsNullOrEmpty(s.Name))
-            .Where(s => !s.Name.StartsWith("docker", StringComparison.OrdinalIgnoreCase)
-                     && !s.Name.StartsWith("br-",    StringComparison.OrdinalIgnoreCase)
-                     && !s.Name.StartsWith("veth",   StringComparison.OrdinalIgnoreCase))
+            .Where(s => !IsServiceManagedInterface(s.Name))
             .Select(s => new DetectedNetworkInterface
             {
                 Name = s.Name,
@@ -196,7 +221,8 @@ public class SetupWizardService : ISetupWizardService
                 Confidence = s.Confidence,
                 Reason = s.Reason,
                 Mtu = s.Mtu,
-                IsVirtual = s.IsVirtual
+                IsVirtual = s.IsVirtual,
+                DetectedAddressingMode = s.AddressingMode
             })
             .OrderBy(i => i.Name)
             .ToList();
@@ -204,6 +230,29 @@ public class SetupWizardService : ISetupWizardService
         _logger.LogInformation("Detected {Count} network interfaces via sysfs", interfaces.Count);
         return interfaces;
     }
+
+    /// <summary>
+    /// Interfaces the wizard's Step 1 must NOT offer for manual NIC config: they
+    /// are created and owned by a SERVICE, not the network-interface layer.
+    /// Configuring wg0/tun0/etc. here would write ifupdown/netplan config and an
+    /// fw_interfaces row that the owning subsystem (WireGuard, container runtime,
+    /// bridge) then fights with — and if the service is never enabled it leaves
+    /// orphan config behind. The VPN subsystem (IWireGuardService /
+    /// IVpnRoutingService) owns wg*; Docker owns docker*/br-/veth*; tun/tap are
+    /// app-managed point-to-point devices.
+    /// </summary>
+    private static bool IsServiceManagedInterface(string name) =>
+        name.StartsWith("wg",     StringComparison.OrdinalIgnoreCase) ||   // WireGuard (wg0, wg1, …)
+        name.StartsWith("tun",    StringComparison.OrdinalIgnoreCase) ||   // OpenVPN / generic tunnels
+        name.StartsWith("tap",    StringComparison.OrdinalIgnoreCase) ||   // L2 tap devices
+        name.StartsWith("docker", StringComparison.OrdinalIgnoreCase) ||   // Docker bridge
+        name.StartsWith("br-",    StringComparison.OrdinalIgnoreCase) ||   // Docker/user bridges
+        name.StartsWith("veth",   StringComparison.OrdinalIgnoreCase) ||   // container veth pairs
+        name.StartsWith("virbr",  StringComparison.OrdinalIgnoreCase) ||   // libvirt bridge
+        name.StartsWith("vnet",   StringComparison.OrdinalIgnoreCase) ||   // libvirt/QEMU vNICs
+        name.StartsWith("zt",     StringComparison.OrdinalIgnoreCase) ||   // ZeroTier
+        name.StartsWith("tailscale", StringComparison.OrdinalIgnoreCase) || // Tailscale
+        name.StartsWith("ppp",    StringComparison.OrdinalIgnoreCase);     // PPP (managed by pppd/the WAN dialer)
 
     private static string MapSuggestedRole(Models.System.InterfaceSuggestion s) => (s.SuggestedType, s.SuggestedRole) switch
     {
@@ -246,6 +295,11 @@ public class SetupWizardService : ISetupWizardService
             iface.Role = config.Role;
             iface.Enabled = true;
             iface.Mtu = config.Mtu;
+
+            // MAC override (clone/spoof). Empty → keep the NIC's hardware MAC. The
+            // daemon applies it on the interface when this config is pushed.
+            if (!string.IsNullOrWhiteSpace(config.MacAddress))
+                iface.MacAddress = config.MacAddress.Trim();
 
             iface.AddressingMode = config.AddressingMode switch
             {

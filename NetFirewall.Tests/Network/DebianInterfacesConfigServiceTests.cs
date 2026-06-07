@@ -232,4 +232,58 @@ public class DebianInterfacesConfigServiceTests
         var cfg = await _svc.GenerateConfigAsync(IfaceStatic(), routes: null);
         Assert.Contains("iface eth0 inet static", cfg);
     }
+
+    // ── ParseAddressingMode — read the DECLARED mode (fixes the wizard's
+    //    static-vs-DHCP guesswork that got ens192/ens224 backwards) ──
+
+    private const string SampleInterfaces = """
+        # /etc/network/interfaces
+        auto lo
+        iface lo inet loopback
+
+        auto ens192
+        iface ens192 inet static
+            address 154.12.104.135
+            netmask 255.255.255.0
+            gateway 154.12.104.134
+
+        allow-hotplug ens224
+        iface ens224 inet dhcp
+        """;
+
+    [Fact]
+    public void ParseAddressingMode_Static_interface()
+        => Assert.Equal("static", DebianInterfacesConfigService.ParseAddressingMode(SampleInterfaces, "ens192"));
+
+    [Fact]
+    public void ParseAddressingMode_Dhcp_interface()
+        => Assert.Equal("dhcp", DebianInterfacesConfigService.ParseAddressingMode(SampleInterfaces, "ens224"));
+
+    [Fact]
+    public void ParseAddressingMode_Loopback_is_null()
+        => Assert.Null(DebianInterfacesConfigService.ParseAddressingMode(SampleInterfaces, "lo"));
+
+    [Fact]
+    public void ParseAddressingMode_UnknownInterface_is_null()
+        => Assert.Null(DebianInterfacesConfigService.ParseAddressingMode(SampleInterfaces, "ens999"));
+
+    [Fact]
+    public void ParseAddressingMode_Manual_maps_to_disabled()
+        => Assert.Equal("disabled", DebianInterfacesConfigService.ParseAddressingMode("iface eth9 inet manual", "eth9"));
+
+    [Fact]
+    public void ParseAddressingMode_LastStanzaWins()
+    {
+        // A later stanza (e.g. from interfaces.d concatenated) overrides an earlier one.
+        const string cfg = "iface eth0 inet dhcp\niface eth0 inet static\n";
+        Assert.Equal("static", DebianInterfacesConfigService.ParseAddressingMode(cfg, "eth0"));
+    }
+
+    [Fact]
+    public void ParseAddressingMode_IgnoresCommentsAndPartialNameMatches()
+    {
+        const string cfg = "# iface eth0 inet dhcp\niface eth00 inet dhcp\n";
+        // "eth0" must NOT match the commented line nor the "eth00" interface.
+        Assert.Null(DebianInterfacesConfigService.ParseAddressingMode(cfg, "eth0"));
+    }
 }
