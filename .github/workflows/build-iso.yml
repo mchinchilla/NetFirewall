@@ -245,6 +245,7 @@ jobs:
 
       - name: Rename ISO
         working-directory: deploy/iso
+        shell: bash   # uses ${VAR///-} pattern substitution (not POSIX sh)
         run: |
           set -eux
           src=$(ls *.iso | head -1)
