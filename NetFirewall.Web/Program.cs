@@ -98,6 +98,10 @@ builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 // ----- Domain services -----
 builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
+// Policy-routing CRUD (route tables / policy rules). Needed Web-side by
+// VpnRoutingService for the WireGuard egress + scaffold features. The daemon owns
+// the apply (kernel ip rule/route); the Web only reads/writes the rows.
+builder.Services.AddScoped<IPolicyRoutingService, PolicyRoutingService>();
 
 // ----- Network config writers (each distro family + a NoOp) -----
 // These are the LOW-LEVEL writers that actually shell out (Process.Start).
@@ -227,6 +231,38 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
                            NetFirewall.Services.Monitoring.MetricsQueryService>();
 
 var app = builder.Build();
+
+// Fail-fast DI sanity check. A controller dependency that isn't registered only
+// blows up at runtime on the first request to that page (an opaque 500) — e.g.
+// IPolicyRoutingService was daemon-only and a Web service started needing it.
+// Resolve the cross-subsystem / easily-forgotten services in a throwaway scope at
+// startup so a missing registration crashes the process with a clear message
+// instead. Cheap (one scope, no work) and runs once.
+{
+    using var scope = app.Services.CreateScope();
+    var sp = scope.ServiceProvider;
+    Type[] mustResolve =
+    {
+        typeof(NetFirewall.Services.Firewall.IFirewallService),
+        typeof(NetFirewall.Services.Firewall.IPolicyRoutingService),
+        typeof(NetFirewall.Services.Vpn.IWireGuardService),
+        typeof(NetFirewall.Services.Vpn.IVpnRoutingService),
+        typeof(NetFirewall.Services.Daemon.IDaemonClient),
+        typeof(NetFirewall.Services.Dhcp.IDhcpAdminService),
+        typeof(NetFirewall.Services.Monitoring.IGeoIpLookupService),
+        typeof(NetFirewall.Web.Services.ITerminalProxyService),
+    };
+    var missing = new List<string>();
+    foreach (var t in mustResolve)
+    {
+        try { sp.GetRequiredService(t); }
+        catch (Exception ex) { missing.Add($"{t.Name}: {ex.Message}"); }
+    }
+    if (missing.Count > 0)
+        throw new InvalidOperationException(
+            "Startup DI check failed — these services could not be resolved (register them in Program.cs):\n  "
+            + string.Join("\n  ", missing));
+}
 
 app.UseSerilogRequestLogging();
 app.MapDefaultEndpoints();

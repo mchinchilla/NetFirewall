@@ -44,7 +44,8 @@ public sealed class VpnEgressController : Controller
     public async Task<IActionResult> Panel(CancellationToken ct)
     {
         var server = await _wg.GetServerAsync(ct);
-        if (server is null) return PartialView("_EgressPanel", EmptyVm("wg0", false));
+        // Full path: this view lives with the WireGuard page, not under /Views/VpnEgress.
+        if (server is null) return PartialView("~/Views/WireGuard/_EgressPanel.cshtml", EmptyVm("wg0", false));
 
         var sources = await _vpnRouting.GetEgressSourcesAsync(server, ct);
         // ScaffoldReady = there's a mark/table the egress sources can attach to.
@@ -55,7 +56,7 @@ public sealed class VpnEgressController : Controller
         var leases = await SafeLeasesAsync(ct);
         var lanSubnets = LanSubnets(await _fw.GetInterfacesAsync(ct));
 
-        return PartialView("_EgressPanel", new VpnEgressViewModel
+        return PartialView("~/Views/WireGuard/_EgressPanel.cshtml", new VpnEgressViewModel
         {
             TunnelName = server.Name,
             ScaffoldReady = scaffoldReady,
