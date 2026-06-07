@@ -1,0 +1,248 @@
+name: Build .deb and appliance ISO
+
+# Builds the self-contained NetFirewall .deb, then embeds it into a Debian 13
+# (trixie) live-build appliance ISO. See deploy/debian/ and deploy/iso/.
+#
+#   PR            -> build the .deb only (fast feedback, no privileged ISO job)
+#   push to main  -> build .deb + ISO, upload both as artifacts
+#   tag v*        -> build .deb + ISO, attach the ISO + .deb to a GitHub Release
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to attach assets to a Release on tag builds.
+
+concurrency:
+  group: build-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────── .deb ─────────────────────────────
+  deb:
+    name: Build .deb (self-contained)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+    steps:
+      - name: Install build tooling
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git rsync \
+            dotnet-sdk-10.0 \
+            debhelper devscripts dpkg-dev lintian \
+            file
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The NetFirewall.Web project compiles Tailwind via the STANDALONE
+      # tailwindcss binary during publish (project rule #1: no npm). It must be
+      # on PATH or the Web publish fails. Pull the official standalone release.
+      - name: Install standalone tailwindcss
+        run: |
+          set -eux
+          # Match the version that produced the committed wwwroot/css/site.css
+          # header (tailwindcss v4.3.0). v4 standalone uses the new engine.
+          ver="v4.3.0"
+          url="https://github.com/tailwindlabs/tailwindcss/releases/download/${ver}/tailwindcss-linux-x64"
+          curl -fsSL "$url" -o /usr/local/bin/tailwindcss
+          chmod 0755 /usr/local/bin/tailwindcss
+          tailwindcss --help >/dev/null 2>&1 || tailwindcss --version || true
+
+      # NuGet restore cache keyed on the lockfiles / csproj set.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # dpkg-buildpackage expects debian/ at the source root, but ours lives in
+      # deploy/debian/ (and rules references paths relative to the repo root).
+      # Stage it at the root for the build, then build from the root.
+      - name: Stage debian/ at source root
+        run: |
+          set -eux
+          rsync -a deploy/debian/ debian/
+          chmod 0755 debian/rules debian/postinst debian/prerm debian/postrm
+
+      - name: Build the package
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+          DOTNET_NOLOGO: '1'
+          DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+        run: |
+          set -eux
+          # -us -uc: unsigned. -b: binary-only (no source tarball needed).
+          dpkg-buildpackage -us -uc -b
+          # dpkg drops the .deb in the PARENT of the source dir.
+          mkdir -p dist
+          cp ../netfirewall_*.deb dist/
+          ls -l dist/
+
+      - name: Inspect the built package
+        run: |
+          set -eux
+          deb=$(ls dist/netfirewall_*.deb | head -1)
+          dpkg-deb --info "$deb"
+          echo "── contents (top-level) ──"
+          dpkg-deb --contents "$deb" | awk '{print $6}' | sort -u | head -60
+          echo "── ASSERTION: env templates ship tokenized (no secrets baked) ──"
+          tmp=$(mktemp -d); dpkg-deb -x "$deb" "$tmp"
+          for t in daemon web dhcp; do
+            f="$tmp/opt/netfirewall/templates/$t.env.template"
+            test -f "$f" || { echo "missing template $f"; exit 1; }
+          done
+          # daemon + web templates MUST still carry the placeholder, never a key.
+          grep -q '__REPLACE_MASTER_KEY__' "$tmp/opt/netfirewall/templates/daemon.env.template"
+          grep -q '__REPLACE_MASTER_KEY__' "$tmp/opt/netfirewall/templates/web.env.template"
+          echo "── ASSERTION: firstboot + provisioning bits present ──"
+          test -x "$tmp/usr/local/bin/netfirewall-firstboot"
+          test -x "$tmp/usr/local/bin/netfirewall-bootstrap"
+          test -f "$tmp/lib/systemd/system/netfirewall-firstboot.service"
+          echo "── ASSERTION: self-contained (bundled coreclr, no runtime dep) ──"
+          test -f "$tmp/opt/netfirewall/daemon/libcoreclr.so"
+          ! dpkg-deb -f "$deb" Depends | grep -qi 'dotnet-runtime\|aspnetcore-runtime'
+
+      - name: Lint (non-blocking)
+        run: |
+          set -eux
+          lintian --no-tag-display-limit dist/netfirewall_*.deb || true
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netfirewall-deb
+          path: dist/netfirewall_*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  # ───────────────────────────── ISO ─────────────────────────────
+  iso:
+    name: Build appliance ISO (live-build)
+    # Only on main/master pushes + tags — NOT on PRs (privileged + slow).
+    if: github.event_name != 'pull_request'
+    needs: deb
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+      # live-build needs loop devices, mount, debootstrap → privileged.
+      options: --privileged
+    steps:
+      - name: Install live-build tooling
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git rsync \
+            live-build debootstrap squashfs-tools xorriso \
+            isolinux syslinux-common syslinux-utils \
+            grub-pc-bin grub-efi-amd64-bin grub-common \
+            mtools dosfstools file
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: netfirewall-deb
+          path: deb
+
+      - name: Stage the .deb for offline install
+        run: |
+          set -eux
+          cp deb/netfirewall_*.deb deploy/iso/config/packages.chroot/
+          ls -l deploy/iso/config/packages.chroot/
+
+      - name: Build the ISO
+        working-directory: deploy/iso
+        run: |
+          set -eux
+          lb config
+          lb build
+          ls -l *.iso
+
+      # The load-bearing safety check: the squashfs env files MUST still carry
+      # the placeholders. If a real base64 master key leaked into the image,
+      # every flashed appliance would share one TOTP key — FAIL the build.
+      - name: Assert no secrets baked into the image
+        working-directory: deploy/iso
+        run: |
+          set -eux
+          # Find the squashfs inside the built ISO.
+          iso=$(ls *.iso | head -1)
+          workdir=$(mktemp -d)
+          # Extract the squashfs from the ISO (live/filesystem.squashfs).
+          # xorriso can extract a single file from the ISO image.
+          xorriso -osirrox on -indev "$iso" \
+            -extract /live/filesystem.squashfs "$workdir/filesystem.squashfs"
+          mkdir -p "$workdir/sqfs"
+          unsquashfs -f -d "$workdir/sqfs" "$workdir/filesystem.squashfs" \
+            etc/netfirewall 2>/dev/null || \
+            unsquashfs -f -d "$workdir/sqfs" "$workdir/filesystem.squashfs"
+          envdir="$workdir/sqfs/etc/netfirewall"
+          if [ ! -d "$envdir" ]; then
+            echo "::error::/etc/netfirewall not found in squashfs — expected env files from postinst"
+            exit 1
+          fi
+          echo "── env files in the image ──"
+          ls -l "$envdir"
+          fail=0
+          for f in "$envdir"/daemon.env "$envdir"/web.env; do
+            test -f "$f" || { echo "::error::missing $f"; fail=1; continue; }
+            if ! grep -q '__REPLACE_MASTER_KEY__' "$f"; then
+              echo "::error::SECRET LEAK: $f has no __REPLACE_MASTER_KEY__ placeholder — a real key may be baked in!"
+              fail=1
+            fi
+            # A 32-byte base64 key is ~44 chars ending in '='. Heuristic catch.
+            if grep -qE '^NETFIREWALL_MASTER_KEY=[A-Za-z0-9+/]{43}=$' "$f"; then
+              echo "::error::SECRET LEAK: $f looks like it contains a real base64 key!"
+              fail=1
+            fi
+            # .provisioned must NOT exist in the image (firstboot makes it).
+          done
+          if [ -e "$workdir/sqfs/var/lib/netfirewall/.provisioned" ]; then
+            echo "::error::image is pre-provisioned (.provisioned present) — firstboot would be skipped!"
+            fail=1
+          fi
+          test "$fail" -eq 0
+          echo "OK: env files are tokenized, no secrets baked, not pre-provisioned."
+
+      - name: Rename ISO
+        working-directory: deploy/iso
+        run: |
+          set -eux
+          src=$(ls *.iso | head -1)
+          ver="${GITHUB_REF_NAME//\//-}"
+          mv "$src" "netfirewall-${ver}-amd64.iso"
+          sha256sum "netfirewall-${ver}-amd64.iso" > "netfirewall-${ver}-amd64.iso.sha256"
+          ls -l netfirewall-*.iso*
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netfirewall-iso
+          path: |
+            deploy/iso/netfirewall-*.iso
+            deploy/iso/netfirewall-*.iso.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach to Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            deploy/iso/netfirewall-*.iso
+            deploy/iso/netfirewall-*.iso.sha256
+            deb/netfirewall_*.deb

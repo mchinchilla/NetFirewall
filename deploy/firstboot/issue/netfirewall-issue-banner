@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# netfirewall-issue-banner — regenerates /etc/issue with the appliance's current
+# IPv4 address(es) and the web UI URL, so a console operator (serial / KVM /
+# monitor) immediately sees where to point a browser. Runs at boot and whenever
+# networking changes (wired into a dispatcher hook on the appliance image).
+#
+# Pure read of /sys + `ip`; writes only /etc/issue. Safe to run repeatedly.
+set -euo pipefail
+
+ISSUE=/etc/issue
+PORTAL_PORT="${NETFIREWALL_PORTAL_PORT:-443}"   # nginx terminates TLS in prod.
+
+# Collect non-loopback, non-tunnel global IPv4 addresses with their iface.
+mapfile -t ADDRS < <(
+    ip -o -4 addr show scope global 2>/dev/null \
+        | awk '{print $2" "$4}' \
+        | grep -vE '^(lo|wg|tun|tap|docker|veth|br-)' \
+        || true
+)
+
+{
+    printf '\n'
+    printf '  \\d \\t\n'
+    printf '  ─────────────────────────────────────────────\n'
+    printf '   NetFirewall appliance — \\n (\\m)\n'
+    printf '  ─────────────────────────────────────────────\n'
+    if [[ ${#ADDRS[@]} -eq 0 ]]; then
+        printf '   No network address yet (waiting for DHCP...).\n'
+        printf '   Connect a cable to the WAN/LAN port and wait,\n'
+        printf '   or log in at the console to configure manually.\n'
+    else
+        printf '   Web UI:\n'
+        for entry in "${ADDRS[@]}"; do
+            iface=${entry%% *}
+            cidr=${entry##* }
+            ipaddr=${cidr%%/*}
+            if [[ "$PORTAL_PORT" == "443" ]]; then
+                printf '     https://%s/        (on %s)\n' "$ipaddr" "$iface"
+            else
+                printf '     https://%s:%s/   (on %s)\n' "$ipaddr" "$PORTAL_PORT" "$iface"
+            fi
+        done
+        printf '\n   First login: the bootstrap token is printed to\n'
+        printf '   the journal — run:  journalctl -u netfirewall-web | grep -i token\n'
+    fi
+    printf '\n   Console admin:  sudo netfirewall-tui\n'
+    printf '   Health check:   sudo netfirewall-doctor\n'
+    printf '  ─────────────────────────────────────────────\n\n'
+} > "$ISSUE.tmp"
+
+mv "$ISSUE.tmp" "$ISSUE"

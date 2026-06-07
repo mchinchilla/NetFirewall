@@ -1,0 +1,16 @@
+[Unit]
+Description=NetFirewall console banner (/etc/issue with web UI URL)
+Documentation=file:///opt/netfirewall/README.txt
+After=network-online.target
+Wants=network-online.target
+# Re-run after firstboot so the banner reflects the provisioned appliance.
+After=netfirewall-firstboot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/netfirewall-issue-banner
+# Best-effort: a console banner is informational, never block boot on it.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

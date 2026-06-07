@@ -1,0 +1,11 @@
+
+  ─────────────────────────────────────────────
+   NetFirewall appliance — \n (\m)  \l
+  ─────────────────────────────────────────────
+   Bringing up the network (DHCP)...
+   The web UI address appears here once an IP is acquired.
+
+   Console admin:  sudo netfirewall-tui
+   Health check:   sudo netfirewall-doctor
+  ─────────────────────────────────────────────
+

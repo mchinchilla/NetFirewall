@@ -1,0 +1,50 @@
+#!/bin/sh
+# deploy/iso/auto/config — live-build configuration for the NetFirewall
+# appliance ISO (Debian 13 / trixie, amd64).
+#
+# Run as: cd deploy/iso && lb config (lb reads auto/config automatically).
+#
+# Produces a hybrid ISO that is BOTH:
+#   * a live appliance you can boot directly (or run as a VM), and
+#   * a bare-metal installer (--debian-installer live + preseed) that lays the
+#     same live filesystem to disk.
+#
+# Everything needed is embedded so the install works fully OFFLINE: the
+# NetFirewall .deb (dropped into config/packages.chroot by CI) plus every OS
+# dependency from the package-lists is pulled into the squashfs at build time.
+set -e
+
+lb config noauto \
+    --mode debian \
+    --distribution trixie \
+    --architecture amd64 \
+    --archive-areas "main contrib non-free-firmware" \
+    --binary-images iso-hybrid \
+    --debian-installer live \
+    --debian-installer-gui false \
+    --apt-indices false \
+    --apt-recommends false \
+    --memtest none \
+    --iso-application "NetFirewall" \
+    --iso-publisher "NetFirewall Project" \
+    --iso-volume "NetFirewall trixie amd64" \
+    --bootappend-live "boot=live components quiet splash hostname=netfirewall username=root noeject" \
+    --bootappend-install "auto=true priority=critical" \
+    "${@}"
+
+# Notes on the choices:
+#   --archive-areas non-free-firmware  → real NIC / wifi firmware on the media so
+#                                        the appliance actually sees its ports.
+#   --debian-installer live            → the d-i variant that installs THIS live
+#                                        filesystem to disk (what the operator
+#                                        wants for bare metal), preseeded.
+#   --apt-recommends false             → keep the image lean; we Recommends:
+#                                        deliberately and pull what we want via
+#                                        the package-list.
+#   --apt-indices false                → don't ship apt indices (offline image).
+#
+# Explicitly NOT set / NOT installed (see package-lists too):
+#   * no network-manager / netplan.io  — we use ifupdown (DebianInterfacesConfigService).
+#   * no cloud-init                     — this is an appliance, not a cloud image.
+#   * no dotnet-runtime / Microsoft APT — the .deb is self-contained.
+#   * no desktop task                   — headless appliance.

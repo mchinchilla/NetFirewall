@@ -1,0 +1,23 @@
+# /etc/network/interfaces.d/00-netfirewall-bootstrap
+#
+# First-boot reachability ONLY. NIC names are unknown at image-build time, so we
+# can't hardcode eth0/ens256. This file is installed by the ISO into the image
+# and brings up loopback + DHCP on the first physical NIC found, so a freshly
+# flashed appliance is reachable on the network and the operator can open the
+# web UI.
+#
+# Once the operator runs the SetupWizard, the daemon (via
+# DebianInterfacesConfigService) writes the REAL per-NIC config into other files
+# under /etc/network/interfaces.d/ and this bootstrap file is superseded /
+# removed. Do NOT treat this as the production interface config.
+#
+# NOTE: the actual NIC name is substituted at first boot by
+# netfirewall-issue-banner / a tiny generator that reads /sys/class/net — this
+# file ships with the literal token __FIRST_NIC__ which the firstboot network
+# hook replaces. If left as-is, ifupdown ignores the unknown stanza harmlessly.
+
+auto lo
+iface lo inet loopback
+
+allow-hotplug __FIRST_NIC__
+iface __FIRST_NIC__ inet dhcp

@@ -1,0 +1,83 @@
+#!/bin/sh
+# postinst — package CONFIGURE step. Runs at package-install time (including in
+# the live-build chroot), so it MUST be:
+#   * non-interactive
+#   * idempotent + upgrade-safe
+#   * secret-free  — writes NO master key, NO DB password
+#   * DB-free      — touches NO PostgreSQL instance
+#
+# Per docs/master-key.md, baking secrets here would make every flashed appliance
+# share one TOTP master key + DB password. All per-appliance secrets and the DB
+# are handled by netfirewall-firstboot.service on the first real boot. The env
+# files we drop here are the TEMPLATES verbatim — they still contain the
+# __REPLACE__ / __REPLACE_MASTER_KEY__ placeholders.
+set -e
+
+GROUP_NAME=netfirewall
+WEB_USER=netfirewall-web
+ETC_DIR=/etc/netfirewall
+STATE_DIR=/var/lib/netfirewall
+LOG_DIR=/var/log/netfirewall
+TPL_DIR=/opt/netfirewall/templates
+
+case "$1" in
+    configure)
+        # ── group + service user (system, nologin) ──
+        if ! getent group "$GROUP_NAME" >/dev/null; then
+            addgroup --system "$GROUP_NAME"
+        fi
+        if ! getent passwd "$WEB_USER" >/dev/null; then
+            adduser --system --no-create-home --shell /usr/sbin/nologin \
+                    --ingroup "$GROUP_NAME" --home "$STATE_DIR/web" "$WEB_USER"
+        else
+            # Upgrade path: make sure the user is still in the group.
+            adduser "$WEB_USER" "$GROUP_NAME" >/dev/null 2>&1 || true
+        fi
+
+        # ── directories + modes (mirror deploy/install.sh) ──
+        install -d -m 0750 -o root -g "$GROUP_NAME"        "$ETC_DIR"
+        install -d -m 0750 -o root -g root                 "$STATE_DIR" "$STATE_DIR/daemon"
+        install -d -m 0750 -o "$WEB_USER" -g "$GROUP_NAME" "$STATE_DIR/web"
+        install -d -m 0750 -o root -g root                 "$LOG_DIR" "$LOG_DIR/daemon"
+        install -d -m 0750 -o "$WEB_USER" -g "$GROUP_NAME" "$LOG_DIR/web"
+        install -d -m 0750 -o root -g root                 "$LOG_DIR/dhcp"
+
+        # ── env files: drop the TEMPLATES verbatim, ONLY if absent. ──
+        # Still tokenized (__REPLACE__ / __REPLACE_MASTER_KEY__). firstboot fills
+        # them. On upgrade we never overwrite an already-provisioned env file.
+        if [ ! -e "$ETC_DIR/daemon.env" ]; then
+            install -m 0600 -o root -g root "$TPL_DIR/daemon.env.template" "$ETC_DIR/daemon.env"
+        fi
+        if [ ! -e "$ETC_DIR/web.env" ]; then
+            install -m 0640 -o root -g "$WEB_USER" "$TPL_DIR/web.env.template" "$ETC_DIR/web.env"
+        fi
+        if [ ! -e "$ETC_DIR/dhcp.env" ]; then
+            install -m 0640 -o root -g root "$TPL_DIR/dhcp.env.template" "$ETC_DIR/dhcp.env"
+        fi
+
+        # ── Production appsettings from templates (no secrets in these). ──
+        if [ -f "$TPL_DIR/daemon.json.template" ] && [ ! -e /opt/netfirewall/daemon/appsettings.Production.json ]; then
+            install -m 0640 -o root -g "$GROUP_NAME" \
+                "$TPL_DIR/daemon.json.template" /opt/netfirewall/daemon/appsettings.Production.json
+        fi
+        if [ -f "$TPL_DIR/web.json.template" ] && [ ! -e /opt/netfirewall/web/appsettings.Production.json ]; then
+            install -m 0640 -o root -g "$GROUP_NAME" \
+                "$TPL_DIR/web.json.template" /opt/netfirewall/web/appsettings.Production.json
+        fi
+
+        # ── Web static assets readable by the Web user / a proxy. ──
+        if [ -d /opt/netfirewall/web/wwwroot ]; then
+            chown -R "$WEB_USER:$GROUP_NAME" /opt/netfirewall/web/wwwroot 2>/dev/null || true
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+esac
+
+# debhelper-generated snippets (systemd enable, tmpfiles, sysctl, ...). The
+# units are installed with --no-start, so this enables-without-starting; the
+# real first start happens after netfirewall-firstboot provisions the DB.
+#DEBHELPER#
+
+exit 0

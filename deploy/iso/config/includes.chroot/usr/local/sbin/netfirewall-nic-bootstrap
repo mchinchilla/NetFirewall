@@ -1,0 +1,43 @@
+#!/bin/sh
+# netfirewall-nic-bootstrap — runs ONCE on the first boot, before networking, to
+# substitute the real first physical NIC name into the bootstrap interfaces file.
+#
+# The image ships /etc/network/interfaces.d/00-netfirewall-bootstrap with the
+# literal token __FIRST_NIC__ (NIC names are unknown at build time). We pick the
+# first non-virtual NIC from /sys/class/net and sed it in, so the appliance gets
+# a DHCP lease and is reachable. The operator then assigns real WAN/LAN roles in
+# the SetupWizard, which writes the production per-NIC config and supersedes this.
+#
+# Idempotent: if the token is already gone, do nothing.
+set -e
+
+IFACES=/etc/network/interfaces.d/00-netfirewall-bootstrap
+[ -f "$IFACES" ] || exit 0
+grep -q '__FIRST_NIC__' "$IFACES" || exit 0
+
+# First physical, non-virtual interface (skip lo, wg, tun/tap, docker, veth, br-,
+# and anything backed by a virtual device).
+nic=""
+for dev in $(ls /sys/class/net 2>/dev/null | sort); do
+    case "$dev" in
+        lo|wg*|tun*|tap*|docker*|veth*|br-*|virbr*|dummy*) continue ;;
+    esac
+    # Only real devices have a non-virtual /sys/class/net/<dev>/device link.
+    if [ -e "/sys/class/net/$dev/device" ]; then
+        nic="$dev"
+        break
+    fi
+done
+# Fall back to the first non-virtual name if none had a /device link (some VMs).
+if [ -z "$nic" ]; then
+    for dev in $(ls /sys/class/net 2>/dev/null | sort); do
+        case "$dev" in
+            lo|wg*|tun*|tap*|docker*|veth*|br-*|virbr*|dummy*) continue ;;
+        esac
+        nic="$dev"; break
+    done
+fi
+nic="${nic:-eth0}"
+
+sed -i "s/__FIRST_NIC__/$nic/g" "$IFACES"
+echo "netfirewall-nic-bootstrap: bound first-boot DHCP to '$nic'"

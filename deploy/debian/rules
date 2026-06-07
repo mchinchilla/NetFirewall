@@ -1,26 +1,38 @@
 #!/usr/bin/make -f
 #
-# debhelper rules for the netfirewall package. The "build" step publishes
-# four .NET projects into a staging tree under debian/tmp/opt/netfirewall/;
-# dh_install + the maintainer scripts then move them into the final paths.
+# debhelper rules for the netfirewall package.
 #
-# We intentionally avoid Source-built dependency restoration during dpkg-
-# buildpackage to keep the build hermetic — the project depends on the
-# .NET 10 SDK which is declared in Build-Depends and provides `dotnet`.
+# The "build" step publishes seven .NET projects SELF-CONTAINED into a staging
+# tree under debian/tmp/opt/netfirewall/. Self-contained means the .NET runtime
+# travels inside the package — the .deb does NOT depend on dotnet-runtime /
+# aspnetcore-runtime, and the appliance can install fully offline. We keep the
+# apphost+DLLs layout (NOT PublishSingleFile, NOT trimmed): the systemd units
+# ExecStart the per-project apphost launcher, and trimming would break the
+# reflection the app relies on (RepoDb, config binding, MVC).
+#
+# debian/netfirewall.install then maps the staged tree onto the final paths.
+# The maintainer scripts (postinst/prerm/postrm) do the runtime provisioning.
 
 export DEB_BUILD_OPTIONS = nostrip
+# .NET telemetry off + deterministic-ish restore inside the build.
+export DOTNET_CLI_TELEMETRY_OPTOUT = 1
+export DOTNET_NOLOGO = 1
 DH_VERBOSE = 1
 DH_OPTIONS = -v
 
 # Where the publishes land before dh_install distributes them.
 STAGING := debian/tmp
+OPT     := $(STAGING)/opt/netfirewall
 
-# The four publish targets. WanMonitor is published too but isn't on by
-# default — operators enable the unit only on multi-WAN deployments.
+# proj:outdir — every .NET target we ship. WanMonitor is published too but its
+# unit isn't enabled by default (operators flip it on for multi-WAN). doctor and
+# dhcp-server are NEW vs the old skeleton.
 PUBLISH_TARGETS := \
 	NetFirewall.Daemon:daemon \
 	NetFirewall.Web:web \
+	NetFirewall.DhcpServer:dhcp-server \
 	NetFirewall.Tui:tui \
+	NetFirewall.Doctor:doctor \
 	NetFirewall.Migrations:migrations \
 	NetFirewall.WanMonitor:wanmonitor
 
@@ -30,28 +42,122 @@ PUBLISH_TARGETS := \
 override_dh_auto_build:
 	@for entry in $(PUBLISH_TARGETS); do \
 		proj=$${entry%%:*}; out=$${entry##*:}; \
-		echo "==> publishing $$proj -> $(STAGING)/opt/netfirewall/$$out"; \
-		dotnet publish -c Release -r linux-x64 --self-contained false \
-			-o $(STAGING)/opt/netfirewall/$$out \
+		echo "==> publishing $$proj (self-contained) -> $(OPT)/$$out"; \
+		dotnet publish -c Release -r linux-x64 \
+			--self-contained true \
+			-p:DebugType=none -p:DebugSymbols=false \
+			-o $(OPT)/$$out \
 			$$proj/$$proj.csproj; \
 	done
-	# Stage SQL migration files alongside the migration runner.
-	mkdir -p $(STAGING)/opt/netfirewall/migrations/sql/migrations
+
+	# ── env TEMPLATES (verbatim, still tokenized — firstboot fills them) ──
+	mkdir -p $(OPT)/templates
+	cp deploy/env/daemon.env.template $(OPT)/templates/daemon.env.template
+	cp deploy/env/web.env.template    $(OPT)/templates/web.env.template
+	cp deploy/env/dhcp.env.template   $(OPT)/templates/dhcp.env.template
+	cp deploy/config/daemon.json.template $(OPT)/templates/daemon.json.template
+	cp deploy/config/web.json.template    $(OPT)/templates/web.json.template
+
+	# ── SQL migrations (run by firstboot via the self-contained migrate) ──
+	mkdir -p $(OPT)/migrations/sql/migrations
 	cp NetFirewall.Services/sql/migrations/*.sql \
-	   $(STAGING)/opt/netfirewall/migrations/sql/migrations/
-	# TUI shim wrapper — same logic as deploy/install.sh writes today, but
-	# baked into the .deb so it ships with the package instead of being
-	# generated at install time.
-	printf '#!/usr/bin/env bash\nexec dotnet /opt/netfirewall/tui/netfirewall-tui.dll "$$@"\n' \
-	    > $(STAGING)/opt/netfirewall/tui/netfirewall-tui
-	chmod 0755 $(STAGING)/opt/netfirewall/tui/netfirewall-tui
+	   $(OPT)/migrations/sql/migrations/
+
+	# ── seeds (opinionated appliance defaults, applied by firstboot) ──
+	mkdir -p $(OPT)/seeds
+	cp deploy/seeds/*.sql $(OPT)/seeds/ 2>/dev/null || true
+
+	# ── README inside the package (referenced by the unit Documentation=) ──
+	cp deploy/README.txt $(OPT)/README.txt
+
+	# ── shims: launchers on PATH for the console tools ──
+	mkdir -p $(STAGING)/usr/local/bin
+	printf '#!/usr/bin/env bash\nexec /opt/netfirewall/tui/netfirewall-tui "$$@"\n' \
+	    > $(STAGING)/usr/local/bin/netfirewall-tui
+	printf '#!/usr/bin/env bash\nexec /opt/netfirewall/doctor/netfirewall-doctor "$$@"\n' \
+	    > $(STAGING)/usr/local/bin/netfirewall-doctor
+	chmod 0755 $(STAGING)/usr/local/bin/netfirewall-tui \
+	           $(STAGING)/usr/local/bin/netfirewall-doctor
+
+	# ── bootstrap + firstboot + issue-banner scripts onto PATH ──
+	cp deploy/bootstrap/netfirewall-bootstrap        $(STAGING)/usr/local/bin/netfirewall-bootstrap
+	cp deploy/firstboot/netfirewall-firstboot        $(STAGING)/usr/local/bin/netfirewall-firstboot
+	cp deploy/firstboot/issue/netfirewall-issue-banner $(STAGING)/usr/local/bin/netfirewall-issue-banner
+	chmod 0755 $(STAGING)/usr/local/bin/netfirewall-bootstrap \
+	           $(STAGING)/usr/local/bin/netfirewall-firstboot \
+	           $(STAGING)/usr/local/bin/netfirewall-issue-banner
+
+	# ── systemd units: stage into debian/ as source files so dh_installsystemd
+	#    finds them, installs them to /lib/systemd/system, AND generates the
+	#    enable/start maintainer-script snippets. They are passed as explicit
+	#    file arguments in override_dh_installsystemd below. Because
+	#    dh_installsystemd installs them itself, they are NOT listed in
+	#    netfirewall.install (that would double-install the same path). Creating
+	#    files in debian/ during the build phase is safe — dh_installsystemd runs
+	#    later, in the install/binary phase.
+	cp deploy/systemd/netfirewall-daemon.service       debian/netfirewall-daemon.service
+	cp deploy/systemd/netfirewall-web.service          debian/netfirewall-web.service
+	cp deploy/systemd/netfirewall-dhcp.service         debian/netfirewall-dhcp.service
+	cp deploy/systemd/netfirewall-bootstrap.service    debian/netfirewall-bootstrap.service
+	cp deploy/systemd/netfirewall-firstboot.service    debian/netfirewall-firstboot.service
+	cp deploy/systemd/netfirewall-issue-banner.service debian/netfirewall-issue-banner.service
+
+	# ── manpage + bash completion ──
+	mkdir -p $(STAGING)/usr/share/man/man1 $(STAGING)/usr/share/bash-completion/completions
+	cp deploy/man/netfirewall-tui.1        $(STAGING)/usr/share/man/man1/netfirewall-tui.1
+	cp deploy/completion/netfirewall-tui   $(STAGING)/usr/share/bash-completion/completions/netfirewall-tui
 
 override_dh_auto_test:
-	# dotnet test is run separately in CI — skipping here keeps the .deb
-	# build deterministic and avoids dragging the test deps (xunit etc.)
-	# into the build environment.
+	# dotnet test runs in CI separately — skipping here keeps the .deb build
+	# deterministic and avoids dragging xunit/Moq into the build environment.
 
 override_dh_auto_clean:
 	-find . -type d -name bin   -exec rm -rf {} +
 	-find . -type d -name obj   -exec rm -rf {} +
 	-rm -rf $(STAGING)
+	# Remove the unit files staged into debian/ by override_dh_auto_build so a
+	# re-build / a dev's working tree doesn't accumulate them.
+	-rm -f debian/netfirewall-daemon.service debian/netfirewall-web.service \
+	       debian/netfirewall-dhcp.service debian/netfirewall-bootstrap.service \
+	       debian/netfirewall-firstboot.service debian/netfirewall-issue-banner.service
+
+# Self-contained publish ships the .NET host (apphost) and native runtime libs
+# (libcoreclr.so, libclrjit.so, …) that dh_strip would corrupt. Disable it.
+override_dh_strip:
+	:
+
+override_dh_strip_nondeterminism:
+	:
+
+# The native runtime .so/.a bundled by self-contained publish trip up
+# dh_dwz / dh_shlibdeps in ways that aren't meaningful for a vendored runtime.
+override_dh_dwz:
+	:
+
+# The self-contained publish vendors the ENTIRE .NET runtime (libcoreclr.so,
+# libclrjit.so, the apphost ELF, …). Running dh_shlibdeps over those produces
+# bogus / unsatisfiable Depends on Microsoft-internal sonames and frequently
+# errors out. We declare the real OS-level runtime deps by hand in control
+# (libicu, openssl via ca-certificates, etc.), so skip automatic detection.
+override_dh_shlibdeps:
+	:
+
+# systemd: install our units but DO NOT start them at configure time — there's
+# no DB yet (firstboot creates it). firstboot's Before= gates the real first
+# start. We enable daemon/web/bootstrap/firstboot/issue-banner so they come up on
+# the next boot after firstboot provisions; the DHCP unit is installed but left
+# DISABLED (operators enable it per host).
+#
+# The unit names don't match the package name (netfirewall), so dh_installsystemd
+# won't auto-discover them — we pass each as an explicit file argument from
+# debian/ (staged there in override_dh_auto_build). dh_installsystemd both
+# installs the unit to /lib/systemd/system AND generates the enable/start
+# snippets into the maintainer scripts (via #DEBHELPER#). Separate invocations
+# so the DHCP unit can be --no-enable while the others enable.
+override_dh_installsystemd:
+	dh_installsystemd --no-start debian/netfirewall-firstboot.service
+	dh_installsystemd --no-start debian/netfirewall-daemon.service
+	dh_installsystemd --no-start debian/netfirewall-web.service
+	dh_installsystemd --no-start debian/netfirewall-bootstrap.service
+	dh_installsystemd --no-start debian/netfirewall-issue-banner.service
+	dh_installsystemd --no-start --no-enable debian/netfirewall-dhcp.service

@@ -1,0 +1,18 @@
+[Unit]
+Description=NetFirewall first-boot NIC substitution (DHCP reachability)
+Documentation=file:///opt/netfirewall/README.txt
+DefaultDependencies=no
+# Must run before ifupdown brings interfaces up, and before firstboot/network.
+Before=networking.service network-pre.target netfirewall-firstboot.service
+Wants=network-pre.target
+After=local-fs.target
+# Only meaningful while the token is still present.
+ConditionFileNotEmpty=/etc/network/interfaces.d/00-netfirewall-bootstrap
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/netfirewall-nic-bootstrap
+
+[Install]
+WantedBy=sysinit.target

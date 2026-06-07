@@ -1,0 +1,54 @@
+#!/bin/sh
+# Appliance hardening + branding applied in the chroot at build time.
+set -e
+
+# ── hostname ──
+echo "netfirewall" > /etc/hostname
+# Keep /etc/hosts sane for the chosen hostname.
+if ! grep -q 'netfirewall' /etc/hosts 2>/dev/null; then
+    printf '127.0.1.1\tnetfirewall\n' >> /etc/hosts
+fi
+
+# ── root login policy ──
+# Lock the root PASSWORD (no password login) but keep the account usable via
+# console autologin on the live image / sudo. The installed system's root
+# password is set by the d-i preseed; on the pure-live image the operator uses
+# the console (autologin) + `netfirewall-tui`. SSH password root login is off.
+passwd -l root 2>/dev/null || true
+
+# Harden sshd: no root password login, no empty passwords. (Key-based root is
+# still allowed for break-glass; operators can tighten further.)
+if [ -f /etc/ssh/sshd_config ]; then
+    sed -i \
+        -e 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' \
+        -e 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords no/' \
+        /etc/ssh/sshd_config
+fi
+
+# ── wire the issue-banner refresh into ifupdown ──
+# The .deb installed /usr/local/bin/netfirewall-issue-banner; symlink the hook
+# into if-up.d / if-down.d so the console banner tracks DHCP changes.
+if [ -f /etc/network/if-up.d/netfirewall-banner ]; then
+    chmod 0755 /etc/network/if-up.d/netfirewall-banner
+fi
+if [ -f /etc/network/if-down.d/netfirewall-banner ]; then
+    chmod 0755 /etc/network/if-down.d/netfirewall-banner
+fi
+
+# ── first-boot NIC substitution ──
+# The shipped /etc/network/interfaces.d/00-netfirewall-bootstrap uses the token
+# __FIRST_NIC__. We can't know the NIC name at build time, so leave a tiny
+# generator that substitutes it on first boot (before networking starts). The
+# generator is idempotent and self-deleting once a real NIC is wired.
+if [ -f /etc/network/interfaces.d/00-netfirewall-bootstrap ]; then
+    chmod 0644 /etc/network/interfaces.d/00-netfirewall-bootstrap
+fi
+
+# ── motd: clear the default Debian banner; /etc/issue carries our info ──
+: > /etc/motd 2>/dev/null || true
+
+# ── live image console autologin handled by live-config (username=root in the
+#    bootappend); nothing to do here for that. ──
+
+# ── disable apt periodic / unattended timers — appliance updates are explicit ──
+systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true

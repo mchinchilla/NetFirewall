@@ -1,0 +1,44 @@
+#!/bin/sh
+# Enable the services that must come up on the installed/live appliance.
+#
+# Runs in the chroot at build time. The netfirewall .deb's postinst already
+# enabled its own units (daemon/web/bootstrap/firstboot/issue-banner) with
+# --no-start; here we make sure the platform deps it relies on are enabled too,
+# and that the appliance is reachable + manageable out of the box.
+#
+# Ordering on first boot:
+#   postgresql -> netfirewall-firstboot (provisions DB+secrets) -> daemon ->
+#   bootstrap -> web. firstboot's After=/Before= in its unit enforce this.
+set -e
+
+# Local database the firstboot provisioner needs.
+systemctl enable postgresql.service || true
+
+# Reverse proxy (TLS) in front of the Web.
+systemctl enable nginx.service || true
+
+# Recursive resolver (Recommends).
+systemctl enable unbound.service 2>/dev/null || true
+
+# Remote admin + time sync.
+systemctl enable ssh.service 2>/dev/null || true
+systemctl enable chrony.service 2>/dev/null || true
+
+# VM guest agents — harmless on bare metal, useful in a hypervisor.
+systemctl enable qemu-guest-agent.service 2>/dev/null || true
+systemctl enable open-vm-tools.service 2>/dev/null || true
+
+# Defensive: ensure our own units are enabled even if the .deb postinst ran in a
+# context where systemctl enable was a no-op (chroot quirks).
+for u in netfirewall-firstboot netfirewall-daemon netfirewall-web \
+         netfirewall-bootstrap netfirewall-issue-banner; do
+    systemctl enable "$u.service" 2>/dev/null || true
+done
+# DHCP server stays DISABLED by default (binds UDP/67) — operator enables it.
+systemctl disable netfirewall-dhcp.service 2>/dev/null || true
+
+# Networking: ifupdown manages interfaces; make sure NetworkManager/netplan are
+# NOT in the way even if some dependency dragged one in.
+systemctl disable NetworkManager.service 2>/dev/null || true
+systemctl mask    systemd-networkd.service 2>/dev/null || true
+systemctl enable  networking.service 2>/dev/null || true

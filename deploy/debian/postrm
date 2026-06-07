@@ -1,0 +1,53 @@
+#!/bin/sh
+# postrm — runs after the package files are removed.
+#
+#   remove : keep all data (mirrors `uninstall.sh` without --purge). dpkg has
+#            already deleted the package-owned files under /opt/netfirewall and
+#            the units; we leave /etc, /var/lib, /var/log, the DB and the
+#            netfirewall-web user intact so a reinstall resumes cleanly.
+#   purge  : wipe config + secrets + state + logs + users (mirrors
+#            `uninstall.sh --purge`) and — guarded — drop the LOCAL DB role and
+#            database. The drop only runs against a local cluster reachable via
+#            the postgres peer; a remote/managed PG is never touched.
+set -e
+
+GROUP_NAME=netfirewall
+WEB_USER=netfirewall-web
+ETC_DIR=/etc/netfirewall
+STATE_DIR=/var/lib/netfirewall
+LOG_DIR=/var/log/netfirewall
+RUN_DIR=/run/netfirewall
+
+drop_local_db() {
+    # Only attempt against a LOCAL cluster: run as the `postgres` system user via
+    # peer auth. If psql isn't present or no local cluster answers, skip silently
+    # — we must never block package purge on DB state, and we never touch a
+    # remote/managed PostgreSQL.
+    command -v psql >/dev/null 2>&1 || return 0
+    getent passwd postgres >/dev/null 2>&1 || return 0
+    # Is a local cluster actually answering on the peer socket?
+    if ! runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "netfirewall: dropping local database net_firewall and role netfirewall (purge)"
+    runuser -u postgres -- psql -v ON_ERROR_STOP=0 >/dev/null 2>&1 <<'SQL' || true
+DROP DATABASE IF EXISTS net_firewall;
+DROP ROLE IF EXISTS netfirewall;
+SQL
+}
+
+case "$1" in
+    purge)
+        rm -rf "$ETC_DIR" "$STATE_DIR" "$LOG_DIR" "$RUN_DIR"
+        drop_local_db
+        # Remove the service user + group (ignore if other files still own them).
+        deluser  --system "$WEB_USER"  >/dev/null 2>&1 || true
+        delgroup --system "$GROUP_NAME" >/dev/null 2>&1 || true
+        ;;
+    remove|upgrade|disappear|failed-upgrade|abort-install|abort-upgrade)
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

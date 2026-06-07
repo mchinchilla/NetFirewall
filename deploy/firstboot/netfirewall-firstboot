@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+#
+# netfirewall-firstboot — per-appliance provisioning, run ONCE by
+# netfirewall-firstboot.service on the first real boot of an installed image.
+#
+# This is the secret-bearing half of the install. The .deb's postinst did the
+# deterministic, secret-free work (users, dirs, units, env TEMPLATES verbatim).
+# Here we mint the per-appliance secrets and stand up the local database, so a
+# single flashed image NEVER results in many appliances sharing one TOTP master
+# key or DB password. See docs/master-key.md.
+#
+# Design goals:
+#   * idempotent  — safe to re-run if a previous attempt died partway. We only
+#                   touch the .provisioned stamp on full success; until then a
+#                   reboot retries from a consistent state.
+#   * non-interactive — no prompts; everything is generated or fixed.
+#   * fail loud   — any hard failure exits non-zero so the unit shows failed in
+#                   the journal and retries next boot. The DB and env files are
+#                   written so a retry converges.
+set -euo pipefail
+
+# ───────────────────────────── constants ─────────────────────────────
+PREFIX=/opt/netfirewall
+ETC_DIR=/etc/netfirewall
+STATE_DIR=/var/lib/netfirewall
+TPL_DIR="$PREFIX/templates"
+RUN_DIR=/run/netfirewall
+GROUP_NAME=netfirewall
+WEB_USER=netfirewall-web
+
+DAEMON_ENV="$ETC_DIR/daemon.env"
+WEB_ENV="$ETC_DIR/web.env"
+DHCP_ENV="$ETC_DIR/dhcp.env"
+PROVISIONED_STAMP="$STATE_DIR/.provisioned"
+
+# Local DB on loopback (templates already use Host=127.0.0.1).
+PG_HOST=127.0.0.1
+PG_PORT=5432
+PG_USER=netfirewall
+PG_DATABASE=net_firewall
+
+log()  { printf '\033[1;36m[firstboot]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[firstboot] !!\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[firstboot] FATAL\033[0m %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "must run as root"
+
+if [[ -e "$PROVISIONED_STAMP" ]]; then
+    log "already provisioned ($PROVISIONED_STAMP exists) — nothing to do."
+    exit 0
+fi
+
+# ───────────────────────── local PostgreSQL cluster ─────────────────────────
+# trixie ships PostgreSQL 17; postgresql-common auto-creates the `main` cluster
+# on package install. But in a freshly-flashed image the cluster may be stopped,
+# or (rare) not created. Make sure exactly one local cluster is up.
+ensure_pg_running() {
+    if ! command -v pg_lsclusters >/dev/null 2>&1; then
+        die "PostgreSQL not installed (pg_lsclusters missing). The appliance image must embed it."
+    fi
+
+    # Pick the highest installed major version present.
+    local ver
+    ver=$(pg_lsclusters -h 2>/dev/null | awk '{print $1}' | sort -V | tail -1 || true)
+    if [[ -z "$ver" ]]; then
+        # No cluster at all — create the default main on the newest binaries.
+        ver=$(ls -1 /usr/lib/postgresql 2>/dev/null | sort -V | tail -1 || true)
+        [[ -n "$ver" ]] || die "no PostgreSQL server binaries under /usr/lib/postgresql"
+        log "creating PostgreSQL $ver main cluster"
+        pg_createcluster "$ver" main >/dev/null
+    fi
+
+    log "ensuring PostgreSQL $ver main is running"
+    pg_ctlcluster "$ver" main start >/dev/null 2>&1 || true
+
+    # Wait for the cluster to accept connections (up to ~30s).
+    local i
+    for i in $(seq 1 30); do
+        if runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    die "local PostgreSQL did not become ready in 30s"
+}
+
+ensure_pg_running
+
+# ───────────────────────── role + database (idempotent) ─────────────────────────
+# install.sh never did this — it only CONNECTED to an existing PG. The appliance
+# owns its local cluster, so we create the role + DB here. We generate a random
+# password and (re)set it every run so the env files and the role stay in sync
+# even on a retry. The DB is created once.
+psql_super() { runuser -u postgres -- psql -v ON_ERROR_STOP=1 "$@"; }
+
+PG_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-32)
+[[ -n "$PG_PASSWORD" ]] || die "failed to generate DB password"
+
+log "creating/refreshing role '$PG_USER'"
+# Quote the generated password safely for SQL (no quotes survive the tr above,
+# but be defensive). LOGIN role, not superuser.
+ESCAPED_PW=${PG_PASSWORD//\'/\'\'}
+psql_super <<SQL
+DO \$\$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$PG_USER') THEN
+        ALTER ROLE "$PG_USER" WITH LOGIN PASSWORD '$ESCAPED_PW';
+    ELSE
+        CREATE ROLE "$PG_USER" WITH LOGIN PASSWORD '$ESCAPED_PW';
+    END IF;
+END
+\$\$;
+SQL
+
+log "ensuring database '$PG_DATABASE' owned by '$PG_USER'"
+# CREATE DATABASE can't run inside the DO block / a transaction, so gate it.
+if ! psql_super -tAc "SELECT 1 FROM pg_database WHERE datname = '$PG_DATABASE'" | grep -q 1; then
+    psql_super -c "CREATE DATABASE \"$PG_DATABASE\" OWNER \"$PG_USER\""
+else
+    psql_super -c "ALTER DATABASE \"$PG_DATABASE\" OWNER TO \"$PG_USER\""
+fi
+
+# ───────────────────────── master key: resolve-once-write-both ─────────────────────────
+# Identical to install.sh's contract: the daemon AND the Web must hold the SAME
+# AES-256 key (the Web enrolls TOTP, the daemon decrypts/verifies). Preserve any
+# real key already present (a re-run after partial failure), otherwise generate.
+resolve_existing_key() {
+    local f
+    for f in "$WEB_ENV" "$DAEMON_ENV"; do
+        if [[ -f "$f" ]] && grep -q '^NETFIREWALL_MASTER_KEY=' "$f" \
+                && ! grep -qE '^NETFIREWALL_MASTER_KEY=(__REPLACE__|__REPLACE_MASTER_KEY__|placeholder)$' "$f"; then
+            grep '^NETFIREWALL_MASTER_KEY=' "$f" | head -1 | cut -d= -f2-
+            return 0
+        fi
+    done
+    return 1
+}
+
+if MASTER_KEY=$(resolve_existing_key); then
+    log "preserving existing master key (re-run)"
+else
+    log "generating new AES-256 master key"
+    MASTER_KEY=$(openssl rand -base64 32)
+fi
+
+# Web UID for Daemon__AcceptedPeerUids__0.
+WEB_UID=$(id -u "$WEB_USER")
+
+# ───────────────────────── render env files from TEMPLATES ─────────────────────────
+# Always re-render from the templates so a retry produces a consistent file with
+# the freshly-set DB password. (Templates are still tokenized on disk; we never
+# mutate them.) sed escaping: the password came from tr above with no /+=, so it
+# is sed/SQL-safe, but use a non-/ delimiter regardless.
+render_daemon_env() {
+    sed -e "0,/__REPLACE__/{s|__REPLACE__|$PG_PASSWORD|}" \
+        -e "s|Daemon__AcceptedPeerUids__0=__REPLACE__|Daemon__AcceptedPeerUids__0=$WEB_UID|" \
+        -e "s|NETFIREWALL_MASTER_KEY=__REPLACE_MASTER_KEY__|NETFIREWALL_MASTER_KEY=$MASTER_KEY|" \
+        "$TPL_DIR/daemon.env.template" > "$DAEMON_ENV.tmp"
+    install -m 0600 -o root -g root "$DAEMON_ENV.tmp" "$DAEMON_ENV"
+    rm -f "$DAEMON_ENV.tmp"
+}
+
+render_web_env() {
+    sed -e "s|Password=__REPLACE__|Password=$PG_PASSWORD|" \
+        -e "s|NETFIREWALL_MASTER_KEY=__REPLACE_MASTER_KEY__|NETFIREWALL_MASTER_KEY=$MASTER_KEY|" \
+        "$TPL_DIR/web.env.template" > "$WEB_ENV.tmp"
+    install -m 0640 -o root -g "$WEB_USER" "$WEB_ENV.tmp" "$WEB_ENV"
+    rm -f "$WEB_ENV.tmp"
+}
+
+render_dhcp_env() {
+    # DHCP listens on a fallback iface only; enabled DB subnets override at
+    # runtime. First NIC name (or eth0) is just a placeholder fill — never trust
+    # it for routing. The unit is installed disabled; rendering the env anyway is
+    # harmless and lets an operator enable DHCP without re-templating.
+    local iface
+    iface=$(ls /sys/class/net 2>/dev/null | grep -vE '^(lo|wg|tun|tap|docker|veth|br-)' | head -1 || true)
+    iface=${iface:-eth0}
+    sed -e "s|Password=__REPLACE__|Password=$PG_PASSWORD|" \
+        -e "s|__REPLACE_DHCP_IFACE__|$iface|" \
+        "$TPL_DIR/dhcp.env.template" > "$DHCP_ENV.tmp"
+    install -m 0640 -o root -g root "$DHCP_ENV.tmp" "$DHCP_ENV"
+    rm -f "$DHCP_ENV.tmp"
+}
+
+log "rendering env files from templates"
+render_daemon_env
+render_web_env
+render_dhcp_env
+
+# ── diff-assert: both files MUST carry the identical real key (catches token
+#    drift before it becomes a silent prod TOTP outage). ──
+if ! diff -q \
+        <(grep '^NETFIREWALL_MASTER_KEY=' "$DAEMON_ENV") \
+        <(grep '^NETFIREWALL_MASTER_KEY=' "$WEB_ENV") >/dev/null 2>&1; then
+    die "master key differs between $DAEMON_ENV and $WEB_ENV — daemon TOTP would fail."
+fi
+# Also assert no placeholder leaked through.
+if grep -qE '__REPLACE__|__REPLACE_MASTER_KEY__|__REPLACE_DHCP_IFACE__' "$DAEMON_ENV" "$WEB_ENV"; then
+    die "a placeholder token survived rendering in the env files — refusing to continue."
+fi
+log "env files rendered; master key matches across daemon + web."
+
+# ───────────────────────── sysctl (best-effort) ─────────────────────────
+# The sysctl drop-in is package-owned (/usr/lib/sysctl.d). Apply it now; the
+# daemon can't write /proc/sys itself (ProtectKernelTunables=yes).
+if [[ -f /usr/lib/sysctl.d/netfirewall.conf ]]; then
+    sysctl --quiet --load=/usr/lib/sysctl.d/netfirewall.conf 2>/dev/null \
+        || warn "sysctl load failed; run 'sysctl --system' after boot."
+fi
+
+# ───────────────────────── migrations ─────────────────────────
+log "applying database migrations"
+NETFIREWALL_CONN="Host=$PG_HOST;Port=$PG_PORT;Username=$PG_USER;Password=$PG_PASSWORD;Database=$PG_DATABASE" \
+    "$PREFIX/migrations/netfirewall-migrate" up \
+        --dir "$PREFIX/migrations/sql/migrations" \
+    || die "migrations failed — see output above."
+
+# ───────────────────────── seeds (opinionated appliance defaults) ─────────────────────────
+# Seeds are written idempotent (ON CONFLICT). Apply them via psql as the
+# netfirewall role over loopback. Non-fatal individually — a bad seed shouldn't
+# brick provisioning — but logged.
+if compgen -G "$PREFIX/seeds/*.sql" >/dev/null; then
+    log "applying appliance seeds"
+    for f in "$PREFIX/seeds/"*.sql; do
+        log "  seed: $(basename "$f")"
+        PGPASSWORD="$PG_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" \
+            -d "$PG_DATABASE" -v ON_ERROR_STOP=1 -f "$f" >/dev/null \
+            || warn "seed $(basename "$f") failed — continuing."
+    done
+fi
+
+# ───────────────────────── TUI / Doctor runtime config ─────────────────────────
+# Tiny config telling the TUI where the daemon socket lives (matches install.sh).
+TUI_CONFIG="$PREFIX/tui/appsettings.json"
+if [[ ! -e "$TUI_CONFIG" ]]; then
+    cat >"$TUI_CONFIG" <<EOF
+{
+  "Daemon": {
+    "SocketPath": "$RUN_DIR/control.sock",
+    "SessionHeader": "X-NetFw-Session",
+    "Timeout": "00:00:10"
+  },
+  "Logging": { "LogLevel": { "Default": "Warning" } }
+}
+EOF
+    chmod 0644 "$TUI_CONFIG"
+fi
+
+# ───────────────────────── mark provisioned + start services ─────────────────────────
+# Drop the stamp BEFORE starting the daemon/web: this unit has
+# Before=netfirewall-daemon, so systemd will start them right after we exit 0.
+# The stamp must exist so a reboot doesn't re-provision.
+install -d -m 0750 -o root -g root "$STATE_DIR"
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$PROVISIONED_STAMP" 2>/dev/null || : > "$PROVISIONED_STAMP"
+chmod 0640 "$PROVISIONED_STAMP"
+log "provisioning stamp written: $PROVISIONED_STAMP"
+
+# Start the daemon + web now (they are enabled; firstboot's Before= gated them).
+log "starting daemon + web"
+systemctl start netfirewall-daemon.service || warn "daemon failed to start — check journalctl -u netfirewall-daemon"
+# Give the daemon a moment to sd_notify READY before the Web/bootstrap connect.
+for i in $(seq 1 15); do
+    if systemctl is-active --quiet netfirewall-daemon.service; then break; fi
+    sleep 1
+done
+systemctl start netfirewall-web.service       || warn "web failed to start — check journalctl -u netfirewall-web"
+systemctl start netfirewall-bootstrap.service || warn "bootstrap apply failed — check journalctl -u netfirewall-bootstrap"
+
+# ───────────────────────── doctor (non-fatal) ─────────────────────────
+log "running netfirewall-doctor"
+if ! "$PREFIX/doctor/netfirewall-doctor"; then
+    warn "netfirewall-doctor reported problems above — review them, but provisioning is complete."
+fi
+
+log "first-boot provisioning complete."
+exit 0

@@ -1,0 +1,55 @@
+# Packages pulled into the appliance squashfs at build time. These must cover
+# the netfirewall .deb's Depends + Recommends so `dpkg -i` (done by a hook from
+# config/packages.chroot) resolves entirely OFFLINE, plus the appliance runtime
+# tooling. One package per line; comments allowed.
+
+# ── core OS the firewall needs ──
+postgresql
+postgresql-client
+nftables
+iproute2
+util-linux
+bash
+openssl
+ca-certificates
+adduser
+systemd
+systemd-sysv
+libicu76
+
+# ── networking stack (ifupdown, NOT NetworkManager/netplan) ──
+ifupdown
+isc-dhcp-client
+ethtool
+iputils-ping
+tcpdump
+conntrack
+curl
+
+# ── VPN + DNS (Recommends of the .deb) ──
+wireguard-tools
+unbound
+
+# ── reverse proxy for TLS termination in front of the Web ──
+nginx
+
+# ── firmware so the appliance sees its NICs (non-free-firmware area) ──
+firmware-linux-free
+firmware-misc-nonfree
+
+# ── VM guest agents (the ISO doubles as a VM image) ──
+qemu-guest-agent
+open-vm-tools
+
+# ── console quality-of-life ──
+less
+vim-tiny
+htop
+chrony
+openssh-server
+bash-completion
+
+# ── live-build / installer runtime bits ──
+live-boot
+live-config
+live-config-systemd

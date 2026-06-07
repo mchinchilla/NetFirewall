@@ -1,0 +1,32 @@
+[Unit]
+Description=NetFirewall first-boot provisioning (per-appliance secrets + local DB)
+Documentation=file:///opt/netfirewall/README.txt
+# Runs ONCE on the first real boot of the installed appliance. It generates the
+# per-appliance master key + DB password, initialises the local PostgreSQL
+# cluster, creates the role/DB, fills both env files (diff-asserting the key),
+# runs migrations + seeds, and lets the daemon/web start. The postinst NEVER
+# does this — that would bake one shared secret into every flashed image.
+After=postgresql.service network-online.target
+Wants=postgresql.service network-online.target
+# Gate the real first start of the firewall on a provisioned DB.
+Before=netfirewall-daemon.service netfirewall-web.service netfirewall-bootstrap.service
+# Skip entirely once provisioning has succeeded.
+ConditionPathExists=!/var/lib/netfirewall/.provisioned
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Provisioning needs root: openssl key gen, write root-owned env files, manage
+# the local PG cluster, run migrations. Runs unconfined intentionally — it is a
+# one-shot installer, not a long-lived surface.
+User=root
+Group=root
+ExecStart=/usr/local/bin/netfirewall-firstboot
+# Generous timeout: migrations + cluster init on slow disks.
+TimeoutStartSec=600
+# If it fails, retry on next boot (the .provisioned stamp is only dropped on
+# success), but don't hammer — surface the failure in the journal.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

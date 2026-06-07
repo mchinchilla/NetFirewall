@@ -56,7 +56,30 @@ deploy/
   install.sh                            idempotent installer (also publishes TUI + symlink)
   uninstall.sh                          reverse install (--purge wipes data)
   README.txt                            operational handbook
+  debian/                               .deb packaging (self-contained, maintainer scripts)
+  firstboot/                            per-appliance provisioning (secrets + local DB)
+  iso/                                  Debian 13 live-build appliance ISO tree
 ```
+
+There are **two** deployment paths, both documented in full at
+**`docs/appliance-iso.md`**:
+
+1. **Manual install** (`deploy/install.sh`) — targets a host that already has
+   .NET + PostgreSQL; only *connects* to PG. Production runtime root on tekium is
+   `/opt/tekium/` (the `.deb` uses `/opt/netfirewall/`). This is what's running today.
+2. **Appliance `.deb` + ISO** (`deploy/debian/`, `deploy/firstboot/`,
+   `deploy/iso/`, CI `.github/workflows/build-iso.yml`) — a pfSense/OPNsense-style
+   self-contained appliance. The binaries are published `--self-contained true`
+   (runtime travels in the package — NO dotnet-runtime dep; libicu stays).
+   Provisioning is **split**: the `.deb` postinst does only deterministic,
+   **secret-free** work (users/dirs/units/tokenized env templates, nothing
+   started, no DB); `netfirewall-firstboot.service` runs once on first boot to
+   mint the per-appliance master key + DB password, init the local PG cluster,
+   create role/DB, run migrations + seeds, and start the services. **Never bake
+   secrets into the image** — enforced by a diff-assert, Doctor's
+   `MasterKeySyncCheck`, and a CI step that greps the built squashfs env files.
+   The ISO build itself runs only on Debian (live-build); it cannot be built on
+   macOS — use CI or a Debian host.
 
 The installer publishes the daemon, web, tui and Doctor runtime targets plus the
 migration runner — and, **opt-in**, the DHCP server. The TUI ships as

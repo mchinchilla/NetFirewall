@@ -1,3 +1,21 @@
+netfirewall (0.5.0-1) unstable; urgency=medium
+
+  * Self-contained .NET publish — the runtime travels inside the package; drop
+    the dotnet-runtime / aspnetcore-runtime dependencies and the Microsoft APT
+    repository requirement. Adds libicu to Depends (culture-aware app).
+  * Ship the DHCP server and the deployment doctor binaries.
+  * Split provisioning into a secret-free postinst (users, dirs, units, env
+    TEMPLATES verbatim) and a per-appliance netfirewall-firstboot.service that
+    generates the master key + DB password, inits the local cluster, creates the
+    role/DB, runs migrations + seeds, and starts the services. Prevents flashed
+    appliance images from sharing one TOTP master key / DB password.
+  * Install the bootstrap wrapper (/usr/local/bin/netfirewall-bootstrap) and
+    enable netfirewall-bootstrap.service so the firewall reconciles DB→kernel
+    each boot.
+  * postrm purge mirrors uninstall.sh --purge and drops the LOCAL DB/role only.
+
+ -- NetFirewall Project <noreply@example.invalid>  Sat, 06 Jun 2026 23:30:00 +0000
+
 netfirewall (0.4.0-1) unstable; urgency=medium
 
   * Initial Debian packaging.

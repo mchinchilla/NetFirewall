@@ -223,6 +223,21 @@ curl -sS https://fw.example.com/login
 
 Open `https://fw.example.com/setup/bootstrap?token=<token-printed-to-journalctl>` for first admin enrollment.
 
+### 📀 Appliance `.deb` + Debian 13 ISO
+
+Besides the manual installer above, NetFirewall can be built as a **self-contained
+appliance** — a real `.deb` (the .NET runtime travels inside it, no
+`dotnet-runtime` dependency) embedded in a Debian 13 live-build ISO that boots as
+a live appliance/VM **and** installs to bare metal, fully offline. Provisioning is
+split so that flashing one image to many machines never shares one TOTP master key
+or DB password: the package `postinst` does only secret-free setup, and
+`netfirewall-firstboot.service` mints per-appliance secrets + the local database on
+first boot. The ISO is built in CI (`.github/workflows/build-iso.yml`); it cannot
+be built on macOS.
+
+**Full guide: [`docs/appliance-iso.md`](docs/appliance-iso.md)** (and
+[`deploy/iso/README.md`](deploy/iso/README.md) for the live-build specifics).
+
 ## 🔄 Boot-time apply workflow
 
 ```mermaid

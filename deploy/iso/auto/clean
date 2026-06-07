@@ -1,0 +1,7 @@
+#!/bin/sh
+# deploy/iso/auto/clean — standard live-build clean wrapper. Also drops the
+# build log and any stray binary artifacts so a re-config starts fresh. The
+# CI-dropped .deb under config/packages.chroot is preserved.
+set -e
+lb clean noauto "${@}"
+rm -f build.log

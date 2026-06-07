@@ -1,0 +1,16 @@
+#!/bin/sh
+# prerm — runs before the package files are removed. The heavy lifting (stop +
+# disable the units, daemon-reload) is emitted by dh_installsystemd into the
+# #DEBHELPER# block below, so we keep this minimal.
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        ;;
+    failed-upgrade)
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

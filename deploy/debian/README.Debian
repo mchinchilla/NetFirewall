@@ -1,0 +1,64 @@
+NetFirewall for Debian
+======================
+
+This package installs NetFirewall as a self-contained appliance. The .NET
+runtime is bundled inside the binaries, so there is NO dependency on
+dotnet-runtime / aspnetcore-runtime or the Microsoft APT repository.
+
+Provisioning is split in two halves so that a single image flashed to many
+machines never shares one TOTP master key or DB password (see
+/usr/share/doc/netfirewall/master-key.md if shipped, or docs/master-key.md in
+the source tree):
+
+  1. postinst (package configure time, INCLUDING inside the live-build chroot)
+     does only deterministic, secret-free work:
+       * creates the `netfirewall` group and `netfirewall-web` service user
+       * lays out /etc/netfirewall, /var/lib/netfirewall, /var/log/netfirewall
+       * installs the systemd units (enabled, but NOT started — no DB yet)
+       * drops the env files from the TEMPLATES verbatim. They still contain the
+         __REPLACE__ / __REPLACE_MASTER_KEY__ placeholders. NO secret, NO DB.
+
+  2. netfirewall-firstboot.service runs ONCE on the first real boot of the
+     installed system (gated by /var/lib/netfirewall/.provisioned):
+       * generates a per-appliance AES-256 master key + a random local DB password
+       * ensures the local PostgreSQL cluster is up; creates role + database
+       * renders both env files with the SAME master key (diff-asserted)
+       * runs the database migrations and applies the seeds
+       * starts netfirewall-daemon, -web and -bootstrap
+       * runs netfirewall-doctor (logged, non-fatal)
+
+First login
+-----------
+The web UI prints a one-time bootstrap token to the journal on first start with
+an empty users table:
+
+    journalctl -u netfirewall-web | grep -i token
+
+The console /etc/issue banner shows the acquired IP + the web URL.
+
+Console administration
+----------------------
+    sudo netfirewall-tui       # interactive console UI (break-glass)
+    sudo netfirewall-doctor    # validate the deployment
+
+Installing onto an EXISTING host (not the appliance ISO)
+-------------------------------------------------------
+`apt install ./netfirewall_*.deb` runs postinst (no secrets). On the next boot
+netfirewall-firstboot provisions a LOCAL PostgreSQL cluster. If you want to
+point at an external/managed PostgreSQL instead, edit the env files under
+/etc/netfirewall BEFORE first boot (or before enabling the services) and create
+the role/database yourself, then `touch /var/lib/netfirewall/.provisioned` after
+running migrations manually:
+
+    NETFIREWALL_CONN="Host=...;Username=...;Password=...;Database=net_firewall" \
+        /opt/netfirewall/migrations/netfirewall-migrate up \
+        --dir /opt/netfirewall/migrations/sql/migrations
+
+Removing
+--------
+    apt remove netfirewall          # keeps /etc, /var/lib, /var/log, the DB
+    apt purge  netfirewall          # also wipes those + drops the LOCAL DB/role
+
+A remote/managed PostgreSQL is NEVER dropped by purge.
+
+ -- NetFirewall Project <noreply@example.invalid>

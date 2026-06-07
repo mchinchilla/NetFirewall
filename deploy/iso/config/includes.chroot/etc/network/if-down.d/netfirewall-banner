@@ -1,0 +1,14 @@
+#!/bin/sh
+# ifupdown dispatcher hook — refresh /etc/issue whenever an interface comes up
+# or down, so the console banner always shows the current DHCP-acquired IP.
+#
+# Installed on the appliance image as:
+#   /etc/network/if-up.d/netfirewall-banner
+#   /etc/network/if-down.d/netfirewall-banner
+# (the same script, symlinked into both, or copied to each).
+#
+# Skip loopback churn to avoid pointless rewrites.
+[ "$IFACE" = "lo" ] && exit 0
+[ -x /usr/local/bin/netfirewall-issue-banner ] || exit 0
+/usr/local/bin/netfirewall-issue-banner || true
+exit 0
