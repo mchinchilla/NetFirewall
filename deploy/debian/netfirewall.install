@@ -18,12 +18,14 @@ opt/netfirewall/templates    opt/netfirewall
 opt/netfirewall/seeds        opt/netfirewall
 opt/netfirewall/README.txt   opt/netfirewall
 
-# Console shims + provisioning scripts (already under debian/tmp/usr/local/bin).
-usr/local/bin/netfirewall-tui        usr/local/bin
-usr/local/bin/netfirewall-doctor     usr/local/bin
-usr/local/bin/netfirewall-bootstrap     usr/local/bin
-usr/local/bin/netfirewall-firstboot     usr/local/bin
-usr/local/bin/netfirewall-issue-banner  usr/local/bin
+# Console shims + provisioning scripts (already under debian/tmp/usr/bin).
+# In /usr/bin, NOT /usr/local/bin — Debian Policy forbids packages writing to
+# /usr/local (dh_usrlocal would reject it).
+usr/bin/netfirewall-tui           usr/bin
+usr/bin/netfirewall-doctor        usr/bin
+usr/bin/netfirewall-bootstrap     usr/bin
+usr/bin/netfirewall-firstboot     usr/bin
+usr/bin/netfirewall-issue-banner  usr/bin
 
 # NOTE: systemd units are installed by dh_installsystemd (see debian/rules),
 # NOT here — listing them here too would double-install the same path.

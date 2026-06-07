@@ -79,21 +79,25 @@ override_dh_auto_install:
 	cp deploy/README.txt $(OPT)/README.txt
 
 	# ── shims: launchers on PATH for the console tools ──
-	mkdir -p $(STAGING)/usr/local/bin
+	# Debian Policy forbids packages installing files under /usr/local (that
+	# tree belongs to the local admin — dh_usrlocal rejects non-directories
+	# there). Package-provided binaries go in /usr/bin. (The manual install.sh
+	# still symlinks into /usr/local/bin, which is fine — a local admin may.)
+	mkdir -p $(STAGING)/usr/bin
 	printf '#!/usr/bin/env bash\nexec /opt/netfirewall/tui/netfirewall-tui "$$@"\n' \
-	    > $(STAGING)/usr/local/bin/netfirewall-tui
+	    > $(STAGING)/usr/bin/netfirewall-tui
 	printf '#!/usr/bin/env bash\nexec /opt/netfirewall/doctor/netfirewall-doctor "$$@"\n' \
-	    > $(STAGING)/usr/local/bin/netfirewall-doctor
-	chmod 0755 $(STAGING)/usr/local/bin/netfirewall-tui \
-	           $(STAGING)/usr/local/bin/netfirewall-doctor
+	    > $(STAGING)/usr/bin/netfirewall-doctor
+	chmod 0755 $(STAGING)/usr/bin/netfirewall-tui \
+	           $(STAGING)/usr/bin/netfirewall-doctor
 
 	# ── bootstrap + firstboot + issue-banner scripts onto PATH ──
-	cp deploy/bootstrap/netfirewall-bootstrap        $(STAGING)/usr/local/bin/netfirewall-bootstrap
-	cp deploy/firstboot/netfirewall-firstboot        $(STAGING)/usr/local/bin/netfirewall-firstboot
-	cp deploy/firstboot/issue/netfirewall-issue-banner $(STAGING)/usr/local/bin/netfirewall-issue-banner
-	chmod 0755 $(STAGING)/usr/local/bin/netfirewall-bootstrap \
-	           $(STAGING)/usr/local/bin/netfirewall-firstboot \
-	           $(STAGING)/usr/local/bin/netfirewall-issue-banner
+	cp deploy/bootstrap/netfirewall-bootstrap          $(STAGING)/usr/bin/netfirewall-bootstrap
+	cp deploy/firstboot/netfirewall-firstboot          $(STAGING)/usr/bin/netfirewall-firstboot
+	cp deploy/firstboot/issue/netfirewall-issue-banner $(STAGING)/usr/bin/netfirewall-issue-banner
+	chmod 0755 $(STAGING)/usr/bin/netfirewall-bootstrap \
+	           $(STAGING)/usr/bin/netfirewall-firstboot \
+	           $(STAGING)/usr/bin/netfirewall-issue-banner
 
 	# ── systemd units: stage into debian/ as source files named
 	#    debian/<package>.<installed-unit-name>.service so dh_installsystemd

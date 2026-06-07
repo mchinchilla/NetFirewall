@@ -8,7 +8,7 @@ After=netfirewall-firstboot.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/netfirewall-issue-banner
+ExecStart=/usr/bin/netfirewall-issue-banner
 # Best-effort: a console banner is informational, never block boot on it.
 SuccessExitStatus=0 1
 

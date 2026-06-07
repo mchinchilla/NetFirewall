@@ -9,6 +9,6 @@
 #
 # Skip loopback churn to avoid pointless rewrites.
 [ "$IFACE" = "lo" ] && exit 0
-[ -x /usr/local/bin/netfirewall-issue-banner ] || exit 0
-/usr/local/bin/netfirewall-issue-banner || true
+[ -x /usr/bin/netfirewall-issue-banner ] || exit 0
+/usr/bin/netfirewall-issue-banner || true
 exit 0

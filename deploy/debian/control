@@ -49,9 +49,9 @@ Description: Multi-WAN firewall, DHCP server, VPN and router (full appliance)
    * /opt/netfirewall/{daemon,web,dhcp-server,tui,doctor,migrations} binaries
    * /opt/netfirewall/templates/{daemon,web,dhcp}.env.template — env templates
    * /opt/netfirewall/migrations/sql/migrations + /opt/netfirewall/seeds — SQL
-   * systemd units: netfirewall-{daemon,web,dhcp,bootstrap,firstboot}
-   * /usr/local/bin/{netfirewall-tui,netfirewall-doctor,netfirewall-bootstrap,
-     netfirewall-firstboot} + manpage + bash completion
+   * systemd units: netfirewall-{daemon,web,dhcp,bootstrap,firstboot,issue-banner}
+   * /usr/bin/{netfirewall-tui,netfirewall-doctor,netfirewall-bootstrap,
+     netfirewall-firstboot,netfirewall-issue-banner} + manpage + bash completion
  .
  Provisioning is split in two so that flashing one appliance image to many
  machines never shares one master key or DB password:

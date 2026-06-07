@@ -21,7 +21,7 @@ RemainAfterExit=yes
 # one-shot installer, not a long-lived surface.
 User=root
 Group=root
-ExecStart=/usr/local/bin/netfirewall-firstboot
+ExecStart=/usr/bin/netfirewall-firstboot
 # Generous timeout: migrations + cluster init on slow disks.
 TimeoutStartSec=600
 # If it fails, retry on next boot (the .provisioned stamp is only dropped on

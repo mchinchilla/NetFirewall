@@ -18,7 +18,7 @@ Type=oneshot
 # without a session token.
 User=root
 Group=root
-ExecStart=/usr/local/bin/netfirewall-bootstrap
+ExecStart=/usr/bin/netfirewall-bootstrap
 
 # Short retry policy: 3 attempts, 5s apart. Don't loop forever — if the
 # daemon really isn't healthy we'd rather surface that than spam the log.
