@@ -33,6 +33,15 @@ WEB_ENV="$ETC_DIR/web.env"
 DHCP_ENV="$ETC_DIR/dhcp.env"
 PROVISIONED_STAMP="$STATE_DIR/.provisioned"
 
+# TLS (self-signed, generated on first boot — nginx terminates TLS in front of
+# the Web; the __Host- session cookie requires HTTPS, so this is load-bearing).
+TLS_DIR="$ETC_DIR/tls"
+TLS_CERT="$TLS_DIR/netfirewall.crt"
+TLS_KEY="$TLS_DIR/netfirewall.key"
+NGINX_TPL="$TPL_DIR/netfirewall-appliance.conf.template"
+NGINX_SITE="/etc/nginx/sites-available/netfirewall.conf"
+NGINX_ENABLED="/etc/nginx/sites-enabled/netfirewall.conf"
+
 # Local DB on loopback (templates already use Host=127.0.0.1).
 PG_HOST=127.0.0.1
 PG_PORT=5432
@@ -248,6 +257,68 @@ if [[ ! -e "$TUI_CONFIG" ]]; then
 EOF
     chmod 0644 "$TUI_CONFIG"
 fi
+
+# ───────────────────────── TLS cert + nginx (HTTPS from first boot) ─────────────────────────
+# nginx terminates TLS in front of the unprivileged Web. The Web's __Host-
+# session cookie is HTTPS-only, so without a working cert the very first login
+# fails. We mint a self-signed cert (the appliance has no DNS/internet yet) and
+# render the appliance nginx config from the template. The operator swaps in a
+# real cert (certbot, or upload) later; the config path stays the same.
+provision_tls_nginx() {
+    # 1) self-signed cert (idempotent — keep an existing one on re-run).
+    install -d -m 0750 -o root -g "$GROUP_NAME" "$TLS_DIR"
+    if [[ ! -s "$TLS_CERT" || ! -s "$TLS_KEY" ]]; then
+        log "generating self-signed TLS certificate"
+        # SAN covers localhost + the appliance's current global IPv4s so the cert
+        # validates for whatever IP the operator browses to (still untrusted —
+        # self-signed — but no name-mismatch on top of that).
+        local sans="DNS:netfirewall,DNS:localhost,IP:127.0.0.1"
+        local ip
+        for ip in $(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1); do
+            sans="$sans,IP:$ip"
+        done
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$TLS_KEY" -out "$TLS_CERT" \
+            -days 3650 -subj "/CN=netfirewall" \
+            -addext "subjectAltName=$sans" >/dev/null 2>&1 \
+            || die "openssl failed to generate the self-signed certificate"
+        chmod 0640 "$TLS_KEY"; chgrp "$GROUP_NAME" "$TLS_KEY"
+        chmod 0644 "$TLS_CERT"
+    else
+        log "keeping existing TLS certificate"
+    fi
+
+    # 2) render + enable the nginx site (only if nginx is installed).
+    if ! command -v nginx >/dev/null 2>&1; then
+        warn "nginx not installed — skipping reverse-proxy setup (Web is HTTP-only on 127.0.0.1:5000)."
+        return 0
+    fi
+    if [[ ! -f "$NGINX_TPL" ]]; then
+        warn "nginx template $NGINX_TPL missing — skipping reverse-proxy setup."
+        return 0
+    fi
+    log "configuring nginx reverse proxy (TLS)"
+    sed -e "s|__TLS_CERT__|$TLS_CERT|g" \
+        -e "s|__TLS_KEY__|$TLS_KEY|g" \
+        "$NGINX_TPL" > "$NGINX_SITE"
+    chmod 0644 "$NGINX_SITE"
+    # Drop Debian's default site so our default_server wins; enable ours.
+    rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+    ln -sfn "$NGINX_SITE" "$NGINX_ENABLED"
+
+    # Validate before (re)loading so a bad config never takes nginx down.
+    if nginx -t >/dev/null 2>&1; then
+        systemctl enable nginx.service >/dev/null 2>&1 || true
+        systemctl reload nginx.service 2>/dev/null \
+            || systemctl restart nginx.service 2>/dev/null \
+            || warn "nginx reload/restart failed — check 'systemctl status nginx'."
+    else
+        warn "nginx -t rejected the generated config — leaving nginx as-is. Run 'nginx -t' to debug."
+    fi
+}
+
+log "provisioning TLS + nginx"
+provision_tls_nginx
 
 # ───────────────────────── mark provisioned + start services ─────────────────────────
 # Drop the stamp BEFORE starting the daemon/web: this unit has

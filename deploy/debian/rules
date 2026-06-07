@@ -66,6 +66,7 @@ override_dh_auto_install:
 	cp deploy/env/dhcp.env.template   $(OPT)/templates/dhcp.env.template
 	cp deploy/config/daemon.json.template $(OPT)/templates/daemon.json.template
 	cp deploy/config/web.json.template    $(OPT)/templates/web.json.template
+	cp deploy/nginx/netfirewall-appliance.conf.template $(OPT)/templates/netfirewall-appliance.conf.template
 
 	# ── SQL migrations (run by firstboot via the self-contained migrate) ──
 	mkdir -p $(OPT)/migrations/sql/migrations

@@ -50,10 +50,13 @@ with `options: --privileged` (see `.github/workflows/build-iso.yml`).
 1. `netfirewall-nic-bootstrap` substitutes the real first NIC into the bootstrap
    interfaces file → DHCP → the appliance is reachable.
 2. `netfirewall-firstboot.service` provisions per-appliance secrets + the local
-   PostgreSQL DB, runs migrations + seeds, starts the daemon/web (see the .deb's
-   README.Debian). Drops `/var/lib/netfirewall/.provisioned` on success.
-3. The console `/etc/issue` shows the acquired IP + web URL. First login uses the
-   bootstrap token: `journalctl -u netfirewall-web | grep -i token`.
+   PostgreSQL DB, runs migrations + seeds, generates a self-signed TLS cert at
+   `/etc/netfirewall/tls/` and enables the nginx reverse proxy (HTTPS from first
+   boot), starts the daemon/web (see the .deb's README.Debian). Drops
+   `/var/lib/netfirewall/.provisioned` on success.
+3. The console `/etc/issue` shows the acquired IP + the **https://** web URL.
+   First login uses the bootstrap token: `journalctl -u netfirewall-web | grep -i token`.
+   The cert is self-signed → expect a browser warning until you install a real one.
 
 ## Test in QEMU
 

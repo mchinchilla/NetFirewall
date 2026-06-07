@@ -68,7 +68,9 @@ Description: Multi-WAN firewall, DHCP server, VPN and router (full appliance)
      random local PostgreSQL password, initialises the local cluster, creates
      the role and database, fills BOTH env files with the SAME master key (a
      diff-assert guarantees they match — see docs/master-key.md), runs the
-     migrations, applies the seeds, starts the daemon and web, and runs the
+     migrations, applies the seeds, generates a self-signed TLS certificate and
+     enables the nginx reverse proxy (the web UI is HTTPS from first boot — the
+     __Host- session cookie requires it), starts the daemon and web, and runs the
      doctor. After it succeeds it drops /var/lib/netfirewall/.provisioned so it
      never runs again.
  .

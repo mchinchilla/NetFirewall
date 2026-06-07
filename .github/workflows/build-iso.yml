@@ -240,8 +240,14 @@ jobs:
             echo "::error::image is pre-provisioned (.provisioned present) — firstboot would be skipped!"
             fail=1
           fi
+          # No TLS private key may be baked in — firstboot mints a per-appliance
+          # self-signed cert at runtime; a key in the image would be shared by all.
+          if [ -e "$workdir/sqfs/etc/netfirewall/tls/netfirewall.key" ]; then
+            echo "::error::SECRET LEAK: a TLS private key is baked into the image!"
+            fail=1
+          fi
           test "$fail" -eq 0
-          echo "OK: env files are tokenized, no secrets baked, not pre-provisioned."
+          echo "OK: env files tokenized, no master key / TLS key baked, not pre-provisioned."
 
       - name: Rename ISO
         working-directory: deploy/iso
