@@ -39,7 +39,15 @@ PUBLISH_TARGETS := \
 %:
 	dh $@
 
+# NOTE: staging happens in override_dh_auto_install, NOT override_dh_auto_build.
+# Reason: in the `dh binary` sequence, dh_prep runs AFTER dh_auto_build and wipes
+# debian/tmp + debian/<pkg> before dh_auto_install/dh_install. Publishing during
+# the build phase therefore gets deleted by dh_prep. dh_auto_install runs AFTER
+# dh_prep, so everything we stage here survives to dh_install / dh_installsystemd.
 override_dh_auto_build:
+	# Nothing to do here — see override_dh_auto_install.
+
+override_dh_auto_install:
 	@for entry in $(PUBLISH_TARGETS); do \
 		proj=$${entry%%:*}; out=$${entry##*:}; \
 		echo "==> publishing $$proj (self-contained) -> $(OPT)/$$out"; \
