@@ -26,9 +26,9 @@ Depends:
  adduser,
  systemd (>= 250),
  libicu76 | libicu,
- postgresql,
  postgresql-client
 Recommends:
+ postgresql-18 | postgresql,
  wireguard-tools,
  unbound,
  nginx | apache2

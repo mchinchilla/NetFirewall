@@ -12,6 +12,7 @@ deploy/iso/
   auto/{config,build,clean}              lb wrappers (auto/config = the lb config knobs)
   config/
     package-lists/netfirewall.list.chroot  OS deps embedded in the squashfs
+    archives/pgdg.*                        PGDG repo + key → PostgreSQL 18 (Debian 13 main only has 17)
     packages.chroot/                       CI drops netfirewall_*.deb here (gitignored)
     hooks/normal/0100-enable-services      enable postgresql + our units + nginx + ssh
     hooks/normal/0200-harden               hostname, lock root pw, sshd, ifupdown wiring

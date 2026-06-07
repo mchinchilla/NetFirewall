@@ -60,7 +60,10 @@ if [[ -e "$PROVISIONED_STAMP" ]]; then
 fi
 
 # ───────────────────────── local PostgreSQL cluster ─────────────────────────
-# trixie ships PostgreSQL 17; postgresql-common auto-creates the `main` cluster
+# The appliance ships PostgreSQL 18 (from PGDG; Debian 13 main only has 17).
+# This logic is version-agnostic — it adopts whatever the newest installed major
+# is (pg_lsclusters / newest dir under /usr/lib/postgresql). postgresql-common
+# auto-creates the `main` cluster
 # on package install. But in a freshly-flashed image the cluster may be stopped,
 # or (rare) not created. Make sure exactly one local cluster is up.
 ensure_pg_running() {

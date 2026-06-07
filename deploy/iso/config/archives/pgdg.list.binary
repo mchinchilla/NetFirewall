@@ -1,0 +1,6 @@
+# PostgreSQL Global Development Group APT repo for Debian 13 (trixie).
+# Added so the appliance can install postgresql-18 (Debian 13 main only ships
+# PG 17). live-build pulls the packages into the squashfs at BUILD time, so the
+# installed appliance still resolves them OFFLINE. The matching signing key is
+# config/archives/pgdg.key.chroot (PGDG ACCC4CF8).
+deb http://apt.postgresql.org/pub/repos/apt trixie-pgdg main

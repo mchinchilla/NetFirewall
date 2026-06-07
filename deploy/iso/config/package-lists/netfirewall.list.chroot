@@ -4,8 +4,12 @@
 # tooling. One package per line; comments allowed.
 
 # ── core OS the firewall needs ──
-postgresql
-postgresql-client
+# PostgreSQL 18 from PGDG (config/archives/pgdg.*). We pin the explicit major so
+# the generic `postgresql` meta-package (which tracks Debian's default, PG 17 on
+# trixie) doesn't pull 17 instead. firstboot is version-agnostic (it picks the
+# newest cluster under /usr/lib/postgresql), so it adopts 18 automatically.
+postgresql-18
+postgresql-client-18
 nftables
 iproute2
 util-linux
