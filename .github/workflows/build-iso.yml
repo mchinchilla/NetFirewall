@@ -112,8 +112,9 @@ jobs:
           set -eux
           deb=$(ls dist/netfirewall_*.deb | head -1)
           dpkg-deb --info "$deb"
-          echo "── contents (top-level) ──"
-          dpkg-deb --contents "$deb" | awk '{print $6}' | sort -u | head -60
+          echo "── contents: systemd units + /usr/bin + templates ──"
+          dpkg-deb --contents "$deb" | awk '{print $6}' \
+            | grep -E 'systemd/system/|usr/bin/netfirewall|templates/' | sort -u
           echo "── ASSERTION: env templates ship tokenized (no secrets baked) ──"
           tmp=$(mktemp -d); dpkg-deb -x "$deb" "$tmp"
           for t in daemon web dhcp; do
@@ -128,7 +129,10 @@ jobs:
           test -x "$tmp/usr/bin/netfirewall-bootstrap"
           test -x "$tmp/usr/bin/netfirewall-tui"
           test -x "$tmp/usr/bin/netfirewall-doctor"
-          test -f "$tmp/lib/systemd/system/netfirewall-firstboot.service"
+          # debhelper 13 installs units under /usr/lib/systemd/system (Debian
+          # merged-/usr); accept either path defensively.
+          test -f "$tmp/usr/lib/systemd/system/netfirewall-firstboot.service" \
+            || test -f "$tmp/lib/systemd/system/netfirewall-firstboot.service"
           echo "── ASSERTION: self-contained (bundled coreclr, no runtime dep) ──"
           test -f "$tmp/opt/netfirewall/daemon/libcoreclr.so"
           ! dpkg-deb -f "$deb" Depends | grep -qi 'dotnet-runtime\|aspnetcore-runtime'
