@@ -1,13 +1,22 @@
 #!/bin/sh
-# prerm — runs before the package files are removed. The heavy lifting (stop +
-# disable the units, daemon-reload) is emitted by dh_installsystemd into the
-# #DEBHELPER# block below, so we keep this minimal.
+# prerm — runs before the package files are removed. Since we install the systemd
+# units as plain data (not via dh_installsystemd), the stop/disable that the
+# #DEBHELPER# block would normally emit isn't generated — do it explicitly.
 set -e
 
+UNITS="netfirewall-firstboot netfirewall-daemon netfirewall-web \
+       netfirewall-bootstrap netfirewall-issue-banner netfirewall-dhcp"
+
 case "$1" in
-    remove|upgrade|deconfigure)
+    remove|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            for u in $UNITS; do
+                systemctl --no-reload disable "$u.service" >/dev/null 2>&1 || true
+                systemctl stop "$u.service" >/dev/null 2>&1 || true
+            done
+        fi
         ;;
-    failed-upgrade)
+    upgrade|failed-upgrade)
         ;;
 esac
 

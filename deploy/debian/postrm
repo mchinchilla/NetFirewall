@@ -36,15 +36,31 @@ DROP ROLE IF EXISTS netfirewall;
 SQL
 }
 
+UNITS="netfirewall-firstboot netfirewall-daemon netfirewall-web \
+       netfirewall-bootstrap netfirewall-issue-banner netfirewall-dhcp"
+
 case "$1" in
     purge)
+        # Clean up deb-systemd-helper enable-state records (units are gone now).
+        if command -v deb-systemd-helper >/dev/null 2>&1; then
+            for u in $UNITS; do
+                deb-systemd-helper purge "$u.service"  >/dev/null 2>&1 || true
+                deb-systemd-helper unmask "$u.service" >/dev/null 2>&1 || true
+            done
+        fi
         rm -rf "$ETC_DIR" "$STATE_DIR" "$LOG_DIR" "$RUN_DIR"
         drop_local_db
         # Remove the service user + group (ignore if other files still own them).
         deluser  --system "$WEB_USER"  >/dev/null 2>&1 || true
         delgroup --system "$GROUP_NAME" >/dev/null 2>&1 || true
         ;;
-    remove|upgrade|disappear|failed-upgrade|abort-install|abort-upgrade)
+    remove|disappear)
+        # Units are removed by dpkg; just reload so systemd forgets them.
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+    upgrade|failed-upgrade|abort-install|abort-upgrade)
         ;;
 esac
 

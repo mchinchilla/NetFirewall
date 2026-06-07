@@ -21,8 +21,9 @@ DH_VERBOSE = 1
 DH_OPTIONS = -v
 
 # Where the publishes land before dh_install distributes them.
-STAGING := debian/tmp
-OPT     := $(STAGING)/opt/netfirewall
+STAGING     := debian/tmp
+OPT         := $(STAGING)/opt/netfirewall
+OPT_SYSTEMD := $(STAGING)/usr/lib/systemd/system
 
 # proj:outdir — every .NET target we ship. WanMonitor is published too but its
 # unit isn't enabled by default (operators flip it on for multi-WAN). doctor and
@@ -99,10 +100,19 @@ override_dh_auto_install:
 	           $(STAGING)/usr/bin/netfirewall-firstboot \
 	           $(STAGING)/usr/bin/netfirewall-issue-banner
 
-	# NOTE: systemd unit staging is NOT here. dh_installsystemd only reads
-	# debian/<name>.service SOURCE files, and it runs BEFORE override_dh_auto_install
-	# in the dh sequence — so units copied here would be invisible to it. They are
-	# staged in execute_before_dh_installsystemd (below) instead.
+	# ── systemd units → /usr/lib/systemd/system via dh_install (listed in
+	#    netfirewall.install). We do NOT rely on dh_installsystemd to install or
+	#    enable them: its auto-discovery of build-time-generated debian/*.service
+	#    files proved unreliable here (silently installed nothing). Instead we
+	#    install the unit files as plain data and do enable/disable + daemon-reload
+	#    explicitly in postinst (deb-systemd-helper). Deterministic, no magic.
+	mkdir -p $(OPT_SYSTEMD)
+	cp deploy/systemd/netfirewall-daemon.service       $(OPT_SYSTEMD)/
+	cp deploy/systemd/netfirewall-web.service          $(OPT_SYSTEMD)/
+	cp deploy/systemd/netfirewall-dhcp.service         $(OPT_SYSTEMD)/
+	cp deploy/systemd/netfirewall-bootstrap.service    $(OPT_SYSTEMD)/
+	cp deploy/systemd/netfirewall-firstboot.service    $(OPT_SYSTEMD)/
+	cp deploy/systemd/netfirewall-issue-banner.service $(OPT_SYSTEMD)/
 
 	# ── manpage + bash completion ──
 	mkdir -p $(STAGING)/usr/share/man/man1 $(STAGING)/usr/share/bash-completion/completions
@@ -117,11 +127,6 @@ override_dh_auto_clean:
 	-find . -type d -name bin   -exec rm -rf {} +
 	-find . -type d -name obj   -exec rm -rf {} +
 	-rm -rf $(STAGING)
-	# Remove the unit files staged into debian/ by execute_before_dh_installsystemd
-	# so a re-build / a dev's working tree doesn't accumulate them.
-	-rm -f debian/netfirewall-daemon.service debian/netfirewall-web.service \
-	       debian/netfirewall-dhcp.service debian/netfirewall-bootstrap.service \
-	       debian/netfirewall-firstboot.service debian/netfirewall-issue-banner.service
 
 # Self-contained publish ships the .NET host (apphost) and native runtime libs
 # (libcoreclr.so, libclrjit.so, …) that dh_strip would corrupt. Disable it.
@@ -144,27 +149,10 @@ override_dh_dwz:
 override_dh_shlibdeps:
 	:
 
-# systemd unit staging MUST happen here, in execute_before_dh_installsystemd:
-# dh_installsystemd reads only debian/<name>.service SOURCE files (it does NOT
-# scan the staging dir debian/<pkg>/ for already-installed units), and it runs
-# BEFORE override_dh_auto_install — so units staged there are invisible to it.
-# execute_before_dh_installsystemd runs immediately before dh_installsystemd, so
-# the files exist when its glob runs. Standalone naming debian/<unit>.service
-# (the part before the first dot, "netfirewall-daemon", != the package name
-# "netfirewall", so debhelper treats it as a standalone unit installed verbatim).
-execute_before_dh_installsystemd:
-	cp deploy/systemd/netfirewall-daemon.service       debian/netfirewall-daemon.service
-	cp deploy/systemd/netfirewall-web.service          debian/netfirewall-web.service
-	cp deploy/systemd/netfirewall-dhcp.service         debian/netfirewall-dhcp.service
-	cp deploy/systemd/netfirewall-bootstrap.service    debian/netfirewall-bootstrap.service
-	cp deploy/systemd/netfirewall-firstboot.service    debian/netfirewall-firstboot.service
-	cp deploy/systemd/netfirewall-issue-banner.service debian/netfirewall-issue-banner.service
-
-# install our units but DO NOT start them at configure time — no DB yet
-# (firstboot creates it). A single dh_installsystemd call (no positional args)
-# installs ALL debian/netfirewall-*.service to /usr/lib/systemd/system AND
-# generates the enable + (suppressed) start snippets via #DEBHELPER#. All units
-# are enabled; the DHCP unit (binds UDP/67, opt-in) is disabled afterward in
-# postinst via deb-systemd-helper (the unit file stays installed).
+# dh_installsystemd is a NO-OP here: the unit files are installed as plain data
+# by dh_install (from debian/tmp/usr/lib/systemd/system, listed in
+# netfirewall.install), and enable/disable + daemon-reload are done explicitly in
+# postinst/postrm via deb-systemd-helper. We override it to nothing so it doesn't
+# also try (and fail) to find debian/*.service source files.
 override_dh_installsystemd:
-	dh_installsystemd --no-start
+	:

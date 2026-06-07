@@ -75,20 +75,35 @@ case "$1" in
         ;;
 esac
 
-# debhelper-generated snippets (systemd enable, tmpfiles, sysctl, ...). The
-# units are installed with --no-start, so this enables-without-starting; the
-# real first start happens after netfirewall-firstboot provisions the DB.
+# debhelper-generated snippets (tmpfiles, sysctl, ...). systemd unit handling is
+# done explicitly below, NOT by dh_installsystemd (its auto-discovery of our
+# build-time-generated units proved unreliable) — the units are shipped as plain
+# data and we enable/reload them here.
 #DEBHELPER#
 
-# The debhelper snippet above enabled ALL units (dh_installsystemd --no-enable is
-# global, so we couldn't selectively skip DHCP there). Disable the DHCP unit here
-# — it binds UDP/67 and is opt-in per host. The unit file stays installed; an
-# operator runs `systemctl enable --now netfirewall-dhcp` to turn it on.
+# ── systemd: reload, enable (don't start — no DB yet; firstboot starts them) ──
+# The unit files were installed as plain data to /usr/lib/systemd/system. Wire up
+# the enable/disable here so they behave exactly like dh_installsystemd would,
+# minus the unreliable discovery. systemctl may be unavailable in a build chroot;
+# all calls are best-effort.
 if [ "$1" = "configure" ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    # Enable everything except DHCP (binds UDP/67; opt-in per host). Use
+    # deb-systemd-helper so the enable state is tracked across upgrades/purges.
+    for unit in netfirewall-firstboot netfirewall-daemon netfirewall-web \
+                netfirewall-bootstrap netfirewall-issue-banner; do
+        if command -v deb-systemd-helper >/dev/null 2>&1; then
+            deb-systemd-helper enable "$unit.service" >/dev/null 2>&1 || true
+        else
+            systemctl enable "$unit.service" >/dev/null 2>&1 || true
+        fi
+    done
+    # DHCP: install enable-state record but leave disabled.
     if command -v deb-systemd-helper >/dev/null 2>&1; then
         deb-systemd-helper disable netfirewall-dhcp.service >/dev/null 2>&1 || true
     fi
-    systemctl --no-reload disable netfirewall-dhcp.service >/dev/null 2>&1 || true
 fi
 
 exit 0

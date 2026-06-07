@@ -27,8 +27,14 @@ usr/bin/netfirewall-bootstrap     usr/bin
 usr/bin/netfirewall-firstboot     usr/bin
 usr/bin/netfirewall-issue-banner  usr/bin
 
-# NOTE: systemd units are installed by dh_installsystemd (see debian/rules),
-# NOT here — listing them here too would double-install the same path.
+# systemd units (staged under debian/tmp/usr/lib/systemd/system by rules).
+# Installed as plain data; enable/disable + daemon-reload happen in postinst.
+usr/lib/systemd/system/netfirewall-daemon.service       usr/lib/systemd/system
+usr/lib/systemd/system/netfirewall-web.service          usr/lib/systemd/system
+usr/lib/systemd/system/netfirewall-dhcp.service         usr/lib/systemd/system
+usr/lib/systemd/system/netfirewall-bootstrap.service    usr/lib/systemd/system
+usr/lib/systemd/system/netfirewall-firstboot.service    usr/lib/systemd/system
+usr/lib/systemd/system/netfirewall-issue-banner.service usr/lib/systemd/system
 
 # manpage + bash completion (staged under debian/tmp by rules).
 usr/share/man/man1/netfirewall-tui.1                          usr/share/man/man1
