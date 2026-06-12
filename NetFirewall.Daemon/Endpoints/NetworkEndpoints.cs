@@ -175,7 +175,11 @@ public static class NetworkEndpoints
                     var ipChanged       = !Equals(existing.IpAddress?.ToString(), d.CurrentIp?.ToString());
                     var maskChanged     = !Equals(existing.SubnetMask?.ToString(), detectedMask?.ToString());
                     var gatewayChanged  = !Equals(existing.Gateway?.ToString(), d.CurrentGateway?.ToString());
-                    var macChanged      = !Equals(existing.MacAddress, d.MacAddress);
+                    // A stored MAC that differs from the kernel's is an operator
+                    // clone/spoof override (possibly not applied yet) — preserve
+                    // it. Only reconcile when nothing is stored.
+                    var macChanged      = string.IsNullOrEmpty(existing.MacAddress)
+                                          && !string.IsNullOrEmpty(d.MacAddress);
                     var mtuChanged      = existing.Mtu != d.Mtu;
 
                     if (ipChanged || maskChanged || gatewayChanged || macChanged || mtuChanged)
@@ -183,7 +187,7 @@ public static class NetworkEndpoints
                         existing.IpAddress  = d.CurrentIp;
                         existing.SubnetMask = detectedMask;
                         existing.Gateway    = d.CurrentGateway;
-                        existing.MacAddress = d.MacAddress;
+                        if (macChanged) existing.MacAddress = d.MacAddress;
                         existing.Mtu        = d.Mtu;
                         await firewall.UpdateInterfaceAsync(existing, ct);
                         result.Updated++;
