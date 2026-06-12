@@ -81,6 +81,14 @@ public sealed class NetworkController : Controller
             ? FromExisting(configured)
             : FromDetected(name, detected);
 
+        // Redetect reconciles fw_interfaces.mac_address with the kernel's MAC,
+        // so a stored value equal to the hardware MAC is not an operator
+        // override — show the spoof field empty in that case.
+        form.HardwareMac = detected?.MacAddress;
+        if (form.MacAddress != null &&
+            string.Equals(form.MacAddress, detected?.MacAddress, StringComparison.OrdinalIgnoreCase))
+            form.MacAddress = null;
+
         return PartialView("_InterfaceForm", form);
     }
 
@@ -215,6 +223,7 @@ public sealed class NetworkController : Controller
         Mtu = fw.Mtu,
         VlanId = fw.VlanId,
         VlanParent = fw.VlanParent,
+        MacAddress = fw.MacAddress,
         Description = fw.Description,
         AutoStart = fw.AutoStart,
         Enabled = fw.Enabled
@@ -255,6 +264,7 @@ public sealed class NetworkController : Controller
             Mtu = f.Mtu,
             VlanId = f.VlanId,
             VlanParent = f.VlanParent,
+            MacAddress = string.IsNullOrWhiteSpace(f.MacAddress) ? null : f.MacAddress.Trim(),
             Description = f.Description,
             AutoStart = f.AutoStart,
             Enabled = f.Enabled

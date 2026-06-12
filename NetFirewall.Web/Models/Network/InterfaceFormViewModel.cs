@@ -40,6 +40,17 @@ public sealed class InterfaceFormViewModel : IValidatableObject
 
     public string? VlanParent { get; set; }
 
+    /// <summary>
+    /// Operator-supplied MAC override (clone/spoof). Empty → keep the NIC's
+    /// hardware MAC. Same contract as the wizard's <c>SpoofMacAddress</c>.
+    /// </summary>
+    [RegularExpression(@"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$",
+        ErrorMessage = "MAC must be 6 hex octets, e.g. 00:11:22:33:44:55.")]
+    public string? MacAddress { get; set; }
+
+    /// <summary>Detected hardware MAC — display-only (placeholder/help text in the form).</summary>
+    public string? HardwareMac { get; set; }
+
     public string? Description { get; set; }
 
     public bool AutoStart { get; set; } = true;

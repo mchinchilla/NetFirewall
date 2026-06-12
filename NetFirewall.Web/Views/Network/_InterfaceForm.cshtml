@@ -131,6 +131,13 @@
                 Placeholder = "eth0"
             })
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "MacAddress", Label = "Clone / spoof MAC",
+                Value = Model.MacAddress,
+                Placeholder = string.IsNullOrEmpty(Model.HardwareMac) ? "00:11:22:33:44:55" : Model.HardwareMac,
+                Pattern = "^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$",
+                Help = $"Leave empty to keep the hardware MAC{(string.IsNullOrEmpty(Model.HardwareMac) ? "" : $" ({Model.HardwareMac})")}. Set to impersonate another device's MAC (e.g. an ISP-bound modem)."
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = "Description", Label = "Description",
                 Kind = FormFieldKind.Textarea,
                 Value = Model.Description
