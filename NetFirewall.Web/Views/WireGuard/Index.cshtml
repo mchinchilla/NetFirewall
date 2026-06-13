@@ -122,11 +122,14 @@
                         Name = nameof(form.Name), Label = "Interface name", Required = true, Value = form.Name,
                         Placeholder = "wg0"
                     })
-                    @* ListenPort — server mode only. *@
+                    @* ListenPort — server mode only. Disabled in client mode so the
+                       hidden field's min/max constraint can't block submit (HTML5
+                       can't focus a display:none invalid control) and isn't posted. *@
                     <div x-show="mode === 'server'">
                         @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
                             Name = nameof(form.ListenPort), Label = "UDP listen port", Kind = NetFirewall.Web.Models.FormFieldKind.Number,
-                            Value = form.ListenPort.ToString(), Min = "1", Max = "65535"
+                            Value = form.ListenPort.ToString(), Min = "1", Max = "65535",
+                            AlpineExtra = ":disabled=\"mode !== 'server'\""
                         })
                     </div>
                 </div>
