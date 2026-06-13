@@ -36,6 +36,13 @@
         <div class="flex flex-col flex-1 min-w-0">
             @await Html.PartialAsync("_TopHeader")
             @await Html.PartialAsync("_DaemonModeBanner")
+            @* Active-system-alerts banner (VPN down, etc). Self-populating + self-
+               clearing: polls /Alerts/banner and swaps in _AlertsBanner — empty
+               markup when nothing is active. Also refreshes on WireGuard events. *@
+            <div id="alerts-banner"
+                 hx-get="/Alerts/banner"
+                 hx-trigger="load, every 20s, refreshWireGuard from:body"
+                 hx-swap="innerHTML"></div>
             @await Html.PartialAsync("_Breadcrumb")
 
             <main role="main" class="flex-1 px-4 sm:px-6 lg:px-8 py-6"

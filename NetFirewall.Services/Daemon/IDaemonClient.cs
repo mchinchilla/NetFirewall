@@ -169,6 +169,10 @@ public interface IDaemonClient
 
     /// <summary><c>GET /v1/system/wan-health</c> — per-WAN health state + recent transition events.</summary>
     Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/vpn-health</c> — per-peer WireGuard health state, recent
+    /// transitions, and active UI alerts.</summary>
+    Task<ServiceResponse<VpnHealthDto>> GetVpnHealthAsync(CancellationToken ct = default);
 }
 
 public sealed record TerminalTicketDto(string Ticket);
@@ -198,3 +202,8 @@ public sealed record TopDestinationsDto(
 public sealed record WanHealthDto(
     IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,
     IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents);
+
+public sealed record VpnHealthDto(
+    IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthState> State,
+    IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthEvent> RecentEvents,
+    IReadOnlyList<NetFirewall.Models.Vpn.SystemAlert> ActiveAlerts);

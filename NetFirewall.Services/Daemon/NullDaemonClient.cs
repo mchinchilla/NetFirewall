@@ -167,4 +167,11 @@ public sealed class NullDaemonClient : IDaemonClient
             new WanHealthDto(Array.Empty<NetFirewall.Models.WanMonitor.WanHealthState>(),
                              Array.Empty<NetFirewall.Models.WanMonitor.WanHealthEvent>()),
             "Daemon disabled."));
+
+    public Task<ServiceResponse<VpnHealthDto>> GetVpnHealthAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<VpnHealthDto>.Ok(
+            new VpnHealthDto(Array.Empty<NetFirewall.Models.Vpn.VpnHealthState>(),
+                             Array.Empty<NetFirewall.Models.Vpn.VpnHealthEvent>(),
+                             Array.Empty<NetFirewall.Models.Vpn.SystemAlert>()),
+            "Daemon disabled."));
 }

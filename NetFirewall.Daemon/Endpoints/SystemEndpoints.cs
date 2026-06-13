@@ -53,6 +53,18 @@ public static class SystemEndpoints
             return Results.Json(ServiceResponse<WanHealthDto>.Ok(new WanHealthDto(state, events), "OK"));
         });
 
+        // GET /v1/system/vpn-health — per-peer WireGuard health state, recent
+        // transitions, and the currently-active alerts that feed the UI banner.
+        grp.MapGet("/vpn-health", async (
+                NetFirewall.Services.Vpn.IVpnHealthService vpn,
+                CancellationToken ct) =>
+        {
+            var state = await vpn.GetStateAsync(ct);
+            var events = await vpn.RecentEventsAsync(20, ct);
+            var alerts = await vpn.ActiveAlertsAsync(ct);
+            return Results.Json(ServiceResponse<VpnHealthDto>.Ok(new VpnHealthDto(state, events, alerts), "OK"));
+        });
+
         // GET /v1/system/top-talkers?hours=24&limit=5 — top hosts + services.
         grp.MapGet("/top-talkers", async (
                 ITopTalkersService svc,
@@ -117,4 +129,9 @@ public static class SystemEndpoints
     public sealed record WanHealthDto(
         IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,
         IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents);
+
+    public sealed record VpnHealthDto(
+        IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthState> State,
+        IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthEvent> RecentEvents,
+        IReadOnlyList<NetFirewall.Models.Vpn.SystemAlert> ActiveAlerts);
 }

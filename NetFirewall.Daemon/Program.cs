@@ -212,6 +212,27 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardImporter,
 builder.Services.Configure<NetFirewall.Services.Vpn.WireGuardApplyOptions>(
     builder.Configuration.GetSection("WireGuard"));
 
+// VPN health monitor — proactive "tunnel went down" detection. Polls wg show on
+// a timer, applies hysteresis, records up/down transitions to vpn_health_* and
+// fires notifications (UI banner + email). Observe-and-alert only, no failover.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnHealthService,
+                           NetFirewall.Services.Vpn.VpnHealthService>();
+builder.Services.Configure<NetFirewall.Services.Vpn.VpnHealthMonitorOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Vpn.VpnHealthMonitorOptions.SectionName));
+
+// Notification channels — ALL enabled INotifiers fan out from the dispatcher.
+// Banner is always on (DB write the UI polls); SMTP is opt-in via config. Adding
+// Telegram/webhook later is just another AddSingleton<INotifier, ...> here.
+builder.Services.Configure<NetFirewall.Services.Notifications.SmtpNotifierOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Notifications.SmtpNotifierOptions.SectionName));
+builder.Services.AddScoped<NetFirewall.Services.Notifications.INotifier,
+                           NetFirewall.Services.Notifications.UiBannerNotifier>();
+builder.Services.AddSingleton<NetFirewall.Services.Notifications.INotifier,
+                              NetFirewall.Services.Notifications.SmtpNotifier>();
+builder.Services.AddScoped<NetFirewall.Services.Notifications.INotificationDispatcher,
+                           NetFirewall.Services.Notifications.NotificationDispatcher>();
+builder.Services.AddHostedService<NetFirewall.Services.Vpn.VpnHealthMonitorService>();
+
 // ----- Authentication: validate X-NetFw-Session header -----
 builder.Services
     .AddAuthentication(DaemonSessionAuthHandler.SchemeName)

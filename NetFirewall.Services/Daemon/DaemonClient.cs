@@ -244,6 +244,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
         => GetAsync<WanHealthDto>("/v1/system/wan-health", ct);
 
+    public Task<ServiceResponse<VpnHealthDto>> GetVpnHealthAsync(CancellationToken ct = default)
+        => GetAsync<VpnHealthDto>("/v1/system/vpn-health", ct);
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

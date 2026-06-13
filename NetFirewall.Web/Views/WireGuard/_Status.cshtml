@@ -25,10 +25,35 @@
 }
 else if (Model.Status.Count == 0)
 {
-    <p class="text-sm py-6 text-center text-surface-fg-muted">
-        Interface @Model.Server.Name is not up, or no peers have ever handshook.
-        Click <span class="font-medium text-surface-fg">Apply</span> above to bring it up.
-    </p>
+    @* No live peers at all. For an enabled client-mode tunnel this is itself an
+       outage (the interface is down or the upstream stopped responding — e.g. its
+       IP changed), so flag it red instead of the neutral grey "bring it up" hint. *@
+    var clientDown = Model.Server.Enabled
+                     && Model.Server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase);
+    if (clientDown)
+    {
+        <div class="flex items-start gap-3 rounded-lg p-4 my-2
+                    bg-feedback-danger-bg text-feedback-danger-fg border border-feedback-danger-bd">
+            <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
+            </svg>
+            <div class="text-sm">
+                <p class="font-semibold">Tunnel @Model.Server.Name is down.</p>
+                <p class="mt-0.5 opacity-90">
+                    No handshake with the upstream server. The remote endpoint may be
+                    unreachable or its IP may have changed — check the endpoint and click
+                    <span class="font-medium">Apply VPN</span> to re-establish.
+                </p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <p class="text-sm py-6 text-center text-surface-fg-muted">
+            Interface @Model.Server.Name is not up, or no peers have ever handshook.
+            Click <span class="font-medium text-surface-fg">Apply</span> above to bring it up.
+        </p>
+    }
 }
 else
 {
@@ -47,14 +72,29 @@ else
                 @{ var byPubkey = Model.Peers.ToDictionary(p => p.PublicKey, p => p); }
                 @foreach (var s in Model.Status.OrderByDescending(s => s.LastHandshakeAt ?? DateTime.MinValue))
                 {
-                    var name = byPubkey.TryGetValue(s.PublicKey, out var p) ? p.Name : "(unknown)";
-                    var fresh = s.LastHandshakeAt is { } h && (DateTime.UtcNow - h) < TimeSpan.FromMinutes(3);
+                    var peer = byPubkey.TryGetValue(s.PublicKey, out var p) ? p : null;
+                    var name = peer?.Name ?? "(unknown)";
+                    // Typed verdict (Connected / Down / Idle) — same rule the daemon's
+                    // VpnHealthMonitorService uses, so the dot agrees with the alerting.
+                    var health = NetFirewall.Web.Models.Vpn.WgPeerHealthEvaluator.Evaluate(
+                        Model.Server, peer, s, DateTime.UtcNow);
+                    var (dotColor, statusLabel) = health switch
+                    {
+                        NetFirewall.Web.Models.Vpn.WgPeerHealth.Connected => ("var(--feedback-success-bd)", "Connected"),
+                        NetFirewall.Web.Models.Vpn.WgPeerHealth.Down       => ("var(--feedback-danger-bd)",  "Down"),
+                        _                                                  => ("var(--surface-fg-muted)",   "Idle"),
+                    };
                     <tr>
                         <td class="px-5 py-3">
                             <div class="flex items-center gap-2">
-                                <span class="inline-block h-2 w-2 rounded-full"
-                                      style="background-color: @(fresh ? "var(--feedback-success-bd)" : "var(--surface-fg-muted)");"></span>
+                                <span class="inline-block h-2 w-2 rounded-full" title="@statusLabel"
+                                      style="background-color: @dotColor;"></span>
                                 <span class="font-medium">@name</span>
+                                @if (health == NetFirewall.Web.Models.Vpn.WgPeerHealth.Down)
+                                {
+                                    <span class="text-xs font-medium px-1.5 py-0.5 rounded
+                                                 bg-feedback-danger-bg text-feedback-danger-fg">Down</span>
+                                }
                             </div>
                             <p class="text-xs font-mono mt-0.5 text-surface-fg-muted">@s.PublicKey[..16]…</p>
                         </td>

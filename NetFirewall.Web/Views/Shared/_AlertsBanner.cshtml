@@ -1,0 +1,45 @@
+@model NetFirewall.Web.Models.AlertsBannerViewModel
+@*
+    Active-system-alerts banner. Full-width, sits under the top header. Polled by
+    HTMX (#alerts-banner in _Layout) every 20s and on the refreshWireGuard event,
+    so it appears within one poll of the daemon detecting a tunnel down and clears
+    itself within one poll of recovery.
+
+    Renders nothing when there are no active alerts. Colours come from the
+    feedback tokens (rule #9) keyed off each alert's severity.
+*@
+@functions {
+    static string AgoText(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+}
+
+@foreach (var a in Model.Alerts)
+{
+    var (bg, fg, bd) = a.Severity switch
+    {
+        "warning" => ("bg-feedback-warning-bg", "text-feedback-warning-fg", "border-feedback-warning-bd"),
+        "info"    => ("bg-feedback-info-bg",    "text-feedback-info-fg",    "border-feedback-info-bd"),
+        _         => ("bg-feedback-danger-bg",  "text-feedback-danger-fg",  "border-feedback-danger-bd"),
+    };
+    <div role="alert" aria-live="assertive"
+         class="px-4 sm:px-6 lg:px-8 py-2.5 border-b flex items-center gap-3 text-sm @bg @fg @bd">
+        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+            <span class="font-semibold">@a.Title</span>
+            @if (!string.IsNullOrEmpty(a.Body))
+            {
+                <span class="opacity-90"> — @a.Body</span>
+            }
+        </div>
+        <span class="shrink-0 text-xs opacity-75 whitespace-nowrap">@AgoText(a.RaisedAt)</span>
+    </div>
+}
