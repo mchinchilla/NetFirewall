@@ -43,15 +43,46 @@ public static class SystemEndpoints
             return Results.Json(ServiceResponse<IReadOnlyList<ApplyHistoryEntry>>.Ok(list));
         });
 
-        // GET /v1/system/wan-health — current per-WAN health state + recent transitions.
+        // GET /v1/system/wan-health — current per-WAN health state + recent
+        // transitions + the control row (active WAN + manual override).
         grp.MapGet("/wan-health", async (
                 NetFirewall.Services.WanMonitor.IWanHealthService wan,
                 CancellationToken ct) =>
         {
             var state = await wan.GetStateAsync(ct);
             var events = await wan.RecentEventsAsync(20, ct);
-            return Results.Json(ServiceResponse<WanHealthDto>.Ok(new WanHealthDto(state, events), "OK"));
+            var control = await wan.GetControlAsync(ct);
+            return Results.Json(ServiceResponse<WanHealthDto>.Ok(new WanHealthDto(state, events, control), "OK"));
         });
+
+        // POST /v1/system/wan-failover — manually pin a WAN as the active default
+        // route (sticky override). Elevated + destructive (mutates routing).
+        grp.MapPost("/wan-failover", async (
+                WanFailoverRequest req,
+                NetFirewall.Services.WanMonitor.IWanFailoverControlService ctrl,
+                System.Security.Claims.ClaimsPrincipal user,
+                CancellationToken ct) =>
+        {
+            if (req.InterfaceId == Guid.Empty)
+                return Results.Json(ServiceResponse<bool>.Fail("interfaceId is required."));
+            var res = await ctrl.ForceActiveAsync(req.InterfaceId, user.Identity?.Name, ct);
+            return Results.Json(res, statusCode: res.Success ? 200 : 500);
+        })
+        .WithMetadata(new NetFirewall.Daemon.Auth.DaemonAllowRootPeerAttribute(),
+                      new NetFirewall.Daemon.Auth.DaemonRequireElevatedAttribute());
+
+        // POST /v1/system/wan-failover/clear — drop the manual override, return
+        // to automatic priority-based failover.
+        grp.MapPost("/wan-failover/clear", async (
+                NetFirewall.Services.WanMonitor.IWanFailoverControlService ctrl,
+                System.Security.Claims.ClaimsPrincipal user,
+                CancellationToken ct) =>
+        {
+            var res = await ctrl.ClearOverrideAsync(user.Identity?.Name, ct);
+            return Results.Json(res, statusCode: res.Success ? 200 : 500);
+        })
+        .WithMetadata(new NetFirewall.Daemon.Auth.DaemonAllowRootPeerAttribute(),
+                      new NetFirewall.Daemon.Auth.DaemonRequireElevatedAttribute());
 
         // GET /v1/system/vpn-health — per-peer WireGuard health state, recent
         // transitions, and the currently-active alerts that feed the UI banner.
@@ -63,6 +94,19 @@ public static class SystemEndpoints
             var events = await vpn.RecentEventsAsync(20, ct);
             var alerts = await vpn.ActiveAlertsAsync(ct);
             return Results.Json(ServiceResponse<VpnHealthDto>.Ok(new VpnHealthDto(state, events, alerts), "OK"));
+        });
+
+        // GET /v1/system/alerts?limit=50 — recent system alerts (active + resolved),
+        // the unified activity feed across VPN, WAN failover, etc. Powers the
+        // notifications dropdown and the "View all activity" history page.
+        grp.MapGet("/alerts", async (
+                NetFirewall.Services.Vpn.IVpnHealthService vpn,
+                int? limit,
+                CancellationToken ct) =>
+        {
+            var n = Math.Clamp(limit ?? 50, 1, 200);
+            var alerts = await vpn.RecentAlertsAsync(n, ct);
+            return Results.Json(ServiceResponse<AlertsDto>.Ok(new AlertsDto(alerts), "OK"));
         });
 
         // GET /v1/system/top-talkers?hours=24&limit=5 — top hosts + services.
@@ -128,7 +172,13 @@ public static class SystemEndpoints
 
     public sealed record WanHealthDto(
         IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,
-        IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents);
+        IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents,
+        NetFirewall.Models.WanMonitor.WanFailoverControl Control);
+
+    public sealed record WanFailoverRequest(Guid InterfaceId);
+
+    public sealed record AlertsDto(
+        IReadOnlyList<NetFirewall.Models.Vpn.SystemAlert> Alerts);
 
     public sealed record VpnHealthDto(
         IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthState> State,

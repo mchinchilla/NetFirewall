@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Vpn;
+using NetFirewall.Services.Database;
 using Npgsql;
 
 namespace NetFirewall.Services.Vpn;
@@ -7,14 +9,27 @@ namespace NetFirewall.Services.Vpn;
 /// Npgsql-backed implementation of <see cref="IVpnHealthService"/>. Direct
 /// parameterized SQL (same style as <c>WanHealthService</c>) — no RepoDb here
 /// because the reads join across wg_peers/wg_servers for denormalized names.
+///
+/// Reads degrade to empty and writes become no-ops when the vpn_health_* /
+/// system_alerts tables don't exist yet (host's migrations behind the code) —
+/// see MissingTableGuard. This is what stops the 42P01 storm observed on tekium
+/// where every vpn-health probe and dashboard read threw on a 30s loop.
 /// </summary>
 public sealed class VpnHealthService : IVpnHealthService
 {
     private readonly NpgsqlDataSource _ds;
+    private readonly ILogger<VpnHealthService> _logger;
 
-    public VpnHealthService(NpgsqlDataSource ds) => _ds = ds;
+    public VpnHealthService(NpgsqlDataSource ds, ILogger<VpnHealthService> logger)
+    {
+        _ds = ds;
+        _logger = logger;
+    }
 
-    public async Task<IReadOnlyList<VpnHealthState>> GetStateAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<VpnHealthState>> GetStateAsync(CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => GetStateCoreAsync(ct), _logger, nameof(GetStateAsync));
+
+    private async Task<IReadOnlyList<VpnHealthState>> GetStateCoreAsync(CancellationToken ct)
     {
         // LEFT JOIN wg_peers: a state row can exist for a pubkey with no catalog
         // row (imported/desynced peer) — COALESCE to a readable fallback name.
@@ -51,7 +66,10 @@ public sealed class VpnHealthService : IVpnHealthService
         return list;
     }
 
-    public async Task UpsertStateAsync(VpnHealthState s, CancellationToken ct = default)
+    public Task UpsertStateAsync(VpnHealthState s, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => UpsertStateCoreAsync(s, ct), _logger, nameof(UpsertStateAsync));
+
+    private async Task UpsertStateCoreAsync(VpnHealthState s, CancellationToken ct)
     {
         const string sql = @"
             INSERT INTO vpn_health_state
@@ -80,7 +98,10 @@ public sealed class VpnHealthService : IVpnHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task RecordEventAsync(Guid serverId, string publicKey, string eventType, string? detailJson, CancellationToken ct = default)
+    public Task RecordEventAsync(Guid serverId, string publicKey, string eventType, string? detailJson, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => RecordEventCoreAsync(serverId, publicKey, eventType, detailJson, ct), _logger, nameof(RecordEventAsync));
+
+    private async Task RecordEventCoreAsync(Guid serverId, string publicKey, string eventType, string? detailJson, CancellationToken ct)
     {
         const string sql = @"
             INSERT INTO vpn_health_events (server_id, public_key, event_type, detail)
@@ -94,7 +115,10 @@ public sealed class VpnHealthService : IVpnHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<IReadOnlyList<VpnHealthEvent>> RecentEventsAsync(int limit = 20, CancellationToken ct = default)
+    public Task<IReadOnlyList<VpnHealthEvent>> RecentEventsAsync(int limit = 20, CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => RecentEventsCoreAsync(limit, ct), _logger, nameof(RecentEventsAsync));
+
+    private async Task<IReadOnlyList<VpnHealthEvent>> RecentEventsCoreAsync(int limit, CancellationToken ct)
     {
         const string sql = @"
             SELECT e.id, e.occurred_at, e.server_id, e.public_key, e.event_type, e.detail::text,
@@ -126,7 +150,10 @@ public sealed class VpnHealthService : IVpnHealthService
         return list;
     }
 
-    public async Task RaiseAlertAsync(SystemAlert a, CancellationToken ct = default)
+    public Task RaiseAlertAsync(SystemAlert a, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => RaiseAlertCoreAsync(a, ct), _logger, nameof(RaiseAlertAsync));
+
+    private async Task RaiseAlertCoreAsync(SystemAlert a, CancellationToken ct)
     {
         // Upsert by dedupe_key. If a row already exists we refresh its content and
         // CLEAR resolved_at (re-arming it), but keep the original raised_at so the
@@ -152,7 +179,10 @@ public sealed class VpnHealthService : IVpnHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task ResolveAlertAsync(string dedupeKey, CancellationToken ct = default)
+    public Task ResolveAlertAsync(string dedupeKey, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => ResolveAlertCoreAsync(dedupeKey, ct), _logger, nameof(ResolveAlertAsync));
+
+    private async Task ResolveAlertCoreAsync(string dedupeKey, CancellationToken ct)
     {
         const string sql = @"
             UPDATE system_alerts SET resolved_at = now()
@@ -163,7 +193,10 @@ public sealed class VpnHealthService : IVpnHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<IReadOnlyList<SystemAlert>> ActiveAlertsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SystemAlert>> ActiveAlertsAsync(CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => ActiveAlertsCoreAsync(ct), _logger, nameof(ActiveAlertsAsync));
+
+    private async Task<IReadOnlyList<SystemAlert>> ActiveAlertsCoreAsync(CancellationToken ct)
     {
         const string sql = @"
             SELECT id, source, severity, dedupe_key, title, body, raised_at, resolved_at
@@ -172,6 +205,40 @@ public sealed class VpnHealthService : IVpnHealthService
             ORDER BY raised_at DESC";
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
+        var list = new List<SystemAlert>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            list.Add(new SystemAlert
+            {
+                Id         = r.GetInt64(0),
+                Source     = r.GetString(1),
+                Severity   = r.GetString(2),
+                DedupeKey  = r.GetString(3),
+                Title      = r.GetString(4),
+                Body       = r.IsDBNull(5) ? null : r.GetString(5),
+                RaisedAt   = r.GetDateTime(6),
+                ResolvedAt = r.IsDBNull(7) ? null : r.GetDateTime(7),
+            });
+        }
+        return list;
+    }
+
+    public Task<IReadOnlyList<SystemAlert>> RecentAlertsAsync(int limit = 50, CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => RecentAlertsCoreAsync(limit, ct), _logger, nameof(RecentAlertsAsync));
+
+    private async Task<IReadOnlyList<SystemAlert>> RecentAlertsCoreAsync(int limit, CancellationToken ct)
+    {
+        // Active first (still unresolved), then most-recently-raised. Includes
+        // resolved rows so the dropdown/history shows the full activity stream.
+        const string sql = @"
+            SELECT id, source, severity, dedupe_key, title, body, raised_at, resolved_at
+            FROM system_alerts
+            ORDER BY (resolved_at IS NULL) DESC, raised_at DESC
+            LIMIT @lim";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("lim", limit);
         var list = new List<SystemAlert>();
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))

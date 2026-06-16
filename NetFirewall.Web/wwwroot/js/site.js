@@ -22,7 +22,8 @@ const DEFAULT_STATE = Object.freeze({
     theme: "boulder",     // palette id
     mode: "light",        // "light" | "dark"
     sidebar: "auto",      // "auto" | "dark" | "light"
-    sidebarCollapsed: false
+    sidebarCollapsed: false,
+    soundAlerts: true     // audible cue on danger alerts (WAN/VPN down) + recovery
 });
 
 /* ---------- localStorage helpers (async to honor rule #2) ---------- */
@@ -91,6 +92,82 @@ window.NetFw.qrcode = {
         });
     }
 };
+
+/**
+ * Audible alert cues, fully synthesized with the Web Audio API — no audio
+ * assets, lives entirely here (rules #1 and #3). Each cue is a short sequence
+ * of oscillator beeps shaped by a gain envelope so it's recognizable but not
+ * jarring:
+ *
+ *   "down"     — two descending tones (alarm). For WAN/VPN-down danger alerts.
+ *   "recovery" — two ascending tones, softer. For a cleared danger condition.
+ *   "test"     — a single mid tone. Played when the user enables sound.
+ *
+ * Browsers block audio until the first user gesture (autoplay policy); we lazily
+ * create/resume the AudioContext and also resume it on the first document click
+ * (see the listener wired in alpine:init). Volume is intentionally low.
+ */
+window.NetFw.alarm = (function () {
+    let ctx = null;
+    const MASTER_GAIN = 0.12; // subtle
+
+    function ensureCtx() {
+        if (!ctx) {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return null;
+            ctx = new AC();
+        }
+        return ctx;
+    }
+
+    // One beep: frequency (Hz), start offset (s), duration (s), wave shape.
+    function beep(audio, freq, startAt, dur, type = "sine") {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        // Quick attack, smooth exponential release — avoids clicky edges.
+        const t0 = audio.currentTime + startAt;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(MASTER_GAIN, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(gain).connect(audio.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.02);
+    }
+
+    const PATTERNS = {
+        // Descending minor-third pair — reads as "something's wrong".
+        down:     (a) => { beep(a, 660, 0, 0.18, "triangle"); beep(a, 440, 0.20, 0.30, "triangle"); },
+        // Ascending pair, gentler sine — reads as "all clear".
+        recovery: (a) => { beep(a, 523, 0, 0.14, "sine"); beep(a, 784, 0.16, 0.22, "sine"); },
+        // Single confirmation tone.
+        test:     (a) => { beep(a, 600, 0, 0.16, "sine"); },
+    };
+
+    return {
+        // Resume the context within a user gesture so later programmatic plays
+        // (from an HTMX poll, no gesture) are allowed.
+        unlock() {
+            const a = ensureCtx();
+            if (a && a.state === "suspended") a.resume().catch(() => {});
+        },
+        // Play a named cue. Respects the persisted soundAlerts toggle unless
+        // forced (the toggle-on confirmation passes force=true via "test").
+        play(pattern) {
+            try {
+                const enabled = window.Alpine?.store?.("ui")?.soundAlerts ?? true;
+                if (!enabled && pattern !== "test") return;
+                const a = ensureCtx();
+                if (!a) return;
+                if (a.state === "suspended") a.resume().catch(() => {});
+                (PATTERNS[pattern] || PATTERNS.test)(a);
+            } catch {
+                /* audio unavailable / blocked — never throw into a poll handler */
+            }
+        },
+    };
+})();
 
 /**
  * Format a millisecond duration as `Nd HH:MM:SS` (or `HH:MM:SS` for under a day).
@@ -1178,12 +1255,21 @@ document.addEventListener("alpine:init", () => {
             await saveState(this.snapshot());
         },
 
+        async toggleSoundAlerts() {
+            this.soundAlerts = !this.soundAlerts;
+            await saveState(this.snapshot());
+            // Confirm the new state audibly when turning it ON (and unlock audio
+            // via this user gesture); silent when turning OFF.
+            if (this.soundAlerts) { NetFw.alarm.unlock(); NetFw.alarm.play("test"); }
+        },
+
         snapshot() {
             return {
                 theme: this.theme,
                 mode: this.mode,
                 sidebar: this.sidebar,
-                sidebarCollapsed: this.sidebarCollapsed
+                sidebarCollapsed: this.sidebarCollapsed,
+                soundAlerts: this.soundAlerts
             };
         }
     });
@@ -1302,6 +1388,16 @@ document.addEventListener("alpine:init", () => {
      * endpoint and gets back HX-Trigger:showElevationModal. Stores the
      * original request so it can be replayed verbatim after success.
      */
+    // Notifications: just the unread (active-alert) count that drives the bell
+    // dot. The dropdown list itself is HTMX-rendered from /Alerts/menu; the
+    // fragment calls setUnread() so the badge reflects real active alerts.
+    Alpine.store("notifications", {
+        unread: 0,
+        setUnread(n) {
+            this.unread = Number.isFinite(+n) ? +n : 0;
+        },
+    });
+
     Alpine.store("elevation", {
         open: false,
         code: "",
@@ -1416,6 +1512,43 @@ document.addEventListener("showToast", (event) => {
         message: detail.message || ""
     });
 });
+
+/* Audible alert cue. The /Alerts/banner poll emits `alertsState` every cycle
+ * with the current set of active DANGER alert keys. We diff against the
+ * previous set: a key that just APPEARED → "down" alarm; a key that
+ * DISAPPEARED → "recovery" chime (the condition cleared). The very first event
+ * after page load only seeds the baseline — we don't alarm for alerts that were
+ * already active when you opened the page. NetFw.alarm respects the persisted
+ * soundAlerts toggle and the browser autoplay policy. */
+(function () {
+    let known = null; // Set of danger keys; null until the first event (baseline).
+    document.addEventListener("alertsState", (event) => {
+        const list = Array.isArray(event.detail?.danger) ? event.detail.danger : [];
+        const current = new Set(list.map((d) => d.key).filter(Boolean));
+
+        if (known === null) { known = current; return; } // seed, no sound
+
+        for (const key of current) {
+            if (!known.has(key)) { NetFw.alarm.play("down"); break; }
+        }
+        for (const key of known) {
+            if (!current.has(key)) { NetFw.alarm.play("recovery"); break; }
+        }
+        known = current;
+    });
+})();
+
+/* Unlock Web Audio on the first user gesture so later programmatic cues (fired
+ * from background polls, which have no gesture) are allowed to play. */
+(function () {
+    const unlock = () => {
+        NetFw.alarm.unlock();
+        window.removeEventListener("pointerdown", unlock);
+        window.removeEventListener("keydown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock, { once: false });
+    window.addEventListener("keydown", unlock, { once: false });
+})();
 
 /* Auto-attach the ASP.NET Core anti-forgery token to every HTMX request.
  * The token is rendered into <meta name="request-token"> by _HeadStyles.cshtml. */

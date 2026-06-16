@@ -22,4 +22,23 @@ public interface IWanHealthService
 
     /// <summary>Last N events, newest first. Powers the dashboard's failover history strip.</summary>
     Task<IReadOnlyList<WanHealthEvent>> RecentEventsAsync(int limit = 20, CancellationToken ct = default);
+
+    // ───────────── failover control (active WAN + sticky override) ─────────────
+
+    /// <summary>The singleton control row (active WAN + manual override), with names. Never null.</summary>
+    Task<WanFailoverControl> GetControlAsync(CancellationToken ct = default);
+
+    /// <summary>Set or clear the sticky manual override. Pass null to return to auto mode.</summary>
+    Task SetOverrideAsync(Guid? interfaceId, string? setBy, CancellationToken ct = default);
+
+    /// <summary>Record which interface the monitor just made the active default route.</summary>
+    Task SetActiveAsync(Guid interfaceId, CancellationToken ct = default);
+
+    // ───────────── config CRUD (read/write the per-WAN probe config) ─────────────
+
+    /// <summary>Every config row (enabled or not), joined with interface names. For the admin UI.</summary>
+    Task<IReadOnlyList<WanHealthConfig>> GetAllConfigsAsync(CancellationToken ct = default);
+
+    /// <summary>Insert or update a config row keyed by interface_id.</summary>
+    Task UpsertConfigAsync(WanHealthConfig config, CancellationToken ct = default);
 }

@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using NetFirewall.Models.WanMonitor;
+using NetFirewall.Services.Database;
 using Npgsql;
 
 namespace NetFirewall.Services.WanMonitor;
@@ -6,10 +8,23 @@ namespace NetFirewall.Services.WanMonitor;
 public sealed class WanHealthService : IWanHealthService
 {
     private readonly NpgsqlDataSource _ds;
+    private readonly ILogger<WanHealthService> _logger;
 
-    public WanHealthService(NpgsqlDataSource ds) => _ds = ds;
+    public WanHealthService(NpgsqlDataSource ds, ILogger<WanHealthService> logger)
+    {
+        _ds = ds;
+        _logger = logger;
+    }
 
-    public async Task<IReadOnlyList<WanHealthConfig>> GetConfigsAsync(CancellationToken ct = default)
+    // Reads degrade to empty and writes become no-ops when the wan_health_*
+    // tables don't exist yet (host's migrations behind the code) — see
+    // MissingTableGuard. Keeps the monitor loop and dashboard alive instead of
+    // throwing 42P01 on every cycle.
+
+    public Task<IReadOnlyList<WanHealthConfig>> GetConfigsAsync(CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => GetConfigsCoreAsync(ct), _logger, nameof(GetConfigsAsync));
+
+    private async Task<IReadOnlyList<WanHealthConfig>> GetConfigsCoreAsync(CancellationToken ct)
     {
         const string sql = @"
             SELECT c.id, c.interface_id, c.priority, c.monitor_targets,
@@ -43,7 +58,10 @@ public sealed class WanHealthService : IWanHealthService
         return list;
     }
 
-    public async Task<IReadOnlyList<WanHealthState>> GetStateAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<WanHealthState>> GetStateAsync(CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => GetStateCoreAsync(ct), _logger, nameof(GetStateAsync));
+
+    private async Task<IReadOnlyList<WanHealthState>> GetStateCoreAsync(CancellationToken ct)
     {
         const string sql = @"
             SELECT s.interface_id, s.is_up, s.consecutive_failures, s.consecutive_successes,
@@ -76,7 +94,10 @@ public sealed class WanHealthService : IWanHealthService
         return list;
     }
 
-    public async Task UpsertStateAsync(WanHealthState s, CancellationToken ct = default)
+    public Task UpsertStateAsync(WanHealthState s, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => UpsertStateCoreAsync(s, ct), _logger, nameof(UpsertStateAsync));
+
+    private async Task UpsertStateCoreAsync(WanHealthState s, CancellationToken ct)
     {
         const string sql = @"
             INSERT INTO wan_health_state
@@ -106,7 +127,10 @@ public sealed class WanHealthService : IWanHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task RecordEventAsync(Guid interfaceId, string eventType, string? detailJson, CancellationToken ct = default)
+    public Task RecordEventAsync(Guid interfaceId, string eventType, string? detailJson, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => RecordEventCoreAsync(interfaceId, eventType, detailJson, ct), _logger, nameof(RecordEventAsync));
+
+    private async Task RecordEventCoreAsync(Guid interfaceId, string eventType, string? detailJson, CancellationToken ct)
     {
         const string sql = @"
             INSERT INTO wan_health_events (interface_id, event_type, detail)
@@ -119,7 +143,10 @@ public sealed class WanHealthService : IWanHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<IReadOnlyList<WanHealthEvent>> RecentEventsAsync(int limit = 20, CancellationToken ct = default)
+    public Task<IReadOnlyList<WanHealthEvent>> RecentEventsAsync(int limit = 20, CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => RecentEventsCoreAsync(limit, ct), _logger, nameof(RecentEventsAsync));
+
+    private async Task<IReadOnlyList<WanHealthEvent>> RecentEventsCoreAsync(int limit, CancellationToken ct)
     {
         const string sql = @"
             SELECT e.id, e.occurred_at, e.interface_id, e.event_type, e.detail::text, i.name
@@ -145,5 +172,154 @@ public sealed class WanHealthService : IWanHealthService
             });
         }
         return list;
+    }
+
+    // ───────────── failover control (active WAN + sticky override) ─────────────
+
+    public async Task<WanFailoverControl> GetControlAsync(CancellationToken ct = default)
+    {
+        // The control row degrades to an empty (auto-mode) control if the table
+        // is missing — never throws, so the UI keeps rendering.
+        try
+        {
+            const string sql = @"
+                SELECT c.override_interface_id, c.override_set_by, c.override_set_at,
+                       c.active_interface_id, c.active_since,
+                       oi.name, ai.name
+                FROM wan_failover_control c
+                LEFT JOIN fw_interfaces oi ON oi.id = c.override_interface_id
+                LEFT JOIN fw_interfaces ai ON ai.id = c.active_interface_id
+                WHERE c.id = true";
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct))
+            {
+                return new WanFailoverControl
+                {
+                    OverrideInterfaceId   = r.IsDBNull(0) ? null : r.GetGuid(0),
+                    OverrideSetBy         = r.IsDBNull(1) ? null : r.GetString(1),
+                    OverrideSetAt         = r.IsDBNull(2) ? null : r.GetDateTime(2),
+                    ActiveInterfaceId     = r.IsDBNull(3) ? null : r.GetGuid(3),
+                    ActiveSince           = r.IsDBNull(4) ? null : r.GetDateTime(4),
+                    OverrideInterfaceName = r.IsDBNull(5) ? null : r.GetString(5),
+                    ActiveInterfaceName   = r.IsDBNull(6) ? null : r.GetString(6),
+                };
+            }
+            return new WanFailoverControl();
+        }
+        catch (Exception ex) when (ex is Npgsql.PostgresException pg && pg.SqlState == MissingTableGuard.UndefinedTable)
+        {
+            _logger.LogWarning("GetControlAsync: wan_failover_control missing ({Sql}) — auto mode. Migration pending?", MissingTableGuard.UndefinedTable);
+            return new WanFailoverControl();
+        }
+    }
+
+    public Task SetOverrideAsync(Guid? interfaceId, string? setBy, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => SetOverrideCoreAsync(interfaceId, setBy, ct), _logger, nameof(SetOverrideAsync));
+
+    private async Task SetOverrideCoreAsync(Guid? interfaceId, string? setBy, CancellationToken ct)
+    {
+        const string sql = @"
+            UPDATE wan_failover_control SET
+                override_interface_id = @i,
+                override_set_by       = @by,
+                override_set_at       = CASE WHEN @i IS NULL THEN NULL ELSE now() END,
+                updated_at            = now()
+            WHERE id = true";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("i",  (object?)interfaceId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("by", (object?)setBy ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public Task SetActiveAsync(Guid interfaceId, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => SetActiveCoreAsync(interfaceId, ct), _logger, nameof(SetActiveAsync));
+
+    private async Task SetActiveCoreAsync(Guid interfaceId, CancellationToken ct)
+    {
+        // Only bump active_since when the active interface actually changes, so
+        // the UI's "active since" reflects the last real switch, not every tick.
+        const string sql = @"
+            UPDATE wan_failover_control SET
+                active_since       = CASE WHEN active_interface_id IS DISTINCT FROM @i THEN now() ELSE active_since END,
+                active_interface_id = @i,
+                updated_at         = now()
+            WHERE id = true";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("i", interfaceId);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // ───────────── config CRUD ─────────────
+
+    public Task<IReadOnlyList<WanHealthConfig>> GetAllConfigsAsync(CancellationToken ct = default) =>
+        MissingTableGuard.ReadListAsync(() => GetAllConfigsCoreAsync(ct), _logger, nameof(GetAllConfigsAsync));
+
+    private async Task<IReadOnlyList<WanHealthConfig>> GetAllConfigsCoreAsync(CancellationToken ct)
+    {
+        // Like GetConfigsAsync but includes disabled rows and disabled interfaces
+        // — the admin UI needs to see and toggle everything.
+        const string sql = @"
+            SELECT c.id, c.interface_id, c.priority, c.monitor_targets,
+                   c.failover_threshold, c.recovery_threshold, c.enabled,
+                   c.created_at, c.updated_at, i.name, c.probe_fwmark
+            FROM wan_health_config c
+            JOIN fw_interfaces i ON i.id = c.interface_id
+            ORDER BY c.priority, i.name";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        var list = new List<WanHealthConfig>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            list.Add(new WanHealthConfig
+            {
+                Id                 = r.GetGuid(0),
+                InterfaceId        = r.GetGuid(1),
+                Priority           = r.GetInt32(2),
+                MonitorTargets     = r.IsDBNull(3) ? Array.Empty<string>() : (string[])r["monitor_targets"],
+                FailoverThreshold  = r.GetInt32(4),
+                RecoveryThreshold  = r.GetInt32(5),
+                Enabled            = r.GetBoolean(6),
+                CreatedAt          = r.GetDateTime(7),
+                UpdatedAt          = r.GetDateTime(8),
+                InterfaceName      = r.GetString(9),
+                ProbeFwmark        = r.IsDBNull(10) ? null : r.GetInt64(10),
+            });
+        }
+        return list;
+    }
+
+    public Task UpsertConfigAsync(WanHealthConfig c, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => UpsertConfigCoreAsync(c, ct), _logger, nameof(UpsertConfigAsync));
+
+    private async Task UpsertConfigCoreAsync(WanHealthConfig c, CancellationToken ct)
+    {
+        const string sql = @"
+            INSERT INTO wan_health_config
+                (interface_id, priority, monitor_targets, probe_fwmark,
+                 failover_threshold, recovery_threshold, enabled)
+            VALUES (@i, @prio, @targets, @mark, @ft, @rt, @en)
+            ON CONFLICT (interface_id) DO UPDATE SET
+                priority           = EXCLUDED.priority,
+                monitor_targets    = EXCLUDED.monitor_targets,
+                probe_fwmark       = EXCLUDED.probe_fwmark,
+                failover_threshold = EXCLUDED.failover_threshold,
+                recovery_threshold = EXCLUDED.recovery_threshold,
+                enabled            = EXCLUDED.enabled,
+                updated_at         = now()";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("i",       c.InterfaceId);
+        cmd.Parameters.AddWithValue("prio",    c.Priority);
+        cmd.Parameters.AddWithValue("targets", c.MonitorTargets ?? Array.Empty<string>());
+        cmd.Parameters.AddWithValue("mark",    (object?)c.ProbeFwmark ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("ft",      c.FailoverThreshold);
+        cmd.Parameters.AddWithValue("rt",      c.RecoveryThreshold);
+        cmd.Parameters.AddWithValue("en",      c.Enabled);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 }

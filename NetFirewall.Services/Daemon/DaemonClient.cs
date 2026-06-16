@@ -244,8 +244,17 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
         => GetAsync<WanHealthDto>("/v1/system/wan-health", ct);
 
+    public Task<ServiceResponse<bool>> ForceWanFailoverAsync(Guid interfaceId, CancellationToken ct = default)
+        => PostJsonAsync<object, bool>("/v1/system/wan-failover", new { interfaceId }, ct);
+
+    public Task<ServiceResponse<bool>> ClearWanFailoverOverrideAsync(CancellationToken ct = default)
+        => PostAsync<bool>("/v1/system/wan-failover/clear", ct);
+
     public Task<ServiceResponse<VpnHealthDto>> GetVpnHealthAsync(CancellationToken ct = default)
         => GetAsync<VpnHealthDto>("/v1/system/vpn-health", ct);
+
+    public Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default)
+        => GetAsync<AlertsDto>($"/v1/system/alerts?limit={limit}", ct);
 
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {

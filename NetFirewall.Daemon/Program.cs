@@ -150,6 +150,10 @@ builder.Services.AddHostedService<NetFirewall.Services.Monitoring.ConntrackSampl
 // route in the main table when priority winner changes.
 builder.Services.AddScoped<NetFirewall.Services.WanMonitor.IWanHealthService,
                            NetFirewall.Services.WanMonitor.WanHealthService>();
+// Operator-facing manual failover (force/clear the active WAN) — used by the
+// swap endpoint and the WAN control UI.
+builder.Services.AddScoped<NetFirewall.Services.WanMonitor.IWanFailoverControlService,
+                           NetFirewall.Services.WanMonitor.WanFailoverControlService>();
 builder.Services.Configure<NetFirewall.Services.WanMonitor.WanHealthMonitorOptions>(
     builder.Configuration.GetSection(NetFirewall.Services.WanMonitor.WanHealthMonitorOptions.SectionName));
 builder.Services.AddHostedService<NetFirewall.Services.WanMonitor.WanHealthMonitorService>();

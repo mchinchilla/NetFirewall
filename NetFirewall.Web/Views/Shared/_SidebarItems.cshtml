@@ -41,7 +41,8 @@
     };
     var netHrefs = new[] {
         Url.Action("Interfaces", "Network")!, Url.Action("Index", "StaticRoutes")!,
-        Url.Action("Index", "NetworkObjects")!, Url.Action("Index", "NetworkServices")!
+        Url.Action("Index", "NetworkObjects")!, Url.Action("Index", "NetworkServices")!,
+        Url.Action("Index", "WanFailover")!
     };
 
     var dhcpOpen = AnyActive(dhcpHrefs) ? "true" : "false";
@@ -114,6 +115,7 @@
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
         <a href="@Url.Action("Interfaces", "Network")" class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Network")!))">Interfaces</a>
+        <a href="@Url.Action("Index", "WanFailover")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "WanFailover")!))">WAN failover</a>
         <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
         <a href="@Url.Action("Index", "NetworkObjects")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkObjects")!))">Objects</a>
         <a href="@Url.Action("Index", "NetworkServices")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkServices")!))">Services</a>

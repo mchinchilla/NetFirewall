@@ -54,6 +54,28 @@ public sealed class WanHealthState
 }
 
 /// <summary>
+/// Singleton control row: which WAN is currently the active default route, and
+/// whether an operator has pinned one via a sticky manual override. Read by the
+/// dashboard (to show + let the operator swap the active WAN) and by the monitor
+/// (to honor the override). See migration 00035.
+/// </summary>
+public sealed class WanFailoverControl
+{
+    /// <summary>Manually-pinned interface, or null for auto (priority-based) selection.</summary>
+    public Guid? OverrideInterfaceId { get; set; }
+    public string? OverrideSetBy     { get; set; }
+    public DateTime? OverrideSetAt   { get; set; }
+
+    /// <summary>The interface the monitor last made the default route (UI cache).</summary>
+    public Guid? ActiveInterfaceId   { get; set; }
+    public DateTime? ActiveSince     { get; set; }
+
+    // Denormalized for the UI — populated by the loader from fw_interfaces.
+    public string? OverrideInterfaceName { get; set; }
+    public string? ActiveInterfaceName   { get; set; }
+}
+
+/// <summary>
 /// Transition event. Only written when something changes (up↔down, or this
 /// interface becomes/stops being the active default route).
 /// </summary>

@@ -170,9 +170,21 @@ public interface IDaemonClient
     /// <summary><c>GET /v1/system/wan-health</c> — per-WAN health state + recent transition events.</summary>
     Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default);
 
+    /// <summary><c>POST /v1/system/wan-failover</c> — manually pin a WAN as the active
+    /// default route (sticky override). Elevated.</summary>
+    Task<ServiceResponse<bool>> ForceWanFailoverAsync(Guid interfaceId, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/system/wan-failover/clear</c> — drop the manual override,
+    /// return to automatic priority-based failover. Elevated.</summary>
+    Task<ServiceResponse<bool>> ClearWanFailoverOverrideAsync(CancellationToken ct = default);
+
     /// <summary><c>GET /v1/system/vpn-health</c> — per-peer WireGuard health state, recent
     /// transitions, and active UI alerts.</summary>
     Task<ServiceResponse<VpnHealthDto>> GetVpnHealthAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/system/alerts</c> — recent system alerts (active + resolved),
+    /// the unified activity feed. Powers the notifications dropdown + history page.</summary>
+    Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default);
 }
 
 public sealed record TerminalTicketDto(string Ticket);
@@ -201,9 +213,13 @@ public sealed record TopDestinationsDto(
 
 public sealed record WanHealthDto(
     IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthState> State,
-    IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents);
+    IReadOnlyList<NetFirewall.Models.WanMonitor.WanHealthEvent> RecentEvents,
+    NetFirewall.Models.WanMonitor.WanFailoverControl Control);
 
 public sealed record VpnHealthDto(
     IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthState> State,
     IReadOnlyList<NetFirewall.Models.Vpn.VpnHealthEvent> RecentEvents,
     IReadOnlyList<NetFirewall.Models.Vpn.SystemAlert> ActiveAlerts);
+
+public sealed record AlertsDto(
+    IReadOnlyList<NetFirewall.Models.Vpn.SystemAlert> Alerts);

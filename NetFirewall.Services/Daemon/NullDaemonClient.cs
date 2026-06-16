@@ -165,8 +165,15 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<WanHealthDto>> GetWanHealthAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<WanHealthDto>.Ok(
             new WanHealthDto(Array.Empty<NetFirewall.Models.WanMonitor.WanHealthState>(),
-                             Array.Empty<NetFirewall.Models.WanMonitor.WanHealthEvent>()),
+                             Array.Empty<NetFirewall.Models.WanMonitor.WanHealthEvent>(),
+                             new NetFirewall.Models.WanMonitor.WanFailoverControl()),
             "Daemon disabled."));
+
+    public Task<ServiceResponse<bool>> ForceWanFailoverAsync(Guid interfaceId, CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<bool>.Fail("Daemon disabled."));
+
+    public Task<ServiceResponse<bool>> ClearWanFailoverOverrideAsync(CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<bool>.Fail("Daemon disabled."));
 
     public Task<ServiceResponse<VpnHealthDto>> GetVpnHealthAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<VpnHealthDto>.Ok(
@@ -174,4 +181,8 @@ public sealed class NullDaemonClient : IDaemonClient
                              Array.Empty<NetFirewall.Models.Vpn.VpnHealthEvent>(),
                              Array.Empty<NetFirewall.Models.Vpn.SystemAlert>()),
             "Daemon disabled."));
+
+    public Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default)
+        => Task.FromResult(ServiceResponse<AlertsDto>.Ok(
+            new AlertsDto(Array.Empty<NetFirewall.Models.Vpn.SystemAlert>()), "Daemon disabled."));
 }

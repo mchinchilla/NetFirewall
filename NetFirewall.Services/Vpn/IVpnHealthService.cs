@@ -32,4 +32,12 @@ public interface IVpnHealthService
 
     /// <summary>All currently-active alerts (unresolved), newest first. Read by the Web's banner.</summary>
     Task<IReadOnlyList<SystemAlert>> ActiveAlertsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Last N alerts including resolved ones, newest first. Powers the
+    /// notifications dropdown and the full "View all activity" history page.
+    /// Cross-subsystem — VPN, WAN failover, and any future source all write to
+    /// <c>system_alerts</c>, so this is the unified activity feed.
+    /// </summary>
+    Task<IReadOnlyList<SystemAlert>> RecentAlertsAsync(int limit = 50, CancellationToken ct = default);
 }

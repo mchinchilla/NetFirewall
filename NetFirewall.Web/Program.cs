@@ -98,6 +98,11 @@ builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 // ----- Domain services -----
 builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
+// WAN health: the Web reads health state + does config CRUD straight from the
+// DB (same rows the daemon's monitor writes). The destructive route SWAP goes
+// through IDaemonClient (needs CAP_NET_ADMIN) — not this service.
+builder.Services.AddScoped<NetFirewall.Services.WanMonitor.IWanHealthService,
+                           NetFirewall.Services.WanMonitor.WanHealthService>();
 // Policy-routing CRUD (route tables / policy rules). Needed Web-side by
 // VpnRoutingService for the WireGuard egress + scaffold features. The daemon owns
 // the apply (kernel ip rule/route); the Web only reads/writes the rows.

@@ -1,0 +1,68 @@
+@model NetFirewall.Web.Models.NotificationsViewModel
+@{
+    static (string bg, string fg) Hue(string severity) => severity switch
+    {
+        "danger"  => ("var(--feedback-danger-bg)",  "var(--feedback-danger-fg)"),
+        "warning" => ("var(--feedback-warning-bg)", "var(--feedback-warning-fg)"),
+        _          => ("var(--feedback-info-bg)",    "var(--feedback-info-fg)"),
+    };
+    static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        if (d.TotalMinutes < 1) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes} min ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours} h ago";
+        return $"{(int)d.TotalDays} d ago";
+    }
+}
+
+@* Sync the bell badge with the real active count. *@
+<div x-init="$store.notifications.setUnread(@Model.ActiveCount)"></div>
+
+<div class="px-4 py-3 border-b border-surface-border">
+    <p class="text-sm font-semibold">Notifications</p>
+    <p class="text-xs text-surface-fg-muted">
+        @if (Model.ActiveCount > 0)
+        {
+            <span>@Model.ActiveCount active</span>
+        }
+        else
+        {
+            <span>No active alerts</span>
+        }
+    </p>
+</div>
+
+@if (Model.Items.Count == 0)
+{
+    <div class="p-6 text-center text-sm text-surface-fg-muted">
+        Nothing here yet. System events (WAN failover, VPN, …) will show up here.
+    </div>
+}
+else
+{
+    <ul class="max-h-80 overflow-auto divide-y border-surface-border">
+        @foreach (var n in Model.Items)
+        {
+            var (bg, fg) = Hue(n.Severity);
+            <li class="p-4 text-sm @(n.IsActive ? "" : "opacity-60")">
+                <div class="flex items-start gap-2.5">
+                    <span class="mt-0.5 inline-flex h-2 w-2 shrink-0 rounded-full"
+                          style="background-color: @(n.IsActive ? fg : "var(--surface-fg-muted)");"></span>
+                    <div class="min-w-0 flex-1">
+                        <p class="font-medium">@n.Title</p>
+                        @if (!string.IsNullOrEmpty(n.Body))
+                        {
+                            <p class="text-xs mt-0.5 text-surface-fg-muted line-clamp-2">@n.Body</p>
+                        }
+                        <p class="text-xs mt-1 text-surface-fg-muted">
+                            <span class="uppercase tracking-wide">@n.Source</span>
+                            · @Ago(n.RaisedAt)
+                            @if (!n.IsActive) { <span>· resolved</span> }
+                        </p>
+                    </div>
+                </div>
+            </li>
+        }
+    </ul>
+}

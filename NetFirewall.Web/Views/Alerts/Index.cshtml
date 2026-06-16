@@ -1,0 +1,67 @@
+@model NetFirewall.Web.Models.NotificationsViewModel
+@{
+    ViewData["Title"] = "Activity";
+    Layout = "_Layout";
+
+    (string bg, string fg) Hue(string severity) => severity switch
+    {
+        "danger"  => ("var(--feedback-danger-bg)",  "var(--feedback-danger-fg)"),
+        "warning" => ("var(--feedback-warning-bg)", "var(--feedback-warning-fg)"),
+        _          => ("var(--feedback-info-bg)",    "var(--feedback-info-fg)"),
+    };
+}
+<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">System</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Activity</h1>
+        <p class="text-sm mt-1 text-surface-fg-muted">
+            Recent system alerts across all subsystems — WAN failover, VPN tunnels, and more.
+            Active alerts appear first.
+        </p>
+    </div>
+    <span class="text-xs text-surface-fg-muted">@Model.ActiveCount active · @Model.Items.Count shown</span>
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    @if (Model.Items.Count == 0)
+    {
+        <div class="p-6 text-center text-sm text-surface-fg-muted">
+            No activity recorded yet.
+        </div>
+    }
+    else
+    {
+        <ul class="divide-y border-surface-border">
+            @foreach (var n in Model.Items)
+            {
+                var (bg, fg) = Hue(n.Severity);
+                <li class="flex items-start gap-3 py-3 @(n.IsActive ? "" : "opacity-60")">
+                    <span class="mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide shrink-0"
+                          style="background-color: @bg; color: @fg;">@n.Source</span>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2">
+                            <p class="font-medium">@n.Title</p>
+                            @if (n.IsActive)
+                            {
+                                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                                      style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg);">Active</span>
+                            }
+                            else
+                            {
+                                <span class="text-xs text-surface-fg-muted">resolved</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(n.Body))
+                        {
+                            <p class="text-sm mt-0.5 text-surface-fg-muted">@n.Body</p>
+                        }
+                    </div>
+                    <time class="text-xs text-surface-fg-muted shrink-0" datetime="@n.RaisedAt.ToString("o")">
+                        @n.RaisedAt.ToLocalTime().ToString("MMM d, HH:mm")
+                    </time>
+                </li>
+            }
+        </ul>
+    }
+</section>
