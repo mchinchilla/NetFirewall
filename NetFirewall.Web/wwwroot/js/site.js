@@ -1398,6 +1398,12 @@ document.addEventListener("alpine:init", () => {
         },
     });
 
+    // Global flag the Monitoring page's Pause button flips so the app-wide
+    // /Alerts/banner poll (in _Layout) freezes alongside the live metrics there.
+    // Default false — every other page keeps alerts polling. The htmx:beforeRequest
+    // hook below reads this and cancels banner polls while paused.
+    Alpine.store("alerts", { paused: false });
+
     Alpine.store("elevation", {
         open: false,
         code: "",
@@ -1523,16 +1529,28 @@ document.addEventListener("showToast", (event) => {
 (function () {
     let known = null; // Set of danger keys; null until the first event (baseline).
     document.addEventListener("alertsState", (event) => {
+        // Keep the bell badge live on every poll — no need to open the dropdown.
+        // The /Alerts/banner poll runs app-wide (it lives in _Layout), so this
+        // updates the unread count on the dashboard, monitoring, anywhere.
+        const store = window.Alpine?.store("notifications");
+        if (store) store.setUnread(event.detail?.activeCount ?? 0);
+
         const list = Array.isArray(event.detail?.danger) ? event.detail.danger : [];
         const current = new Set(list.map((d) => d.key).filter(Boolean));
 
         if (known === null) { known = current; return; } // seed, no sound
 
+        let changed = false;
         for (const key of current) {
-            if (!known.has(key)) { NetFw.alarm.play("down"); break; }
+            if (!known.has(key)) { NetFw.alarm.play("down"); changed = true; break; }
         }
         for (const key of known) {
-            if (!current.has(key)) { NetFw.alarm.play("recovery"); break; }
+            if (!current.has(key)) { NetFw.alarm.play("recovery"); changed = true; break; }
+        }
+        // When the active set actually changed, refresh an open dropdown so its
+        // list reflects the new state immediately (the badge already updated above).
+        if (changed && window.htmx) {
+            window.htmx.trigger(document.body, "refreshNotifications");
         }
         known = current;
     });
@@ -1555,6 +1573,18 @@ document.addEventListener("showToast", (event) => {
 document.addEventListener("htmx:configRequest", (event) => {
     const meta = document.querySelector('meta[name="request-token"]');
     if (meta) event.detail.headers["RequestVerificationToken"] = meta.getAttribute("content");
+});
+
+/* Honor the Monitoring page's Pause for the app-wide alerts banner poll. The
+ * banner lives in _Layout, so its `every 10s` timer keeps firing even when the
+ * page sets $store.alerts.paused (HTMX 2.x doesn't re-read a reactively-rewritten
+ * hx-trigger). Cancelling the request here is the reliable freeze: no banner
+ * swap, no `alertsState` event → no badge update and no sound, until resumed. */
+document.addEventListener("htmx:beforeRequest", (event) => {
+    const path = event.detail?.requestConfig?.path || event.detail?.pathInfo?.requestPath || "";
+    if (window.Alpine?.store("alerts")?.paused && path.indexOf("/Alerts/banner") !== -1) {
+        event.preventDefault();
+    }
 });
 
 /* Step-up modal trigger from RequireElevated 401 responses. */

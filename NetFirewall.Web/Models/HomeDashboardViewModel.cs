@@ -38,8 +38,6 @@ public sealed class HomeDashboardViewModel
 
     /// <summary>systemd units (daemon, web, nginx, postgres, …) with active/failed state.</summary>
     public IReadOnlyList<SystemServiceStatus> Services { get; init; } = [];
-    /// <summary>WAN reachability snapshot — one row per configured WAN interface.</summary>
-    public IReadOnlyList<WanStatusSummary> WanStatus { get; init; } = [];
     /// <summary>Per-kind (nftables/tc/wireguard) pending change counts vs last successful Apply.</summary>
     public IReadOnlyList<PendingApplySummary> PendingChanges { get; init; } = [];
 
@@ -50,31 +48,8 @@ public sealed class HomeDashboardViewModel
     // dashboard loads them via HTMX from /Monitoring/toptalkers (shared
     // _TopTalkersLive partial) so the window selector works. See Home/Index.cshtml.
 
-    /// <summary>Per-WAN health rows (state + last RTT + consecutive failures).</summary>
-    public IReadOnlyList<WanHealthRow> WanHealth { get; init; } = [];
-    /// <summary>Recent failover / up / down transitions across all WANs.</summary>
-    public IReadOnlyList<WanTransition> WanTransitions { get; init; } = [];
-}
-
-public sealed class WanHealthRow
-{
-    public required string InterfaceName { get; init; }
-    public required string Role { get; init; }
-    public required bool IsUp { get; init; }
-    public int ConsecutiveFailures { get; init; }
-    public int ConsecutiveSuccesses { get; init; }
-    public DateTime LastCheckAt { get; init; }
-    public DateTime LastTransitionAt { get; init; }
-    public double? LastRttMs { get; init; }
-    public string? LastTarget { get; init; }
-    public string? LastError { get; init; }
-}
-
-public sealed class WanTransition
-{
-    public required DateTime OccurredAt { get; init; }
-    public required string InterfaceName { get; init; }
-    public required string EventType { get; init; }   // up | down | failover | demoted
+    /// <summary>Shared WAN-health card model (Summary mode), rendered by _WanHealthCard.</summary>
+    public NetFirewall.Web.Models.Network.WanHealthCardViewModel WanCard { get; init; } = new();
 }
 
 public sealed class TopTalkerRow
@@ -114,16 +89,6 @@ public sealed class SystemServiceStatus
         "activating" or "deactivating" => "warning",
         _ => "neutral"
     };
-}
-
-public sealed class WanStatusSummary
-{
-    public required string InterfaceName { get; init; }
-    public required string Role { get; init; }
-    public string? Target { get; init; }
-    public required bool IsUp { get; init; }
-    public double? RttMs { get; init; }
-    public string? Message { get; init; }
 }
 
 public sealed class PendingApplySummary

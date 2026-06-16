@@ -7,6 +7,7 @@ using NetFirewall.Services.WanMonitor;
 using NetFirewall.Web.Filters;
 using NetFirewall.Web.Helpers;
 using NetFirewall.Web.Models.Network;
+using NetFirewall.Web.Services;
 
 namespace NetFirewall.Web.Controllers;
 
@@ -22,29 +23,34 @@ public sealed class WanFailoverController : Controller
     private readonly IWanHealthService _health;
     private readonly IFirewallService _firewall;
     private readonly IDaemonClient _daemon;
+    private readonly IWanHealthCardBuilder _cardBuilder;
     private readonly ILogger<WanFailoverController> _logger;
 
     public WanFailoverController(
         IWanHealthService health,
         IFirewallService firewall,
         IDaemonClient daemon,
+        IWanHealthCardBuilder cardBuilder,
         ILogger<WanFailoverController> logger)
     {
         _health = health;
         _firewall = firewall;
         _daemon = daemon;
+        _cardBuilder = cardBuilder;
         _logger = logger;
     }
 
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    // Live panel — health + active/override + recent events. Polled by the page.
+    // Live panel — health + active/override + recent events + interactive controls.
+    // Renders the shared WAN-health card (Panel mode); ManageUrl is null because
+    // this *is* the manage page. Polled by the page.
     [HttpGet("panel")]
     public async Task<IActionResult> Panel(CancellationToken ct)
     {
-        var vm = await BuildPanelAsync(ct);
-        return PartialView("_WanFailoverPanel", vm);
+        var vm = await _cardBuilder.BuildAsync(WanCardOptions.Panel(), ct);
+        return PartialView("_WanHealthCard", vm);
     }
 
     // Config editor for one WAN (drawer). id = the interface id.
@@ -112,57 +118,6 @@ public sealed class WanFailoverController : Controller
     }
 
     // ───────────── helpers ─────────────
-
-    private async Task<WanFailoverPanelViewModel> BuildPanelAsync(CancellationToken ct)
-    {
-        var env = await _daemon.GetWanHealthAsync(ct);
-        // Daemon unreachable/disabled → fall back to a DB-direct read so the
-        // page still shows health (the control row + state both live in PG).
-        var state = env.Success && env.Data is not null ? env.Data.State : await _health.GetStateAsync(ct);
-        var events = env.Success && env.Data is not null ? env.Data.RecentEvents : await _health.RecentEventsAsync(20, ct);
-        var control = env.Success && env.Data is not null ? env.Data.Control : await _health.GetControlAsync(ct);
-
-        // Union configured WANs with whatever has a state row, so a freshly
-        // seeded WAN that hasn't been probed yet still appears.
-        var configs = await _health.GetAllConfigsAsync(ct);
-        var stateById = state.ToDictionary(s => s.InterfaceId);
-
-        var rows = configs
-            .Where(c => c.Enabled)
-            .OrderBy(c => c.Priority)
-            .Select(c =>
-            {
-                stateById.TryGetValue(c.InterfaceId, out var s);
-                return new WanFailoverPanelViewModel.WanRow
-                {
-                    InterfaceId          = c.InterfaceId,
-                    Name                 = c.InterfaceName,
-                    Role                 = s?.Role ?? string.Empty,
-                    IsUp                 = s?.IsUp ?? true,
-                    IsActive             = control.ActiveInterfaceId == c.InterfaceId,
-                    IsPinned             = control.OverrideInterfaceId == c.InterfaceId,
-                    ConsecutiveFailures  = s?.ConsecutiveFailures ?? 0,
-                    ConsecutiveSuccesses = s?.ConsecutiveSuccesses ?? 0,
-                    LastRttMs            = s?.LastRttMs,
-                    LastTarget           = s?.LastTarget,
-                    LastError            = s?.LastError,
-                    LastCheckAt          = s?.LastCheckAt,
-                };
-            })
-            .ToList();
-
-        return new WanFailoverPanelViewModel
-        {
-            Wans                  = rows,
-            RecentEvents          = events,
-            ActiveInterfaceId     = control.ActiveInterfaceId,
-            ActiveInterfaceName   = control.ActiveInterfaceName,
-            ActiveSince           = control.ActiveSince,
-            OverrideInterfaceId   = control.OverrideInterfaceId,
-            OverrideInterfaceName = control.OverrideInterfaceName,
-            OverrideSetBy         = control.OverrideSetBy,
-        };
-    }
 
     // Split on comma / whitespace / newlines; trim; drop empties.
     private static string[] ParseTargets(string? raw) =>

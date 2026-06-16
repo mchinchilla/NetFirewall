@@ -11,6 +11,8 @@ using NetFirewall.Services.Monitoring;
 using NetFirewall.Services.Vpn;
 using NetFirewall.Services.Daemon;
 using NetFirewall.Web.Models;
+using NetFirewall.Web.Models.Network;
+using NetFirewall.Web.Services;
 
 namespace NetFirewall.Web.Controllers;
 
@@ -23,6 +25,7 @@ public class HomeController : Controller
     private readonly IWireGuardService _wg;
     private readonly IDaemonClient _daemon;
     private readonly IScheduleService _schedules;
+    private readonly IWanHealthCardBuilder _wanCard;
     private readonly ILogger<HomeController> _logger;
 
     public HomeController(
@@ -33,6 +36,7 @@ public class HomeController : Controller
         IWireGuardService wg,
         IDaemonClient daemon,
         IScheduleService schedules,
+        IWanHealthCardBuilder wanCard,
         ILogger<HomeController> logger)
     {
         _dhcp = dhcp;
@@ -42,6 +46,7 @@ public class HomeController : Controller
         _wg = wg;
         _daemon = daemon;
         _schedules = schedules;
+        _wanCard = wanCard;
         _logger = logger;
     }
 
@@ -61,13 +66,15 @@ public class HomeController : Controller
         // New panels — every daemon call has its own safe-wrapper so the page
         // still renders if the daemon is unreachable or the endpoint 4xx-es.
         var servicesTask   = SafeQueryServicesAsync(ct);
-        var wanTask        = SafeQueryWanAsync(ct);
         var pendingTask    = SafeQueryPendingAsync(ct);
-        var wanHealthTask  = SafeQueryWanHealthAsync(ct);
+        // WAN health is the shared card model (Summary mode: compact, ping fallback
+        // on). The builder swallows its own failures, so no extra safe-wrapper.
+        var wanCardTask    = _wanCard.BuildAsync(
+            WanCardOptions.Summary(Url.Action("Index", "WanFailover") ?? "/Network/Wan"), ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
                            filterTask, snapshotTask, historyTask, wgTask, schedulesTask,
-                           servicesTask, wanTask, pendingTask, wanHealthTask);
+                           servicesTask, pendingTask, wanCardTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -79,9 +86,8 @@ public class HomeController : Controller
         var wg        = wgTask.Result;
         var sched     = schedulesTask.Result;
         var services  = servicesTask.Result;
-        var wanStatus = wanTask.Result;
         var pending   = pendingTask.Result;
-        var wanHealth = wanHealthTask.Result;
+        var wanCard   = wanCardTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
         var totalBytesPerSec = snapshot.Network
@@ -127,10 +133,8 @@ public class HomeController : Controller
             },
             Subnets = subnetSummaries,
             Services = services,
-            WanStatus = wanStatus,
             PendingChanges = pending,
-            WanHealth = wanHealth.Health,
-            WanTransitions = wanHealth.Transitions,
+            WanCard = wanCard,
         };
 
         return View(vm);
@@ -445,72 +449,6 @@ public class HomeController : Controller
         {
             _logger.LogDebug(ex, "systemd services query failed");
             return Array.Empty<SystemServiceStatus>();
-        }
-    }
-
-    private async Task<IReadOnlyList<WanStatusSummary>> SafeQueryWanAsync(CancellationToken ct)
-    {
-        try
-        {
-            var env = await _daemon.GetWanStatusAsync(ct);
-            if (!env.Success || env.Data is null) return Array.Empty<WanStatusSummary>();
-            return env.Data.Select(w => new WanStatusSummary
-            {
-                InterfaceName = w.InterfaceName,
-                Role = w.Role,
-                Target = w.Target,
-                IsUp = w.IsUp,
-                RttMs = w.RttMs,
-                Message = w.Message,
-            }).ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "WAN status query failed");
-            return Array.Empty<WanStatusSummary>();
-        }
-    }
-
-    private sealed record WanHealthSnapshot(IReadOnlyList<WanHealthRow> Health, IReadOnlyList<WanTransition> Transitions)
-    {
-        public static readonly WanHealthSnapshot Empty =
-            new(Array.Empty<WanHealthRow>(), Array.Empty<WanTransition>());
-    }
-
-    private async Task<WanHealthSnapshot> SafeQueryWanHealthAsync(CancellationToken ct)
-    {
-        try
-        {
-            var env = await _daemon.GetWanHealthAsync(ct);
-            if (!env.Success || env.Data is null) return WanHealthSnapshot.Empty;
-
-            var rows = env.Data.State.Select(s => new WanHealthRow
-            {
-                InterfaceName        = s.InterfaceName,
-                Role                 = s.Role,
-                IsUp                 = s.IsUp,
-                ConsecutiveFailures  = s.ConsecutiveFailures,
-                ConsecutiveSuccesses = s.ConsecutiveSuccesses,
-                LastCheckAt          = s.LastCheckAt,
-                LastTransitionAt     = s.LastTransitionAt,
-                LastRttMs            = s.LastRttMs,
-                LastTarget           = s.LastTarget,
-                LastError            = s.LastError,
-            }).ToList();
-
-            var transitions = env.Data.RecentEvents.Select(e => new WanTransition
-            {
-                OccurredAt    = e.OccurredAt,
-                InterfaceName = e.InterfaceName,
-                EventType     = e.EventType,
-            }).ToList();
-
-            return new WanHealthSnapshot(rows, transitions);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "WAN health query failed");
-            return WanHealthSnapshot.Empty;
         }
     }
 

@@ -51,12 +51,14 @@ public sealed class AlertsController : Controller
             _logger.LogDebug(ex, "Active-alerts query failed");
         }
 
-        // Emit the current active-danger alert keys so the client can detect
-        // newly-appeared (→ alarm) and disappeared (→ recovery chime) alerts and
-        // play the audible cue. Sent on every poll; the client diffs against the
-        // previous set. Cheap: just keys + source, no bodies.
+        // Emit the current active-alert state on every poll so the client can,
+        // without opening the dropdown or reloading: (a) play the audible cue
+        // (diff the danger keys — appeared → alarm, disappeared → recovery), and
+        // (b) keep the bell badge's unread count live. `activeCount` is ALL active
+        // alerts (any severity); `danger` is just keys+source for the sound diff.
         this.AttachHxEvent("alertsState", new
         {
+            activeCount = model.Alerts.Count,
             danger = model.Alerts
                 .Where(a => a.Severity == "danger")
                 .Select(a => new { key = a.Key, source = a.Source })

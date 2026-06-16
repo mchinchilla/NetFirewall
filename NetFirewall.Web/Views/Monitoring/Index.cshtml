@@ -3,7 +3,12 @@
     Layout = "_Layout";
 }
 <div x-data="{ tab: 'live', range: '24h', talkersRange: '24h', paused: false }" class="space-y-4"
-     style="animation: var(--animate-slide-up);">
+     style="animation: var(--animate-slide-up);"
+     @* Mirror this page's Pause into the global alerts store so the app-wide
+        alerts banner / sound (in _Layout) freeze with the live metrics here.
+        Reset to false on navigate-away so other pages keep alerts polling. *@
+     x-effect="$store.alerts.paused = paused"
+     x-init="$el.addEventListener('alpine:destroyed', () => $store.alerts.paused = false)">
 
     @* ---------- header + tabs ---------- *@
     <div class="flex flex-wrap items-end justify-between gap-3">
@@ -49,6 +54,25 @@
              hx-swap="innerHTML">
             @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder, Size = LoadingOverlaySize.Lg })
         </div>
+
+        @* ---------- WAN interfaces health (failover state, polled every 10s) ---------- *@
+        <section class="card mt-4">
+            <header class="flex items-baseline justify-between mb-3">
+                <div>
+                    <h2 class="text-base font-semibold">WAN interfaces</h2>
+                    <p class="text-xs text-surface-fg-muted">
+                        Health verdict (with hysteresis), probe RTT, and which WAN is the active default route.
+                    </p>
+                </div>
+                <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
+            </header>
+            <div id="monitoring-wan" class="loading-host"
+                 hx-get="/Monitoring/wan-interfaces"
+                 :hx-trigger="paused ? 'load' : 'load, every 10s'"
+                 hx-swap="innerHTML">
+                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+            </div>
+        </section>
 
         @* ---------- Top talkers (refreshed every 30s — daemon's sampler cadence) ---------- *@
         @* The 30s poll carries the selected window via hx-vals so the chosen

@@ -103,6 +103,10 @@ builder.Services.AddScoped<IFirewallService, FirewallService>();
 // through IDaemonClient (needs CAP_NET_ADMIN) — not this service.
 builder.Services.AddScoped<NetFirewall.Services.WanMonitor.IWanHealthService,
                            NetFirewall.Services.WanMonitor.WanHealthService>();
+// Builds the one shared WAN-health card model used by the failover page, the
+// Monitoring pod, and the Home dashboard (single daemon→DTO→VM mapping + fallback).
+builder.Services.AddScoped<NetFirewall.Web.Services.IWanHealthCardBuilder,
+                           NetFirewall.Web.Services.WanHealthCardBuilder>();
 // Policy-routing CRUD (route tables / policy rules). Needed Web-side by
 // VpnRoutingService for the WireGuard egress + scaffold features. The daemon owns
 // the apply (kernel ip rule/route); the Web only reads/writes the rows.

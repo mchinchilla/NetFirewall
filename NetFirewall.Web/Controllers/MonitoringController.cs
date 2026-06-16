@@ -6,6 +6,8 @@ using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Monitoring;
 using NetFirewall.Web.Models;
 using NetFirewall.Web.Models.Monitoring;
+using NetFirewall.Web.Models.Network;
+using NetFirewall.Web.Services;
 using Npgsql;
 
 namespace NetFirewall.Web.Controllers;
@@ -21,6 +23,7 @@ public sealed class MonitoringController : Controller
     private readonly ISystemMonitorService _monitor;
     private readonly IMetricsQueryService _query;
     private readonly IScheduleService _schedules;
+    private readonly IWanHealthCardBuilder _cardBuilder;
     private readonly IDaemonClient _daemon;
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<MonitoringController> _logger;
@@ -29,6 +32,7 @@ public sealed class MonitoringController : Controller
         ISystemMonitorService monitor,
         IMetricsQueryService query,
         IScheduleService schedules,
+        IWanHealthCardBuilder cardBuilder,
         IDaemonClient daemon,
         NpgsqlDataSource ds,
         ILogger<MonitoringController> logger)
@@ -36,6 +40,7 @@ public sealed class MonitoringController : Controller
         _monitor = monitor;
         _query = query;
         _schedules = schedules;
+        _cardBuilder = cardBuilder;
         _daemon = daemon;
         _ds = ds;
         _logger = logger;
@@ -221,6 +226,17 @@ public sealed class MonitoringController : Controller
 
         ViewBag.Attached = attached;
         return PartialView("_SchedulesLive", all);
+    }
+
+    // WAN interfaces health pod — the shared WAN-health card in read-only "Pod"
+    // mode (compact list, no controls/events). Same builder + model as the
+    // failover page and the Home card; pin/swap controls stay on /Network/Wan.
+    [HttpGet("wan-interfaces")]
+    public async Task<IActionResult> WanInterfaces(CancellationToken ct)
+    {
+        var manageUrl = Url.Action("Index", "WanFailover") ?? "/Network/Wan";
+        var vm = await _cardBuilder.BuildAsync(WanCardOptions.Pod(manageUrl), ct);
+        return PartialView("_WanHealthCard", vm);
     }
 
     private static (DateTime From, DateTime To, bool UseHourly) ResolveRange(string? range)

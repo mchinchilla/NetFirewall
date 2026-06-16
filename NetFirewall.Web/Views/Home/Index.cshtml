@@ -17,15 +17,6 @@
         return $"{x:0.##} {u[i]}";
     }
 
-    static string AgoFromNow(DateTime ts)
-    {
-        var d = DateTime.UtcNow - ts.ToUniversalTime();
-        if (d.TotalMinutes < 1) return "just now";
-        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes} min ago";
-        if (d.TotalHours < 24)   return $"{(int)d.TotalHours} h ago";
-        return $"{(int)d.TotalDays} d ago";
-    }
-
     static string FmtUptime(TimeSpan t)
     {
         if (t.TotalDays >= 1) return $"{(int)t.TotalDays}d {t.Hours}h";
@@ -301,105 +292,15 @@
         }
     </section>
 
-    @* WAN health — uses the persisted state from WanHealthMonitorService
-       which includes hysteresis counters + last-transition timestamps. The
-       older "WAN reachability" card (instant ping snapshot) is only a
-       fallback for when wan_health_state hasn't been populated yet. *@
+    @* WAN health — the shared _WanHealthCard in Summary mode (compact list,
+       hysteresis counters, instant-ping fallback when state isn't populated).
+       Same component the failover page and the Monitoring pod render. *@
     <section class="card">
         <header class="flex items-baseline justify-between mb-3">
             <h2 class="text-base font-semibold">WAN health</h2>
-            <span class="text-xs text-surface-fg-muted">
-                @if (Model.WanHealth.Count > 0)
-                {
-                    <span>last probe: @AgoFromNow(Model.WanHealth.Max(w => w.LastCheckAt))</span>
-                }
-                else
-                {
-                    <span>via daemon ping</span>
-                }
-            </span>
+            <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
         </header>
-        @if (Model.WanHealth.Count > 0)
-        {
-            <ul class="divide-y border-surface-border">
-                @foreach (var w in Model.WanHealth)
-                {
-                    <li class="py-2">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2 min-w-0">
-                                @{
-                                    var dotCls = w.IsUp ? "bg-feedback-success-bd" : "bg-feedback-danger-bd";
-                                }
-                                <span class="inline-flex h-2 w-2 rounded-full @dotCls"></span>
-                                <span class="font-medium text-sm">@w.InterfaceName</span>
-                                <span class="text-xs text-surface-fg-muted">@w.Role</span>
-                                @if (!w.IsUp)
-                                {
-                                    <span class="text-xs px-1.5 py-0.5 rounded bg-feedback-danger-bg text-feedback-danger-fg">DOWN</span>
-                                }
-                                else if (w.ConsecutiveFailures > 0)
-                                {
-                                    <span class="text-xs px-1.5 py-0.5 rounded bg-feedback-warning-bg text-feedback-warning-fg">@w.ConsecutiveFailures fail(s)</span>
-                                }
-                            </div>
-                            <span class="text-xs text-surface-fg-muted shrink-0 font-mono">
-                                @if (w.IsUp && w.LastRttMs is { } rtt)
-                                {
-                                    <span>@w.LastTarget  ·  @rtt.ToString("F1") ms</span>
-                                }
-                                else if (!string.IsNullOrEmpty(w.LastError))
-                                {
-                                    <span class="text-feedback-danger-fg">@w.LastError</span>
-                                }
-                            </span>
-                        </div>
-                        @if (Model.WanTransitions.Count > 0)
-                        {
-                            var lastTransition = Model.WanTransitions.FirstOrDefault(t => t.InterfaceName == w.InterfaceName);
-                            if (lastTransition is not null)
-                            {
-                                <p class="text-xs text-surface-fg-muted mt-0.5">
-                                    last <strong>@lastTransition.EventType</strong> @AgoFromNow(lastTransition.OccurredAt)
-                                </p>
-                            }
-                        }
-                    </li>
-                }
-            </ul>
-        }
-        else if (Model.WanStatus.Count > 0)
-        {
-            @* Fallback: older instant ping data (no hysteresis). *@
-            <ul class="divide-y border-surface-border">
-                @foreach (var wan in Model.WanStatus)
-                {
-                    <li class="flex items-center justify-between py-2">
-                        <div class="flex items-center gap-2 min-w-0">
-                            @{
-                                var wanDotCls = wan.IsUp ? "bg-feedback-success-bd" : "bg-feedback-danger-bd";
-                            }
-                            <span class="inline-flex h-2 w-2 rounded-full @wanDotCls"></span>
-                            <span class="font-medium text-sm">@wan.InterfaceName</span>
-                            <span class="text-xs text-surface-fg-muted">@wan.Role</span>
-                        </div>
-                        <span class="text-xs text-surface-fg-muted shrink-0 font-mono">
-                            @if (wan.IsUp && wan.RttMs is { } rtt)
-                            {
-                                <span>@wan.Target  ·  @rtt.ToString("F1") ms</span>
-                            }
-                            else
-                            {
-                                <span class="text-feedback-danger-fg">@(wan.Message ?? "unreachable")</span>
-                            }
-                        </span>
-                    </li>
-                }
-            </ul>
-        }
-        else
-        {
-            <p class="text-sm text-surface-fg-muted">No WAN interfaces configured. Add monitor targets in wan_health_config.</p>
-        }
+        @await Html.PartialAsync("_WanHealthCard", Model.WanCard)
     </section>
 
     @* Where traffic is going — LAN-wide top destinations, ASN-enriched, polled

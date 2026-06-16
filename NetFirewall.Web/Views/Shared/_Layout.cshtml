@@ -36,12 +36,17 @@
         <div class="flex flex-col flex-1 min-w-0">
             @await Html.PartialAsync("_TopHeader")
             @await Html.PartialAsync("_DaemonModeBanner")
-            @* Active-system-alerts banner (VPN down, etc). Self-populating + self-
-               clearing: polls /Alerts/banner and swaps in _AlertsBanner — empty
-               markup when nothing is active. Also refreshes on WireGuard events. *@
+            @* Active-system-alerts banner (VPN/WAN down, etc). Self-populating +
+               self-clearing: polls /Alerts/banner every 10s and swaps in
+               _AlertsBanner — empty markup when nothing is active. Each poll also
+               emits `alertsState` (HX-Trigger) which drives the bell badge + the
+               audible cue app-wide. Also refreshes on WireGuard events. When the
+               Monitoring page sets $store.alerts.paused, the htmx:beforeRequest
+               hook in site.js cancels these polls so the banner/badge/sound freeze
+               with that page's live metrics. *@
             <div id="alerts-banner"
                  hx-get="/Alerts/banner"
-                 hx-trigger="load, every 20s, refreshWireGuard from:body"
+                 hx-trigger="load, every 10s, refreshWireGuard from:body"
                  hx-swap="innerHTML"></div>
             @await Html.PartialAsync("_Breadcrumb")
 
