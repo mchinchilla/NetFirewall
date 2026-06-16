@@ -4,6 +4,10 @@
     GUID segments are rendered as "…", segment names are title-cased and
     spaces are inserted before camelCase boundaries.
 
+    Module-root segments (Dhcp, Firewall, Network, Vpn, setup) have NO landing
+    page — they're collapsible group headers in the sidebar, not pages — so they
+    render as plain non-clickable text rather than links that 404.
+
     A page can override this by setting ViewData["Crumbs"] to a list of
     (label, url) tuples. Pass url=null for non-clickable crumbs (the
     current page's terminal segment).
@@ -12,6 +16,16 @@
     var path = Context.Request.Path.Value ?? "/";
 
     static bool IsGuid(string s) => Guid.TryParse(s, out _);
+
+    // Top-level path segments that are module groupings without their own
+    // landing page (mirrors the non-clickable group headers in _SidebarItems).
+    // Matched case-insensitively against the FIRST path segment only.
+    static bool IsModuleRootWithoutIndex(string seg) =>
+        seg.Equals("Dhcp", StringComparison.OrdinalIgnoreCase)
+        || seg.Equals("Firewall", StringComparison.OrdinalIgnoreCase)
+        || seg.Equals("Network", StringComparison.OrdinalIgnoreCase)
+        || seg.Equals("Vpn", StringComparison.OrdinalIgnoreCase)
+        || seg.Equals("setup", StringComparison.OrdinalIgnoreCase);
 
     static string Pretty(string raw)
     {
@@ -42,8 +56,11 @@
             var seg = segments[i];
             acc += "/" + seg;
             var label = IsGuid(seg) ? "…" : Pretty(seg);
-            // Last segment is the current page — no link.
-            crumbs.Add((label, i == segments.Length - 1 ? null : acc));
+            // No link for: the current page's terminal segment, or a module-root
+            // segment (first segment) that has no landing page to link to.
+            var isLast = i == segments.Length - 1;
+            var isModuleRoot = i == 0 && IsModuleRootWithoutIndex(seg);
+            crumbs.Add((label, isLast || isModuleRoot ? null : acc));
         }
     }
 }
