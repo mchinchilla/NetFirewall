@@ -4,16 +4,13 @@
     var server = (NetFirewall.Models.Vpn.WgServer?)ViewBag.Server;
     var form = (NetFirewall.Web.Models.Vpn.WgServerFormViewModel)ViewBag.Form;
 }
-@* Mode-aware labels (sets ViewData["wg.*"]). *@
-@await Html.PartialAsync("_ModeLabels", (string)(server?.Mode ?? form.Mode))
-
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">VPN</p>
         <h1 class="text-2xl font-semibold tracking-tight">WireGuard</h1>
         <p class="text-sm mt-1 text-surface-fg-muted">
-            Single-tunnel server. Peer keys are generated on-device by the daemon and the private half is shown <span class="font-medium">once</span> at peer creation — we never persist it.
+            One interface, two jobs: <span class="font-medium">tunnels</span> this firewall keeps up (upstream egress, site-to-site) and <span class="font-medium">clients</span> that connect in (laptops, phones). Client keys are generated on-device by the daemon and the private half is shown <span class="font-medium">once</span> — we never persist it.
         </p>
     </div>
     @if (server is not null)
@@ -78,10 +75,10 @@
 </section>
 
 <div class="grid gap-4 grid-cols-1 xl:grid-cols-2">
-    @* ----- Server config ----- *@
+    @* ----- Interface config ----- *@
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
         <header class="flex items-baseline justify-between mb-4">
-            <h2 class="text-base font-semibold">Server</h2>
+            <h2 class="text-base font-semibold">Interface</h2>
             @if (server is not null)
             {
                 <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
@@ -99,39 +96,21 @@
             }
         </header>
 
-        <form hx-post="/Vpn/WireGuard/save" hx-swap="none"
-              x-data="{ mode: '@(server?.Mode ?? form.Mode)' }">
+        <form hx-post="/Vpn/WireGuard/save" hx-swap="none">
             @Html.AntiForgeryToken()
             @if (form.Id.HasValue) { <input type="hidden" name="Id" value="@form.Id" /> }
 
             <div class="space-y-3">
-                @* Mode — drives field visibility. Server = accepts inbound peers;
-                   Client = this firewall dials out to a remote server. *@
-                @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                    Name = nameof(form.Mode), Label = "Tunnel role", Kind = NetFirewall.Web.Models.FormFieldKind.Select,
-                    Value = server?.Mode ?? form.Mode, AlpineModel = "mode",
-                    Options = new[] {
-                        new NetFirewall.Web.Models.FormFieldViewModel.SelectOption("server", "Server — accept inbound peers"),
-                        new NetFirewall.Web.Models.FormFieldViewModel.SelectOption("client", "Client — dial out to a remote server"),
-                    },
-                    Help = "Client mode = this firewall connects OUT (e.g. egress LAN devices through a remote VPN)."
-                })
-
                 <div class="grid grid-cols-2 gap-3">
                     @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
                         Name = nameof(form.Name), Label = "Interface name", Required = true, Value = form.Name,
                         Placeholder = "wg0"
                     })
-                    @* ListenPort — server mode only. Disabled in client mode so the
-                       hidden field's min/max constraint can't block submit (HTML5
-                       can't focus a display:none invalid control) and isn't posted. *@
-                    <div x-show="mode === 'server'">
-                        @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                            Name = nameof(form.ListenPort), Label = "UDP listen port", Kind = NetFirewall.Web.Models.FormFieldKind.Number,
-                            Value = form.ListenPort.ToString(), Min = "1", Max = "65535",
-                            AlpineExtra = ":disabled=\"mode !== 'server'\""
-                        })
-                    </div>
+                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                        Name = nameof(form.ListenPort), Label = "UDP listen port", Kind = NetFirewall.Web.Models.FormFieldKind.Number,
+                        Value = form.ListenPort.ToString(), Min = "0", Max = "65535",
+                        Help = "Where inbound clients connect. 0 = don't accept inbound (dial-only interface). Independent of upstream tunnels — one interface can do both."
+                    })
                 </div>
 
                 @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
@@ -139,26 +118,6 @@
                     Value = form.AddressCidr, Placeholder = "10.10.0.1/24",
                     Help = "The wg0 IP inside the tunnel subnet."
                 })
-
-                @* ── Client-mode fields ── *@
-                <div x-show="mode === 'client'" x-cloak class="space-y-3 rounded-lg p-3 border border-surface-border" style="background: color-mix(in srgb, var(--accent) 5%, transparent);">
-                    <p class="text-xs font-semibold text-surface-fg-muted">Remote server (upstream)</p>
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.RemoteEndpoint), Label = "Remote endpoint (host:port)",
-                        Value = form.RemoteEndpoint, Placeholder = "vpn.friend.example:51820",
-                        Help = "Where this firewall dials out. The remote server's PUBLIC KEY is set in the peer below."
-                    })
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.ClientAllowedIpsRaw), Label = "Route into tunnel (AllowedIPs)",
-                        Value = form.ClientAllowedIpsRaw, Placeholder = "0.0.0.0/0",
-                        Help = "What to send through the tunnel. 0.0.0.0/0 lets marked LAN devices egress via the VPN."
-                    })
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.ClientKeepalive), Label = "Persistent keepalive (s)", Kind = NetFirewall.Web.Models.FormFieldKind.Number,
-                        Value = form.ClientKeepalive?.ToString(), Min = "0", Max = "65535",
-                        Help = "25 is a sensible default for NAT traversal."
-                    })
-                </div>
 
                 @* Common extras. *@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -172,14 +131,11 @@
                     })
                 </div>
 
-                @* Table=off — forced on in client mode (policy routing owns the route). *@
-                <div x-show="mode === 'client'" x-cloak>
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.TableOff), Label = "Table = off (let policy routing own the route)",
-                        Kind = NetFirewall.Web.Models.FormFieldKind.Checkbox, Value = "true",
-                        Help = "Required in client mode so wg-quick doesn't fight the fwmark→table default route. Forced on."
-                    })
-                </div>
+                @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                    Name = nameof(form.TableOff), Label = "Table = off (let policy routing own the route)",
+                    Kind = NetFirewall.Web.Models.FormFieldKind.Checkbox, Value = form.TableOff ? "true" : "false",
+                    Help = "Keeps wg-quick from installing the tunnel's routes itself. Forced ON automatically while an enabled upstream tunnel exists — otherwise its 0.0.0.0/0 route would hijack the firewall's own outbound."
+                })
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
@@ -199,9 +155,9 @@
                 @if (server is not null)
                 {
                     <div class="pt-3 border-t border-surface-border">
-                        <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-surface-fg-muted">Server public key</p>
+                        <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-surface-fg-muted">Interface public key</p>
                         <p class="text-xs font-mono break-all p-2 rounded" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent);">@server.PublicKey</p>
-                        <p class="text-xs mt-1 text-surface-fg-muted">Share with peers. The private key never leaves the daemon.</p>
+                        <p class="text-xs mt-1 text-surface-fg-muted">This firewall's identity — give it to the remote side of any tunnel and to inbound clients. The private key never leaves the daemon.</p>
                     </div>
                 }
             </div>
@@ -230,34 +186,67 @@
     </section>
 </div>
 
-@* ----- Peers ----- *@
+@* ----- Tunnels (upstream / site-to-site — links this firewall keeps up) ----- *@
 <section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
     <header class="flex items-baseline justify-between mb-4">
         <div>
-            <h2 class="text-base font-semibold">@(ViewData["wg.peersTitle"] ?? "Peers")</h2>
-            <p class="text-xs text-surface-fg-muted">@(ViewData["wg.peersSubtitle"] ?? "Each peer = one client config (laptop, phone, etc).")</p>
+            <h2 class="text-base font-semibold">Tunnels</h2>
+            <p class="text-xs text-surface-fg-muted">Upstream egress and site-to-site links. Expected to stay connected — health-monitored, with alerts when the handshake goes stale.</p>
         </div>
         @if (server is not null)
         {
-            var addLabel = (string?)ViewData["wg.addPeerLabel"] ?? "Add peer";
             <button type="button" class="btn btn-primary text-xs"
-                    hx-get="/Vpn/WireGuard/Peers/edit"
+                    hx-get="/Vpn/WireGuard/Peers/edit?family=tunnels"
                     hx-target="#drawer-body" hx-swap="innerHTML"
-                    @@click="$store.drawer.openRaw('@addLabel')">
+                    @@click="$store.drawer.openRaw('Add tunnel')">
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-                @addLabel
+                Add tunnel
             </button>
         }
     </header>
 
     @if (server is null)
     {
-        <p class="text-sm py-8 text-center text-surface-fg-muted">Save the server config first — peers need a server to attach to.</p>
+        <p class="text-sm py-8 text-center text-surface-fg-muted">Save the interface config first — tunnels need an interface to attach to.</p>
     }
     else
     {
-        <div id="wg-peers-table"
-             hx-get="/Vpn/WireGuard/Peers/table"
+        <div id="wg-tunnels-table"
+             hx-get="/Vpn/WireGuard/Peers/table?family=tunnels"
+             hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
+             hx-swap="innerHTML">
+             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        </div>
+    }
+</section>
+
+@* ----- VPN clients (road-warriors that connect in) ----- *@
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 200ms;">
+    <header class="flex items-baseline justify-between mb-4">
+        <div>
+            <h2 class="text-base font-semibold">VPN clients</h2>
+            <p class="text-xs text-surface-fg-muted">Each client = one config (laptop, phone, etc). Offline clients are normal — they're never flagged as outages.</p>
+        </div>
+        @if (server is not null)
+        {
+            <button type="button" class="btn btn-primary text-xs"
+                    hx-get="/Vpn/WireGuard/Peers/edit?family=clients"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add client')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add client
+            </button>
+        }
+    </header>
+
+    @if (server is null)
+    {
+        <p class="text-sm py-8 text-center text-surface-fg-muted">Save the interface config first — clients need an interface to attach to.</p>
+    }
+    else
+    {
+        <div id="wg-clients-table"
+             hx-get="/Vpn/WireGuard/Peers/table?family=clients"
              hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
              hx-swap="innerHTML">
              Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })

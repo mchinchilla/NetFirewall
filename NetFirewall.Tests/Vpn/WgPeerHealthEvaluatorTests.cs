@@ -6,28 +6,28 @@ namespace NetFirewall.Tests.Vpn;
 /// <summary>
 /// Pure-function coverage of <see cref="WgPeerHealthEvaluator"/> — the single
 /// health rule shared by the Web's status dot and the daemon's
-/// VpnHealthMonitorService. The regressions these pin down:
-/// a road-warrior laptop (keepalive-defaulted, no endpoint) must never read as
-/// an outage, and a freshly provisioned peer that has never handshaked is
-/// Pending, not Down.
+/// VpnHealthMonitorService. The regressions these pin down: only explicit
+/// 'upstream'/'site' roles are monitored (a road-warrior client must never read
+/// as an outage, no matter what keepalive or endpoint got filled into its row),
+/// and a peer that has never handshaked is Pending, not Down.
 /// </summary>
 public class WgPeerHealthEvaluatorTests
 {
     private static readonly DateTime Now = new(2026, 7, 7, 12, 0, 0, DateTimeKind.Utc);
 
     private static WgPeer Peer(
+        string role = "client",
         bool enabled = true,
         string? endpoint = null,
-        string routeMode = "full",
         int? keepalive = null) => new()
     {
         Id = Guid.NewGuid(),
         ServerId = Guid.NewGuid(),
         Name = "peer",
         PublicKey = "PUBKEY",
+        Role = role,
         Enabled = enabled,
         Endpoint = endpoint,
-        RouteMode = routeMode,
         PersistentKeepalive = keepalive,
     };
 
@@ -37,24 +37,26 @@ public class WgPeerHealthEvaluatorTests
     // ── ExpectedLive: who is monitored at all ──
 
     [Fact]
-    public void ExpectedLive_UpstreamWithEndpoint_IsMonitored() =>
-        Assert.True(WgPeerHealthEvaluator.ExpectedLive(Peer(endpoint: "vps.example.com:51821")));
+    public void ExpectedLive_UpstreamRole_IsMonitored() =>
+        Assert.True(WgPeerHealthEvaluator.ExpectedLive(Peer(role: "upstream", endpoint: "vps.example.com:51821")));
 
     [Fact]
-    public void ExpectedLive_SiteToSite_IsMonitoredEvenWithoutEndpoint() =>
-        Assert.True(WgPeerHealthEvaluator.ExpectedLive(Peer(routeMode: "site")));
+    public void ExpectedLive_SiteRole_IsMonitored() =>
+        Assert.True(WgPeerHealthEvaluator.ExpectedLive(Peer(role: "site")));
 
     [Fact]
-    public void ExpectedLive_RoadWarriorWithDefaultKeepalive_IsNotMonitored()
+    public void ExpectedLive_ClientRole_IsNotMonitored_EvenWithKeepaliveAndEndpoint()
     {
-        // The peer form defaults keepalive to 25 for every road-warrior client,
-        // so keepalive alone must not mean "expected to stay connected".
-        Assert.False(WgPeerHealthEvaluator.ExpectedLive(Peer(keepalive: 25)));
+        // The peer form defaults keepalive to 25 for every road-warrior, and
+        // operators have mis-filled Endpoint on client rows — neither may drag a
+        // client into monitoring. Only the explicit role decides.
+        Assert.False(WgPeerHealthEvaluator.ExpectedLive(
+            Peer(role: "client", endpoint: "fw.example.net:51820", keepalive: 25)));
     }
 
     [Fact]
     public void ExpectedLive_DisabledPeer_IsNotMonitored() =>
-        Assert.False(WgPeerHealthEvaluator.ExpectedLive(Peer(enabled: false, endpoint: "vps.example.com:51821")));
+        Assert.False(WgPeerHealthEvaluator.ExpectedLive(Peer(role: "upstream", enabled: false)));
 
     [Fact]
     public void ExpectedLive_NullPeer_IsNotMonitored() =>
@@ -67,9 +69,9 @@ public class WgPeerHealthEvaluatorTests
     {
         var live = Live(Now.AddSeconds(-30));
         Assert.Equal(WgPeerHealth.Connected,
-            WgPeerHealthEvaluator.Evaluate(Peer(keepalive: 25), live, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "client"), live, Now));
         Assert.Equal(WgPeerHealth.Connected,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), live, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), live, Now));
     }
 
     [Fact]
@@ -77,7 +79,7 @@ public class WgPeerHealthEvaluatorTests
     {
         var live = Live(Now.AddMinutes(-10));
         Assert.Equal(WgPeerHealth.Down,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), live, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), live, Now));
     }
 
     [Fact]
@@ -85,25 +87,25 @@ public class WgPeerHealthEvaluatorTests
     {
         var live = Live(Now.AddMinutes(-10));
         Assert.Equal(WgPeerHealth.Down,
-            WgPeerHealthEvaluator.Evaluate(Peer(routeMode: "site"), live, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "site"), live, Now));
     }
 
     [Fact]
-    public void StaleRoadWarrior_IsIdle_NotDown()
+    public void StaleClient_IsIdle_NotDown()
     {
         // A laptop that went to sleep — keepalive default notwithstanding.
         var live = Live(Now.AddHours(-3));
         Assert.Equal(WgPeerHealth.Idle,
-            WgPeerHealthEvaluator.Evaluate(Peer(keepalive: 25), live, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "client", keepalive: 25), live, Now));
     }
 
     [Fact]
     public void NeverHandshakedUpstream_IsPending_NotDown()
     {
-        // Freshly provisioned peer whose remote hasn't connected yet: the exact
+        // Freshly provisioned tunnel whose remote hasn't connected yet: the exact
         // scenario that used to raise a permanent "tunnel down" banner.
         Assert.Equal(WgPeerHealth.Pending,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), Live(null), Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), Live(null), Now));
     }
 
     [Fact]
@@ -111,7 +113,7 @@ public class WgPeerHealthEvaluatorTests
     {
         // Peer exists in the catalog but the config was never applied (live == null).
         Assert.Equal(WgPeerHealth.Pending,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), null, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), null, Now));
     }
 
     [Fact]
@@ -126,7 +128,7 @@ public class WgPeerHealthEvaluatorTests
     public void DisabledPeer_IsIdle_EvenWhenStale()
     {
         Assert.Equal(WgPeerHealth.Idle,
-            WgPeerHealthEvaluator.Evaluate(Peer(enabled: false, endpoint: "vps.example.com:51821"),
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream", enabled: false),
                 Live(Now.AddHours(-1)), Now));
     }
 
@@ -138,7 +140,7 @@ public class WgPeerHealthEvaluatorTests
         // Interface just restarted: wg says "never handshaked", but we saw a
         // handshake 1 min ago. Grace, not a false alarm.
         Assert.Equal(WgPeerHealth.Connected,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), Live(null), Now,
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), Live(null), Now,
                 lastKnownHandshakeAt: Now.AddMinutes(-1)));
     }
 
@@ -148,7 +150,7 @@ public class WgPeerHealthEvaluatorTests
         // The peer WAS alive once (persisted state remembers), so a missing
         // handshake after a restart is an outage, not a brand-new peer.
         Assert.Equal(WgPeerHealth.Down,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), Live(null), Now,
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), Live(null), Now,
                 lastKnownHandshakeAt: Now.AddHours(-2)));
     }
 
@@ -158,10 +160,10 @@ public class WgPeerHealthEvaluatorTests
         var live = Live(Now.AddSeconds(-120));
         // 120s-old handshake: fresh under the default 180s...
         Assert.Equal(WgPeerHealth.Connected,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), live, Now));
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), live, Now));
         // ...but stale under a tightened 60s threshold.
         Assert.Equal(WgPeerHealth.Down,
-            WgPeerHealthEvaluator.Evaluate(Peer(endpoint: "vps.example.com:51821"), live, Now,
+            WgPeerHealthEvaluator.Evaluate(Peer(role: "upstream"), live, Now,
                 staleAfter: TimeSpan.FromSeconds(60)));
     }
 }

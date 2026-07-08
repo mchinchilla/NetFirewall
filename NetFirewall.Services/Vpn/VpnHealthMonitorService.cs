@@ -222,9 +222,12 @@ public sealed class VpnHealthMonitorService : BackgroundService
         // One dedupe key per logical condition so the banner upserts a single row
         // and recovery clears it.
         var key = $"vpn:{server.Id}:{peer.PublicKey}";
-        var who = server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase)
-            ? $"Upstream tunnel \"{server.Name}\""
-            : $"WireGuard peer \"{peer.Name}\"";
+        var who = peer.Role.ToLowerInvariant() switch
+        {
+            "upstream" => $"Upstream tunnel \"{peer.Name}\" on {server.Name}",
+            "site"     => $"Site-to-site tunnel \"{peer.Name}\"",
+            _          => $"WireGuard peer \"{peer.Name}\"",
+        };
 
         var message = resolved
             ? new NotificationMessage(

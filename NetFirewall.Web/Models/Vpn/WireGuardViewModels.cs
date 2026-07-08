@@ -6,38 +6,20 @@ public sealed class WgServerFormViewModel
 {
     public Guid? Id { get; set; }
 
-    /// <summary>"server" (accepts inbound peers) or "client" (this firewall dials
-    /// out to a remote wg server — e.g. egress through a friend's US VPN).</summary>
-    [Required, RegularExpression("server|client", ErrorMessage = "Mode must be 'server' or 'client'.")]
-    public string Mode { get; set; } = "server";
-
     [Required, StringLength(64)]
     public string Name { get; set; } = "wg0";
 
-    // ListenPort only matters in server mode; in client mode the kernel picks an
-    // ephemeral source port. Not [Required] because client mode ignores it; the
-    // controller validates it server-side only when Mode == "server".
-    [Range(1, 65535, ErrorMessage = "Port must be 1-65535.")]
+    /// <summary>UDP port the interface listens on for inbound peers (clients /
+    /// site links that dial us). 0 = don't listen — a dial-only interface whose
+    /// kernel picks an ephemeral source port. Independent of whether the
+    /// interface also dials upstream tunnels (it can do both at once).</summary>
+    [Range(0, 65535, ErrorMessage = "Port must be 0-65535 (0 = don't accept inbound).")]
     public int ListenPort { get; set; } = 51820;
 
     [Required, RegularExpression(@"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$", ErrorMessage = "Address must be CIDR (e.g. 10.10.0.1/24).")]
     public string AddressCidr { get; set; } = "10.10.0.1/24";
 
-    // ── client-mode extras (the firewall as a client to a remote server) ──
-    /// <summary>Remote server "host:port" — REQUIRED in client mode. Stored on the
-    /// single peer that represents the upstream server.</summary>
-    [RegularExpression(@"^[^\s:]+:\d{1,5}$", ErrorMessage = "Endpoint must be host:port (e.g. vpn.example.com:51820).")]
-    public string? RemoteEndpoint { get; set; }
-
-    /// <summary>Client-side AllowedIPs (what to route INTO the tunnel). Default
-    /// 0.0.0.0/0 = everything (so marked LAN devices can egress via the tunnel).</summary>
-    public string? ClientAllowedIpsRaw { get; set; } = "0.0.0.0/0";
-
-    [Range(0, 65535)]
-    public int? ClientKeepalive { get; set; } = 25;
-
-    /// <summary>DNS pushed via the tunnel [Interface] (client mode) / advertised to
-    /// clients (server mode). Comma-separated. Optional.</summary>
+    /// <summary>DNS for the tunnel [Interface]. Comma-separated. Optional.</summary>
     [StringLength(200)]
     public string? Dns { get; set; }
 
@@ -46,7 +28,7 @@ public sealed class WgServerFormViewModel
 
     /// <summary>Emit "Table = off" so wg-quick does NOT install its own routes —
     /// required when policy routing (fwmark→table) owns the default route to wg0.
-    /// Forced ON in client mode when a routing scaffold is active.</summary>
+    /// The controller forces it ON whenever an enabled upstream tunnel exists.</summary>
     public bool TableOff { get; set; }
 
     [StringLength(500)]
@@ -67,6 +49,13 @@ public sealed class WgPeerFormViewModel
     public Guid? Id { get; set; }
     public Guid ServerId { get; set; }
 
+    /// <summary>What the peer IS: 'client' (inbound road-warrior — keys generated
+    /// on-device, no endpoint), 'upstream' (remote server we dial — endpoint +
+    /// pasted public key required) or 'site' (site-to-site link). Decides which
+    /// form variant renders and how Save shapes the entity.</summary>
+    [Required, RegularExpression("client|upstream|site", ErrorMessage = "Role must be client, upstream or site.")]
+    public string Role { get; set; } = "client";
+
     [Required, StringLength(80)]
     public string Name { get; set; } = string.Empty;
 
@@ -76,12 +65,18 @@ public sealed class WgPeerFormViewModel
     [Range(0, 65535)]
     public int? PersistentKeepalive { get; set; }
 
-    /// <summary>"host:port" of the remote side. Required when the parent server is
-    /// in client mode (the peer IS the upstream server); optional otherwise.</summary>
+    /// <summary>"host:port" of the remote side. Required for upstream tunnels
+    /// (we dial them); optional for site links; unused for clients.</summary>
     [RegularExpression(@"^[^\s:]+:\d{1,5}$", ErrorMessage = "Endpoint must be host:port.")]
     public string? Endpoint { get; set; }
 
-    /// <summary>Per-peer routing intent (server mode): full | split | restricted | site.</summary>
+    /// <summary>Remote side's PUBLIC key — tunnels only (upstream/site), pasted by
+    /// the operator. Client peers get a daemon-generated keypair instead.</summary>
+    [RegularExpression(@"^[A-Za-z0-9+/]{42,44}={0,2}$", ErrorMessage = "Public key must be a 44-char base64 WireGuard key.")]
+    public string? PublicKey { get; set; }
+
+    /// <summary>Client access intent: full | split | restricted. ('site' is set by
+    /// the controller for site-role tunnels — not operator-selectable here.)</summary>
     [RegularExpression("full|split|restricted|site")]
     public string RouteMode { get; set; } = "full";
 
@@ -107,6 +102,17 @@ public sealed class WgPeerCreatedViewModel
     public required Guid PeerId { get; init; }
     public required string PeerName { get; init; }
     public required string ClientConfig { get; init; }
+}
+
+/// <summary>
+/// Typed model for the peers-table partial. Family decides the columns and
+/// labels: "clients" (road-warriors: access intent, QR/export) vs "tunnels"
+/// (upstream/site: role badge + endpoint).
+/// </summary>
+public sealed class WgPeerTableViewModel
+{
+    public required string Family { get; init; }   // "clients" | "tunnels"
+    public required IReadOnlyList<NetFirewall.Models.Vpn.WgPeer> Peers { get; init; }
 }
 
 /// <summary>

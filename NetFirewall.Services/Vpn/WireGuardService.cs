@@ -117,10 +117,10 @@ public sealed class WireGuardService : IWireGuardService
         const string sql = @"
             INSERT INTO wg_peers
                 (id, server_id, name, public_key, preshared_key, allowed_ips,
-                 persistent_keepalive, endpoint, route_mode, allowed_subnets,
+                 persistent_keepalive, endpoint, role, route_mode, allowed_subnets,
                  description, enabled, created_at)
             VALUES
-                (@id, @sid, @name, @pub, @psk, @ips, @ka, @endpoint, @rmode, @subnets,
+                (@id, @sid, @name, @pub, @psk, @ips, @ka, @endpoint, @role, @rmode, @subnets,
                  @desc, @enabled, @created)";
         await using var cmd = new NpgsqlCommand(sql, conn);
         BindPeerParams(cmd, peer);
@@ -138,7 +138,8 @@ public sealed class WireGuardService : IWireGuardService
             UPDATE wg_peers SET
                 name = @name, public_key = @pub, preshared_key = @psk,
                 allowed_ips = @ips, persistent_keepalive = @ka,
-                endpoint = @endpoint, route_mode = @rmode, allowed_subnets = @subnets,
+                endpoint = @endpoint, role = @role, route_mode = @rmode,
+                allowed_subnets = @subnets,
                 description = @desc, enabled = @enabled
             WHERE id = @id";
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -167,6 +168,7 @@ public sealed class WireGuardService : IWireGuardService
         cmd.Parameters.AddWithValue("ips", p.AllowedIps);
         cmd.Parameters.AddWithValue("ka", (object?)p.PersistentKeepalive ?? DBNull.Value);
         cmd.Parameters.AddWithValue("endpoint", (object?)p.Endpoint ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("role", string.IsNullOrEmpty(p.Role) ? "client" : p.Role);
         cmd.Parameters.AddWithValue("rmode", string.IsNullOrEmpty(p.RouteMode) ? "full" : p.RouteMode);
         cmd.Parameters.AddWithValue("subnets", p.AllowedSubnets ?? Array.Empty<string>());
         cmd.Parameters.AddWithValue("desc", (object?)p.Description ?? DBNull.Value);
@@ -202,6 +204,7 @@ public sealed class WireGuardService : IWireGuardService
         AllowedIps          = r.IsDBNull(r.GetOrdinal("allowed_ips")) ? Array.Empty<string>() : (string[])r["allowed_ips"],
         PersistentKeepalive = r.IsDBNull(r.GetOrdinal("persistent_keepalive")) ? null : r.GetInt32(r.GetOrdinal("persistent_keepalive")),
         Endpoint            = r.IsDBNull(r.GetOrdinal("endpoint")) ? null : r.GetString(r.GetOrdinal("endpoint")),
+        Role                = r.IsDBNull(r.GetOrdinal("role")) ? "client" : r.GetString(r.GetOrdinal("role")),
         RouteMode           = r.IsDBNull(r.GetOrdinal("route_mode")) ? "full" : r.GetString(r.GetOrdinal("route_mode")),
         AllowedSubnets      = r.IsDBNull(r.GetOrdinal("allowed_subnets")) ? Array.Empty<string>() : (string[])r["allowed_subnets"],
         Description         = r.IsDBNull(r.GetOrdinal("description")) ? null : r.GetString(r.GetOrdinal("description")),

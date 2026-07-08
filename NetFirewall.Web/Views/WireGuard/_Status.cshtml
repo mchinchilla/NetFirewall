@@ -25,12 +25,12 @@
 }
 else if (Model.Status.Count == 0)
 {
-    @* No live peers at all. For an enabled client-mode tunnel this is itself an
-       outage (the interface is down or the upstream stopped responding — e.g. its
-       IP changed), so flag it red instead of the neutral grey "bring it up" hint. *@
-    var clientDown = Model.Server.Enabled
-                     && Model.Server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase);
-    if (clientDown)
+    @* No live peers at all. When an enabled upstream tunnel is configured this is
+       itself an outage (the interface is down or the upstream stopped responding —
+       e.g. its IP changed), so flag it red instead of the neutral grey hint. *@
+    var upstreamDown = Model.Server.Enabled
+                       && Model.Peers.Any(p => p.Enabled && string.Equals(p.Role, "upstream", StringComparison.OrdinalIgnoreCase));
+    if (upstreamDown)
     {
         <div class="flex items-start gap-3 rounded-lg p-4 my-2
                     bg-feedback-danger-bg text-feedback-danger-fg border border-feedback-danger-bd">

@@ -41,22 +41,7 @@ public sealed class WireGuardController : Controller
     {
         var server = await _wg.GetServerAsync(ct);
         ViewBag.Server = server;
-        if (server is null)
-        {
-            ViewBag.Form = new WgServerFormViewModel();
-        }
-        else
-        {
-            // In client mode the single peer represents the upstream server — surface
-            // its endpoint/allowed-ips on the server form for a coherent client view.
-            WgPeer? remote = null;
-            if (server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase))
-            {
-                var peers = await _wg.GetPeersAsync(server.Id, ct);
-                remote = peers.Count == 1 ? peers[0] : peers.FirstOrDefault(p => !string.IsNullOrEmpty(p.Endpoint));
-            }
-            ViewBag.Form = ToForm(server, remote);
-        }
+        ViewBag.Form = server is null ? new WgServerFormViewModel() : ToForm(server);
         return View();
     }
 
@@ -94,14 +79,6 @@ public sealed class WireGuardController : Controller
         if (!ModelState.IsValid)
             return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Form validation failed."));
 
-        var isClient = form.Mode.Equals("client", StringComparison.OrdinalIgnoreCase);
-
-        // Mode-specific validation the DataAnnotations can't express.
-        if (isClient && string.IsNullOrWhiteSpace(form.RemoteEndpoint))
-            return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Client mode requires the remote server endpoint (host:port)."));
-        if (!isClient && (form.ListenPort < 1 || form.ListenPort > 65535))
-            return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Server mode requires a valid UDP listen port (1-65535)."));
-
         try
         {
             var existing = await _wg.GetServerAsync(ct);
@@ -117,36 +94,27 @@ public sealed class WireGuardController : Controller
                 entity.PublicKey  = keys.Data.PublicKey;
             }
 
-            entity.Mode        = isClient ? "client" : "server";
+            // Table=off is not negotiable while an enabled upstream tunnel exists:
+            // wg-quick would otherwise install the 0.0.0.0/0 AllowedIPs route and
+            // hijack the firewall's own outbound from policy routing.
+            var hasUpstream = existing is not null
+                && (await _wg.GetPeersAsync(existing.Id, ct))
+                    .Any(p => p.Enabled && p.Role.Equals("upstream", StringComparison.OrdinalIgnoreCase));
+
+            // Mode is legacy (roles live on the peers now, migration 00036) — keep
+            // whatever the row already has so old readers stay coherent.
+            entity.Mode        = string.IsNullOrEmpty(entity.Mode) ? "server" : entity.Mode;
             entity.Name        = form.Name;
             entity.ListenPort  = form.ListenPort;
             entity.AddressCidr = form.AddressCidr;
             entity.Dns         = string.IsNullOrWhiteSpace(form.Dns) ? null : form.Dns.Trim();
             entity.Mtu         = form.Mtu;
-            // In client mode with policy routing, wg-quick must NOT manage routes —
-            // force Table=off so it doesn't fight the fwmark→table default route.
-            entity.TableOff    = isClient ? true : form.TableOff;
+            entity.TableOff    = hasUpstream || form.TableOff;
             entity.PostUp      = string.IsNullOrWhiteSpace(form.PostUp)   ? null : form.PostUp;
             entity.PostDown    = string.IsNullOrWhiteSpace(form.PostDown) ? null : form.PostDown;
             entity.Enabled     = form.Enabled;
 
             var saved = await _wg.SaveServerAsync(entity, ct);
-
-            // Client mode: keep the single "upstream server" peer's endpoint /
-            // allowed-ips / keepalive in sync with the server form (convenience —
-            // the operator still sets the remote PUBLIC KEY via the peer drawer).
-            if (isClient)
-            {
-                var peers = await _wg.GetPeersAsync(saved.Id, ct);
-                var remote = peers.Count == 1 ? peers[0] : peers.FirstOrDefault(p => !string.IsNullOrEmpty(p.Endpoint));
-                if (remote is not null)
-                {
-                    remote.Endpoint = form.RemoteEndpoint;
-                    remote.AllowedIps = ParseCidrs(form.ClientAllowedIpsRaw);
-                    remote.PersistentKeepalive = form.ClientKeepalive;
-                    await _wg.UpdatePeerAsync(remote, ct);
-                }
-            }
 
             // Phase C: when enabled, idempotently ensure the policy-routing scaffold
             // (interface + route table + mark + policy rule + default route). Adopts
@@ -257,20 +225,11 @@ public sealed class WireGuardController : Controller
         return this.ToHtmxResponse(envelope);
     }
 
-    private static string[] ParseCidrs(string? raw) =>
-        string.IsNullOrWhiteSpace(raw)
-            ? Array.Empty<string>()
-            : raw.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-    private static WgServerFormViewModel ToForm(WgServer s, WgPeer? remotePeer = null) => new()
+    private static WgServerFormViewModel ToForm(WgServer s) => new()
     {
-        Id = s.Id, Mode = s.Mode, Name = s.Name, ListenPort = s.ListenPort, AddressCidr = s.AddressCidr,
+        Id = s.Id, Name = s.Name, ListenPort = s.ListenPort, AddressCidr = s.AddressCidr,
         Dns = s.Dns, Mtu = s.Mtu, TableOff = s.TableOff,
         PostUp = s.PostUp, PostDown = s.PostDown, Enabled = s.Enabled,
         PrivateKey = s.PrivateKey, PublicKey = s.PublicKey,
-        // Client mode: surface the upstream server's endpoint + allowed-ips from its peer row.
-        RemoteEndpoint = remotePeer?.Endpoint,
-        ClientAllowedIpsRaw = remotePeer is not null ? string.Join(", ", remotePeer.AllowedIps) : "0.0.0.0/0",
-        ClientKeepalive = remotePeer?.PersistentKeepalive ?? 25,
     };
 }

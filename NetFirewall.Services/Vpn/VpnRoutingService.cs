@@ -231,8 +231,10 @@ public sealed class VpnRoutingService : IVpnRoutingService
 
     public async Task EnsurePeerForwardingAsync(WgServer server, WgPeer peer, CancellationToken ct = default)
     {
-        // Only server-mode tunnels host inbound peers that need NAT/forward.
-        if (server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase)) return;
+        // Upstream tunnels are peers WE dial — they get no inbound NAT/forward.
+        // Clients and site links need it regardless of the legacy server mode
+        // (a dual-role interface dials an upstream AND hosts inbound peers).
+        if (string.Equals(peer.Role, "upstream", StringComparison.OrdinalIgnoreCase)) return;
 
         var wg = await _fw.GetInterfaceByNameAsync(server.Name, ct);
         if (wg is null) return; // scaffold not built yet

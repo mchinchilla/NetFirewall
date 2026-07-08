@@ -47,6 +47,29 @@ public class WireGuardConfigServiceTests
     }
 
     [Fact]
+    public void ServerConfig_ListenPortZero_Omitted()
+    {
+        var s = Server();
+        s.ListenPort = 0;   // dial-only interface — kernel picks an ephemeral port
+        var cfg = _svc.GenerateServerConfig(s, Array.Empty<WgPeer>());
+
+        Assert.DoesNotContain("ListenPort", cfg);
+    }
+
+    [Fact]
+    public void ServerConfig_ListenPortEmitted_RegardlessOfLegacyClientMode()
+    {
+        // A dual-role interface (dials an upstream AND accepts inbound clients)
+        // must keep listening even if the legacy mode column says 'client' —
+        // omitting ListenPort here silently broke inbound clients on re-apply.
+        var s = Server();
+        s.Mode = "client";
+        var cfg = _svc.GenerateServerConfig(s, Array.Empty<WgPeer>());
+
+        Assert.Contains("ListenPort = 51820", cfg);
+    }
+
+    [Fact]
     public void ServerConfig_NoPostUpDown_OmitsLines()
     {
         var s = Server();

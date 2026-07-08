@@ -49,24 +49,20 @@ public static class WgPeerHealthEvaluator
 
     /// <summary>
     /// Whether this peer is expected to stay connected — i.e. a stale handshake
-    /// is an outage rather than a laptop that went to sleep. True when:
-    /// <list type="bullet">
-    /// <item>we dial the peer (<c>Endpoint</c> set — the upstream in client
-    /// mode, where it's required, or a site-to-site remote in server mode), or</item>
-    /// <item>the peer is a site-to-site link (<c>route_mode = 'site'</c>),
-    /// expected up regardless of which side dials.</item>
-    /// </list>
-    /// Deliberately NOT a signal: <c>PersistentKeepalive</c>. The peer form
-    /// defaults it to 25 for every road-warrior client (it flows into the
-    /// exported client config), so keepalive says nothing about whether the
-    /// remote is supposed to be always-on.
+    /// is an outage rather than a laptop that went to sleep. Decided by the
+    /// peer's explicit <see cref="WgPeer.Role"/> (migration 00036): 'upstream'
+    /// and 'site' links are always-on by definition; 'client' road-warriors may
+    /// be offline whenever they like.
+    /// Deliberately NOT signals: <c>PersistentKeepalive</c> (the peer form
+    /// defaults it to 25 for every road-warrior — it flows into the exported
+    /// client config and says nothing about the remote being always-on) and
+    /// <c>Endpoint</c> (operators mis-fill it on client peers).
     /// </summary>
     public static bool ExpectedLive(WgPeer? peer)
     {
         if (peer is null || !peer.Enabled) return false;
-        var dialsOut = !string.IsNullOrWhiteSpace(peer.Endpoint);
-        var siteToSite = string.Equals(peer.RouteMode, "site", StringComparison.OrdinalIgnoreCase);
-        return dialsOut || siteToSite;
+        return string.Equals(peer.Role, "upstream", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(peer.Role, "site", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <param name="peer">The catalog row, or null when wg reports a pubkey we

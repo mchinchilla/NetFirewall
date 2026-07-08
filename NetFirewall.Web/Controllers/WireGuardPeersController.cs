@@ -41,32 +41,42 @@ public sealed class WireGuardPeersController : Controller
         _logger = logger;
     }
 
+    private static bool IsTunnelRole(string role) =>
+        role.Equals("upstream", StringComparison.OrdinalIgnoreCase)
+        || role.Equals("site", StringComparison.OrdinalIgnoreCase);
+
     [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
+    public async Task<IActionResult> Table(string family = "clients", CancellationToken ct = default)
     {
+        var tunnels = string.Equals(family, "tunnels", StringComparison.OrdinalIgnoreCase);
         var server = await _wg.GetServerAsync(ct);
-        if (server is null) return PartialView("_PeersTable", Array.Empty<WgPeer>());
-        // Stash mode so the table can relabel itself (client mode = "remote server",
-        // server mode = "peers") and show the per-peer access column where relevant.
-        ViewData["wg.mode"] = server.Mode;
-        var peers = await _wg.GetPeersAsync(server.Id, ct);
-        return PartialView("_PeersTable", peers);
+        var peers = server is null
+            ? (IReadOnlyList<WgPeer>)Array.Empty<WgPeer>()
+            : await _wg.GetPeersAsync(server.Id, ct);
+        return PartialView("_PeersTable", new WgPeerTableViewModel
+        {
+            Family = tunnels ? "tunnels" : "clients",
+            Peers = peers.Where(p => IsTunnelRole(p.Role) == tunnels).ToArray(),
+        });
     }
 
     [HttpGet("edit/{id:guid?}")]
-    public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
+    public async Task<IActionResult> Edit(Guid? id, string? family, CancellationToken ct)
     {
         var server = await _wg.GetServerAsync(ct);
         if (server is null) return NotFound();
 
         if (id is null)
         {
-            // Suggest the next .X address inside the server's subnet.
+            var tunnel = string.Equals(family, "tunnels", StringComparison.OrdinalIgnoreCase);
+            // Clients get the next free .X/32 inside the tunnel subnet; upstream
+            // tunnels default to routing everything into the tunnel.
             var suggested = SuggestNextPeerCidr(server, await _wg.GetPeersAsync(server.Id, ct));
             return PartialView("_PeerForm", new WgPeerFormViewModel
             {
                 ServerId = server.Id,
-                AllowedIpsRaw = suggested,
+                Role = tunnel ? "upstream" : "client",
+                AllowedIpsRaw = tunnel ? "0.0.0.0/0" : suggested,
                 PersistentKeepalive = 25,
             });
         }
@@ -92,29 +102,57 @@ public sealed class WireGuardPeersController : Controller
             if (allowedIps.Length == 0)
                 return this.ToHtmxResponse(ServiceResponse<object>.Fail("Allowed IPs cannot be empty."));
 
+            var isTunnel = IsTunnelRole(form.Role);
+
+            // Guards the DataAnnotations can't express. Tunnels use the REMOTE
+            // side's pasted public key — generating a keypair here (the old
+            // single-form behavior) stored OUR fresh pubkey as if it were the
+            // remote's, which could never handshake.
+            if (isTunnel && string.IsNullOrWhiteSpace(form.PublicKey))
+                return this.ToHtmxResponse(ServiceResponse<object>.Fail("Tunnels need the remote side's public key."));
+            if (form.Role.Equals("upstream", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(form.Endpoint))
+                return this.ToHtmxResponse(ServiceResponse<object>.Fail("Upstream tunnels need the remote endpoint (host:port)."));
+
+            // Role-derived shape: tunnels carry endpoint + pasted key and pin
+            // route_mode ('site' drives the remote-LAN forwarding; upstream gets
+            // none); clients never carry an endpoint and pick their access intent.
+            var peerEndpoint = isTunnel && !string.IsNullOrWhiteSpace(form.Endpoint) ? form.Endpoint.Trim() : null;
+            var routeMode = form.Role.ToLowerInvariant() switch
+            {
+                "site"     => "site",
+                "upstream" => "full",
+                _          => form.RouteMode is "full" or "split" or "restricted" ? form.RouteMode : "full",
+            };
+
             var isNew = !form.Id.HasValue;
             string? clientPrivateKey = null;
             WgPeer entity;
 
             if (isNew)
             {
-                // Generate the peer's keypair on the daemon. Server stores PUBLIC,
-                // we hand the private back to the operator ONCE in the response.
-                var keys = await _daemon.GenerateWireGuardKeyPairAsync(ct);
-                if (!keys.Success || keys.Data is null)
-                    return this.ToHtmxResponse(ServiceResponse<object>.Fail($"Key gen failed: {keys.Message}"));
-                clientPrivateKey = keys.Data.PrivateKey;
+                var publicKey = form.PublicKey?.Trim();
+                if (!isTunnel)
+                {
+                    // Client peers: generate the keypair on the daemon. Server stores
+                    // PUBLIC, we hand the private back to the operator ONCE.
+                    var keys = await _daemon.GenerateWireGuardKeyPairAsync(ct);
+                    if (!keys.Success || keys.Data is null)
+                        return this.ToHtmxResponse(ServiceResponse<object>.Fail($"Key gen failed: {keys.Message}"));
+                    clientPrivateKey = keys.Data.PrivateKey;
+                    publicKey = keys.Data.PublicKey;
+                }
 
                 entity = new WgPeer
                 {
                     ServerId = server.Id,
                     Name = form.Name,
-                    PublicKey = keys.Data.PublicKey,
+                    PublicKey = publicKey!,
                     PresharedKey = string.IsNullOrEmpty(form.PresharedKey) ? null : form.PresharedKey,
                     AllowedIps = allowedIps,
                     PersistentKeepalive = form.PersistentKeepalive is > 0 ? form.PersistentKeepalive : null,
-                    Endpoint = string.IsNullOrWhiteSpace(form.Endpoint) ? null : form.Endpoint.Trim(),
-                    RouteMode = string.IsNullOrWhiteSpace(form.RouteMode) ? "full" : form.RouteMode,
+                    Endpoint = peerEndpoint,
+                    Role = isTunnel ? form.Role.ToLowerInvariant() : "client",
+                    RouteMode = routeMode,
                     AllowedSubnets = ParseList(form.AllowedSubnetsRaw),
                     Description = form.Description,
                     Enabled = form.Enabled
@@ -129,21 +167,23 @@ public sealed class WireGuardPeersController : Controller
                 entity.PresharedKey = string.IsNullOrEmpty(form.PresharedKey) ? null : form.PresharedKey;
                 entity.AllowedIps = allowedIps;
                 entity.PersistentKeepalive = form.PersistentKeepalive is > 0 ? form.PersistentKeepalive : null;
-                entity.Endpoint = string.IsNullOrWhiteSpace(form.Endpoint) ? null : form.Endpoint.Trim();
-                entity.RouteMode = string.IsNullOrWhiteSpace(form.RouteMode) ? "full" : form.RouteMode;
+                entity.Endpoint = peerEndpoint;
+                entity.Role = isTunnel ? form.Role.ToLowerInvariant() : "client";
+                entity.RouteMode = routeMode;
                 entity.AllowedSubnets = ParseList(form.AllowedSubnetsRaw);
                 entity.Description = form.Description;
                 entity.Enabled = form.Enabled;
+                // Tunnels may re-paste the remote key (remote rotated); client keys
+                // stay daemon-generated and are never edited from the form.
+                if (isTunnel) entity.PublicKey = form.PublicKey!.Trim();
                 await _wg.UpdatePeerAsync(entity, ct);
             }
 
-            // Phase D: ensure NAT/forward for this peer's intent (server mode only;
-            // the service no-ops in client mode). Best-effort — non-fatal.
-            if (server.Mode.Equals("server", StringComparison.OrdinalIgnoreCase))
-            {
-                try { await _vpnRouting.EnsurePeerForwardingAsync(server, entity, ct); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Peer forwarding ensure failed (non-fatal)"); }
-            }
+            // Phase D: ensure NAT/forward for this peer's intent. The service
+            // skips upstream tunnels itself — clients and site links need it even
+            // on a dual-role interface. Best-effort — non-fatal.
+            try { await _vpnRouting.EnsurePeerForwardingAsync(server, entity, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Peer forwarding ensure failed (non-fatal)"); }
 
             Response.Headers["HX-Trigger"] = "refreshWireGuardPeers";
 
@@ -173,7 +213,8 @@ public sealed class WireGuardPeersController : Controller
                 });
             }
 
-            var envelope = ServiceResponse<object>.Ok(new { entity.Id }, $"Peer '{entity.Name}' saved.");
+            var envelope = ServiceResponse<object>.Ok(new { entity.Id },
+                $"{(isTunnel ? "Tunnel" : "Client")} '{entity.Name}' saved.");
             this.AttachToastTrigger(envelope);
             return Json(envelope);
         }
@@ -281,9 +322,11 @@ public sealed class WireGuardPeersController : Controller
     private static WgPeerFormViewModel FromEntity(WgPeer p) => new()
     {
         Id = p.Id, ServerId = p.ServerId, Name = p.Name,
+        Role = string.IsNullOrEmpty(p.Role) ? "client" : p.Role,
         AllowedIpsRaw = string.Join(", ", p.AllowedIps),
         PersistentKeepalive = p.PersistentKeepalive,
         Endpoint = p.Endpoint,
+        PublicKey = IsTunnelRole(p.Role) ? p.PublicKey : null,
         RouteMode = string.IsNullOrEmpty(p.RouteMode) ? "full" : p.RouteMode,
         AllowedSubnetsRaw = p.AllowedSubnets is { Length: > 0 } ? string.Join(", ", p.AllowedSubnets) : null,
         Description = p.Description, Enabled = p.Enabled,

@@ -1,23 +1,107 @@
 @model NetFirewall.Web.Models.Vpn.WgPeerFormViewModel
 @using NetFirewall.Web.Models
+@{
+    // Two form variants share the drawer: 'client' (road-warrior — keys generated
+    // on-device, no endpoint) and tunnels ('upstream'/'site' — paste the REMOTE
+    // side's public key, endpoint where we dial). Which one renders is decided by
+    // the Role the controller seeded (Add client vs Add tunnel), never by the user
+    // mid-form: moving a peer between families is a delete + re-create.
+    var isTunnel = Model.Role is "upstream" or "site";
+}
 
 <form id="wg-peer-form" hx-post="/Vpn/WireGuard/Peers/save" hx-target="this" hx-swap="outerHTML">
     @Html.AntiForgeryToken()
     <input type="hidden" name="ServerId" value="@Model.ServerId" />
     @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
+    @if (!isTunnel) { <input type="hidden" name="Role" value="client" /> }
 
     <div class="space-y-4">
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-            Name = nameof(Model.Name), Label = "Peer name", Required = true, Value = Model.Name,
-            Placeholder = "Marvin's iPhone"
+            Name = nameof(Model.Name), Label = isTunnel ? "Tunnel name" : "Peer name", Required = true, Value = Model.Name,
+            Placeholder = isTunnel ? "vps-frankfurt" : "Marvin's iPhone"
         })
 
-        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-            Name = nameof(Model.AllowedIpsRaw), Label = "Allowed IPs (server-side)", Required = true,
-            Value = Model.AllowedIpsRaw,
-            Help = "Comma-separated CIDRs the server will route TO this peer (typically just one /32, e.g. 10.10.0.5/32).",
-            Placeholder = "10.10.0.5/32"
-        })
+        @if (isTunnel)
+        {
+            <div x-data="{ role: '@Model.Role' }">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.Role), Label = "Tunnel type", Kind = FormFieldKind.Select,
+                    Value = Model.Role, AlpineModel = "role",
+                    Options = new[] {
+                        new FormFieldViewModel.SelectOption("upstream", "Upstream — this firewall dials a remote VPN server"),
+                        new FormFieldViewModel.SelectOption("site", "Site-to-site — link to another site's LAN"),
+                    },
+                    Help = "Both are expected to stay connected and are health-monitored (alerts fire when the handshake goes stale)."
+                })
+
+                <div class="mt-3">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                        Name = nameof(Model.PublicKey), Label = "Remote public key", Required = true,
+                        Value = Model.PublicKey, Placeholder = "base64, 44 chars — from the remote side",
+                        Pattern = "^[A-Za-z0-9+/]{42,44}={0,2}$",
+                        Help = "The REMOTE side's public key. This firewall's own key is the interface key shown on this page — no keypair is generated for tunnels."
+                    })
+                </div>
+
+                <div class="mt-3">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                        Name = nameof(Model.Endpoint), Label = "Remote endpoint (host:port)",
+                        Value = Model.Endpoint, Placeholder = "vpn.example.com:51820",
+                        Pattern = @"^[^\s:]+:\d{1,5}$",
+                        AlpineExtra = ":required=\"role === 'upstream'\"",
+                        Help = "Where this firewall dials out. Required for upstream; optional for site-to-site (leave empty when the remote side dials us)."
+                    })
+                </div>
+
+                <div class="mt-3">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                        Name = nameof(Model.AllowedIpsRaw), Label = "Route into tunnel (AllowedIPs)", Required = true,
+                        Value = Model.AllowedIpsRaw,
+                        Help = "Upstream: what to send through the tunnel — 0.0.0.0/0 lets marked LAN devices egress via the VPN. Site-to-site: the remote LAN CIDRs.",
+                        Placeholder = "0.0.0.0/0"
+                    })
+                </div>
+
+                <div x-show="role === 'site'" x-cloak class="mt-3">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                        Name = nameof(Model.AllowedSubnetsRaw), Label = "Remote LAN subnets (comma-separated)", Kind = FormFieldKind.Textarea,
+                        Value = Model.AllowedSubnetsRaw, Placeholder = "192.168.99.0/24",
+                        Help = "Drives the auto-generated forward rules so your LAN can reach the remote site."
+                    })
+                </div>
+            </div>
+        }
+        else
+        {
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.AllowedIpsRaw), Label = "Allowed IPs (server-side)", Required = true,
+                Value = Model.AllowedIpsRaw,
+                Help = "Comma-separated CIDRs the firewall will route TO this client (typically just one /32, e.g. 10.10.0.5/32).",
+                Placeholder = "10.10.0.5/32"
+            })
+
+            @* Access intent. Drives the generated NAT/forward + the exported
+               client config's AllowedIPs. *@
+            <div x-data="{ rmode: '@Model.RouteMode' }">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.RouteMode), Label = "Access (what this client can reach)", Kind = FormFieldKind.Select,
+                    Value = Model.RouteMode, AlpineModel = "rmode",
+                    Options = new[] {
+                        new FormFieldViewModel.SelectOption("full", "Full tunnel — LAN + internet via firewall"),
+                        new FormFieldViewModel.SelectOption("split", "Split tunnel — LAN only"),
+                        new FormFieldViewModel.SelectOption("restricted", "Restricted — only specific subnets/hosts"),
+                    },
+                    Help = "Full = client routes everything through the firewall. Restricted needs the subnets below."
+                })
+                <div x-show="rmode === 'restricted' || rmode === 'split'" x-cloak class="mt-3">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                        Name = nameof(Model.AllowedSubnetsRaw), Label = "Subnets (comma-separated)", Kind = FormFieldKind.Textarea,
+                        Value = Model.AllowedSubnetsRaw, Placeholder = "192.168.99.0/24, 192.168.3.5/32",
+                        Help = "For restricted: the LAN targets. For split: optional override of the auto-detected LAN subnets."
+                    })
+                </div>
+            </div>
+        }
 
         <div class="grid grid-cols-2 gap-3">
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
@@ -32,51 +116,24 @@
         </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-            Name = nameof(Model.Endpoint), Label = "Endpoint (optional)", Value = Model.Endpoint,
-            Placeholder = "remote.example:51820",
-            Help = "host:port of the remote side. Required when this firewall is in CLIENT mode (the peer is the upstream server); leave empty for inbound road-warrior peers."
-        })
-
-        @* Per-peer routing intent (server mode). Drives the generated NAT/forward +
-           the exported client config's AllowedIPs. *@
-        <div x-data="{ rmode: '@Model.RouteMode' }">
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                Name = nameof(Model.RouteMode), Label = "Access (what this peer can reach)", Kind = FormFieldKind.Select,
-                Value = Model.RouteMode, AlpineModel = "rmode",
-                Options = new[] {
-                    new FormFieldViewModel.SelectOption("full", "Full tunnel — LAN + internet via firewall"),
-                    new FormFieldViewModel.SelectOption("split", "Split tunnel — LAN only"),
-                    new FormFieldViewModel.SelectOption("restricted", "Restricted — only specific subnets/hosts"),
-                    new FormFieldViewModel.SelectOption("site", "Site-to-site — remote LAN behind this peer"),
-                },
-                Help = "Full = client routes everything through the firewall. Restricted/Site need the subnets below."
-            })
-            <div x-show="rmode === 'restricted' || rmode === 'site' || rmode === 'split'" x-cloak class="mt-3">
-                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                    Name = nameof(Model.AllowedSubnetsRaw), Label = "Subnets (comma-separated)", Kind = FormFieldKind.Textarea,
-                    Value = Model.AllowedSubnetsRaw, Placeholder = "192.168.99.0/24, 192.168.3.5/32",
-                    Help = "For restricted/site: the LAN targets. For split: optional override of the auto-detected LAN subnets."
-                })
-            </div>
-        </div>
-
-        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
             Value = Model.Description
         })
 
-        @if (Model.Id.HasValue)
+        @if (isTunnel || Model.Id.HasValue)
         {
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = nameof(Model.PresharedKey), Label = "Preshared key (optional)", Value = Model.PresharedKey,
-                Help = "Edit-only field. New peers don't get one unless you paste it here. Leave empty for no PSK."
+                Help = isTunnel
+                    ? "Must match the remote side's PSK if it uses one. Leave empty for no PSK."
+                    : "Edit-only field. New clients don't get one unless you paste it here. Leave empty for no PSK."
             })
         }
         else
         {
             <div class="rounded-md border-l-2 px-3 py-2 text-xs"
                  style="background-color: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--surface-fg); border-color: var(--accent);">
-                <p class="font-semibold mb-0.5">First-time peer creation</p>
+                <p class="font-semibold mb-0.5">First-time client creation</p>
                 <p>The daemon will generate a fresh keypair on save. The PRIVATE key is shown <span class="font-medium">once</span> in the next view — copy it or scan the QR before closing the drawer.</p>
             </div>
         }
@@ -84,6 +141,6 @@
 
     <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create peer")</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : (isTunnel ? "Create tunnel" : "Create client"))</button>
     </div>
 </form>

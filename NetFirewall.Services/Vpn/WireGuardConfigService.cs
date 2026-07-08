@@ -7,18 +7,17 @@ public sealed class WireGuardConfigService : IWireGuardConfigService
 {
     public string GenerateServerConfig(WgServer server, IReadOnlyList<WgPeer> peers)
     {
-        var isClient = server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase);
-
         var sb = new StringBuilder();
-        sb.AppendLine($"# NetFirewall WireGuard {(isClient ? "client" : "server")} config");
+        sb.AppendLine("# NetFirewall WireGuard config");
         sb.AppendLine($"# Generated: {DateTime.UtcNow:O}");
         sb.AppendLine();
         sb.AppendLine("[Interface]");
         sb.AppendLine($"PrivateKey = {server.PrivateKey}");
         sb.AppendLine($"Address    = {server.AddressCidr}");
-        // ListenPort only in server mode. In client mode we initiate, so the
-        // kernel picks an ephemeral source port.
-        if (!isClient && server.ListenPort > 0)
+        // ListenPort whenever configured — one interface can dial an upstream
+        // AND accept inbound clients at once, so this must not depend on the
+        // legacy server-level mode. 0 = dial-only, kernel picks an ephemeral port.
+        if (server.ListenPort > 0)
             sb.AppendLine($"ListenPort = {server.ListenPort}");
         if (!string.IsNullOrWhiteSpace(server.Dns))
             sb.AppendLine($"DNS        = {server.Dns}");

@@ -106,6 +106,7 @@ public sealed class WireGuardImporter : IWireGuardImporter
             peer.AllowedIps          = parsedPeer.AllowedIPs;
             peer.PersistentKeepalive = parsedPeer.PersistentKeepalive;
             peer.Endpoint            = parsedPeer.Endpoint;
+            peer.Role                = InferRole(parsedPeer);
             peer.Enabled             = true;
 
             if (peer.Id == Guid.Empty)
@@ -129,6 +130,19 @@ public sealed class WireGuardImporter : IWireGuardImporter
             interfaceName, path, mode, imported.Count);
 
         return new WireGuardImportResult(server, imported, mode, path);
+    }
+
+    /// <summary>
+    /// Same inference as migration 00036's backfill: a peer we dial (Endpoint)
+    /// that routes everything is the upstream; a dialed peer with narrower
+    /// AllowedIPs is a site-to-site remote; endpoint-less peers are inbound
+    /// clients. The operator can reclassify in the UI afterwards.
+    /// </summary>
+    private static string InferRole(PeerSection p)
+    {
+        if (string.IsNullOrEmpty(p.Endpoint)) return "client";
+        var routesEverything = p.AllowedIPs.Any(ip => ip is "0.0.0.0/0" or "::/0");
+        return routesEverything ? "upstream" : "site";
     }
 
     // ─────────────────────────────────── parser
