@@ -1,0 +1,99 @@
+@model NetFirewall.Models.Vpn.WgTeardownImpact
+@{
+    var hasScaffold = Model.HasInterfaceRow || Model.HasRouteTable || Model.HasPolicyRule
+                      || Model.TrafficMarkCount > 0 || Model.StaticRouteCount > 0;
+}
+
+<div x-data="{ typed: '' }" class="space-y-4">
+    <div class="flex items-start gap-3 rounded-lg p-3
+                bg-feedback-danger-bg text-feedback-danger-fg border border-feedback-danger-bd">
+        <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
+        </svg>
+        <p class="text-sm">
+            This deletes <span class="font-semibold">@Model.InterfaceName</span> and everything built on it.
+            The live interface is stopped first; the on-disk
+            <code>/etc/wireguard/@(Model.InterfaceName).conf</code> is <span class="font-medium">left in place</span>
+            so you can re-import it later.
+        </p>
+    </div>
+
+    <div class="text-sm space-y-2">
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">What will be removed</p>
+        <ul class="space-y-1.5 list-disc pl-5">
+            @if (Model.TunnelNames.Length > 0)
+            {
+                <li><span class="font-medium">@Model.TunnelNames.Length tunnel(s)</span>
+                    (@string.Join(", ", Model.TunnelNames)) — traffic routed through them stops flowing.</li>
+            }
+            @if (Model.ClientNames.Length > 0)
+            {
+                <li><span class="font-medium">@Model.ClientNames.Length VPN client(s)</span>
+                    (@string.Join(", ", Model.ClientNames)) — their configs stop working permanently;
+                    private keys can't be recovered.</li>
+            }
+            @if (Model.AutoNatRuleCount + Model.AutoForwardRuleCount + Model.EgressMangleRuleCount > 0)
+            {
+                <li><span class="font-medium">@(Model.AutoNatRuleCount + Model.AutoForwardRuleCount + Model.EgressMangleRuleCount)
+                    auto-generated firewall rules</span> (@Model.AutoNatRuleCount NAT,
+                    @Model.AutoForwardRuleCount forward, @Model.EgressMangleRuleCount egress mangle) — deleted.</li>
+            }
+            @if (Model.EgressSources.Length > 0)
+            {
+                <li><span class="font-medium">@Model.EgressSources.Length egress source(s)</span>
+                    (@string.Join(", ", Model.EgressSources)) — these devices fall back to the normal WAN(s).</li>
+            }
+            @if (hasScaffold)
+            {
+                <li><span class="font-medium">Policy-routing scaffold</span> — @(
+                    string.Join(", ", new[] {
+                        Model.HasPolicyRule ? "fwmark rule" : null,
+                        Model.TrafficMarkCount > 0 ? $"{Model.TrafficMarkCount} traffic mark(s)" : null,
+                        Model.StaticRouteCount > 0 ? $"{Model.StaticRouteCount} route(s)" : null,
+                        Model.HasRouteTable ? $"table '{Model.InterfaceName}'" : null,
+                        Model.HasInterfaceRow ? "interface row" : null,
+                    }.Where(s => s is not null))) — removed.</li>
+            }
+            @if (Model.ActiveAlertCount > 0)
+            {
+                <li><span class="font-medium">@Model.ActiveAlertCount active VPN alert(s)</span> — resolved.</li>
+            }
+        </ul>
+    </div>
+
+    @if (Model.OrphanedRules.Length > 0)
+    {
+        <div class="rounded-md border-l-2 px-3 py-2 text-xs space-y-1"
+             style="background-color: var(--feedback-warning-bg); color: var(--feedback-warning-fg); border-color: var(--feedback-warning-bd);">
+            <p class="font-semibold">@Model.OrphanedRules.Length hand-made rule(s) reference @Model.InterfaceName</p>
+            <p>They will be <span class="font-medium">disabled, not deleted</span> — left enabled without their
+               interface they would silently match more traffic than you intended. Review them afterwards
+               (tagged “[orphaned: interface '@Model.InterfaceName' deleted]”):</p>
+            <ul class="list-disc pl-5">
+                @foreach (var r in Model.OrphanedRules)
+                {
+                    <li><span class="font-mono">@r.Kind</span> — @r.Name</li>
+                }
+            </ul>
+        </div>
+    }
+
+    <form hx-post="/Vpn/WireGuard/delete" hx-swap="none" class="space-y-3 pt-2 border-t border-surface-border">
+        @Html.AntiForgeryToken()
+        <div class="space-y-1.5">
+            <label for="f-ConfirmName" class="block text-xs font-medium text-surface-fg">
+                Type <span class="font-mono font-semibold">@Model.InterfaceName</span> to confirm
+            </label>
+            <input id="f-ConfirmName" name="ConfirmName" type="text" class="input font-mono"
+                   autocomplete="off" spellcheck="false" placeholder="@Model.InterfaceName"
+                   x-model="typed" />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+            <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+            <button type="submit" class="btn btn-danger"
+                    :disabled="typed !== '@Model.InterfaceName'">
+                Delete @Model.InterfaceName
+            </button>
+        </div>
+    </form>
+</div>

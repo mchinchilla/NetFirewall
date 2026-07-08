@@ -121,8 +121,20 @@ public sealed class WireGuardPeersController : Controller
             {
                 "site"     => "site",
                 "upstream" => "full",
-                _          => form.RouteMode is "full" or "split" or "restricted" ? form.RouteMode : "full",
+                // Client LAN axis: split (whole LAN) / restricted / none. Legacy
+                // 'full' posts collapse to split — internet moved to its own
+                // flag (migration 00037).
+                _          => form.RouteMode switch
+                {
+                    "restricted" => "restricted",
+                    "none"       => "none",
+                    _            => "split",
+                },
             };
+            var allowInternet = !isTunnel && form.AllowInternet;
+            if (!isTunnel && routeMode == "none" && !allowInternet)
+                return this.ToHtmxResponse(ServiceResponse<object>.Fail(
+                    "This client would have access to nothing — give it LAN access, internet access, or both."));
 
             var isNew = !form.Id.HasValue;
             string? clientPrivateKey = null;
@@ -153,6 +165,7 @@ public sealed class WireGuardPeersController : Controller
                     Endpoint = peerEndpoint,
                     Role = isTunnel ? form.Role.ToLowerInvariant() : "client",
                     RouteMode = routeMode,
+                    AllowInternet = allowInternet,
                     AllowedSubnets = ParseList(form.AllowedSubnetsRaw),
                     Description = form.Description,
                     Enabled = form.Enabled
@@ -170,6 +183,7 @@ public sealed class WireGuardPeersController : Controller
                 entity.Endpoint = peerEndpoint;
                 entity.Role = isTunnel ? form.Role.ToLowerInvariant() : "client";
                 entity.RouteMode = routeMode;
+                entity.AllowInternet = allowInternet;
                 entity.AllowedSubnets = ParseList(form.AllowedSubnetsRaw);
                 entity.Description = form.Description;
                 entity.Enabled = form.Enabled;
@@ -251,18 +265,19 @@ public sealed class WireGuardPeersController : Controller
             ? Array.Empty<string>()
             : raw.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    /// <summary>Client-side AllowedIPs from the peer's intent: full → 0.0.0.0/0;
-    /// split → the firewall's LAN subnets; restricted/site → the peer's AllowedSubnets
-    /// (fallback to LAN subnets if none given).</summary>
+    /// <summary>Client-side AllowedIPs (what the device routes into the tunnel).
+    /// Internet access ⇒ 0.0.0.0/0 — the firewall's per-peer saddr rules do the
+    /// LAN fine-cut. Otherwise: restricted → the peer's AllowedSubnets; split
+    /// (or legacy full / restricted with no subnets) → the firewall's LAN subnets.</summary>
     private async Task<IReadOnlyList<string>> ComputeClientAllowedIpsAsync(WgPeer peer, CancellationToken ct)
     {
-        var mode = (peer.RouteMode ?? "full").ToLowerInvariant();
-        if (mode == "full") return new[] { "0.0.0.0/0" };
+        if (peer.AllowInternet) return new[] { "0.0.0.0/0" };
 
-        if (mode is "restricted" or "site" && peer.AllowedSubnets is { Length: > 0 })
+        var mode = (peer.RouteMode ?? "split").ToLowerInvariant();
+        if (mode == "restricted" && peer.AllowedSubnets is { Length: > 0 })
             return peer.AllowedSubnets;
 
-        // split (or restricted/site with no explicit subnets) → the LAN subnets.
+        // split / legacy full (or restricted with no explicit subnets) → LAN subnets.
         var lanSubnets = (await _fw.GetInterfacesAsync(ct))
             .Where(i => i.Type == "LAN" && i.Enabled && i.IpAddress is not null && i.SubnetMask is not null)
             .Select(i => ToCidr(i.IpAddress!, i.SubnetMask!))
@@ -327,7 +342,9 @@ public sealed class WireGuardPeersController : Controller
         PersistentKeepalive = p.PersistentKeepalive,
         Endpoint = p.Endpoint,
         PublicKey = IsTunnelRole(p.Role) ? p.PublicKey : null,
-        RouteMode = string.IsNullOrEmpty(p.RouteMode) ? "full" : p.RouteMode,
+        // Legacy 'full' rows display as split — internet is its own flag now.
+        RouteMode = p.RouteMode is null or "" or "full" ? "split" : p.RouteMode,
+        AllowInternet = p.AllowInternet,
         AllowedSubnetsRaw = p.AllowedSubnets is { Length: > 0 } ? string.Join(", ", p.AllowedSubnets) : null,
         Description = p.Description, Enabled = p.Enabled,
         PresharedKey = p.PresharedKey

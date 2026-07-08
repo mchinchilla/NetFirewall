@@ -537,6 +537,14 @@
         background-color: transparent;
     }
     .btn-ghost:hover { background-color: var(--surface-muted); }
+    /* Destructive primary action (delete interface, purge, …). Disabled state
+       stays visible but clearly inert — type-to-confirm gates rely on it. */
+    .btn-danger {
+        background-color: var(--feedback-danger-btn-bg);
+        color: var(--feedback-danger-btn-fg);
+    }
+    .btn-danger:hover { filter: brightness(1.08); }
+    .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
 
     .nav-link {
         @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium

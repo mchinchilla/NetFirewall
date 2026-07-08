@@ -134,4 +134,20 @@ public sealed class PolicyRoutingService : IPolicyRoutingService
             if (!used.Contains(id)) return id;
         throw new InvalidOperationException("No free route-table id in [200,252].");
     }
+
+    public async Task<bool> DeletePolicyRuleAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("DELETE FROM fw_policy_rules WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    public async Task<bool> DeleteRouteTableAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("DELETE FROM fw_route_tables WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
 }

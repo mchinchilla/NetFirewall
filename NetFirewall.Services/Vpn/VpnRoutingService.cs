@@ -239,33 +239,49 @@ public sealed class VpnRoutingService : IVpnRoutingService
         var wg = await _fw.GetInterfaceByNameAsync(server.Name, ct);
         if (wg is null) return; // scaffold not built yet
 
+        // Reconcile, not just add: access may have been NARROWED (full → restricted,
+        // internet revoked, LAN dropped) — the peer's previous [vpn-auto] rows must
+        // go or the old, wider rule keeps granting the old access.
+        await RemovePeerForwardingAsync(server, peer, ct);
+
         var lanIfaces = (await _fw.GetInterfacesAsync(ct)).Where(i => i.Type == "LAN" && i.Enabled).ToList();
         var wanIfaces = (await _fw.GetInterfacesAsync(ct)).Where(i => i.Type == "WAN" && i.Enabled).ToList();
         var mode = (peer.RouteMode ?? "full").ToLowerInvariant();
         var tag = $"{AutoTag} peer {peer.Id}";
 
+        // Every rule is scoped to the peer's OWN tunnel IPs (saddr). WireGuard's
+        // crypto-key routing guarantees a peer can't source-spoof outside its
+        // AllowedIps, so this is real per-peer enforcement — without it, one
+        // permissive client's wg→LAN rule covers every other client's traffic.
+        var src = peer.AllowedIps is { Length: > 0 } ? peer.AllowedIps : null;
+
         var existingNat = await _fw.GetNatRulesAsync(ct);
         var existingFilter = await _fw.GetFilterRulesAsync("forward", ct);
 
-        // FORWARD: wg0 → LAN (+ return), scoped by intent.
-        foreach (var lan in lanIfaces)
+        // LAN axis: FORWARD wg0 → LAN (return path rides conntrack), scoped by intent.
+        if (mode != "none")
         {
-            var dest = mode switch
+            foreach (var lan in lanIfaces)
             {
-                "restricted" or "split" or "site" when peer.AllowedSubnets is { Length: > 0 } => peer.AllowedSubnets,
-                _ => null, // full → no dest restriction (whole LAN)
-            };
-            await EnsureForwardRuleAsync(existingFilter, wg.Id, lan.Id, dest, tag + $" wg→{lan.Name}", ct);
+                var dest = mode switch
+                {
+                    "restricted" or "site" when peer.AllowedSubnets is { Length: > 0 } => peer.AllowedSubnets,
+                    _ => null, // split / legacy full → whole LAN
+                };
+                await EnsureForwardRuleAsync(existingFilter, wg.Id, lan.Id, src, dest, tag + $" wg→{lan.Name}", ct);
+            }
         }
 
-        // FULL tunnel: peer also reaches the internet → masquerade out the WAN + FORWARD wg→WAN.
-        if (mode == "full")
+        // Internet axis (independent of LAN): masquerade out the WAN + FORWARD
+        // wg→WAN, both pinned to this peer's tunnel IPs.
+        if (peer.AllowInternet)
         {
             var wan = wanIfaces.FirstOrDefault(w => w.Role == "primary_wan") ?? wanIfaces.FirstOrDefault();
             if (wan is not null)
             {
-                await EnsureMasqueradeAsync(existingNat, server.AddressCidr, wan.Id, tag + $" → {wan.Name}", ct);
-                await EnsureForwardRuleAsync(existingFilter, wg.Id, wan.Id, null, tag + $" wg→{wan.Name}", ct);
+                foreach (var cidr in peer.AllowedIps)
+                    await EnsureMasqueradeAsync(existingNat, cidr, wan.Id, tag + $" → {wan.Name}", ct);
+                await EnsureForwardRuleAsync(existingFilter, wg.Id, wan.Id, src, null, tag + $" wg→{wan.Name}", ct);
             }
         }
     }
@@ -300,10 +316,12 @@ public sealed class VpnRoutingService : IVpnRoutingService
     }
 
     private async Task EnsureForwardRuleAsync(
-        IReadOnlyList<FwFilterRule> existing, Guid iifId, Guid oifId, string[]? destAddrs, string desc, CancellationToken ct)
+        IReadOnlyList<FwFilterRule> existing, Guid iifId, Guid oifId,
+        string[]? srcAddrs, string[]? destAddrs, string desc, CancellationToken ct)
     {
         if (existing.Any(f => f.InterfaceInId == iifId && f.InterfaceOutId == oifId
                               && f.Action == "accept"
+                              && SameSet(f.SourceAddresses, srcAddrs)
                               && SameSet(f.DestinationAddresses, destAddrs)))
             return;
         await _fw.CreateFilterRuleAsync(new FwFilterRule
@@ -312,6 +330,7 @@ public sealed class VpnRoutingService : IVpnRoutingService
             Action = "accept",
             InterfaceInId = iifId,
             InterfaceOutId = oifId,
+            SourceAddresses = srcAddrs,
             DestinationAddresses = destAddrs,
             Enabled = true,
             Priority = 90,

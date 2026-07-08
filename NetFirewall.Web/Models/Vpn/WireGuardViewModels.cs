@@ -6,7 +6,11 @@ public sealed class WgServerFormViewModel
 {
     public Guid? Id { get; set; }
 
-    [Required, StringLength(64)]
+    /// <summary>Linux interface name (e.g. wg0). IMMUTABLE after creation — the
+    /// controller ignores this field on update (a rename would orphan the on-disk
+    /// config, the policy-routing table, and the live interface). 15 chars is the
+    /// kernel's IFNAMSIZ limit.</summary>
+    [RegularExpression(@"^[A-Za-z0-9_.\-]{1,15}$", ErrorMessage = "1-15 chars: letters, digits, dot, dash, underscore.")]
     public string Name { get; set; } = "wg0";
 
     /// <summary>UDP port the interface listens on for inbound peers (clients /
@@ -75,10 +79,15 @@ public sealed class WgPeerFormViewModel
     [RegularExpression(@"^[A-Za-z0-9+/]{42,44}={0,2}$", ErrorMessage = "Public key must be a 44-char base64 WireGuard key.")]
     public string? PublicKey { get; set; }
 
-    /// <summary>Client access intent: full | split | restricted. ('site' is set by
-    /// the controller for site-role tunnels — not operator-selectable here.)</summary>
-    [RegularExpression("full|split|restricted|site")]
-    public string RouteMode { get; set; } = "full";
+    /// <summary>Client LAN-access intent: split (whole LAN) | restricted (only
+    /// AllowedSubnets) | none. 'full' is accepted as a legacy synonym of split;
+    /// 'site' is set by the controller for site-role tunnels.</summary>
+    [RegularExpression("full|split|restricted|site|none")]
+    public string RouteMode { get; set; } = "split";
+
+    /// <summary>Internet axis, independent of LAN access: masquerade + forward to
+    /// the WAN scoped to this client's tunnel IP. Clients only.</summary>
+    public bool AllowInternet { get; set; }
 
     /// <summary>Comma/newline-separated LAN subnets for split/restricted/site modes.</summary>
     public string? AllowedSubnetsRaw { get; set; }

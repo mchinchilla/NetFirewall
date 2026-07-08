@@ -80,24 +80,32 @@
                 Placeholder = "10.10.0.5/32"
             })
 
-            @* Access intent. Drives the generated NAT/forward + the exported
-               client config's AllowedIPs. *@
+            @* Access intent, two independent axes: LAN (all / specific / none)
+               and internet (checkbox). Together they drive the generated
+               per-client NAT/forward rules AND the exported config's AllowedIPs. *@
             <div x-data="{ rmode: '@Model.RouteMode' }">
                 @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                    Name = nameof(Model.RouteMode), Label = "Access (what this client can reach)", Kind = FormFieldKind.Select,
+                    Name = nameof(Model.RouteMode), Label = "LAN access", Kind = FormFieldKind.Select,
                     Value = Model.RouteMode, AlpineModel = "rmode",
                     Options = new[] {
-                        new FormFieldViewModel.SelectOption("full", "Full tunnel — LAN + internet via firewall"),
-                        new FormFieldViewModel.SelectOption("split", "Split tunnel — LAN only"),
-                        new FormFieldViewModel.SelectOption("restricted", "Restricted — only specific subnets/hosts"),
+                        new FormFieldViewModel.SelectOption("split", "Whole LAN"),
+                        new FormFieldViewModel.SelectOption("restricted", "Specific hosts / subnets only"),
+                        new FormFieldViewModel.SelectOption("none", "No LAN access"),
                     },
-                    Help = "Full = client routes everything through the firewall. Restricted needs the subnets below."
+                    Help = "What this client can reach inside the network. Rules are pinned to this client's tunnel IP — other clients keep their own access."
                 })
-                <div x-show="rmode === 'restricted' || rmode === 'split'" x-cloak class="mt-3">
+                <div x-show="rmode === 'restricted'" x-cloak class="mt-3">
                     @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                        Name = nameof(Model.AllowedSubnetsRaw), Label = "Subnets (comma-separated)", Kind = FormFieldKind.Textarea,
-                        Value = Model.AllowedSubnetsRaw, Placeholder = "192.168.99.0/24, 192.168.3.5/32",
-                        Help = "For restricted: the LAN targets. For split: optional override of the auto-detected LAN subnets."
+                        Name = nameof(Model.AllowedSubnetsRaw), Label = "Hosts / subnets (comma-separated)", Kind = FormFieldKind.Textarea,
+                        Value = Model.AllowedSubnetsRaw, Placeholder = "192.168.99.10/32, 192.168.3.0/24",
+                        Help = "Single host = /32. These become both the client's routes and the firewall's allow-list for it."
+                    })
+                </div>
+                <div class="mt-3">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                        Name = nameof(Model.AllowInternet), Label = "Internet access — egress to the internet through this firewall", Kind = FormFieldKind.Checkbox,
+                        Value = Model.AllowInternet ? "true" : "false",
+                        Help = "Independent of LAN access. Adds NAT + forward to the WAN for this client only; its config routes everything (0.0.0.0/0) into the tunnel."
                     })
                 </div>
             </div>

@@ -22,12 +22,17 @@ public class WgPeer
     // This — not the server-level mode — decides monitoring, NAT/forward
     // generation, and which UI section/form the peer lives in.
     [Map("role")]                  public string   Role                { get; set; } = "client";
-    // Per-peer routing intent (server mode), drives generated NAT/forward + the
-    // exported client config's AllowedIPs. 'full' = LAN+internet, 'split' = LAN only,
-    // 'restricted' = only AllowedSubnets, 'site' = site-to-site (AllowedSubnets are
-    // the remote LAN). DB CHECK chk_wg_peer_route_mode (migration 00032).
+    // LAN-access axis for clients (migration 00037 split the old conflated
+    // modes): 'split' = whole LAN, 'restricted' = only AllowedSubnets, 'none' =
+    // no LAN access, 'site' = site-to-site (AllowedSubnets are the remote LAN).
+    // 'full' survives as a legacy synonym of split (pre-00037 rows / defaults).
+    // DB CHECK chk_wg_peer_route_mode.
     [Map("route_mode")]            public string   RouteMode           { get; set; } = "full";
-    // Target subnets for split/restricted/site modes.
+    // Internet axis, independent of the LAN one: when true the peer gets
+    // masquerade + forward to the WAN scoped to its tunnel IP, and its exported
+    // client config routes 0.0.0.0/0 (the firewall does the LAN fine-cut).
+    [Map("allow_internet")]        public bool     AllowInternet       { get; set; }
+    // Target subnets for restricted/site modes.
     [Map("allowed_subnets")]       public string[] AllowedSubnets      { get; set; } = Array.Empty<string>();
     [Map("description")]           public string?  Description         { get; set; }
     [Map("enabled")]               public bool     Enabled             { get; set; } = true;

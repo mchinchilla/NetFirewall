@@ -4,6 +4,29 @@
     var server = (NetFirewall.Models.Vpn.WgServer?)ViewBag.Server;
     var form = (NetFirewall.Web.Models.Vpn.WgServerFormViewModel)ViewBag.Form;
 }
+@if (!string.IsNullOrEmpty((string?)ViewBag.DeletedName))
+{
+    @* One-shot strip after a teardown (the delete ends in a full-page redirect,
+       so the usual toast can't survive the reload). *@
+    <div class="flex items-start gap-3 rounded-lg p-3 mb-4
+                bg-feedback-success-bg text-feedback-success-fg border border-feedback-success-bd"
+         style="animation: var(--animate-slide-up);">
+        <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/>
+        </svg>
+        <p class="text-sm">
+            Interface <span class="font-semibold">@ViewBag.DeletedName</span> was deleted — tunnel stopped,
+            auto-generated rules removed, orphaned hand-made rules disabled.
+            The on-disk config was left in place for re-import.
+            @if ((bool)(ViewBag.DeleteApplyWarn ?? false))
+            {
+                <span class="font-medium">Warning: the nftables re-apply failed — re-apply from the Firewall page
+                so the removed rules leave the live ruleset.</span>
+            }
+        </p>
+    </div>
+}
+
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
@@ -81,18 +104,26 @@
             <h2 class="text-base font-semibold">Interface</h2>
             @if (server is not null)
             {
-                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                        hx-post="/Vpn/WireGuard/regenerate-keys"
-                        hx-trigger="confirmed-regen"
-                        @@click.prevent="(async () => {
-                            const ok = await $store.confirm.ask({
-                                title: 'Rotate server keys?',
-                                message: 'EVERY existing client config will stop working. You will need to re-issue every peer config.',
-                                confirmLabel: 'Rotate keys',
-                                level: 'danger'
-                            });
-                            if (ok) htmx.trigger($el, 'confirmed-regen');
-                        })()">Rotate keys</button>
+                <div class="flex items-center gap-1">
+                    <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+                            hx-post="/Vpn/WireGuard/regenerate-keys"
+                            hx-trigger="confirmed-regen"
+                            @@click.prevent="(async () => {
+                                const ok = await $store.confirm.ask({
+                                    title: 'Rotate server keys?',
+                                    message: 'EVERY existing client config will stop working. You will need to re-issue every peer config.',
+                                    confirmLabel: 'Rotate keys',
+                                    level: 'danger'
+                                });
+                                if (ok) htmx.trigger($el, 'confirmed-regen');
+                            })()">Rotate keys</button>
+                    @* Full teardown — opens an impact-summary drawer (computed
+                       server-side) with a type-the-name confirmation gate. *@
+                    <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+                            hx-get="/Vpn/WireGuard/delete-confirm"
+                            hx-target="#drawer-body" hx-swap="innerHTML"
+                            @@click="$store.drawer.openRaw('Delete @server.Name')">Delete interface</button>
+                </div>
             }
         </header>
 
@@ -102,10 +133,24 @@
 
             <div class="space-y-3">
                 <div class="grid grid-cols-2 gap-3">
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.Name), Label = "Interface name", Required = true, Value = form.Name,
-                        Placeholder = "wg0"
-                    })
+                    @if (server is null)
+                    {
+                        @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                            Name = nameof(form.Name), Label = "Interface name", Required = true, Value = form.Name,
+                            Placeholder = "wg0", Pattern = @"^[A-Za-z0-9_.\-]{1,15}$",
+                            Help = "Linux interface name. Locked after creation — choose carefully."
+                        })
+                    }
+                    else
+                    {
+                        @* Immutable once created: the name keys /etc/wireguard/<name>.conf,
+                           the policy-routing table, and the live interface — the controller
+                           ignores it on update, this disabled field is just honest UI. *@
+                        @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                            Name = nameof(form.Name), Label = "Interface name", Value = form.Name, Disabled = true,
+                            Help = "Locked — renaming would orphan the live interface, its config file and the routing rules built on it."
+                        })
+                    }
                     @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
                         Name = nameof(form.ListenPort), Label = "UDP listen port", Kind = NetFirewall.Web.Models.FormFieldKind.Number,
                         Value = form.ListenPort.ToString(), Min = "0", Max = "65535",

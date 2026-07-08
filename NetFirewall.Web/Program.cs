@@ -162,6 +162,13 @@ builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
 // IFirewallService + IPolicyRoutingService.
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnRoutingService,
                            NetFirewall.Services.Vpn.VpnRoutingService>();
+// Interface teardown: impact analysis + orderly delete of a wg interface and
+// everything hanging off it (auto rules, scaffold, orphan disabling, alerts).
+// Needs the Npgsql-backed health store directly to resolve banners in-line.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnHealthService,
+                           NetFirewall.Services.Vpn.VpnHealthService>();
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardTeardownService,
+                           NetFirewall.Services.Vpn.WireGuardTeardownService>();
 
 // Network objects — alias-style address objects. Filter / NAT / mangle
 // generators resolve names → flat CIDRs through INetworkObjectResolver.

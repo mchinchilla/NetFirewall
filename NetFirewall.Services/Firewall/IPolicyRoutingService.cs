@@ -35,6 +35,16 @@ public interface IPolicyRoutingService
     /// <summary>Lowest free table_id in [200,252] not used by any fw_route_tables row.
     /// Throws if the range is exhausted.</summary>
     Task<int> AllocateTableIdAsync(CancellationToken ct = default);
+
+    // ── delete-side (added for WireGuard interface teardown) ──
+
+    /// <summary>Delete a policy rule row. True when a row was removed.</summary>
+    Task<bool> DeletePolicyRuleAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Delete a route table row. Static routes referencing it go
+    /// table_id=NULL (FK SET NULL) — callers delete those routes first when
+    /// tearing down a tunnel. True when a row was removed.</summary>
+    Task<bool> DeleteRouteTableAsync(Guid id, CancellationToken ct = default);
 }
 
 /// <summary>

@@ -54,9 +54,18 @@ else
                         }
                         else
                         {
+                            var lanLabel = (p.RouteMode ?? "split") switch
+                            {
+                                "restricted" => "restricted LAN",
+                                "none"       => "no LAN",
+                                _            => "LAN",   // split / legacy full
+                            };
+                            var accessLabel = p.AllowInternet
+                                ? (p.RouteMode == "none" ? "internet only" : $"{lanLabel} + internet")
+                                : lanLabel;
                             <td class="px-5 py-3 font-mono text-xs">@string.Join(", ", p.AllowedIps)</td>
                             <td class="px-5 py-3 hidden lg:table-cell text-xs">
-                                <span class="badge badge-muted">@(string.IsNullOrEmpty(p.RouteMode) ? "full" : p.RouteMode)</span>
+                                <span class="badge badge-muted">@accessLabel</span>
                             </td>
                         }
                         <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted" title="@p.PublicKey">@p.PublicKey[..12]…</td>

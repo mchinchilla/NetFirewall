@@ -64,14 +64,19 @@ public sealed class WireGuardImporter : IWireGuardImporter
         // (or there's exactly one peer with Endpoint set) → 'client'.
         var mode = parsed.Interface.ListenPort.HasValue ? "server" : "client";
 
+        // Single-interface design: importing a conf under a DIFFERENT name would
+        // insert a second wg_servers row that the whole stack (first-by-created_at)
+        // silently shadows — refuse loudly instead of half-importing.
+        var existing = await _wg.GetServerAsync(ct);
+        if (existing is not null && !existing.Name.Equals(interfaceName, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"This firewall manages a single WireGuard interface ('{existing.Name}'). " +
+                $"Importing '{interfaceName}' would create a second, hidden interface — delete '{existing.Name}' first.");
+
         // Public key must be derived from private — wg-quick configs don't store it.
         var pubkey = await _apply.DerivePublicKeyAsync(parsed.Interface.PrivateKey, ct);
 
-        // UPSERT wg_servers by name.
-        var existing = await _wg.GetServerAsync(ct);  // single-server design today
-        // Find by name explicitly even though the service returns 'first' —
-        // when we support N servers this becomes the right path.
-        var server = (existing != null && existing.Name == interfaceName) ? existing : new WgServer { Name = interfaceName };
+        var server = existing ?? new WgServer { Name = interfaceName };
 
         server.Mode        = mode;
         server.PrivateKey  = parsed.Interface.PrivateKey;
