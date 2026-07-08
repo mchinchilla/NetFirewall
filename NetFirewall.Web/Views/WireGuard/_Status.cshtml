@@ -74,15 +74,17 @@ else
                 {
                     var peer = byPubkey.TryGetValue(s.PublicKey, out var p) ? p : null;
                     var name = peer?.Name ?? "(unknown)";
-                    // Typed verdict (Connected / Down / Idle) — same rule the daemon's
-                    // VpnHealthMonitorService uses, so the dot agrees with the alerting.
-                    var health = NetFirewall.Web.Models.Vpn.WgPeerHealthEvaluator.Evaluate(
-                        Model.Server, peer, s, DateTime.UtcNow);
+                    // Typed verdict (Connected / Pending / Down / Idle) — the SAME
+                    // evaluator the daemon's VpnHealthMonitorService calls, so the
+                    // dot always agrees with the alerting.
+                    var health = NetFirewall.Models.Vpn.WgPeerHealthEvaluator.Evaluate(
+                        peer, s, DateTime.UtcNow);
                     var (dotColor, statusLabel) = health switch
                     {
-                        NetFirewall.Web.Models.Vpn.WgPeerHealth.Connected => ("var(--feedback-success-bd)", "Connected"),
-                        NetFirewall.Web.Models.Vpn.WgPeerHealth.Down       => ("var(--feedback-danger-bd)",  "Down"),
-                        _                                                  => ("var(--surface-fg-muted)",   "Idle"),
+                        NetFirewall.Models.Vpn.WgPeerHealth.Connected => ("var(--feedback-success-bd)", "Connected"),
+                        NetFirewall.Models.Vpn.WgPeerHealth.Pending   => ("var(--feedback-warning-bd)", "Waiting for first handshake"),
+                        NetFirewall.Models.Vpn.WgPeerHealth.Down      => ("var(--feedback-danger-bd)",  "Down"),
+                        _                                             => ("var(--surface-fg-muted)",   "Idle"),
                     };
                     <tr>
                         <td class="px-5 py-3">
@@ -90,10 +92,15 @@ else
                                 <span class="inline-block h-2 w-2 rounded-full" title="@statusLabel"
                                       style="background-color: @dotColor;"></span>
                                 <span class="font-medium">@name</span>
-                                @if (health == NetFirewall.Web.Models.Vpn.WgPeerHealth.Down)
+                                @if (health == NetFirewall.Models.Vpn.WgPeerHealth.Down)
                                 {
                                     <span class="text-xs font-medium px-1.5 py-0.5 rounded
                                                  bg-feedback-danger-bg text-feedback-danger-fg">Down</span>
+                                }
+                                else if (health == NetFirewall.Models.Vpn.WgPeerHealth.Pending)
+                                {
+                                    <span class="text-xs font-medium px-1.5 py-0.5 rounded
+                                                 bg-feedback-warning-bg text-feedback-warning-fg">Pending</span>
                                 }
                             </div>
                             <p class="text-xs font-mono mt-0.5 text-surface-fg-muted">@s.PublicKey[..16]…</p>

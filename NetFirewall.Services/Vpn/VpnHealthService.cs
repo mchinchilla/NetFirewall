@@ -98,6 +98,21 @@ public sealed class VpnHealthService : IVpnHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public Task DeleteStateAsync(Guid serverId, string publicKey, CancellationToken ct = default) =>
+        MissingTableGuard.WriteAsync(() => DeleteStateCoreAsync(serverId, publicKey, ct), _logger, nameof(DeleteStateAsync));
+
+    private async Task DeleteStateCoreAsync(Guid serverId, string publicKey, CancellationToken ct)
+    {
+        const string sql = @"
+            DELETE FROM vpn_health_state
+            WHERE server_id = @srv AND public_key = @pk";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("srv", serverId);
+        cmd.Parameters.AddWithValue("pk",  publicKey);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public Task RecordEventAsync(Guid serverId, string publicKey, string eventType, string? detailJson, CancellationToken ct = default) =>
         MissingTableGuard.WriteAsync(() => RecordEventCoreAsync(serverId, publicKey, eventType, detailJson, ct), _logger, nameof(RecordEventAsync));
 

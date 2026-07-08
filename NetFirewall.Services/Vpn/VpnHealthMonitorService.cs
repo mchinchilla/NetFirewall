@@ -17,11 +17,13 @@ namespace NetFirewall.Services.Vpn;
 ///
 /// Modelled on <c>WanHealthMonitorService</c>:
 ///   1. Every CheckInterval, read the server + its peers and the live wg dump.
-///   2. For each peer that SHOULD be live (client-mode tunnel, or a peer with
-///      keepalive — same rule as WgPeerHealthEvaluator in the Web), classify the
-///      handshake as fresh/stale.
+///   2. For each peer that SHOULD be live per <see cref="WgPeerHealthEvaluator"/>
+///      (the shared rule the Web's status dot also calls), classify the handshake
+///      as Connected / Pending / Down. Peers that leave the monitored set
+///      (deleted, disabled, reclassified) are retired: alert resolved, state dropped.
 ///   3. Apply hysteresis: FailoverThreshold consecutive stale cycles → down;
-///      RecoveryThreshold consecutive fresh cycles → back up.
+///      RecoveryThreshold consecutive fresh cycles → back up. Pending (never
+///      handshook) counts toward neither — alerting engages after first contact.
 ///   4. On a transition, persist the event and dispatch a notification.
 ///
 /// We never touch the interface — this is observe-and-alert only, not failover.
@@ -83,45 +85,80 @@ public sealed class VpnHealthMonitorService : BackgroundService
 
     private async Task TickAsync(CancellationToken ct)
     {
+        var states = await _health.GetStateAsync(ct);
+
         var server = await _wg.GetServerAsync(ct);
-        if (server is null || !server.Enabled) return;
+        if (server is null || !server.Enabled)
+        {
+            // Monitoring is off entirely — nothing can ever emit the "up" that
+            // would clear a standing alert, so retire everything now instead of
+            // leaving banners orphaned.
+            foreach (var s in states) await RetireAsync(s.ServerId, s.PublicKey, ct);
+            return;
+        }
 
         var peers = await _wg.GetPeersAsync(server.Id, ct);
         var live = await _apply.GetStatusAsync(server.Name, ct);
         var liveByKey = live.ToDictionary(s => s.PublicKey);
 
         var now = DateTime.UtcNow;
-        var existing = (await _health.GetStateAsync(ct))
-            .Where(s => s.ServerId == server.Id)
-            .ToDictionary(s => s.PublicKey);
+        // Evaluate every peer that's expected to stay connected (we dial its
+        // endpoint, or it's a site-to-site link). Quiet inbound road-warriors are
+        // skipped — a stale handshake there is a laptop asleep, not an outage.
+        var monitored = peers.Where(WgPeerHealthEvaluator.ExpectedLive).ToList();
+        var monitoredKeys = monitored.Select(p => p.PublicKey).ToHashSet(StringComparer.Ordinal);
 
-        // Evaluate every peer that's expected to stay connected. Peers we don't
-        // monitor (disabled, or idle inbound with no keepalive) are skipped — a
-        // stale handshake there is normal, not an outage.
-        foreach (var peer in peers)
+        // Retire state for peers that left the monitored set (deleted, disabled,
+        // or reclassified). Their alert would otherwise stand forever: the loop
+        // below only evaluates peers still in the set, so nobody ever emits the
+        // recovery that clears it.
+        var existing = states.Where(s => s.ServerId == server.Id).ToDictionary(s => s.PublicKey);
+        foreach (var (key, _) in existing)
         {
-            if (!ShouldMonitor(server, peer)) continue;
-
-            liveByKey.TryGetValue(peer.PublicKey, out var liveStatus);
-            var handshake = liveStatus?.LastHandshakeAt;
-            var fresh = handshake is { } h && (now - h).TotalSeconds < _opts.StaleAfterSeconds;
-
-            await EvaluatePeerAsync(server, peer, liveStatus, fresh, handshake, existing, now, ct);
+            if (monitoredKeys.Contains(key)) continue;
+            await RetireAsync(server.Id, key, ct);
         }
+
+        foreach (var peer in monitored)
+        {
+            liveByKey.TryGetValue(peer.PublicKey, out var liveStatus);
+            await EvaluatePeerAsync(server, peer, liveStatus, existing, now, ct);
+        }
+    }
+
+    /// <summary>
+    /// Stop tracking a peer: resolve any standing UI alert (silently — nothing
+    /// "recovered", the condition is simply moot) and drop the state row.
+    /// </summary>
+    private async Task RetireAsync(Guid serverId, string publicKey, CancellationToken ct)
+    {
+        _logger.LogInformation("VPN peer {Key} no longer monitored — retiring health state and resolving its alert",
+            publicKey);
+        await _health.ResolveAlertAsync($"vpn:{serverId}:{publicKey}", ct);
+        await _health.DeleteStateAsync(serverId, publicKey, ct);
     }
 
     private async Task EvaluatePeerAsync(
         WgServer server,
         WgPeer peer,
         WgPeerLiveStatus? liveStatus,
-        bool fresh,
-        DateTime? handshake,
         Dictionary<string, VpnHealthState> existing,
         DateTime now,
         CancellationToken ct)
     {
         existing.TryGetValue(peer.PublicKey, out var prior);
         var wasUp = prior?.IsUp ?? true;  // optimistic default — only alert on a real flip
+
+        // wg resets latest-handshake to "never" when the interface restarts, so
+        // fold in the persisted memory: without it a peer dying across a restart
+        // would look brand-new (Pending) instead of Down, and a healthy peer
+        // would false-alarm during the post-restart reconnect window.
+        var handshake = liveStatus?.LastHandshakeAt ?? prior?.LastHandshakeAt;
+
+        var verdict = WgPeerHealthEvaluator.Evaluate(
+            peer, liveStatus, now,
+            lastKnownHandshakeAt: prior?.LastHandshakeAt,
+            staleAfter: TimeSpan.FromSeconds(_opts.StaleAfterSeconds));
 
         var state = new VpnHealthState
         {
@@ -134,36 +171,47 @@ public sealed class VpnHealthMonitorService : BackgroundService
             IsUp             = wasUp,
         };
 
-        if (fresh)
+        switch (verdict)
         {
-            state.ConsecutiveSuccesses = (prior?.ConsecutiveSuccesses ?? 0) + 1;
-            state.ConsecutiveFailures  = 0;
-            state.IsUp = wasUp || state.ConsecutiveSuccesses >= _opts.RecoveryThreshold;
+            case WgPeerHealth.Connected:
+                state.ConsecutiveSuccesses = (prior?.ConsecutiveSuccesses ?? 0) + 1;
+                state.ConsecutiveFailures  = 0;
+                state.IsUp = wasUp || state.ConsecutiveSuccesses >= _opts.RecoveryThreshold;
 
-            if (state.IsUp && !wasUp)
-            {
-                state.LastTransitionAt = now;
-                _logger.LogInformation("VPN peer {Peer} on {Iface} RECOVERED", peer.Name, server.Name);
-                await _health.RecordEventAsync(server.Id, peer.PublicKey, "up",
-                    JsonSerializer.Serialize(new { endpoint = state.LastEndpoint, handshake }), ct);
-                await DispatchAsync(server, peer, resolved: true, state.LastEndpoint, ct);
-            }
-        }
-        else
-        {
-            state.ConsecutiveFailures  = (prior?.ConsecutiveFailures ?? 0) + 1;
-            state.ConsecutiveSuccesses = 0;
-            state.IsUp = wasUp && state.ConsecutiveFailures < _opts.FailoverThreshold;
+                if (state.IsUp && !wasUp)
+                {
+                    state.LastTransitionAt = now;
+                    _logger.LogInformation("VPN peer {Peer} on {Iface} RECOVERED", peer.Name, server.Name);
+                    await _health.RecordEventAsync(server.Id, peer.PublicKey, "up",
+                        JsonSerializer.Serialize(new { endpoint = state.LastEndpoint, handshake }), ct);
+                    await DispatchAsync(server, peer, resolved: true, state.LastEndpoint, ct);
+                }
+                break;
 
-            if (!state.IsUp && wasUp)
-            {
-                state.LastTransitionAt = now;
-                _logger.LogWarning("VPN peer {Peer} on {Iface} went DOWN after {N} stale cycles",
-                    peer.Name, server.Name, state.ConsecutiveFailures);
-                await _health.RecordEventAsync(server.Id, peer.PublicKey, "down",
-                    JsonSerializer.Serialize(new { endpoint = state.LastEndpoint, lastHandshake = handshake }), ct);
-                await DispatchAsync(server, peer, resolved: false, state.LastEndpoint, ct);
-            }
+            case WgPeerHealth.Pending:
+                // Never handshook since we started watching — a freshly provisioned
+                // peer whose remote hasn't connected yet. Not an outage; alerting
+                // engages after the first successful handshake. Keep counters at
+                // zero so the grace period doesn't accumulate toward a DOWN flip.
+                state.ConsecutiveSuccesses = 0;
+                state.ConsecutiveFailures  = 0;
+                break;
+
+            default: // Down (Idle can't reach here — ExpectedLive filtered the peer list)
+                state.ConsecutiveFailures  = (prior?.ConsecutiveFailures ?? 0) + 1;
+                state.ConsecutiveSuccesses = 0;
+                state.IsUp = wasUp && state.ConsecutiveFailures < _opts.FailoverThreshold;
+
+                if (!state.IsUp && wasUp)
+                {
+                    state.LastTransitionAt = now;
+                    _logger.LogWarning("VPN peer {Peer} on {Iface} went DOWN after {N} stale cycles",
+                        peer.Name, server.Name, state.ConsecutiveFailures);
+                    await _health.RecordEventAsync(server.Id, peer.PublicKey, "down",
+                        JsonSerializer.Serialize(new { endpoint = state.LastEndpoint, lastHandshake = handshake }), ct);
+                    await DispatchAsync(server, peer, resolved: false, state.LastEndpoint, ct);
+                }
+                break;
         }
 
         await _health.UpsertStateAsync(state, ct);
@@ -198,18 +246,6 @@ public sealed class VpnHealthMonitorService : BackgroundService
         await _notify.DispatchAsync(message, ct);
     }
 
-    /// <summary>
-    /// Same "should be live" rule as the Web's WgPeerHealthEvaluator: client-mode
-    /// tunnels and keepalive peers are expected to stay connected; everything else
-    /// is quiet-by-design and not an outage when stale.
-    /// </summary>
-    private static bool ShouldMonitor(WgServer server, WgPeer peer)
-    {
-        if (!peer.Enabled) return false;
-        var clientMode = server.Mode.Equals("client", StringComparison.OrdinalIgnoreCase);
-        var hasKeepalive = peer.PersistentKeepalive is > 0;
-        return clientMode || hasKeepalive;
-    }
 }
 
 public sealed class VpnHealthMonitorOptions

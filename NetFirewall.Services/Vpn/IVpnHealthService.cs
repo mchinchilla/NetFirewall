@@ -16,6 +16,11 @@ public interface IVpnHealthService
     /// <summary>UPSERT the state row after a probe cycle.</summary>
     Task UpsertStateAsync(VpnHealthState state, CancellationToken ct = default);
 
+    /// <summary>Drop the state row for a peer that is no longer monitored
+    /// (deleted, disabled, or reclassified as a quiet road-warrior). The monitor
+    /// pairs this with resolving the peer's alert so nothing orphans.</summary>
+    Task DeleteStateAsync(Guid serverId, string publicKey, CancellationToken ct = default);
+
     /// <summary>Append an up/down transition event.</summary>
     Task RecordEventAsync(Guid serverId, string publicKey, string eventType, string? detailJson, CancellationToken ct = default);
 
