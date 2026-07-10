@@ -35,8 +35,10 @@ log "Removing systemd units"
 rm -f /etc/systemd/system/netfirewall-{daemon,web,dhcp}.service
 systemctl daemon-reload
 
-log "Removing sysctl drop-in"
+log "Removing sysctl + modprobe + modules-load drop-ins"
 rm -f /etc/sysctl.d/netfirewall.conf
+rm -f /etc/modprobe.d/netfirewall.conf
+rm -f /etc/modules-load.d/netfirewall.conf
 
 log "Removing TUI symlink + manpage + completion (if present)"
 rm -f /usr/local/bin/netfirewall-tui

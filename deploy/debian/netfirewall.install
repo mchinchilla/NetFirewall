@@ -42,6 +42,8 @@ usr/share/bash-completion/completions/netfirewall-tui         usr/share/bash-com
 
 # OS drop-ins straight from the source tree.
 deploy/sysctl/netfirewall.conf       usr/lib/sysctl.d
+deploy/modprobe.d/netfirewall.conf   usr/lib/modprobe.d
+deploy/modules-load.d/netfirewall.conf  usr/lib/modules-load.d
 deploy/tmpfiles/netfirewall.conf     usr/lib/tmpfiles.d
 
 # Reverse-proxy example + operational handbook into the package docs.

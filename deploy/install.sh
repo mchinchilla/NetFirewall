@@ -367,8 +367,17 @@ systemctl daemon-reload
 # Kernel tunables — enables conntrack per-flow accounting so the dashboard's
 # top-talkers panel has byte counters to read. The daemon itself can't write
 # /proc/sys because its unit sets ProtectKernelTunables=yes.
-log "Installing sysctl drop-in"
+#
+# The sysctl drop-in ALONE does not survive reboots: systemd-sysctl runs
+# before nf_conntrack is loaded (nftables loads it later), so the
+# nf_conntrack_acct key doesn't exist yet and the write is silently skipped.
+# Hence the modprobe.d default (applies at module load, order-independent)
+# and the modules-load.d entry (loads the module before systemd-sysctl).
+log "Installing sysctl + modprobe + modules-load drop-ins"
 install -m 0644 "$SCRIPT_DIR/sysctl/netfirewall.conf" /etc/sysctl.d/netfirewall.conf
+install -m 0644 "$SCRIPT_DIR/modprobe.d/netfirewall.conf" /etc/modprobe.d/netfirewall.conf
+install -m 0644 "$SCRIPT_DIR/modules-load.d/netfirewall.conf" /etc/modules-load.d/netfirewall.conf
+modprobe nf_conntrack 2>/dev/null || true
 sysctl --quiet --load=/etc/sysctl.d/netfirewall.conf || \
     log "warning: sysctl --load failed; reboot or run \`sysctl --system\` manually"
 
