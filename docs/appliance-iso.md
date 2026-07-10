@@ -83,6 +83,17 @@ apt-get install -y live-build debootstrap squashfs-tools xorriso \
 cd deploy/iso && lb config && lb build      # -> live-image-amd64.hybrid.iso
 ```
 
+The bare-metal installer is preseeded except for **two questions kept
+interactive on purpose**: the target disk and the final wipe confirmation
+(hardcoding `/dev/sda` caused wrong-disk installs — USB media often enumerates
+as `sda`). The preseed also sets `grub-installer/force-efi-extra-removable` so
+UEFI machines that lose/ignore NVRAM boot entries still boot from the fallback
+`\EFI\BOOT\BOOTX64.EFI` path. Branding: `lb config` clones + patches the stock
+isolinux theme (BIOS menu) and `config/bootloaders/grub-pc/config.cfg` styles
+the EFI menu; both use `deploy/iso/branding/splash.png`. See
+`deploy/iso/README.md` for the troubleshooting list ("installed but won't
+boot") and unattended-install knobs.
+
 Test in QEMU:
 
 ```bash
@@ -98,8 +109,10 @@ NIC names are unknown at build time, so the image never hardcodes `eth0`/`ens256
 1. `netfirewall-nic-bootstrap.service` (before networking) substitutes the real
    first physical NIC into `/etc/network/interfaces.d/00-netfirewall-bootstrap`
    (ifupdown DHCP) → the appliance gets a lease and is reachable.
-2. `/etc/issue` shows the acquired IP + web URL (refreshed by
-   `netfirewall-issue-banner` via if-up.d/if-down.d hooks).
+2. `/etc/issue` shows the ASCII logo + acquired IP + web URL (refreshed by
+   `netfirewall-issue-banner` via if-up.d/if-down.d hooks); after login,
+   `/etc/update-motd.d/10-netfirewall` (shipped by the `.deb`) prints the same
+   logo plus live unit states and the web URL.
 3. The operator opens the web UI, logs in with the bootstrap token
    (`journalctl -u netfirewall-web | grep -i token`), and runs the SetupWizard,
    which writes the real per-NIC WAN/LAN config (via

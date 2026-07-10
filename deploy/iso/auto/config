@@ -32,6 +32,31 @@ lb config noauto \
     --bootappend-install "auto=true priority=critical" \
     "${@}"
 
+# ── BIOS boot-menu branding (isolinux) ──────────────────────────────────────
+# live-build uses config/bootloaders/<loader> INSTEAD of its stock theme when
+# the directory exists, so a partial overlay would break the menu. Clone the
+# stock theme from the build host and patch title + splash. Runs on every
+# `lb config` (idempotent — always re-cloned from stock); the clone is a
+# build-host artifact and is gitignored. The EFI (GRUB) menu picks up the same
+# splash.png plus its own colors from config/bootloaders/grub-pc/config.cfg.
+STOCK_ISOLINUX=/usr/share/live/build/bootloaders/isolinux
+if [ -d "${STOCK_ISOLINUX}" ]; then
+    rm -rf config/bootloaders/isolinux
+    cp -a "${STOCK_ISOLINUX}" config/bootloaders/isolinux
+    # Pre-rendered 640x480 splash (see branding/) — no rsvg/fontconfig needed
+    # at build time, unlike the stock splash.svg.
+    rm -f config/bootloaders/isolinux/splash.svg
+    cp branding/splash.png config/bootloaders/isolinux/splash.png
+    for f in config/bootloaders/isolinux/menu.cfg \
+             config/bootloaders/isolinux/stdmenu.cfg; do
+        if [ -f "${f}" ]; then
+            sed -i 's/^menu title .*/menu title NetFirewall appliance/' "${f}"
+        fi
+    done
+else
+    echo "W: ${STOCK_ISOLINUX} not found — BIOS menu keeps the stock Debian theme." >&2
+fi
+
 # Notes on the choices:
 #   --archive-areas non-free-firmware  → real NIC / wifi firmware on the media so
 #                                        the appliance actually sees its ports.

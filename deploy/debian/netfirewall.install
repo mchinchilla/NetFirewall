@@ -27,6 +27,10 @@ usr/bin/netfirewall-bootstrap     usr/bin
 usr/bin/netfirewall-firstboot     usr/bin
 usr/bin/netfirewall-issue-banner  usr/bin
 
+# Dynamic MOTD (ASCII logo + service/IP status on every login). Auto-marked
+# as a conffile (lives under /etc); postinst restores its execute bit.
+etc/update-motd.d/10-netfirewall  etc/update-motd.d
+
 # systemd units (staged under debian/tmp/usr/lib/systemd/system by rules).
 # Installed as plain data; enable/disable + daemon-reload happen in postinst.
 usr/lib/systemd/system/netfirewall-daemon.service       usr/lib/systemd/system

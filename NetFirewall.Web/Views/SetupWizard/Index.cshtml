@@ -7,6 +7,13 @@
 }
 
 <div class="mb-6" style="animation: var(--animate-slide-up);">
+    @* ASCII logo — decorative, matches the appliance console/MOTD branding. *@
+    <pre aria-hidden="true" class="hidden sm:block font-mono text-accent text-[10px] leading-tight select-none mb-3">
+ _   _      _   _____ _                        _ _
+| \ | | ___| |_|  ___(_)_ __ _____      ____ _| | |
+|  \| |/ _ \ __| |_  | | '__/ _ \ \ /\ / / _` | | |
+| |\  |  __/ |_|  _| | | | |  __/\ V  V / (_| | | |
+|_| \_|\___|\__|_|   |_|_|  \___| \_/\_/ \__,_|_|_|</pre>
     <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">
         @(isRerun ? "Re-running setup" : (isResuming ? "Resuming setup" : "First-run setup"))
     </p>

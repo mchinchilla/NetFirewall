@@ -72,6 +72,10 @@ case "$1" in
         if [ -d /opt/netfirewall/web/wwwroot ]; then
             chown -R "$WEB_USER:$GROUP_NAME" /opt/netfirewall/web/wwwroot 2>/dev/null || true
         fi
+
+        # ── dynamic MOTD: restore the execute bit dh_fixperms strips under
+        #    /etc — run-parts silently skips non-executable scripts. ──
+        chmod 0755 /etc/update-motd.d/10-netfirewall 2>/dev/null || true
         ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

@@ -20,7 +20,19 @@ mapfile -t ADDRS < <(
 )
 
 {
-    printf '\n'
+    # ASCII logo. Backslashes are doubled because agetty treats `\x` in
+    # /etc/issue as an escape sequence and would otherwise eat them;
+    # `\\` renders as a literal backslash. Quoted heredoc: the backtick
+    # and backslashes stay literal to bash.
+    cat <<'ART'
+
+ _   _      _   _____ _                        _ _
+| \\ | | ___| |_|  ___(_)_ __ _____      ____ _| | |
+|  \\| |/ _ \\ __| |_  | | '__/ _ \\ \\ /\\ / / _` | | |
+| |\\  |  __/ |_|  _| | | | |  __/\\ V  V / (_| | | |
+|_| \\_|\\___|\\__|_|   |_|_|  \\___| \\_/\\_/ \\__,_|_|_|
+
+ART
     printf '  \\d \\t\n'
     printf '  ─────────────────────────────────────────────\n'
     printf '   NetFirewall appliance — \\n (\\m)\n'

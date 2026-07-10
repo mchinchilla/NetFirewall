@@ -101,6 +101,11 @@ override_dh_auto_install:
 	           $(STAGING)/usr/bin/netfirewall-firstboot \
 	           $(STAGING)/usr/bin/netfirewall-issue-banner
 
+	# ── dynamic MOTD (pam_motd runs /etc/update-motd.d via run-parts).
+	#    dh_fixperms strips +x under /etc; postinst restores it. ──
+	mkdir -p $(STAGING)/etc/update-motd.d
+	cp deploy/firstboot/motd/10-netfirewall $(STAGING)/etc/update-motd.d/10-netfirewall
+
 	# ── systemd units → /usr/lib/systemd/system via dh_install (listed in
 	#    netfirewall.install). We do NOT rely on dh_installsystemd to install or
 	#    enable them: its auto-discovery of build-time-generated debian/*.service

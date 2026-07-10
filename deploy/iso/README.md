@@ -22,9 +22,23 @@ deploy/iso/
       usr/local/sbin/netfirewall-nic-bootstrap            first-boot NIC substitution
       etc/systemd/system/netfirewall-nic-bootstrap.service + sysinit.target.wants symlink
       etc/issue                                           static console banner (pre-network)
-    includes.installer/preseed.cfg         hands-off d-i: guided whole-disk, headless
-    bootloaders/grub-pc/config.cfg         branded boot menu (live / install / failsafe)
+    includes.installer/preseed.cfg         near-hands-off d-i: guided whole-disk; asks ONLY
+                                           target disk + final wipe confirmation
+    bootloaders/grub-pc/config.cfg         branded EFI menu (live / install / expert / failsafe)
+    bootloaders/isolinux/                  gitignored — cloned from the build host's stock
+                                           theme + patched by auto/config (BIOS menu branding)
+  branding/splash.png                      pre-rendered 640x480 boot-menu background (BIOS+EFI)
 ```
+
+## Install prompts (by design)
+
+The installer is preseeded except for **two critical questions**: which disk to
+install to, and the final "write the changes to disk?" confirmation. Hardcoding
+`partman-auto/disk /dev/sda` proved dangerous — USB media often enumerates as
+`sda` while the internal disk is `nvme0n1`, so installs landed on the wrong
+disk. For fully unattended installs on known hardware, re-add
+`partman-auto/disk` + `partman/confirm{,_nooverwrite}` in
+`config/includes.installer/preseed.cfg` (comments show the exact lines).
 
 ## Build (Debian 13 host or container, as root)
 
@@ -68,6 +82,34 @@ qemu-system-x86_64 -m 4096 -smp 2 -enable-kvm \
 ```
 
 Add a second NIC to exercise WAN/LAN role assignment in the SetupWizard.
+
+To exercise the **installer** path in QEMU, add a target disk and (for UEFI)
+persistent NVRAM vars — without them OVMF forgets the boot entry and the
+installed disk "doesn't boot", which the preseed mitigates with
+`grub-installer/force-efi-extra-removable`:
+
+```bash
+qemu-img create -f qcow2 disk.qcow2 20G
+cp /usr/share/OVMF/OVMF_VARS_4M.fd vars.fd
+qemu-system-x86_64 -m 4096 -smp 2 -enable-kvm \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+    -drive if=pflash,format=raw,file=vars.fd \
+    -drive file=disk.qcow2,if=virtio \
+    -netdev user,id=n0 -device virtio-net,netdev=n0 \
+    -cdrom deploy/iso/live-image-amd64.hybrid.iso
+```
+
+## Troubleshooting: "installed fine but won't boot"
+
+1. **UEFI NVRAM entry lost/ignored** (Proxmox/QEMU without an EFI vars disk,
+   some appliance firmwares). Fixed in the preseed:
+   `grub-installer/force-efi-extra-removable=true` also installs GRUB to the
+   fallback path `\EFI\BOOT\BOOTX64.EFI`, which every firmware tries.
+2. **Wrong target disk.** The old preseed hardcoded `/dev/sda`; the installer
+   now asks. Double-check the disk you pick at the prompt.
+3. **Firmware-mode mismatch.** Boot the ISO in the same mode (UEFI vs legacy
+   BIOS) the machine will use afterwards — grub is installed for the mode the
+   installer was booted in. Check the firmware boot-order menu after install.
 
 ## The #1 rule: no secrets in the image
 

@@ -13,3 +13,7 @@ build.log
 # The NetFirewall .deb is dropped here by CI before `lb build`; never commit a
 # built package into the source tree.
 config/packages.chroot/*.deb
+
+# Cloned + patched from the build host's stock live-build theme by auto/config
+# (BIOS menu branding) — a build artifact, not source. See branding/.
+config/bootloaders/isolinux/
