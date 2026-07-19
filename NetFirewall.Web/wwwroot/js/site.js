@@ -1616,6 +1616,19 @@ document.addEventListener("htmx:sendError", async () => {
     store.error("Network error — check your connection.");
 });
 
+/* Keep the loading overlay up across HX-Redirect full navigations.
+ * HTMX drops the htmx-request indicator class the moment the XHR settles,
+ * but HX-Redirect means a full page load is about to start — without this
+ * the spinner blinks off and the page looks idle while the next document
+ * loads (visible on login: TOTP verified → dashboard). Pinning .is-loading
+ * on the closest loading-host keeps the overlay visible; the navigation
+ * replaces the whole DOM anyway, so it never needs to be un-pinned. */
+document.addEventListener("htmx:afterRequest", (event) => {
+    if (event.detail?.xhr?.getResponseHeader?.("HX-Redirect")) {
+        event.detail.elt?.closest?.(".loading-host")?.classList.add("is-loading");
+    }
+});
+
 /* JSON envelope responses must never be painted into the DOM.
  * Drawer forms (filter / NAT / port-forward / mangle rule editors) post with
  * hx-swap="outerHTML", but their save endpoints return a ServiceResponse<T> as

@@ -1,0 +1,68 @@
+@model NetFirewall.Web.Models.Auth.LoginViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Shared
+@*
+    Step 1 of the login flow (credentials). Self-contained HTMX swap unit:
+    the form posts via hx-post and replaces #auth-step with either this same
+    partial (validation / bad-password re-render) or _LoginTotpForm (step 2).
+    The loading overlay is inside the swap target on purpose — each step
+    carries its own overlay with a step-appropriate label.
+*@
+<div id="auth-step" class="auth-step loading-host">
+    @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Label = "Checking credentials…" })
+
+    <h1 class="text-2xl font-semibold tracking-tight">Welcome back</h1>
+    <p class="text-sm mt-1 text-surface-fg-muted">
+        Sign in with your username and password. We'll ask for your TOTP code next.
+    </p>
+
+    @if (!ViewData.ModelState.IsValid && ViewData.ModelState[""]?.Errors.Count > 0)
+    {
+        <div class="mt-5 rounded-md border-l-2 px-3 py-2 text-sm flex items-start gap-2 bg-feedback-danger-bg text-feedback-danger-fg border-feedback-danger-bd">
+            <svg class="h-4 w-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+            <div>
+                @foreach (var err in ViewData.ModelState[""]!.Errors) { <p>@err.ErrorMessage</p> }
+            </div>
+        </div>
+    }
+
+    <form asp-action="Login" method="post" class="mt-7 space-y-4"
+          hx-post="@Url.Action("Login", "Auth")"
+          hx-target="#auth-step"
+          hx-swap="outerHTML"
+          hx-indicator="#auth-step"
+          hx-disabled-elt="find button[type='submit']">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="ReturnUrl" />
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Username),
+            Label = "Username",
+            Value = Model.Username,
+            Required = true,
+            Size = FormFieldSize.Large,
+            IconPath = "M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z",
+            AlpineExtra = "autofocus autocomplete=\"username\" spellcheck=\"false\"",
+            Error = ViewData.ModelState[nameof(Model.Username)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Password),
+            Label = "Password",
+            Kind = FormFieldKind.Password,
+            Required = true,
+            Size = FormFieldSize.Large,
+            WithPasswordToggle = true,
+            IconPath = "M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z",
+            AlpineExtra = "autocomplete=\"current-password\"",
+            Error = ViewData.ModelState[nameof(Model.Password)]?.Errors.FirstOrDefault()?.ErrorMessage
+        })
+
+        <button type="submit" class="btn btn-primary w-full py-2.5">
+            Continue
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+            </svg>
+        </button>
+    </form>
+</div>

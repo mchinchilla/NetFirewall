@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NetFirewall.Models.Auth;
@@ -311,6 +312,127 @@ public class AuthControllerTests
             It.IsAny<IPAddress?>(), It.IsAny<string?>(), It.IsAny<object?>(),
             It.IsAny<CancellationToken>()), Times.Once);
         _cookieIssuer.Verify(c => c.IssueAsync(It.IsAny<HttpContext>(), u, It.IsAny<CancellationToken>()), Times.Once);
+        _pending.Verify(p => p.Clear(), Times.Once);
+    }
+
+    // ── HTMX step-swap flow ────────────────────────────────────────────
+    // The login card posts via hx-post and swaps steps in place: failures
+    // re-render the SAME step as a bare partial, step advance returns the
+    // NEXT step's partial (+ HX-Push-Url), and full navigations (enroll,
+    // final sign-in) ride on HX-Redirect instead of a 302 the XHR would
+    // transparently follow into the swap target.
+
+    private static HttpContext MakeHtmxContext()
+    {
+        var ctx = MakeHttpContext();
+        ctx.Request.Headers["HX-Request"] = "true";
+        return ctx;
+    }
+
+    private AuthController CreateHtmxController()
+    {
+        var c = CreateController(MakeHtmxContext());
+        var url = new Mock<IUrlHelper>();
+        url.Setup(h => h.Action(It.IsAny<UrlActionContext>()))
+           .Returns((UrlActionContext uac) => $"/mocked/{uac.Action}");
+        c.Url = url.Object;
+        return c;
+    }
+
+    [Fact]
+    public async Task Login_Htmx_BadPassword_ReturnsLoginFormPartial()
+    {
+        var u = MakeUser();
+        _users.Setup(s => s.GetByUsernameAsync("alice", It.IsAny<CancellationToken>())).ReturnsAsync(u);
+        _hasher.Setup(h => h.VerifyAsync("bad", u.PasswordHash, It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new PasswordVerificationResult(false, false));
+
+        var result = await CreateHtmxController().Login(
+            new LoginViewModel { Username = "alice", Password = "bad" }, CancellationToken.None);
+
+        var partial = Assert.IsType<PartialViewResult>(result);
+        Assert.Equal("_LoginForm", partial.ViewName);
+    }
+
+    [Fact]
+    public async Task Login_Htmx_GoodPassword_HasTotp_ReturnsTotpPartial_AndPushesUrl()
+    {
+        var u = MakeUser();
+        _users.Setup(s => s.GetByUsernameAsync("alice", It.IsAny<CancellationToken>())).ReturnsAsync(u);
+        _hasher.Setup(h => h.VerifyAsync("good", u.PasswordHash, It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new PasswordVerificationResult(true, false));
+        _totp.Setup(t => t.HasEnrolledAsync(u.Id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var c = CreateHtmxController();
+        var result = await c.Login(
+            new LoginViewModel { Username = "alice", Password = "good", ReturnUrl = "/dashboard" },
+            CancellationToken.None);
+
+        var partial = Assert.IsType<PartialViewResult>(result);
+        Assert.Equal("_LoginTotpForm", partial.ViewName);
+        var model = Assert.IsType<LoginTotpViewModel>(partial.Model);
+        Assert.Equal("/dashboard", model.ReturnUrl);
+        Assert.Equal("/mocked/LoginTotp", c.Response.Headers["HX-Push-Url"]);
+        _pending.Verify(p => p.Issue(u.Id, "/dashboard", null), Times.Once);
+    }
+
+    [Fact]
+    public async Task Login_Htmx_NoTotpEnrolled_RespondsWithHxRedirectToEnroll()
+    {
+        var u = MakeUser();
+        _users.Setup(s => s.GetByUsernameAsync("alice", It.IsAny<CancellationToken>())).ReturnsAsync(u);
+        _hasher.Setup(h => h.VerifyAsync("good", u.PasswordHash, It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new PasswordVerificationResult(true, false));
+        _totp.Setup(t => t.HasEnrolledAsync(u.Id, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var c = CreateHtmxController();
+        var result = await c.Login(
+            new LoginViewModel { Username = "alice", Password = "good" }, CancellationToken.None);
+
+        Assert.IsType<EmptyResult>(result);
+        Assert.Equal("/mocked/EnrollTotp", c.Response.Headers["HX-Redirect"]);
+    }
+
+    [Fact]
+    public async Task LoginTotp_Htmx_BadCode_ReturnsTotpFormPartial()
+    {
+        var uid = Guid.NewGuid();
+        var u = MakeUser();
+        u.Id = uid;
+        Guid outUid = uid;
+        string? outReturn = "/dashboard";
+        byte[]? outSecret = null;
+        _pending.Setup(p => p.TryRead(out outUid, out outReturn, out outSecret)).Returns(true);
+        _users.Setup(s => s.GetByIdAsync(uid, It.IsAny<CancellationToken>())).ReturnsAsync(u);
+        _totp.Setup(t => t.VerifyAsync(uid, "000000", It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var result = await CreateHtmxController().LoginTotp(
+            new LoginTotpViewModel { Code = "000000" }, CancellationToken.None);
+
+        var partial = Assert.IsType<PartialViewResult>(result);
+        Assert.Equal("_LoginTotpForm", partial.ViewName);
+    }
+
+    [Fact]
+    public async Task LoginTotp_Htmx_GoodCode_RespondsWithHxRedirectToReturnUrl()
+    {
+        var uid = Guid.NewGuid();
+        var u = MakeUser();
+        u.Id = uid;
+        Guid outUid = uid;
+        string? outReturn = "/dashboard";
+        byte[]? outSecret = null;
+        _pending.Setup(p => p.TryRead(out outUid, out outReturn, out outSecret)).Returns(true);
+        _users.Setup(s => s.GetByIdAsync(uid, It.IsAny<CancellationToken>())).ReturnsAsync(u);
+        _totp.Setup(t => t.VerifyAsync(uid, "123456", It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var c = CreateHtmxController();
+        var result = await c.LoginTotp(
+            new LoginTotpViewModel { Code = "123456" }, CancellationToken.None);
+
+        Assert.IsType<EmptyResult>(result);
+        Assert.Equal("/dashboard", c.Response.Headers["HX-Redirect"]);
+        _cookieIssuer.Verify(i => i.IssueAsync(It.IsAny<HttpContext>(), u, It.IsAny<CancellationToken>()), Times.Once);
         _pending.Verify(p => p.Clear(), Times.Once);
     }
 

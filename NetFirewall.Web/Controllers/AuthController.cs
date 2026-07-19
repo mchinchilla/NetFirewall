@@ -61,7 +61,7 @@ public sealed class AuthController : Controller
     [HttpPost("/login"), ValidateAntiForgeryToken, AllowAnonymous]
     public async Task<IActionResult> Login(LoginViewModel model, CancellationToken ct)
     {
-        if (!ModelState.IsValid) return View(model);
+        if (!ModelState.IsValid) return LoginStep(model);
 
         var ip = ClientIp();
         var ua = Request.Headers.UserAgent.ToString();
@@ -79,7 +79,7 @@ public sealed class AuthController : Controller
             await _audit.LogAsync(AuthAuditEvents.LoginFailed, username: model.Username, ip: ip, userAgent: ua,
                 detail: new { reason = "user_not_found" }, ct: ct);
             ModelState.AddModelError(string.Empty, "Username or password is invalid.");
-            return View(model);
+            return LoginStep(model);
         }
 
         if (!user.IsActive)
@@ -87,7 +87,7 @@ public sealed class AuthController : Controller
             await _audit.LogAsync(AuthAuditEvents.LoginFailed, user.Id, user.Username, ip, ua,
                 new { reason = "inactive" }, ct);
             ModelState.AddModelError(string.Empty, "This account is disabled.");
-            return View(model);
+            return LoginStep(model);
         }
 
         if (user.LockedUntil is { } until && until > DateTimeOffset.UtcNow)
@@ -95,7 +95,7 @@ public sealed class AuthController : Controller
             await _audit.LogAsync(AuthAuditEvents.LoginLocked, user.Id, user.Username, ip, ua,
                 new { until }, ct);
             ModelState.AddModelError(string.Empty, $"Account locked until {until.LocalDateTime:t}.");
-            return View(model);
+            return LoginStep(model);
         }
 
         var verify = await _hasher.VerifyAsync(model.Password, user.PasswordHash, ct);
@@ -105,7 +105,7 @@ public sealed class AuthController : Controller
             await _audit.LogAsync(AuthAuditEvents.LoginFailed, user.Id, user.Username, ip, ua,
                 new { reason = "bad_password", locked = nowLocked }, ct);
             ModelState.AddModelError(string.Empty, "Username or password is invalid.");
-            return View(model);
+            return LoginStep(model);
         }
 
         if (verify.NeedsRehash)
@@ -117,7 +117,21 @@ public sealed class AuthController : Controller
         _pending.Issue(user.Id, safeReturnUrl);
 
         if (!hasTotp)
-            return RedirectToAction("EnrollTotp", "Account");
+        {
+            // Enrollment is a different page (QR + recovery codes) — full navigation.
+            return Request.IsHtmxRequest()
+                ? HtmxRedirect(Url.Action("EnrollTotp", "Account")!)
+                : RedirectToAction("EnrollTotp", "Account");
+        }
+
+        if (Request.IsHtmxRequest())
+        {
+            // Swap the TOTP step into the login card in place (smooth transition);
+            // HX-Push-Url keeps the address bar honest so refresh/back still work
+            // through GET /login/totp.
+            Response.Headers["HX-Push-Url"] = Url.Action(nameof(LoginTotp), new { returnUrl = safeReturnUrl });
+            return PartialView("_LoginTotpForm", new LoginTotpViewModel { ReturnUrl = safeReturnUrl });
+        }
 
         return RedirectToAction(nameof(LoginTotp), new { returnUrl = safeReturnUrl });
     }
@@ -136,14 +150,14 @@ public sealed class AuthController : Controller
     public async Task<IActionResult> LoginTotp(LoginTotpViewModel model, CancellationToken ct)
     {
         if (!_pending.TryRead(out var userId, out var stashedReturn, out _))
-            return RedirectToAction(nameof(Login), new { returnUrl = model.ReturnUrl });
+            return RedirectBackToLogin(model.ReturnUrl);
 
         if (string.IsNullOrEmpty(model.ReturnUrl)) model.ReturnUrl = stashedReturn;
 
-        if (!ModelState.IsValid) return View(model);
+        if (!ModelState.IsValid) return TotpStep(model);
 
         var user = await _users.GetByIdAsync(userId, ct);
-        if (user is null) return RedirectToAction(nameof(Login));
+        if (user is null) return RedirectBackToLogin(null);
 
         var ip = ClientIp();
         var ua = Request.Headers.UserAgent.ToString();
@@ -159,7 +173,7 @@ public sealed class AuthController : Controller
                 user.Id, user.Username, ip, ua,
                 new { matched = false, locked }, ct);
             ModelState.AddModelError(nameof(model.Code), "Invalid code.");
-            return View(model);
+            return TotpStep(model);
         }
 
         await _users.RecordLoginSuccessAsync(user.Id, ip, ct);
@@ -170,7 +184,8 @@ public sealed class AuthController : Controller
         await _cookieIssuer.IssueAsync(HttpContext, user, ct);
         _pending.Clear();
 
-        return LocalRedirect(ReturnUrlGuard.Sanitize(model.ReturnUrl));
+        var destination = ReturnUrlGuard.Sanitize(model.ReturnUrl);
+        return Request.IsHtmxRequest() ? HtmxRedirect(destination) : LocalRedirect(destination);
     }
 
     // ----------------------------------------------------------- /auth/elevate
@@ -240,6 +255,35 @@ public sealed class AuthController : Controller
     }
 
     // ---------------------------------------------------------- helpers
+
+    /// <summary>
+    /// Re-render of the credentials step. HTMX requests get the bare partial
+    /// (swapped into #auth-step, keeping the shell + system-info card intact);
+    /// non-HTMX requests keep the classic full-page MVC flow.
+    /// </summary>
+    private IActionResult LoginStep(LoginViewModel model) =>
+        Request.IsHtmxRequest() ? PartialView("_LoginForm", model) : View(nameof(Login), model);
+
+    /// <summary>Re-render of the TOTP step; same HTMX/full-page split.</summary>
+    private IActionResult TotpStep(LoginTotpViewModel model) =>
+        Request.IsHtmxRequest() ? PartialView("_LoginTotpForm", model) : View(nameof(LoginTotp), model);
+
+    /// <summary>
+    /// Full-page navigation from an HTMX request. A plain 302 would make HTMX
+    /// fetch the target and swap it INTO the step container (nesting a whole
+    /// document inside the card) — HX-Redirect makes the browser navigate.
+    /// </summary>
+    private IActionResult HtmxRedirect(string url)
+    {
+        Response.Headers["HX-Redirect"] = url;
+        return new EmptyResult();
+    }
+
+    /// <summary>Expired/absent pending-auth ticket — back to step 1.</summary>
+    private IActionResult RedirectBackToLogin(string? returnUrl) =>
+        Request.IsHtmxRequest()
+            ? HtmxRedirect(Url.Action(nameof(Login), new { returnUrl })!)
+            : RedirectToAction(nameof(Login), new { returnUrl });
 
     internal IPAddress? ClientIp()
     {

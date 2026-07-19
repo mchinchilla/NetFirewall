@@ -1,56 +1,11 @@
 @model NetFirewall.Web.Models.Auth.LoginTotpViewModel
-@using NetFirewall.Web.Models
 @{
     Layout = "_AuthLayout";
     ViewData["Title"] = "Two-factor";
 }
 
-<div x-data="{ recovery: @(Model.IsRecoveryCode ? "true" : "false") }">
-    <h1 class="text-2xl font-semibold tracking-tight">Two-factor verification</h1>
-    <p class="text-sm mt-1 text-surface-fg-muted">
-        <span x-show="!recovery">Enter the 6-digit code from your authenticator app.</span>
-        <span x-show="recovery" x-cloak>Enter one of your recovery codes — it will be consumed.</span>
-    </p>
-
-    @if (!ViewData.ModelState.IsValid && ViewData.ModelState[""]?.Errors.Count > 0)
-    {
-        <div class="mt-5 rounded-md border-l-2 px-3 py-2 text-sm bg-feedback-danger-bg text-feedback-danger-fg border-feedback-danger-bd">
-            @foreach (var err in ViewData.ModelState[""]!.Errors) { <p>@err.ErrorMessage</p> }
-        </div>
-    }
-
-    <form asp-action="LoginTotp" method="post" class="mt-7 space-y-4">
-        @Html.AntiForgeryToken()
-        <input type="hidden" asp-for="ReturnUrl" />
-        <input type="hidden" name="IsRecoveryCode" :value="recovery" />
-
-        <div class="space-y-1.5">
-            <label for="f-Code" class="block text-xs font-medium">
-                <span x-show="!recovery">Authenticator code</span>
-                <span x-show="recovery" x-cloak>Recovery code</span>
-                <span class="text-feedback-danger-fg">*</span>
-            </label>
-            <input id="f-Code" name="Code" required autofocus autocomplete="one-time-code"
-                   class="@(ViewData.ModelState[nameof(Model.Code)]?.Errors.Count > 0 ? "input input-error" : "input") py-2.5 text-center tracking-widest font-mono text-base"
-                   :placeholder="recovery ? 'XXXXX-XXXXX' : '••• •••'"
-                   :inputmode="recovery ? 'text' : 'numeric'"
-                   :pattern="recovery ? '^[A-Z0-9\\-]{11}$' : '^\\d{6}$'"
-                   :maxlength="recovery ? 11 : 6"
-                   value="@Model.Code" />
-            @if (ViewData.ModelState[nameof(Model.Code)]?.Errors.FirstOrDefault() is { } err)
-            {
-                <p class="text-xs text-feedback-danger-fg">@err.ErrorMessage</p>
-            }
-        </div>
-
-        <button type="submit" class="btn btn-primary w-full py-2.5">Verify and sign in</button>
-
-        <button type="button" class="text-xs hover:underline w-full text-center text-accent"
-                @@click="recovery = !recovery">
-            <span x-show="!recovery">Use a recovery code instead</span>
-            <span x-show="recovery" x-cloak>Use authenticator app instead</span>
-        </button>
-    </form>
+<div>
+    @await Html.PartialAsync("_LoginTotpForm", Model)
 
     <div class="mt-8">
         @await Html.PartialAsync("_SystemInfoCard")
