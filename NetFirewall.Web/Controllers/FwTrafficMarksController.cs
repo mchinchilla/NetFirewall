@@ -58,7 +58,7 @@ public sealed class FwTrafficMarksController : Controller
             }
             var envelope = ServiceResponse<FwTrafficMark>.Ok(saved, $"Mark '{saved.Name}' saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshTrafficMarks";
+            this.AttachHxEvent("refreshTrafficMarks", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -73,7 +73,7 @@ public sealed class FwTrafficMarksController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _firewall.DeleteTrafficMarkAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshTrafficMarks";
+        this.AttachHxEvent("refreshTrafficMarks", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Mark deleted.")
             : ServiceResponse<object>.Fail("Mark not found."));

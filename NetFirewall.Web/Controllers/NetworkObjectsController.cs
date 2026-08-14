@@ -99,7 +99,7 @@ public sealed class NetworkObjectsController : Controller
 
             var envelope = ServiceResponse<NetworkObject>.Ok(saved, $"Object '{saved.Name}' saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshNetworkObjects";
+            this.AttachHxEvent("refreshNetworkObjects", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -113,7 +113,7 @@ public sealed class NetworkObjectsController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _objects.DeleteAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshNetworkObjects";
+        this.AttachHxEvent("refreshNetworkObjects", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Object deleted.")
             : ServiceResponse<object>.Fail("Object not found."));

@@ -62,7 +62,7 @@ public sealed class FwSchedulesController : Controller
             }
             var envelope = ServiceResponse<FwSchedule>.Ok(saved, $"Schedule '{saved.Name}' saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshSchedules";
+            this.AttachHxEvent("refreshSchedules", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -76,7 +76,7 @@ public sealed class FwSchedulesController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _schedules.DeleteAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshSchedules";
+        this.AttachHxEvent("refreshSchedules", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Schedule deleted. Filter rules referencing it now apply unconditionally.")
             : ServiceResponse<object>.Fail("Schedule not found."));

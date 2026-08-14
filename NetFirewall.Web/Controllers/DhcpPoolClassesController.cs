@@ -66,7 +66,7 @@ public sealed class DhcpPoolClassesController : Controller
                 envelope = ServiceResponse<object>.Ok(new { }, $"Class {(allow ? "allowed" : "denied")} on pool.");
             }
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshPoolClasses";
+            this.AttachHxEvent("refreshPoolClasses", new { });
             return Json(envelope);
         }
         catch (Exception ex)

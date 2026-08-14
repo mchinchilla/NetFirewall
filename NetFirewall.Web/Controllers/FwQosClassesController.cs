@@ -75,7 +75,7 @@ public sealed class FwQosClassesController : Controller
             var envelope = ServiceResponse<FwQosClass>.Ok(saved,
                 $"Class '{saved.Name}' saved ({saved.GuaranteedMbps}/{saved.CeilingMbps} Mbps, prio {saved.Priority}).");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshQosClasses";
+            this.AttachHxEvent("refreshQosClasses", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -91,7 +91,7 @@ public sealed class FwQosClassesController : Controller
     {
         _ = configId;
         var ok = await _firewall.DeleteQosClassAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshQosClasses";
+        this.AttachHxEvent("refreshQosClasses", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Class deleted.")
             : ServiceResponse<object>.Fail("Class not found."));

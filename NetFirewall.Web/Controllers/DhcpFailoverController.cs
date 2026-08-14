@@ -63,7 +63,7 @@ public sealed class DhcpFailoverController : Controller
             }
             var envelope = ServiceResponse<FailoverPeer>.Ok(saved, $"Peer '{saved.Name}' saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshFailover";
+            this.AttachHxEvent("refreshFailover", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -78,7 +78,7 @@ public sealed class DhcpFailoverController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _admin.DeleteFailoverPeerAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshFailover";
+        this.AttachHxEvent("refreshFailover", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Peer deleted.")
             : ServiceResponse<object>.Fail("Peer not found."));

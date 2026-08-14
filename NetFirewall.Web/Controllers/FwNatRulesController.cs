@@ -62,7 +62,7 @@ public sealed class FwNatRulesController : Controller
             }
             var envelope = ServiceResponse<FwNatRule>.Ok(saved, $"NAT rule {saved.Type} for {saved.SourceNetwork} saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshNatRules";
+            this.AttachHxEvent("refreshNatRules", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -77,7 +77,7 @@ public sealed class FwNatRulesController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _firewall.DeleteNatRuleAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshNatRules";
+        this.AttachHxEvent("refreshNatRules", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "NAT rule deleted.")
             : ServiceResponse<object>.Fail("Rule not found."));

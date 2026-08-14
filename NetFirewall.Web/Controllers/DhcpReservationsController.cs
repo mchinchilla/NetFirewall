@@ -61,11 +61,13 @@ public sealed class DhcpReservationsController : Controller
                 saved = await _admin.CreateReservationAsync(entity, ct);
             }
 
-            var envelope = ServiceResponse<DhcpMacReservation>.Ok(saved,
-                $"Reservation {saved.MacAddress} → {saved.ReservedIp} saved.");
-            this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshReservations";
-            return Json(envelope);
+            // Serialize the view model, not the entity: System.Text.Json throws on
+            // IPAddress (ScopeId getter) — the row was saved but the response 500'd.
+            var vm = FromEntity(saved);
+            var envelope = ServiceResponse<ReservationFormViewModel>.Ok(vm,
+                $"Reservation {vm.MacAddress} → {vm.ReservedIp} saved.");
+            this.AttachHxEvent("refreshReservations", new { });
+            return this.ToHtmxResponse(envelope);
         }
         catch (Exception ex)
         {
@@ -82,7 +84,7 @@ public sealed class DhcpReservationsController : Controller
         var envelope = ok
             ? ServiceResponse<object>.Ok(new { }, "Reservation deleted.")
             : ServiceResponse<object>.Fail("Reservation not found.");
-        Response.Headers["HX-Trigger"] = "refreshReservations";
+        this.AttachHxEvent("refreshReservations", new { });
         return this.ToHtmxResponse(envelope);
     }
 

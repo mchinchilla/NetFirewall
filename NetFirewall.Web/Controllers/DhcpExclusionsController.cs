@@ -69,7 +69,7 @@ public sealed class DhcpExclusionsController : Controller
             }
             var envelope = ServiceResponse<DhcpExclusion>.Ok(saved, "Exclusion saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshExclusions";
+            this.AttachHxEvent("refreshExclusions", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -85,7 +85,7 @@ public sealed class DhcpExclusionsController : Controller
     {
         _ = subnetId;
         var ok = await _admin.DeleteExclusionAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshExclusions";
+        this.AttachHxEvent("refreshExclusions", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Exclusion deleted.")
             : ServiceResponse<object>.Fail("Exclusion not found."));

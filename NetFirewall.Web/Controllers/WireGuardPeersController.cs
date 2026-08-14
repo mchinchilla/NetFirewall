@@ -199,7 +199,7 @@ public sealed class WireGuardPeersController : Controller
             try { await _vpnRouting.EnsurePeerForwardingAsync(server, entity, ct); }
             catch (Exception ex) { _logger.LogWarning(ex, "Peer forwarding ensure failed (non-fatal)"); }
 
-            Response.Headers["HX-Trigger"] = "refreshWireGuardPeers";
+            this.AttachHxEvent("refreshWireGuardPeers", new { });
 
             // For NEW peers we render the client config view in-drawer so the
             // operator can copy/QR before navigating away. For updates, just toast.
@@ -252,7 +252,7 @@ public sealed class WireGuardPeersController : Controller
         }
 
         var ok = await _wg.DeletePeerAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshWireGuardPeers";
+        this.AttachHxEvent("refreshWireGuardPeers", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Peer deleted.")
             : ServiceResponse<object>.Fail("Peer not found."));

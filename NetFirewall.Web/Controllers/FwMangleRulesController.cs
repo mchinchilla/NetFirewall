@@ -62,7 +62,7 @@ public sealed class FwMangleRulesController : Controller
             }
             var envelope = ServiceResponse<FwMangleRule>.Ok(saved, $"Mangle rule on {saved.Chain} saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshMangleRules";
+            this.AttachHxEvent("refreshMangleRules", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -77,7 +77,7 @@ public sealed class FwMangleRulesController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _firewall.DeleteMangleRuleAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshMangleRules";
+        this.AttachHxEvent("refreshMangleRules", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Mangle rule deleted.")
             : ServiceResponse<object>.Fail("Rule not found."));

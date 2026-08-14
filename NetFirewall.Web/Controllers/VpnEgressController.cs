@@ -76,7 +76,7 @@ public sealed class VpnEgressController : Controller
         try
         {
             await _vpnRouting.SetEgressSourcesAsync(server, sources ?? Array.Empty<string>(), ct);
-            Response.Headers["HX-Trigger"] = "refreshWireGuard";
+            this.AttachHxEvent("refreshWireGuard", new { });
             return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { },
                 "Egress devices updated. Apply to push the routing to the kernel."));
         }

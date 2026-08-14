@@ -64,7 +64,7 @@ public sealed class FwFilterRulesController : Controller
             var envelope = ServiceResponse<FwFilterRule>.Ok(saved,
                 $"Filter rule on {saved.Chain}/{saved.Action} saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshFilterRules";
+            this.AttachHxEvent("refreshFilterRules", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -79,7 +79,7 @@ public sealed class FwFilterRulesController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _firewall.DeleteFilterRuleAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshFilterRules";
+        this.AttachHxEvent("refreshFilterRules", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Filter rule deleted.")
             : ServiceResponse<object>.Fail("Rule not found."));

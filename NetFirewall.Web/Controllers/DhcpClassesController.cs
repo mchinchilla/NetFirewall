@@ -59,7 +59,7 @@ public sealed class DhcpClassesController : Controller
             }
             var envelope = ServiceResponse<DhcpClass>.Ok(saved, $"Class '{saved.Name}' saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshClasses";
+            this.AttachHxEvent("refreshClasses", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -74,7 +74,7 @@ public sealed class DhcpClassesController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _admin.DeleteClassAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshClasses";
+        this.AttachHxEvent("refreshClasses", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Class deleted.")
             : ServiceResponse<object>.Fail("Class not found."));

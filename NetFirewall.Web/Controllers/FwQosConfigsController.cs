@@ -61,7 +61,7 @@ public sealed class FwQosConfigsController : Controller
             }
             var envelope = ServiceResponse<FwQosConfig>.Ok(saved, $"QoS config saved ({saved.TotalBandwidthMbps} Mbps).");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshQosConfigs";
+            this.AttachHxEvent("refreshQosConfigs", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -76,7 +76,7 @@ public sealed class FwQosConfigsController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _firewall.DeleteQosConfigAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshQosConfigs";
+        this.AttachHxEvent("refreshQosConfigs", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "QoS config deleted (cascades classes).")
             : ServiceResponse<object>.Fail("Config not found."));

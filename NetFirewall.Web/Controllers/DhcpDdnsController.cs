@@ -63,7 +63,7 @@ public sealed class DhcpDdnsController : Controller
             var envelope = ServiceResponse<DdnsConfig>.Ok(saved,
                 $"DDNS config{(saved.SubnetId is null ? " (global)" : "")} saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshDdns";
+            this.AttachHxEvent("refreshDdns", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -78,7 +78,7 @@ public sealed class DhcpDdnsController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _admin.DeleteDdnsConfigAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshDdns";
+        this.AttachHxEvent("refreshDdns", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "DDNS config deleted.")
             : ServiceResponse<object>.Fail("Config not found."));

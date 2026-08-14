@@ -63,7 +63,7 @@ public sealed class FwPortForwardsController : Controller
             var envelope = ServiceResponse<FwPortForward>.Ok(saved,
                 $"Port forward {saved.Protocol}/{saved.ExternalPortStart} → {saved.InternalIp}:{saved.InternalPort} saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshPortForwards";
+            this.AttachHxEvent("refreshPortForwards", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -78,7 +78,7 @@ public sealed class FwPortForwardsController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var ok = await _firewall.DeletePortForwardAsync(id, ct);
-        Response.Headers["HX-Trigger"] = "refreshPortForwards";
+        this.AttachHxEvent("refreshPortForwards", new { });
         return this.ToHtmxResponse(ok
             ? ServiceResponse<object>.Ok(new { }, "Port forward deleted.")
             : ServiceResponse<object>.Fail("Forward not found."));

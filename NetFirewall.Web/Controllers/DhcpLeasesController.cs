@@ -48,7 +48,7 @@ public sealed class DhcpLeasesController : Controller
         var envelope = ok
             ? ServiceResponse<object>.Ok(new { }, "Lease released.")
             : ServiceResponse<object>.Fail("Lease not found or already gone.");
-        Response.Headers["HX-Trigger"] = "refreshLeases";
+        this.AttachHxEvent("refreshLeases", new { });
         return this.ToHtmxResponse(envelope);
     }
 
@@ -59,7 +59,7 @@ public sealed class DhcpLeasesController : Controller
     {
         var n = await _admin.CleanupExpiredLeasesAsync(ct);
         var envelope = ServiceResponse<int>.Ok(n, $"Removed {n} expired lease(s).");
-        Response.Headers["HX-Trigger"] = "refreshLeases";
+        this.AttachHxEvent("refreshLeases", new { });
         return this.ToHtmxResponse(envelope);
     }
 }

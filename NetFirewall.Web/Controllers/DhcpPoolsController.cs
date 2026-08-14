@@ -75,7 +75,7 @@ public sealed class DhcpPoolsController : Controller
 
             var envelope = ServiceResponse<DhcpPool>.Ok(saved, $"Pool {saved.RangeStart}–{saved.RangeEnd} saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshPools";
+            this.AttachHxEvent("refreshPools", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -94,7 +94,7 @@ public sealed class DhcpPoolsController : Controller
         var envelope = ok
             ? ServiceResponse<object>.Ok(new { }, "Pool deleted.")
             : ServiceResponse<object>.Fail("Pool not found.");
-        Response.Headers["HX-Trigger"] = "refreshPools";
+        this.AttachHxEvent("refreshPools", new { });
         return this.ToHtmxResponse(envelope);
     }
 

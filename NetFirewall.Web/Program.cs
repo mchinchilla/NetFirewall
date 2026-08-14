@@ -70,6 +70,13 @@ builder.Services.AddControllersWithViews(options =>
         .RequireAuthenticatedUser()
         .Build();
     options.Filters.Add(new AuthorizeFilter(policy));
+}).AddJsonOptions(o =>
+{
+    // Without these, Json(envelope) throws mid-response for any entity carrying
+    // an IPAddress/PhysicalAddress (its ScopeId getter throws on IPv4) — the
+    // save committed but the client saw HTTP 500.
+    o.JsonSerializerOptions.Converters.Add(new NetFirewall.Models.Json.IPAddressJsonConverter());
+    o.JsonSerializerOptions.Converters.Add(new NetFirewall.Models.Json.PhysicalAddressJsonConverter());
 });
 
 // HTMX requests can't send the form-field anti-forgery token, so accept it via header.

@@ -147,7 +147,7 @@ public sealed class WireGuardController : Controller
 
             var envelope = ServiceResponse<WgServer>.Ok(saved, "WireGuard configuration saved.");
             this.AttachToastTrigger(envelope);
-            Response.Headers["HX-Trigger"] = "refreshWireGuard";
+            this.AttachHxEvent("refreshWireGuard", new { });
             return Json(envelope);
         }
         catch (Exception ex)
@@ -227,7 +227,7 @@ public sealed class WireGuardController : Controller
         var envelope = ServiceResponse<object>.Ok(new { server.PublicKey },
             "Server keys rotated. Every peer config must be re-issued — old client configs will fail.");
         this.AttachToastTrigger(envelope);
-        Response.Headers["HX-Trigger"] = "refreshWireGuard";
+        this.AttachHxEvent("refreshWireGuard", new { });
         return Json(envelope);
     }
 
@@ -235,7 +235,7 @@ public sealed class WireGuardController : Controller
     public async Task<IActionResult> Apply(CancellationToken ct)
     {
         var envelope = await _daemon.ApplyWireGuardAsync(ct);
-        Response.Headers["HX-Trigger"] = "refreshWireGuard";
+        this.AttachHxEvent("refreshWireGuard", new { });
         return this.ToHtmxResponse(envelope);
     }
 
@@ -246,7 +246,7 @@ public sealed class WireGuardController : Controller
     [HttpPost("apply-all"), ValidateAntiForgeryToken, RequireElevated]
     public async Task<IActionResult> ApplyAll(CancellationToken ct)
     {
-        Response.Headers["HX-Trigger"] = "refreshWireGuard";
+        this.AttachHxEvent("refreshWireGuard", new { });
 
         var nft = await _daemon.ApplyFirewallAsync(ct);
         if (!nft.Success)
@@ -268,7 +268,7 @@ public sealed class WireGuardController : Controller
     public async Task<IActionResult> Stop(CancellationToken ct)
     {
         var envelope = await _daemon.StopWireGuardAsync(ct);
-        Response.Headers["HX-Trigger"] = "refreshWireGuard";
+        this.AttachHxEvent("refreshWireGuard", new { });
         return this.ToHtmxResponse(envelope);
     }
 
@@ -291,7 +291,7 @@ public sealed class WireGuardController : Controller
     public async Task<IActionResult> Import(string name, CancellationToken ct)
     {
         var envelope = await _daemon.ImportWireGuardConfigAsync(name, ct);
-        Response.Headers["HX-Trigger"] = "refreshWireGuard";
+        this.AttachHxEvent("refreshWireGuard", new { });
         // Translate the daemon envelope into a UI-friendly toast. ToHtmxResponse
         // already adds showToast — we just pass through.
         return this.ToHtmxResponse(envelope);
