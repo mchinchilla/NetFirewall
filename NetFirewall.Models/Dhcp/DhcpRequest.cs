@@ -23,16 +23,22 @@ public class DhcpRequest
     public IPAddress GiAddr { get; set; } = IPAddress.Any;
     public string ClientMac { get; set; } = string.Empty;
     public byte[] ChAddr { get; set; } = Array.Empty<byte>();
-    public string SName { get; set; } = string.Empty;
-    public string File { get; set; } = string.Empty;
+    public string? SName { get; set; }
+    public string? File { get; set; }
 
-    // DHCP Options
+    // DHCP Options — null means "the client did not send this option".
+    // The distinction matters: a REQUEST without option 50 (renewal) must NOT
+    // look like a request for 0.0.0.0, and an absent hostname must NOT look
+    // like an empty one to class matchers / DDNS.
     public DhcpMessageType MessageType { get; set; }
-    public IPAddress RequestedIp { get; set; } = IPAddress.Any;
-    public byte[] ClientIdentifier { get; set; } = Array.Empty<byte>();
-    public string Hostname { get; set; } = string.Empty;
-    public byte[] ParameterRequestList { get; set; } = Array.Empty<byte>();
-    public string VendorClassIdentifier { get; set; } = string.Empty;
+    public IPAddress? RequestedIp { get; set; }
+    public byte[]? ClientIdentifier { get; set; }
+    public string? Hostname { get; set; }
+    public byte[]? ParameterRequestList { get; set; }
+    public string? VendorClassIdentifier { get; set; }
+    /// <summary>Option 54 — which server a REQUEST is addressed to. A server
+    /// whose identifier doesn't match must stay silent (RFC 2131 §4.3.2).</summary>
+    public IPAddress? ServerIdentifier { get; set; }
     public int LeaseTime { get; set; }
 
     public bool IsBootp { get; set; }

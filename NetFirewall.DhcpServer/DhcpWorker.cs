@@ -104,12 +104,16 @@ public class DhcpWorker : BackgroundService
         // ms and 100 packets backs up in <20ms. 1024 buys us headroom without
         // meaningfully impacting memory (each context is a 576-byte ArrayPool
         // rental + ~80 bytes of struct fields ≈ 650 KB worst case).
+        // itemDropped: DropOldest evicts silently on overflow — without this
+        // callback each evicted context's rented buffer never went back to the
+        // ArrayPool, so a sustained overload bled the pool dry (fresh
+        // allocations + GC churn exactly when the server was busiest).
         _packetChannel = Channel.CreateBounded<DhcpPacketContext>(new BoundedChannelOptions(1024)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
             SingleWriter = !_useRawSocket
-        });
+        }, static dropped => dropped.Dispose());
     }
 
     /// <summary>
@@ -218,7 +222,7 @@ public class DhcpWorker : BackgroundService
         table.AddRow("Bind Address", "0.0.0.0");
         table.AddRow("Interfaces", string.Join(", ", _interfaces));
         table.AddRow("Buffer Size", $"{MaxDhcpPacketSize} bytes");
-        table.AddRow("Channel Capacity", "100 packets");
+        table.AddRow("Channel Capacity", "1024 packets");
         table.AddRow("OS", RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux" : "Windows");
 
         AnsiConsole.Write(table);
@@ -489,10 +493,10 @@ public class DhcpWorker : BackgroundService
 
         if (!response.IsEmpty)
         {
-            var destination = DetermineDestinationEndPoint(request, context.RemoteEndPoint);
-
-            // Parse response to log what we're sending
+            // Parse the response type first — destination depends on it (NAKs
+            // must broadcast; everything else may unicast).
             var responseType = ParseResponseMessageType(response.Span);
+            var destination = DetermineDestinationEndPoint(request, responseType, context.RemoteEndPoint);
             LogDhcpResponse(request, responseType, destination, context.InterfaceName);
 
             // Track response types
@@ -628,9 +632,24 @@ public class DhcpWorker : BackgroundService
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static IPEndPoint DetermineDestinationEndPoint(DhcpRequest request, IPEndPoint originalEndPoint)
+    internal static IPEndPoint DetermineDestinationEndPoint(DhcpRequest request, DhcpMessageType responseType, IPEndPoint originalEndPoint)
     {
-        // RFC 2131: Broadcast if flag set or client has no IP
+        // RFC 2131 §4.1: a relayed request (giaddr != 0) is answered via the
+        // relay agent on the server port — never broadcast on our own segment,
+        // where the client can't hear it.
+        if (request.GiAddr != null && !request.GiAddr.Equals(IPAddress.Any))
+        {
+            return new IPEndPoint(request.GiAddr, 67);
+        }
+
+        // NAK: the client's addressing state is wrong or unknown (that's why
+        // we're NAKing) — unicasting to its claimed ciaddr may never arrive.
+        if (responseType == DhcpMessageType.Nak)
+        {
+            return new IPEndPoint(IPAddress.Broadcast, 68);
+        }
+
+        // Broadcast if flag set or client has no IP
         bool broadcastFlagSet = (request.Flags & 0x8000) != 0;
 
         if (broadcastFlagSet || request.CiAddr == null || request.CiAddr.Equals(IPAddress.Any))
@@ -645,7 +664,11 @@ public class DhcpWorker : BackgroundService
     {
         request = default!;
 
-        if (buffer.Length < MinDhcpPacketSize)
+        // The magic cookie + at least the End option live at [236..240); a
+        // 236-239 byte packet passes the MinDhcpPacketSize check upstream but
+        // indexing buffer[236] below would throw. DHCP (as opposed to plain
+        // BOOTP) always carries the cookie, so anything shorter is unparseable.
+        if (buffer.Length < OptionsOffset)
         {
             _logger.LogWarning("[PARSE] Buffer too short: {Length} bytes", buffer.Length);
             return false;
@@ -811,6 +834,10 @@ public class DhcpWorker : BackgroundService
 
             case DhcpOptionCode.IPAddressLeaseTime when data.Length >= 4:
                 request.LeaseTime = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(data));
+                break;
+
+            case DhcpOptionCode.ServerIdentifier when data.Length >= 4:
+                request.ServerIdentifier = new IPAddress(data.Slice(0, 4));
                 break;
         }
     }

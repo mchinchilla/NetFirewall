@@ -58,10 +58,22 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         _logger.LogDebug("[LEASE] OfferLeaseAsync called for MAC: {Mac}, Range: {Start}-{End}",
             macAddress, rangeStart, rangeEnd);
 
-        // FAST PATH: Check cache first (O(1) lookup)
+        // FAST PATH: Check cache first (O(1) lookup). Reservations are DB-only
+        // state the cache doesn't mirror, so one light snapshot query resolves
+        // them up front — without it, a reserved MAC gets offered an arbitrary
+        // free IP that CanAssignIpAsync later denies (endless DISCOVER/NAK
+        // loop), and an offline device's reservation sitting at the head of
+        // the range gets offered to EVERY new client with the same result.
         if (_leaseCache != null)
         {
             _logger.LogDebug("[LEASE] Checking cache for MAC: {Mac}", macAddress);
+
+            var (ownReservation, reservedIps) = await GetReservationSnapshotAsync(macAddress).ConfigureAwait(false);
+            if (ownReservation != null)
+            {
+                _logger.LogDebug("[LEASE] MAC {Mac} has reservation {Ip} — offering it", macAddress, ownReservation);
+                return ownReservation;
+            }
 
             // Check for existing lease in cache
             var cachedLease = _leaseCache.GetByMac(macAddress);
@@ -72,8 +84,9 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
                 return cachedLease.IpAddress;
             }
 
-            // Find available IP from cache (no DB hit)
-            var availableIp = _leaseCache.FindAvailableIp(rangeStart!, rangeEnd);
+            // Find available IP from cache, skipping every reserved address.
+            var availableIp = _leaseCache.FindAvailableIp(rangeStart!, rangeEnd,
+                reservedIps.Count > 0 ? reservedIps : null);
             if (availableIp != null)
             {
                 _logger.LogDebug("[LEASE] Cache HIT - Found available IP: {Ip} for {Mac}",
@@ -108,6 +121,17 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
                 return preassignedIp;
             }
 
+            // Serialize allocation across processes (Web admin, failover peer,
+            // future parallel consumers): a transaction-scoped advisory lock on
+            // the range means two concurrent allocators can't both compute the
+            // same "first free" IP. Auto-released at commit/rollback.
+            await using (var lockCmd = new NpgsqlCommand(
+                "SELECT pg_advisory_xact_lock(hashtextextended(@range, 0))", connection, transaction))
+            {
+                lockCmd.Parameters.AddWithValue("range", $"dhcp_alloc:{rangeStart}-{rangeEnd}");
+                await lockCmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
             // Find first available IP using optimized SQL
             _logger.LogDebug("[LEASE] Finding available IP in range {Start}-{End} for {Mac}",
                 rangeStart, rangeEnd, macAddress);
@@ -137,6 +161,47 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             _logger.LogError(ex, "[LEASE] Error offering lease for MAC {Mac}: {Message}", macAddress, ex.Message);
             return null;
         }
+    }
+
+    /// <summary>
+    /// One roundtrip that fetches the whole (small) reservations table:
+    /// the requesting MAC's own reservation plus the set of every reserved IP,
+    /// for exclusion during cache-side allocation. Runs on the fast path, so
+    /// it's deliberately a single indexed scan rather than two queries.
+    /// </summary>
+    private async Task<(IPAddress? OwnReservation, HashSet<IPAddress> ReservedIps)> GetReservationSnapshotAsync(
+        string macAddress)
+    {
+        var parsedMac = ParseMacAddress(macAddress);
+        var reserved = new HashSet<IPAddress>();
+        IPAddress? own = null;
+
+        try
+        {
+            await using var connection = await _dataSource.OpenConnectionAsync().ConfigureAwait(false);
+            const string sql = "SELECT mac_address, reserved_ip FROM dhcp_mac_reservations";
+            await using var cmd = new NpgsqlCommand(sql, connection);
+            await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                var mac = (PhysicalAddress)reader.GetValue(0);
+                var ip = (IPAddress)reader.GetValue(1);
+                reserved.Add(ip);
+                if (mac.Equals(parsedMac))
+                {
+                    own = ip;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Fail-soft: a DB hiccup here shouldn't kill the offer — worst case
+            // we allocate without reservation awareness for this one packet.
+            _logger.LogError(ex, "[LEASE] Failed to load reservation snapshot for {Mac}", macAddress);
+        }
+
+        return (own, reserved);
     }
 
     /// <summary>
@@ -178,14 +243,18 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         string rangeEnd,
         NpgsqlTransaction transaction)
     {
-        // Optimized query using generate_series with proper locking
+        // The previous version used `inet @rangeStart` (typename-literal syntax
+        // with a bind parameter) — a hard Postgres syntax error on EVERY
+        // execution, which aborted the transaction and made the fallback fail
+        // with 25P02 too: the DB path could never allocate a fresh IP. Cast
+        // syntax (@p::inet) is the parameter-compatible form. The old
+        // `FOR UPDATE SKIP LOCKED` locked nothing (no base-table rows in the
+        // CTE) and is gone; serialization comes from the advisory lock taken
+        // in OfferLeaseAsync.
         const string sql = @"
             WITH ip_series AS (
-                SELECT ip::inet AS ip
-                FROM generate_series(1,
-                    (inet @rangeEnd - inet @rangeStart + 1)::int
-                ) AS idx,
-                LATERAL (SELECT (inet @rangeStart + idx - 1) AS ip) AS computed
+                SELECT (@rangeStart::inet + gs) AS ip
+                FROM generate_series(0, (@rangeEnd::inet - @rangeStart::inet)::int) AS gs
             ),
             used_ips AS (
                 SELECT ip_address FROM dhcp_leases WHERE end_time > @now
@@ -194,11 +263,13 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             )
             SELECT ip FROM ip_series
             WHERE ip NOT IN (SELECT ip_address FROM used_ips WHERE ip_address IS NOT NULL)
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED";
+            LIMIT 1";
 
         _logger.LogTrace("[SQL] FindAvailableIp: Range {Start}-{End}", rangeStart, rangeEnd);
 
+        // Savepoint so a failure in the optimized query doesn't poison the
+        // enclosing transaction for the fallback (25P02 cascade).
+        await transaction.SaveAsync("find_ip").ConfigureAwait(false);
         try
         {
             await using var cmd = new NpgsqlCommand(sql, connection, transaction);
@@ -222,7 +293,9 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         catch (PostgresException ex)
         {
             _logger.LogWarning("[SQL] FindAvailableIp: generate_series failed ({Message}), using fallback", ex.Message);
-            // Fallback to simpler iteration if generate_series fails
+            // Roll back to the savepoint so the transaction is usable again,
+            // then fall back to simple iteration.
+            await transaction.RollbackAsync("find_ip").ConfigureAwait(false);
             return await FindAvailableIpFallbackAsync(connection, rangeStart, rangeEnd, transaction).ConfigureAwait(false);
         }
     }
@@ -237,7 +310,10 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         var endIp = IPAddress.Parse(rangeEnd);
         var now = DateTime.UtcNow;
 
-        for (var ip = startIp; CompareIpAddresses(ip, endIp) <= 0; ip = IncrementIpAddress(ip)!)
+        // `ip != null` guards the 255.255.255.255 wrap: IncrementIpAddress
+        // returns null on overflow and CompareIpAddresses treats null as
+        // "equal", which would loop a null into the SQL parameter below.
+        for (var ip = startIp; ip != null && CompareIpAddresses(ip, endIp) <= 0; ip = IncrementIpAddress(ip))
         {
             // Check if IP is available
             const string checkSql = @"
@@ -311,6 +387,11 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         {
             await transaction.RollbackAsync().ConfigureAwait(false);
             _logger.LogError(ex, "Error assigning {Ip} to {Mac}", ipAddress, macAddress);
+            // Rethrow: swallowing here made the caller ACK a lease that was
+            // never persisted — the IP would later be offered to someone else.
+            // The worker's per-packet catch turns this into an error count and
+            // the client retries, which is the recoverable outcome.
+            throw;
         }
     }
 
@@ -324,22 +405,29 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         {
             // Check if this MAC has a reservation
             var reservedIp = await GetReservationInternalAsync(connection, macAddress, null).ConfigureAwait(false);
-            if (reservedIp != null)
+            if (reservedIp != null && !reservedIp.Equals(ipAddress))
             {
-                // MAC has a reservation - only allow if requesting that specific IP
-                var canAssign = reservedIp.Equals(ipAddress);
-                _logger.LogDebug("[CAN_ASSIGN] MAC {Mac} has reservation for {ReservedIp}, requested {RequestedIp}, allowed={Allowed}",
-                    macAddress, reservedIp, ipAddress, canAssign);
-                return canAssign;
+                // MAC has a reservation - only allow requests for that specific IP
+                _logger.LogDebug("[CAN_ASSIGN] MAC {Mac} has reservation for {ReservedIp}, requested {RequestedIp} — denied",
+                    macAddress, reservedIp, ipAddress);
+                return false;
             }
 
-            // Check if this IP is reserved for a DIFFERENT MAC
-            var ipReservationOwner = await GetReservationOwnerAsync(connection, ipAddress).ConfigureAwait(false);
-            if (ipReservationOwner != null && !ipReservationOwner.Equals(macAddress, StringComparison.OrdinalIgnoreCase))
+            // NOTE: even when the MAC requests its OWN reserved IP we still
+            // fall through to the lease-conflict check below — a squatter may
+            // hold an active lease on the reserved address, and double-
+            // assigning produces a live ARP conflict for both clients.
+
+            if (reservedIp == null)
             {
-                _logger.LogDebug("[CAN_ASSIGN] IP {Ip} is reserved for {Owner}, not {Mac}",
-                    ipAddress, ipReservationOwner, macAddress);
-                return false;
+                // Check if this IP is reserved for a DIFFERENT MAC
+                var ipReservationOwner = await GetReservationOwnerAsync(connection, ipAddress).ConfigureAwait(false);
+                if (ipReservationOwner != null && !ipReservationOwner.Equals(macAddress, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("[CAN_ASSIGN] IP {Ip} is reserved for {Owner}, not {Mac}",
+                        ipAddress, ipReservationOwner, macAddress);
+                    return false;
+                }
             }
 
             // FAST PATH: Check cache for lease conflicts
@@ -835,6 +923,11 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
+        // Tracks whether the lease write committed: a post-commit failure (in
+        // the DDNS phase) must NOT attempt a rollback — Npgsql throws on
+        // rolling back a completed transaction, masking the real error.
+        var committed = false;
+
         try
         {
             var parsedMac = ParseMacAddress(macAddress);
@@ -865,6 +958,15 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            committed = true;
+
+            // Mirror into the cache so hot reads (and FindAvailableIp) see the
+            // lease this path just wrote — write-through invariant.
+            if (_leaseCache != null)
+            {
+                await _leaseCache.SetLeaseAsync(macAddress, ipAddress, leaseTime, hostname, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             // Perform DDNS update if service is available and hostname is provided
             DdnsUpdateResult? ddnsResult = null;
@@ -894,7 +996,10 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            if (!committed)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            }
             _logger.LogError(ex, "Error assigning {Ip} to {Mac} with DDNS", ipAddress, macAddress);
             return null;
         }
@@ -922,6 +1027,14 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             await using var deleteCmd = new NpgsqlCommand(deleteSql, connection);
             deleteCmd.Parameters.AddWithValue("mac", ParseMacAddress(macAddress));
             await deleteCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            // Mirror the release into the cache — otherwise GetByMac keeps
+            // returning the deleted lease and OfferLease re-offers it as
+            // "existing" until the entry expires.
+            if (_leaseCache != null)
+            {
+                await _leaseCache.ReleaseLeaseAsync(macAddress, cancellationToken).ConfigureAwait(false);
+            }
 
             // Perform DDNS cleanup if service is available and hostname was registered
             DdnsUpdateResult? ddnsResult = null;

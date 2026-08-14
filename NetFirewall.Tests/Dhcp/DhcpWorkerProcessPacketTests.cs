@@ -231,7 +231,7 @@ public class DhcpWorkerProcessPacketTests
         // unicast (its IP stack isn't configured yet). We must reply to
         // 255.255.255.255:68 regardless of CiAddr.
         var req = new DhcpRequest { Flags = 0x8000, CiAddr = IPAddress.Parse("10.0.0.5") };
-        var dest = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var dest = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
 
         Assert.Equal(IPAddress.Broadcast, dest.Address);
         Assert.Equal(68, dest.Port);
@@ -242,7 +242,7 @@ public class DhcpWorkerProcessPacketTests
     {
         // No CiAddr means the client is mid-bootstrap → broadcast.
         var req = new DhcpRequest { Flags = 0, CiAddr = IPAddress.Any };
-        var dest = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var dest = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
 
         Assert.Equal(IPAddress.Broadcast, dest.Address);
     }
@@ -252,7 +252,7 @@ public class DhcpWorkerProcessPacketTests
     {
         // Renewal case: client already has an IP and didn't request broadcast.
         var req = new DhcpRequest { Flags = 0, CiAddr = IPAddress.Parse("10.0.0.5") };
-        var dest = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var dest = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
 
         Assert.Equal(IPAddress.Parse("10.0.0.5"), dest.Address);
         Assert.Equal(68, dest.Port);
@@ -264,7 +264,7 @@ public class DhcpWorkerProcessPacketTests
         // Defensive: a request that somehow has a null CiAddr (parser path
         // shouldn't produce this, but the helper has to cope anyway).
         var req = new DhcpRequest { Flags = 0, CiAddr = null! };
-        var dest = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var dest = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
 
         Assert.Equal(IPAddress.Broadcast, dest.Address);
     }

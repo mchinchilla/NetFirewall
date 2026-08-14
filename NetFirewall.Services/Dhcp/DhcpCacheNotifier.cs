@@ -19,9 +19,14 @@ public sealed class DhcpCacheNotifier : IDhcpCacheNotifier
         try
         {
             await using var conn = await _ds.OpenConnectionAsync(ct);
-            // Channel + payload are quoted server-side; keep payload short — Postgres caps at 8000 bytes.
-            await using var cmd = new NpgsqlCommand($"NOTIFY {IDhcpCacheNotifier.SubnetChannel}, @p", conn);
-            cmd.Parameters.AddWithValue("p", reason);
+            // pg_notify() is the parameterizable form — `NOTIFY channel, @p`
+            // is a utility statement and rejects bind parameters, so every
+            // notify silently failed (the catch below ate it) and the DHCP
+            // server's caches lagged on their TTL after every UI change.
+            // Keep payload short — Postgres caps at 8000 bytes.
+            await using var cmd = new NpgsqlCommand("SELECT pg_notify(@channel, @payload)", conn);
+            cmd.Parameters.AddWithValue("channel", IDhcpCacheNotifier.SubnetChannel);
+            cmd.Parameters.AddWithValue("payload", reason);
             await cmd.ExecuteNonQueryAsync(ct);
             _logger.LogDebug("Sent NOTIFY {Channel}: {Reason}", IDhcpCacheNotifier.SubnetChannel, reason);
         }

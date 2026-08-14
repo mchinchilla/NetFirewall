@@ -43,15 +43,7 @@ public sealed class DdnsServiceTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private static void ResetStaticCache()
-    {
-        var t = typeof(DdnsService);
-        var cache = (ConcurrentDictionary<Guid, DdnsConfig>?)
-            t.GetField("ConfigCache", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null);
-        cache?.Clear();
-        t.GetField("_globalConfig", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, null);
-        t.GetField("_cacheExpiry", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, DateTime.MinValue);
-    }
+    private static void ResetStaticCache() => DdnsService.ResetConfigCacheForTests();
 
     /// <summary>
     /// Insert a row into dhcp_ddns_config with sensible defaults. Returns the new id.

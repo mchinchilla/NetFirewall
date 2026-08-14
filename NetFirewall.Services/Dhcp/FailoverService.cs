@@ -168,26 +168,56 @@ public sealed class FailoverService : IFailoverService, IDisposable
 
     private static byte ComputeMacHash(string macAddress)
     {
-        // Simple hash based on MAC address bytes
-        var bytes = ParseMacToBytes(macAddress);
+        // Simple hash based on MAC address bytes. A malformed MAC (shouldn't
+        // happen — the worker formats these — but defense in depth) hashes
+        // over its raw characters instead of collapsing to the zero bucket.
+        var bytes = new byte[6];
         uint hash = 0;
-        foreach (var b in bytes)
+        if (TryParseMacToBytes(macAddress, bytes))
         {
-            hash = ((hash << 5) + hash) ^ b;
+            foreach (var b in bytes)
+            {
+                hash = ((hash << 5) + hash) ^ b;
+            }
+        }
+        else
+        {
+            foreach (var c in macAddress)
+            {
+                hash = ((hash << 5) + hash) ^ (byte)c;
+            }
         }
         return (byte)(hash & 0xFF);
+    }
+
+    /// <summary>
+    /// Strict MAC parser. The old lenient version silently produced
+    /// 00:00:00:00:00:00 for anything unparseable, which (a) collapsed every
+    /// malformed client into one load-balancing bucket and (b) upserted them
+    /// all onto a single lease row on the peer (ON CONFLICT mac_address).
+    /// </summary>
+    internal static bool TryParseMacToBytes(string macAddress, byte[] result)
+    {
+        var parts = macAddress.Split(':', '-');
+        if (parts.Length != 6) return false;
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (parts[i].Length != 2 ||
+                !byte.TryParse(parts[i], System.Globalization.NumberStyles.HexNumber, null, out result[i]))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static byte[] ParseMacToBytes(string macAddress)
     {
         var result = new byte[6];
-        var parts = macAddress.Split(':', '-');
-        for (int i = 0; i < Math.Min(6, parts.Length); i++)
+        if (!TryParseMacToBytes(macAddress, result))
         {
-            if (byte.TryParse(parts[i], System.Globalization.NumberStyles.HexNumber, null, out var b))
-            {
-                result[i] = b;
-            }
+            throw new FormatException($"Invalid MAC address for failover payload: '{macAddress}'");
         }
         return result;
     }
@@ -417,13 +447,36 @@ public sealed class FailoverService : IFailoverService, IDisposable
                     await ConnectToPeerAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                // Start receive loop if connected
+                // Start receive loop if connected. Per-connection CTS: when
+                // either loop exits, the other must be cancelled AND awaited
+                // before we loop around — otherwise a still-Connected client
+                // spawned a SECOND receive loop on the same stream (two
+                // concurrent ReadAsyncs interleave arbitrarily) and heartbeat
+                // loops accumulated every reconnect.
                 if (_client?.Connected == true && _stream != null)
                 {
-                    _receiveTask = ReceiveLoopAsync(cancellationToken);
-                    _heartbeatTask = HeartbeatLoopAsync(cancellationToken);
+                    using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    _receiveTask = ReceiveLoopAsync(connectionCts.Token);
+                    _heartbeatTask = HeartbeatLoopAsync(connectionCts.Token);
 
                     await Task.WhenAny(_receiveTask, _heartbeatTask).ConfigureAwait(false);
+
+                    connectionCts.Cancel();
+                    try
+                    {
+                        await Task.WhenAll(_receiveTask, _heartbeatTask).ConfigureAwait(false);
+                    }
+                    catch (Exception loopEx) when (loopEx is not OperationCanceledException)
+                    {
+                        _logger.LogDebug(loopEx, "Failover connection loop terminated with error");
+                    }
+
+                    // On shutdown the loops exit via cancellation — that's not
+                    // a lost connection, don't churn the state machine.
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        await HandleConnectionLostAsync(cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -511,35 +564,45 @@ public sealed class FailoverService : IFailoverService, IDisposable
         {
             try
             {
-                // Read message header (length + type)
-                var bytesRead = await _stream.ReadAsync(headerBuffer, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (bytesRead == 0)
+                // Read message header (length + type). TCP routinely delivers
+                // short reads under load — a single ReadAsync used to discard
+                // partial headers/payloads and parse the remaining bytes of
+                // the SAME frame as the next header, permanently desyncing the
+                // protocol. ReadExactlyAsync loops until the full count.
+                try
+                {
+                    await _stream.ReadExactlyAsync(headerBuffer, cancellationToken).ConfigureAwait(false);
+                }
+                catch (EndOfStreamException)
                 {
                     _logger.LogWarning("Peer disconnected");
                     break;
-                }
-
-                if (bytesRead < 4)
-                {
-                    continue;
                 }
 
                 var length = (headerBuffer[0] << 8) | headerBuffer[1];
                 var messageType = (FailoverMessageType)headerBuffer[2];
                 // headerBuffer[3] is flags/reserved
 
+                // Frame length includes the 4-byte header; anything smaller is
+                // a corrupt frame we can't recover from on a byte stream.
+                if (length < 4)
+                {
+                    _logger.LogWarning("Corrupt failover frame (declared length {Length}), dropping connection", length);
+                    break;
+                }
+
                 // Read payload
                 var payload = new byte[length - 4];
                 if (payload.Length > 0)
                 {
-                    var payloadRead = await _stream.ReadAsync(payload, cancellationToken)
-                        .ConfigureAwait(false);
-                    if (payloadRead < payload.Length)
+                    try
                     {
-                        _logger.LogWarning("Incomplete message received");
-                        continue;
+                        await _stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (EndOfStreamException)
+                    {
+                        _logger.LogWarning("Peer disconnected mid-message");
+                        break;
                     }
                 }
 
@@ -666,17 +729,23 @@ public sealed class FailoverService : IFailoverService, IDisposable
         _logger.LogInformation("Peer state changed to {State}", peerState);
     }
 
+    // Wire layout: 4 (txId) + 4 (ip) + 6 (mac) + 1 (state) + 4 (start) + 4 (end)
+    private const int BindingUpdatePayloadSize = 23;
+
     private async Task HandleBindingUpdateAsync(byte[] payload, CancellationToken cancellationToken)
     {
-        if (payload.Length < 20) return;
+        // The old guard was < 20, but the reads below consume 23 bytes — a
+        // 20-22 byte payload passed the guard and threw on the end-time read.
+        if (payload.Length < BindingUpdatePayloadSize) return;
+
+        // Parse the transaction ID outside the try so a failure can still be
+        // NACKed — silently skipping the ack made the sender burn its full
+        // per-update timeout for every failed binding during a sync.
+        var txId = (uint)IPAddress.NetworkToHostOrder(BitConverter.ToInt32(payload, 0));
 
         try
         {
-            var offset = 0;
-
-            // Transaction ID
-            var txId = (uint)IPAddress.NetworkToHostOrder(BitConverter.ToInt32(payload, offset));
-            offset += 4;
+            var offset = 4;
 
             // IP address
             var ipBytes = new byte[4];
@@ -722,6 +791,22 @@ public sealed class FailoverService : IFailoverService, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to handle binding update");
+
+            // Negative ack (status != 0) so the sender's pending update
+            // completes immediately instead of waiting out its timeout.
+            try
+            {
+                var nackPayload = new byte[5];
+                var txIdBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((int)txId));
+                Array.Copy(txIdBytes, 0, nackPayload, 0, 4);
+                nackPayload[4] = 1; // Failure
+                await SendMessageAsync(FailoverMessageType.BndAck, nackPayload, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ackEx)
+            {
+                _logger.LogDebug(ackEx, "Could not send negative binding ack");
+            }
         }
     }
 
@@ -936,16 +1021,24 @@ public sealed class FailoverService : IFailoverService, IDisposable
         return ms.ToArray();
     }
 
+    // Serializes frame writes: heartbeat, state transitions, BNDACKs (receive
+    // task) and binding updates (caller threads) all write to the same
+    // NetworkStream — unsynchronized concurrent WriteAsync calls can
+    // interleave bytes mid-frame and corrupt the peer's framing.
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
+
     private async Task SendMessageAsync(
         FailoverMessageType messageType,
         byte[] payload,
         CancellationToken cancellationToken)
     {
-        if (_stream == null) return;
+        var stream = _stream;
+        if (stream == null) return;
 
         var totalLength = 4 + payload.Length; // header + payload
         var buffer = _bufferPool.Rent(totalLength);
 
+        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // Length (2 bytes)
@@ -961,12 +1054,13 @@ public sealed class FailoverService : IFailoverService, IDisposable
             // Payload
             Array.Copy(payload, 0, buffer, 4, payload.Length);
 
-            await _stream.WriteAsync(buffer.AsMemory(0, totalLength), cancellationToken)
+            await stream.WriteAsync(buffer.AsMemory(0, totalLength), cancellationToken)
                 .ConfigureAwait(false);
-            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
+            _sendLock.Release();
             _bufferPool.Return(buffer);
         }
     }

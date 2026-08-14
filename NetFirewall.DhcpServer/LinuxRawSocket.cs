@@ -180,6 +180,92 @@ public sealed class LinuxRawSocket : IDisposable
         return (int)index;
     }
 
+    // Receive-path buffers, reused across calls. Receive() runs on exactly one
+    // thread per socket (the per-interface receive loop), so plain fields are
+    // safe — the previous per-call `new byte[2048]` was ~2KB of GC pressure
+    // per packet on the hot path.
+    private readonly byte[] _rawBuffer = new byte[2048];
+
+    /// <summary>
+    /// Result of parsing a raw ethernet frame down to its DHCP payload.
+    /// </summary>
+    internal readonly record struct DhcpFrameInfo(int PayloadOffset, int PayloadLength, IPAddress SourceIp, int SourcePort);
+
+    /// <summary>
+    /// Pure ethernet/IPv4/UDP demultiplexer for the AF_PACKET receive path:
+    /// given a raw frame, locates the DHCP payload of a UDP datagram addressed
+    /// to port 67. Returns false for anything else (ARP, IPv6, non-UDP,
+    /// wrong port, truncated or inconsistent headers). No allocation besides
+    /// the source IPAddress on success.
+    /// </summary>
+    internal static bool TryExtractDhcpPayload(ReadOnlySpan<byte> frame, out DhcpFrameInfo info)
+    {
+        info = default;
+
+        // Ethernet header: 6 bytes dest MAC, 6 bytes src MAC, 2 bytes ethertype
+        if (frame.Length < ETH_HEADER_SIZE)
+        {
+            return false;
+        }
+
+        int etherType = (frame[12] << 8) | frame[13];
+        if (etherType != ETH_TYPE_IP)
+        {
+            return false; // Not IPv4 (could be ARP, IPv6, etc.)
+        }
+
+        int ipOffset = ETH_HEADER_SIZE;
+        if (frame.Length < ipOffset + IP_HEADER_MIN_SIZE)
+        {
+            return false;
+        }
+
+        int ipVersion = (frame[ipOffset] >> 4) & 0x0F;
+        int ipHeaderLength = (frame[ipOffset] & 0x0F) * 4;
+
+        // IHL below 20 bytes is a malformed header — offsets computed from it
+        // would land inside the IP header itself.
+        if (ipVersion != 4 || ipHeaderLength < IP_HEADER_MIN_SIZE)
+        {
+            return false;
+        }
+
+        if (frame[ipOffset + 9] != IPPROTO_UDP)
+        {
+            return false;
+        }
+
+        if (frame.Length < ipOffset + ipHeaderLength + UDP_HEADER_SIZE)
+        {
+            return false;
+        }
+
+        int udpOffset = ipOffset + ipHeaderLength;
+        int srcPort = (frame[udpOffset] << 8) | frame[udpOffset + 1];
+        int dstPort = (frame[udpOffset + 2] << 8) | frame[udpOffset + 3];
+        int udpLength = (frame[udpOffset + 4] << 8) | frame[udpOffset + 5];
+
+        // Only DHCP server traffic
+        if (dstPort != 67)
+        {
+            return false;
+        }
+
+        int dhcpOffset = udpOffset + UDP_HEADER_SIZE;
+        int dhcpLength = udpLength - UDP_HEADER_SIZE;
+
+        // The UDP length field is attacker-controlled — it must describe a
+        // payload that actually fits inside the received frame.
+        if (dhcpLength <= 0 || dhcpOffset + dhcpLength > frame.Length)
+        {
+            return false;
+        }
+
+        var srcIp = new IPAddress(frame.Slice(ipOffset + 12, 4));
+        info = new DhcpFrameInfo(dhcpOffset, dhcpLength, srcIp, srcPort);
+        return true;
+    }
+
     /// <summary>
     /// Receive a DHCP packet. Returns the DHCP payload (without IP/UDP headers).
     /// </summary>
@@ -187,12 +273,10 @@ public sealed class LinuxRawSocket : IDisposable
     {
         sourceEndPoint = null;
 
-        // Buffer for raw ethernet frame (with ethernet header since we use SOCK_RAW)
-        var rawBuffer = new byte[2048];
         var srcAddr = new SockAddrLl { sll_addr = new byte[8] };
         int addrLen = Marshal.SizeOf<SockAddrLl>();
 
-        nint bytesRead = recvfrom(_socketFd, rawBuffer, rawBuffer.Length, 0, ref srcAddr, ref addrLen);
+        nint bytesRead = recvfrom(_socketFd, _rawBuffer, _rawBuffer.Length, 0, ref srcAddr, ref addrLen);
 
         if (bytesRead <= 0)
         {
@@ -207,90 +291,23 @@ public sealed class LinuxRawSocket : IDisposable
             return 0;
         }
 
-        // With SOCK_RAW, we get the full ethernet frame
-        // Ethernet header: 6 bytes dest MAC, 6 bytes src MAC, 2 bytes ethertype
-        if (bytesRead < ETH_HEADER_SIZE)
+        if (!TryExtractDhcpPayload(_rawBuffer.AsSpan(0, (int)bytesRead), out var frame))
         {
-            return 0; // Too short for ethernet header
-        }
-
-        // Check ethertype (bytes 12-13 of ethernet header)
-        int etherType = (rawBuffer[12] << 8) | rawBuffer[13];
-        if (etherType != ETH_TYPE_IP)
-        {
-            // Not an IP packet (could be ARP, IPv6, etc.) - silently ignore
-            return 0;
-        }
-
-        // IP packet starts after ethernet header
-        int ipOffset = ETH_HEADER_SIZE;
-
-        if (bytesRead < ipOffset + IP_HEADER_MIN_SIZE)
-        {
-            return 0;
-        }
-
-        // IP header version and length
-        int ipVersion = (rawBuffer[ipOffset] >> 4) & 0x0F;
-        int ipHeaderLength = (rawBuffer[ipOffset] & 0x0F) * 4;
-
-        if (ipVersion != 4)
-        {
-            return 0; // Not IPv4
-        }
-
-        // Check protocol is UDP (offset 9 in IP header)
-        int protocol = rawBuffer[ipOffset + 9];
-        if (protocol != IPPROTO_UDP)
-        {
-            return 0; // Not UDP
-        }
-
-        if (bytesRead < ipOffset + ipHeaderLength + UDP_HEADER_SIZE)
-        {
-            return 0;
-        }
-
-        // Extract source and destination IP (offsets 12 and 16 in IP header)
-        var srcIp = new IPAddress(new ReadOnlySpan<byte>(rawBuffer, ipOffset + 12, 4));
-        var dstIp = new IPAddress(new ReadOnlySpan<byte>(rawBuffer, ipOffset + 16, 4));
-
-        // UDP header starts after IP header
-        int udpOffset = ipOffset + ipHeaderLength;
-        int srcPort = (rawBuffer[udpOffset] << 8) | rawBuffer[udpOffset + 1];
-        int dstPort = (rawBuffer[udpOffset + 2] << 8) | rawBuffer[udpOffset + 3];
-        int udpLength = (rawBuffer[udpOffset + 4] << 8) | rawBuffer[udpOffset + 5];
-
-        // Only process packets to DHCP server port 67
-        if (dstPort != 67)
-        {
-            return 0;
-        }
-
-        // Extract source MAC for logging
-        var srcMac = $"{rawBuffer[6]:X2}:{rawBuffer[7]:X2}:{rawBuffer[8]:X2}:{rawBuffer[9]:X2}:{rawBuffer[10]:X2}:{rawBuffer[11]:X2}";
-
-        _logger.LogDebug("[RAW] DHCP candidate: {SrcMac} {SrcIp}:{SrcPort} -> {DstIp}:{DstPort}, UDP len={UdpLen}",
-            srcMac, srcIp, srcPort, dstIp, dstPort, udpLength);
-
-        // Calculate DHCP payload offset and length
-        int dhcpOffset = udpOffset + UDP_HEADER_SIZE;
-        int dhcpLength = udpLength - UDP_HEADER_SIZE;
-
-        if (dhcpLength <= 0 || dhcpOffset + dhcpLength > bytesRead)
-        {
-            _logger.LogWarning("[RAW] Invalid DHCP payload length: {Len}", dhcpLength);
             return 0;
         }
 
         // Copy DHCP payload to output buffer
-        int copyLen = Math.Min(dhcpLength, buffer.Length);
-        Array.Copy(rawBuffer, dhcpOffset, buffer, 0, copyLen);
+        int copyLen = Math.Min(frame.PayloadLength, buffer.Length);
+        Array.Copy(_rawBuffer, frame.PayloadOffset, buffer, 0, copyLen);
 
-        sourceEndPoint = new IPEndPoint(srcIp, srcPort);
+        sourceEndPoint = new IPEndPoint(frame.SourceIp, frame.SourcePort);
 
-        _logger.LogInformation("[RAW] DHCP packet received: {Len} bytes from {Mac} ({Source})",
-            copyLen, srcMac, sourceEndPoint);
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            var srcMac = $"{_rawBuffer[6]:X2}:{_rawBuffer[7]:X2}:{_rawBuffer[8]:X2}:{_rawBuffer[9]:X2}:{_rawBuffer[10]:X2}:{_rawBuffer[11]:X2}";
+            _logger.LogDebug("[RAW] DHCP packet received: {Len} bytes from {Mac} ({Source})",
+                copyLen, srcMac, sourceEndPoint);
+        }
 
         return copyLen;
     }

@@ -95,7 +95,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddSubnetParams(cmd, subnet);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            // 0 rows: the row was deleted underneath this edit. Without the
+            // throw the caller reported success and fired a pointless notify.
+            throw new InvalidOperationException($"Subnet {subnet.Id} no longer exists — it may have been deleted by another session.");
+        }
         _logger.LogInformation("Updated subnet {Name}", subnet.Name);
 
         await NotifyAsync($"subnet.update:{subnet.Id}", ct);
@@ -125,9 +130,22 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("id", subnet.Id);
         cmd.Parameters.AddWithValue("name", subnet.Name);
         // 'cidr' columns in Npgsql 10 take IPNetwork, not string. Parse the
-        // model's "addr/prefix" form once on the way in.
-        cmd.Parameters.AddWithValue("network", IPNetwork.Parse(subnet.Network));
-        cmd.Parameters.AddWithValue("mask", (object?)subnet.SubnetMask ?? DBNull.Value);
+        // model's "addr/prefix" form once on the way in — TryParse so a typo
+        // (host bits set, missing prefix) surfaces as a friendly message
+        // instead of a FormatException 500.
+        if (!IPNetwork.TryParse(subnet.Network, out var network))
+        {
+            throw new InvalidOperationException(
+                $"'{subnet.Network}' is not a valid network in CIDR form (e.g. 192.168.1.0/24 — host bits must be zero).");
+        }
+        cmd.Parameters.AddWithValue("network", network);
+        // subnet_mask is NOT NULL in the schema — fail with a message the UI
+        // can show rather than a 23502 from Postgres.
+        if (subnet.SubnetMask is null)
+        {
+            throw new InvalidOperationException("Subnet mask is required.");
+        }
+        cmd.Parameters.AddWithValue("mask", subnet.SubnetMask);
         cmd.Parameters.AddWithValue("router", subnet.Router ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("broadcast", subnet.Broadcast ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("domain", subnet.DomainName ?? (object)DBNull.Value);
@@ -231,12 +249,56 @@ public sealed class DhcpAdminService : IDhcpAdminService
         return list;
     }
 
+    /// <summary>
+    /// Server-side pool guards (rule 4: never trust the client alone):
+    /// IPv4-only, non-inverted range, and no overlap with sibling pools of
+    /// the same subnet. Inverted ranges previously reached the DB and made
+    /// CalculatePoolSize report negative pool stats; overlapping pools
+    /// double-count and double-allocate.
+    /// </summary>
+    private static async Task ValidatePoolRangeAsync(NpgsqlConnection conn, DhcpPool pool, CancellationToken ct)
+    {
+        if (pool.RangeStart.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            pool.RangeEnd.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            throw new InvalidOperationException("Pool ranges must be IPv4 addresses.");
+        }
+
+        if (CalculatePoolSize(pool.RangeStart, pool.RangeEnd) == 0)
+        {
+            throw new InvalidOperationException(
+                $"Pool range is inverted: {pool.RangeStart} comes after {pool.RangeEnd}.");
+        }
+
+        if (pool.SubnetId.HasValue)
+        {
+            const string overlapSql = @"
+                SELECT name FROM dhcp_pools
+                WHERE subnet_id = @subnet AND id <> @id
+                  AND range_start <= @end AND range_end >= @start
+                LIMIT 1";
+            await using var cmd = new NpgsqlCommand(overlapSql, conn);
+            cmd.Parameters.AddWithValue("subnet", pool.SubnetId.Value);
+            cmd.Parameters.AddWithValue("id", pool.Id);
+            cmd.Parameters.AddWithValue("start", pool.RangeStart);
+            cmd.Parameters.AddWithValue("end", pool.RangeEnd);
+            var overlapping = await cmd.ExecuteScalarAsync(ct);
+            if (overlapping != null)
+            {
+                throw new InvalidOperationException(
+                    $"Range {pool.RangeStart}–{pool.RangeEnd} overlaps existing pool '{overlapping}'.");
+            }
+        }
+    }
+
     public async Task<DhcpPool> CreatePoolAsync(DhcpPool pool, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         pool.Id = Guid.NewGuid();
         pool.CreatedAt = DateTime.UtcNow;
+
+        await ValidatePoolRangeAsync(conn, pool, ct);
 
         const string sql = @"
             INSERT INTO dhcp_pools (id, subnet_id, name, range_start, range_end, allow_unknown_clients,
@@ -265,6 +327,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
+        await ValidatePoolRangeAsync(conn, pool, ct);
+
         const string sql = @"
             UPDATE dhcp_pools SET
                 subnet_id = @subnet, name = @name, range_start = @start, range_end = @end,
@@ -284,7 +348,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("priority", pool.Priority);
         cmd.Parameters.AddWithValue("enabled", pool.Enabled);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            // 0 rows: the row was deleted underneath this edit. Without the
+            // throw the caller reported success and fired a pointless notify.
+            throw new InvalidOperationException($"Pool {pool.Id} no longer exists — it may have been deleted by another session.");
+        }
         await NotifyAsync($"pool.update:{pool.Id}", ct);
         return pool;
     }
@@ -376,15 +445,24 @@ public sealed class DhcpAdminService : IDhcpAdminService
     public async Task<bool> ReleaseLeaseAsync(Guid leaseId, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        const string sql = "DELETE FROM dhcp_leases WHERE id = @id";
+        // RETURNING the IP lets us notify the DHCP server process, whose
+        // in-memory LeaseCache is authoritative for hot reads — without the
+        // notify, this delete was silently undone on the client's next renew
+        // (cache hit → write-through re-inserted the row).
+        const string sql = "DELETE FROM dhcp_leases WHERE id = @id RETURNING ip_address";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", leaseId);
 
-        var rows = await cmd.ExecuteNonQueryAsync(ct);
-        if (rows > 0) _logger.LogInformation("Released lease {Id}", leaseId);
+        var released = await cmd.ExecuteScalarAsync(ct);
+        if (released is IPAddress ip)
+        {
+            _logger.LogInformation("Released lease {Id} ({Ip})", leaseId, ip);
+            await NotifyAsync($"lease.release:{ip}", ct);
+            return true;
+        }
 
-        return rows > 0;
+        return false;
     }
 
     public async Task<int> CleanupExpiredLeasesAsync(CancellationToken ct = default)
@@ -464,9 +542,32 @@ public sealed class DhcpAdminService : IDhcpAdminService
             || (macNeedle.Length > 0 && text.Contains(macNeedle, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Server-side guard: a reservation for an address no configured subnet
+    /// contains can never be serviced — the DHCP server ignores out-of-subnet
+    /// reservations at offer time. Only enforced when subnets exist, so a
+    /// fresh install can still seed reservations first.
+    /// </summary>
+    private static async Task ValidateReservationInASubnetAsync(NpgsqlConnection conn, IPAddress ip, CancellationToken ct)
+    {
+        const string sql = @"
+            SELECT EXISTS(SELECT 1 FROM dhcp_subnets),
+                   EXISTS(SELECT 1 FROM dhcp_subnets WHERE @ip <<= network)";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("ip", ip);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct) && reader.GetBoolean(0) && !reader.GetBoolean(1))
+        {
+            throw new InvalidOperationException(
+                $"IP {ip} does not belong to any configured subnet — the reservation could never be handed out.");
+        }
+    }
+
     public async Task<DhcpMacReservation> CreateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        await ValidateReservationInASubnetAsync(conn, reservation.ReservedIp, ct);
 
         // Validate IP is not already reserved by another device
         await using (var checkIp = new NpgsqlCommand(
@@ -510,7 +611,18 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        try
+        {
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // Check-then-insert race: two sessions passed the SELECT guards
+            // concurrently. Surface the same friendly message the guards give,
+            // not a raw 23505 → 500.
+            throw new InvalidOperationException(
+                $"IP {reservation.ReservedIp} or MAC {FormatMacAddress(reservation.MacAddress)} was reserved by another session just now.");
+        }
         _logger.LogInformation("Created reservation {Mac} -> {Ip}", reservation.MacAddress, reservation.ReservedIp);
 
         await NotifyAsync($"reservation.create:{reservation.Id}", ct);
@@ -520,6 +632,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
     public async Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        await ValidateReservationInASubnetAsync(conn, reservation.ReservedIp, ct);
 
         // Validate IP is not already reserved by another device (excluding self)
         await using (var checkIp = new NpgsqlCommand(
@@ -564,7 +678,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            // 0 rows: the row was deleted underneath this edit. Without the
+            // throw the caller reported success and fired a pointless notify.
+            throw new InvalidOperationException($"Reservation {reservation.Id} no longer exists — it may have been deleted by another session.");
+        }
         await NotifyAsync($"reservation.update:{reservation.Id}", ct);
         return reservation;
     }
@@ -646,7 +765,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddClassParams(cmd, dhcpClass);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            // 0 rows: the row was deleted underneath this edit. Without the
+            // throw the caller reported success and fired a pointless notify.
+            throw new InvalidOperationException($"Client class {dhcpClass.Id} no longer exists — it may have been deleted by another session.");
+        }
         _logger.LogInformation("Updated client class {Name}", dhcpClass.Name);
         await NotifyAsync($"class.update:{dhcpClass.Id}", ct);
 
@@ -850,7 +974,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("end", exclusion.IpEnd ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("reason", exclusion.Reason ?? (object)DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            // 0 rows: the row was deleted underneath this edit. Without the
+            // throw the caller reported success and fired a pointless notify.
+            throw new InvalidOperationException($"Exclusion {exclusion.Id} no longer exists — it may have been deleted by another session.");
+        }
         _logger.LogInformation("Updated exclusion {Id}", exclusion.Id);
 
         await NotifyAsync($"exclusion.update:{exclusion.Id}", ct);
@@ -916,8 +1045,17 @@ public sealed class DhcpAdminService : IDhcpAdminService
         return new DhcpStats();
     }
 
-    private static int CalculatePoolSize(IPAddress start, IPAddress end)
+    internal static int CalculatePoolSize(IPAddress start, IPAddress end)
     {
+        // IPv6 would read 4 of 16 bytes and produce garbage; an inverted range
+        // used to underflow the uint subtraction into a huge negative int and
+        // corrupt every stat derived from TotalPoolSize.
+        if (start.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            end.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return 0;
+        }
+
         var startBytes = start.GetAddressBytes();
         var endBytes = end.GetAddressBytes();
 
@@ -930,7 +1068,12 @@ public sealed class DhcpAdminService : IDhcpAdminService
         var startInt = BitConverter.ToUInt32(startBytes, 0);
         var endInt = BitConverter.ToUInt32(endBytes, 0);
 
-        return (int)(endInt - startInt + 1);
+        if (endInt < startInt) return 0;
+
+        // ulong: the full 0.0.0.0–255.255.255.255 span is 2^32 addresses,
+        // which overflows uint arithmetic back to 0.
+        var count = (ulong)endInt - startInt + 1;
+        return (int)Math.Min(count, int.MaxValue);
     }
 
     #endregion
@@ -1054,7 +1197,10 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddDdnsConfigParams(cmd, config);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            throw new InvalidOperationException($"DDNS config {config.Id} no longer exists — it may have been deleted by another session.");
+        }
         return config;
     }
 
@@ -1077,7 +1223,13 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("rev", config.EnableReverse);
         cmd.Parameters.AddWithValue("fwdZone", config.ForwardZone ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("revZone", config.ReverseZone ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("dns", (object?)config.DnsServer ?? DBNull.Value);
+        // dns_server is NOT NULL in the schema — fail with a UI-friendly
+        // message rather than a raw 23502.
+        if (config.DnsServer is null)
+        {
+            throw new InvalidOperationException("DNS server address is required for a DDNS config.");
+        }
+        cmd.Parameters.AddWithValue("dns", config.DnsServer);
         cmd.Parameters.AddWithValue("port", config.DnsPort);
         cmd.Parameters.AddWithValue("keyName", config.TsigKeyName ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("keySecret", config.TsigKeySecret ?? (object)DBNull.Value);
@@ -1234,7 +1386,10 @@ public sealed class DhcpAdminService : IDhcpAdminService
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
         BindFailoverPeer(cmd, p);
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        {
+            throw new InvalidOperationException($"Failover peer {p.Id} no longer exists — it may have been deleted by another session.");
+        }
         return p;
     }
 

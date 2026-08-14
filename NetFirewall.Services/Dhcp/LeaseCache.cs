@@ -350,10 +350,14 @@ public sealed class LeaseCache : IDisposable
 
         var newKey = IpToUInt(ipAddress);
 
-        // Remove old IP mapping if MAC is getting a new IP
+        // Remove old IP mapping if MAC is getting a new IP. Conditional remove:
+        // only drop the reverse-index slot if it still points at OUR old entry.
+        // A blind TryRemove(key) could evict another client's fresh lease that
+        // re-used the address in the meantime — the IP would then look free and
+        // get double-offered.
         if (_byMac.TryGetValue(macAddress, out var oldEntry) && !oldEntry.IpAddress.Equals(ipAddress))
         {
-            _byIp.TryRemove(IpToUInt(oldEntry.IpAddress), out _);
+            _byIp.TryRemove(new KeyValuePair<uint, LeaseEntry>(IpToUInt(oldEntry.IpAddress), oldEntry));
         }
 
         // Create new entry
@@ -395,7 +399,9 @@ public sealed class LeaseCache : IDisposable
     {
         if (_byMac.TryRemove(macAddress, out var entry))
         {
-            _byIp.TryRemove(IpToUInt(entry.IpAddress), out _);
+            // Conditional: only clear the IP slot if it still maps to the entry
+            // we just removed (see SetLeaseAsync for the double-offer hazard).
+            _byIp.TryRemove(new KeyValuePair<uint, LeaseEntry>(IpToUInt(entry.IpAddress), entry));
 
             var operation = new LeaseWriteOperation
             {
@@ -419,7 +425,9 @@ public sealed class LeaseCache : IDisposable
     {
         if (_byIp.TryRemove(IpToUInt(ipAddress), out var entry))
         {
-            _byMac.TryRemove(entry.MacAddress, out _);
+            // Conditional: the MAC may have moved on to a different IP already;
+            // removing its NEW entry here would drop an active lease.
+            _byMac.TryRemove(new KeyValuePair<string, LeaseEntry>(entry.MacAddress, entry));
 
             var operation = new LeaseWriteOperation
             {
@@ -594,14 +602,17 @@ public sealed class LeaseCache : IDisposable
         var expiredLeaseCount = 0;
         var expiredDeclinedCount = 0;
 
-        // Cleanup expired leases
+        // Cleanup expired leases. Both removals are conditional on the exact
+        // entry we saw expire — between the snapshot and the remove, the client
+        // may have renewed (fresh entry under the same MAC key) and a blind
+        // TryRemove(key) would evict the ACTIVE lease from the cache.
         foreach (var kvp in _byMac)
         {
             if (kvp.Value.EndTime <= now)
             {
-                if (_byMac.TryRemove(kvp.Key, out var entry))
+                if (_byMac.TryRemove(kvp))
                 {
-                    _byIp.TryRemove(IpToUInt(entry.IpAddress), out _);
+                    _byIp.TryRemove(new KeyValuePair<uint, LeaseEntry>(IpToUInt(kvp.Value.IpAddress), kvp.Value));
                     expiredLeaseCount++;
                 }
             }

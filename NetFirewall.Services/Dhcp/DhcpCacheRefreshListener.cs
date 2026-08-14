@@ -16,15 +16,18 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
 {
     private readonly NpgsqlDataSource _ds;
     private readonly IDhcpSubnetService _subnets;
+    private readonly LeaseCache? _leaseCache;
     private readonly ILogger<DhcpCacheRefreshListener> _logger;
 
     public DhcpCacheRefreshListener(
         NpgsqlDataSource ds,
         IDhcpSubnetService subnets,
-        ILogger<DhcpCacheRefreshListener> logger)
+        ILogger<DhcpCacheRefreshListener> logger,
+        LeaseCache? leaseCache = null)
     {
         _ds = ds;
         _subnets = subnets;
+        _leaseCache = leaseCache;
         _logger = logger;
     }
 
@@ -77,6 +80,22 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
         _logger.LogDebug("Got NOTIFY {Channel}: {Payload}", e.Channel, e.Payload);
         try
         {
+            // Lease events target the in-memory LeaseCache — without this, an
+            // admin "release" in the Web UI deleted the DB row while the DHCP
+            // server kept serving (and write-through resurrecting) the lease
+            // from memory. Everything else invalidates the subnet cache.
+            if (e.Payload.StartsWith("lease.release:", StringComparison.Ordinal))
+            {
+                var ipText = e.Payload["lease.release:".Length..];
+                if (_leaseCache != null && System.Net.IPAddress.TryParse(ipText, out var ip))
+                {
+                    // Fire-and-forget: the notification pump must not block on
+                    // the cache's write-through queue.
+                    _ = _leaseCache.ReleaseLeaseByIpAsync(ip).AsTask();
+                }
+                return;
+            }
+
             _subnets.InvalidateCache();
         }
         catch (Exception ex)

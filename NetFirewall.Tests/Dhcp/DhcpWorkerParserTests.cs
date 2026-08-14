@@ -230,7 +230,7 @@ public class DhcpWorkerParserTests
             CiAddr = IPAddress.Parse("10.0.0.5") // even with a CIaddr, broadcast wins
         };
 
-        var ep = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var ep = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
         Assert.Equal(IPAddress.Broadcast, ep.Address);
         Assert.Equal(68, ep.Port);
     }
@@ -239,7 +239,7 @@ public class DhcpWorkerParserTests
     public void DetermineDestination_NoCiAddr_RoutesToBroadcast()
     {
         var req = new DhcpRequest { Flags = 0, CiAddr = IPAddress.Any };
-        var ep = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var ep = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
         Assert.Equal(IPAddress.Broadcast, ep.Address);
     }
 
@@ -247,7 +247,7 @@ public class DhcpWorkerParserTests
     public void DetermineDestination_HasCiAddr_AndNoBroadcastFlag_RoutesUnicast()
     {
         var req = new DhcpRequest { Flags = 0, CiAddr = IPAddress.Parse("10.0.0.5") };
-        var ep = DhcpWorker.DetermineDestinationEndPoint(req, new IPEndPoint(IPAddress.Loopback, 68));
+        var ep = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
         Assert.Equal("10.0.0.5", ep.Address.ToString());
         Assert.Equal(68, ep.Port);
     }

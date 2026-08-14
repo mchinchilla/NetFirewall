@@ -227,6 +227,20 @@ public sealed class DhcpServerService : IDhcpServerService
         _logger.LogDebug("[REQUEST] Processing REQUEST from {Mac}, RequestedIP: {RequestedIp}",
             request.ClientMac, request.RequestedIp);
 
+        // RFC 2131 §4.3.2: a SELECTING client addresses its REQUEST to one
+        // server via option 54. If that's not us, the client accepted another
+        // server's offer — we must stay silent, not ACK/NAK on its behalf.
+        var ourServerIp = subnet?.Router ?? _fallbackConfig.ServerIp;
+        if (request.ServerIdentifier != null &&
+            ourServerIp != null &&
+            !request.ServerIdentifier.Equals(ourServerIp))
+        {
+            _logger.LogDebug(
+                "[REQUEST] REQUEST from {Mac} addressed to server {Server} (we are {Us}) — ignoring",
+                request.ClientMac, request.ServerIdentifier, ourServerIp);
+            return DhcpResponseBuffer.Empty;
+        }
+
         // Check failover - should we handle this request?
         if (_failoverService != null && _failoverService.IsEnabled)
         {
@@ -244,6 +258,27 @@ public sealed class DhcpServerService : IDhcpServerService
         }
 
         var requestedIp = request.RequestedIp;
+
+        // A malformed option 50 of 0.0.0.0 is "no address", not a request for
+        // the zero address — treat it like an absent option.
+        if (requestedIp != null && requestedIp.Equals(IPAddress.Any))
+        {
+            requestedIp = null;
+        }
+
+        if (requestedIp == null)
+        {
+            // RENEWING / REBINDING: the client omits option 50 and puts its
+            // current address in ciaddr instead (RFC 2131 §4.3.2). Trust
+            // ciaddr first; fall back to our lease table for clients that
+            // send neither.
+            if (request.CiAddr != null && !request.CiAddr.Equals(IPAddress.Any))
+            {
+                _logger.LogDebug("[REQUEST] Renewal without option 50 — using CiAddr {Ip} for {Mac}",
+                    request.CiAddr, request.ClientMac);
+                requestedIp = request.CiAddr;
+            }
+        }
 
         if (requestedIp == null)
         {
@@ -340,7 +375,7 @@ public sealed class DhcpServerService : IDhcpServerService
 
     private async Task<DhcpResponseBuffer> HandleDeclineAsync(DhcpRequest request)
     {
-        if (request.RequestedIp != null)
+        if (request.RequestedIp != null && !request.RequestedIp.Equals(IPAddress.Any))
         {
             await _dhcpLeasesService.MarkIpAsDeclinedAsync(request.RequestedIp).ConfigureAwait(false);
             _logger.LogWarning("IP {Ip} declined by {Mac}", request.RequestedIp, request.ClientMac);
@@ -350,8 +385,10 @@ public sealed class DhcpServerService : IDhcpServerService
 
     private DhcpResponseBuffer HandleInform(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
-        var clientIp = request.RequestedIp ?? request.CiAddr ?? IPAddress.Any;
-        return ConstructDhcpPacket(request, clientIp, DhcpMessageType.Ack, subnet, clientClass, includeLeaseTime: false);
+        // RFC 2131 §3.4: an INFORM client has an address already and puts it in
+        // ciaddr — option 50 is not part of INFORM. The ACK's yiaddr must be 0;
+        // ciaddr is echoed by ConstructDhcpPacket and drives unicast routing.
+        return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Ack, subnet, clientClass, includeLeaseTime: false);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -682,6 +719,15 @@ public sealed class DhcpServerService : IDhcpServerService
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int WriteOption(byte[] buffer, int offset, DhcpOptionCode code, ReadOnlySpan<byte> data)
     {
+        // A DHCP option length is one byte. Payloads > 255 (e.g. a runaway
+        // domain-search list from config) would silently truncate the length
+        // byte and emit a corrupt packet every client mis-parses. Throwing is
+        // caught by CreateDhcpResponseAsync's catch-all → logged NAK, which is
+        // recoverable; a corrupt OFFER is not.
+        if (data.Length > 255)
+            throw new InvalidOperationException(
+                $"DHCP option {code} payload is {data.Length} bytes (max 255) — check subnet/class configuration.");
+
         buffer[offset++] = (byte)code;
         buffer[offset++] = (byte)data.Length;
         data.CopyTo(buffer.AsSpan(offset));

@@ -38,13 +38,16 @@ public static class DhcpOptionExtensions
             if (string.IsNullOrEmpty(trimmed))
                 continue;
 
-            // Split domain into labels
+            // Split domain into labels. Invalid domains are SKIPPED, not
+            // thrown: this runs on the per-packet hot path from admin-supplied
+            // config, and a throw there would turn one typo into a NAK for
+            // every client on the subnet.
             var labels = trimmed.Split('.');
+            if (labels.Any(l => l.Length is 0 or > 63))
+                continue;
+
             foreach (var label in labels)
             {
-                if (label.Length > 63)
-                    throw new ArgumentException($"Label '{label}' exceeds 63 characters");
-
                 // Length byte + label
                 ms.WriteByte((byte)label.Length);
                 var labelBytes = Encoding.ASCII.GetBytes(label.ToLowerInvariant());
@@ -95,8 +98,21 @@ public static class DhcpOptionExtensions
 
         foreach (var route in routes)
         {
-            var (networkAddress, prefixLength) = route.ParseNetwork();
-            var gateway = route.GetGateway();
+            // Skip malformed routes instead of throwing: this encodes admin
+            // config on the per-packet path, and one bad row must not turn
+            // every OFFER into a NAK.
+            IPAddress networkAddress;
+            int prefixLength;
+            IPAddress gateway;
+            try
+            {
+                (networkAddress, prefixLength) = route.ParseNetwork();
+                gateway = route.GetGateway();
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentOutOfRangeException or ArgumentException)
+            {
+                continue;
+            }
 
             // Write prefix length
             ms.WriteByte((byte)prefixLength);
@@ -133,30 +149,32 @@ public static class DhcpOptionExtensions
     }
 
     /// <summary>
-    /// Encode a 32-bit integer in network byte order
+    /// Encode a 32-bit integer in network byte order. Shifting the HOST value
+    /// directly IS the big-endian serialization — the previous version also
+    /// ran it through HostToNetworkOrder first, double-swapping into
+    /// little-endian output.
     /// </summary>
     public static byte[] EncodeInt32NetworkOrder(int value)
     {
-        var networkOrder = IPAddress.HostToNetworkOrder(value);
         return
         [
-            (byte)(networkOrder >> 24),
-            (byte)(networkOrder >> 16),
-            (byte)(networkOrder >> 8),
-            (byte)networkOrder
+            (byte)(value >> 24),
+            (byte)(value >> 16),
+            (byte)(value >> 8),
+            (byte)value
         ];
     }
 
     /// <summary>
-    /// Encode a 16-bit integer in network byte order
+    /// Encode a 16-bit integer in network byte order (see 32-bit overload for
+    /// the double-swap history).
     /// </summary>
     public static byte[] EncodeInt16NetworkOrder(short value)
     {
-        var networkOrder = IPAddress.HostToNetworkOrder(value);
         return
         [
-            (byte)(networkOrder >> 8),
-            (byte)networkOrder
+            (byte)(value >> 8),
+            (byte)value
         ];
     }
 
@@ -213,6 +231,10 @@ public static class DhcpOptionExtensions
                 break;
 
             int prefixLength = data[offset++];
+            // A prefix > 32 is invalid for IPv4 and would make significantOctets
+            // exceed the 4-byte destination below (Array.Copy throws).
+            if (prefixLength > 32)
+                break;
             int significantOctets = (prefixLength + 7) / 8;
 
             if (offset + significantOctets + 4 > data.Length)

@@ -27,7 +27,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     // string.Split('/') + IPAddress.TryParse + GetAddressBytes() on every
     // FindSubnetContainingIp lookup. Populated in lockstep with _subnetCache.
     private readonly ConcurrentDictionary<Guid, ParsedCidr> _cidrCache = new();
-    private readonly record struct ParsedCidr(byte[] NetworkBytes, byte[] MaskBytes);
+    internal readonly record struct ParsedCidr(byte[] NetworkBytes, byte[] MaskBytes);
 
     private DateTime _lastCacheRefresh = DateTime.MinValue;
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(5);
@@ -184,7 +184,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IpMatchesNetwork(ReadOnlySpan<byte> ipBytes, ParsedCidr cidr)
+    internal static bool IpMatchesNetwork(ReadOnlySpan<byte> ipBytes, ParsedCidr cidr)
     {
         var net = cidr.NetworkBytes;
         var mask = cidr.MaskBytes;
@@ -197,13 +197,35 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ParsedCidr? TryParseCidr(string networkCidr, IPAddress? subnetMask)
+    internal static ParsedCidr? TryParseCidr(string networkCidr, IPAddress? subnetMask)
     {
-        if (subnetMask == null) return null;
         var slash = networkCidr.IndexOf('/');
         var addrPart = slash >= 0 ? networkCidr.AsSpan(0, slash) : networkCidr.AsSpan();
         if (!IPAddress.TryParse(addrPart, out var network)) return null;
-        return new ParsedCidr(network.GetAddressBytes(), subnetMask.GetAddressBytes());
+
+        // Prefer the explicit mask; fall back to deriving it from the CIDR
+        // prefix. Without the fallback, a subnet whose subnet_mask column is
+        // NULL was silently unmatchable by IP (giaddr/ciaddr/requested-ip
+        // subnet selection all failed) even though "10.0.0.0/24" fully
+        // specifies the network.
+        byte[] maskBytes;
+        if (subnetMask != null)
+        {
+            maskBytes = subnetMask.GetAddressBytes();
+        }
+        else if (slash >= 0 &&
+                 int.TryParse(networkCidr.AsSpan(slash + 1), out var prefix) &&
+                 prefix is >= 0 and <= 32)
+        {
+            var mask = prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
+            maskBytes = [(byte)(mask >> 24), (byte)(mask >> 16), (byte)(mask >> 8), (byte)mask];
+        }
+        else
+        {
+            return null;
+        }
+
+        return new ParsedCidr(network.GetAddressBytes(), maskBytes);
     }
 
     #endregion
@@ -221,12 +243,28 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        // FIRST: Check for MAC reservation
+        // FIRST: Check for MAC reservation — but only honor it when the
+        // reserved address actually belongs to THIS subnet. In multi-subnet
+        // setups a laptop that roams to another segment must get a normal
+        // pool address there, not its (unroutable) reservation from home.
         var reservedIp = await GetMacReservationAsync(connection, macAddress, cancellationToken).ConfigureAwait(false);
         if (reservedIp != null)
         {
-            _logger.LogInformation("[SUBNET] Found MAC reservation: {Ip} for {Mac}", reservedIp, macAddress);
-            return (reservedIp, null); // Return reserved IP, no pool (it's a static assignment)
+            var cidr = TryParseCidr(subnet.Network, subnet.SubnetMask);
+            Span<byte> reservedBytes = stackalloc byte[4];
+            var inSubnet = cidr is { } parsed &&
+                           reservedIp.TryWriteBytes(reservedBytes, out var written) && written == 4 &&
+                           IpMatchesNetwork(reservedBytes, parsed);
+
+            if (inSubnet)
+            {
+                _logger.LogInformation("[SUBNET] Found MAC reservation: {Ip} for {Mac}", reservedIp, macAddress);
+                return (reservedIp, null); // Return reserved IP, no pool (it's a static assignment)
+            }
+
+            _logger.LogWarning(
+                "[SUBNET] Reservation {Ip} for {Mac} lies outside subnet '{SubnetName}' ({Network}) — ignoring it here",
+                reservedIp, macAddress, subnet.Name, subnet.Network);
         }
 
         // Get pools for this subnet
