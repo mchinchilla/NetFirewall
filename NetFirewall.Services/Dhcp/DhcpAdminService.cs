@@ -563,6 +563,30 @@ public sealed class DhcpAdminService : IDhcpAdminService
         }
     }
 
+    /// <summary>
+    /// A lease on the reserved IP held by any OTHER MAC makes the DHCP
+    /// server NAK the reserved device (the lease-conflict check in
+    /// CanAssignIpAsync runs even when the MAC owns the reservation) until
+    /// that lease expires. Purge it from the DB and tell the DHCP server to
+    /// drop it from its in-memory LeaseCache — covers re-pointing a
+    /// reservation at a new MAC and reserving an IP a squatter holds.
+    /// </summary>
+    private async Task PurgeConflictingLeaseAsync(NpgsqlConnection conn, DhcpMacReservation reservation, CancellationToken ct)
+    {
+        const string sql = "DELETE FROM dhcp_leases WHERE ip_address = @ip AND mac_address != @mac";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
+        cmd.Parameters.AddWithValue("mac", reservation.MacAddress);
+
+        if (await cmd.ExecuteNonQueryAsync(ct) > 0)
+        {
+            _logger.LogInformation("Purged stale lease on {Ip} held by another MAC — now reserved for {Mac}",
+                reservation.ReservedIp, FormatMacAddress(reservation.MacAddress));
+            await NotifyAsync($"lease.release:{reservation.ReservedIp}", ct);
+        }
+    }
+
     public async Task<DhcpMacReservation> CreateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -625,6 +649,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         }
         _logger.LogInformation("Created reservation {Mac} -> {Ip}", reservation.MacAddress, reservation.ReservedIp);
 
+        await PurgeConflictingLeaseAsync(conn, reservation, ct);
         await NotifyAsync($"reservation.create:{reservation.Id}", ct);
         return reservation;
     }
@@ -684,6 +709,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
             // throw the caller reported success and fired a pointless notify.
             throw new InvalidOperationException($"Reservation {reservation.Id} no longer exists — it may have been deleted by another session.");
         }
+
+        await PurgeConflictingLeaseAsync(conn, reservation, ct);
         await NotifyAsync($"reservation.update:{reservation.Id}", ct);
         return reservation;
     }

@@ -127,6 +127,80 @@ public sealed class DhcpAdminServiceTests : IAsyncLifetime
             It.Is<string>(s => s.StartsWith("reservation.delete:")), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    private async Task SeedLeaseAsync(string mac, string ip)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            INSERT INTO dhcp_leases (id, mac_address, ip_address, start_time, end_time)
+            VALUES (gen_random_uuid(), @mac::macaddr, @ip::inet, now(), now() + interval '1 hour')", conn);
+        cmd.Parameters.AddWithValue("mac", mac);
+        cmd.Parameters.AddWithValue("ip", ip);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task<long> CountLeasesOnIpAsync(string ip)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT COUNT(*) FROM dhcp_leases WHERE ip_address = @ip::inet", conn);
+        cmd.Parameters.AddWithValue("ip", ip);
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
+    public async Task UpdateReservationAsync_MacChangedSameIp_PurgesStaleLease_AndNotifiesRelease()
+    {
+        // The old device's lease would otherwise NAK the new device when it
+        // requests its reserved IP (lease-conflict check sees another MAC).
+        var r = await _svc.CreateReservationAsync(new DhcpMacReservation
+        {
+            MacAddress = Mac("aa:bb:cc:00:00:01"),
+            ReservedIp = IPAddress.Parse("10.0.0.42")
+        });
+        await SeedLeaseAsync("aa:bb:cc:00:00:01", "10.0.0.42");
+
+        r.MacAddress = Mac("aa:bb:cc:00:00:02"); // new device, same IP
+        await _svc.UpdateReservationAsync(r);
+
+        Assert.Equal(0, await CountLeasesOnIpAsync("10.0.0.42"));
+        _notifier.Verify(n => n.NotifySubnetChangedAsync(
+            "lease.release:10.0.0.42", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateReservationAsync_LeaseHeldByReservedMac_IsKept()
+    {
+        var r = await _svc.CreateReservationAsync(new DhcpMacReservation
+        {
+            MacAddress = Mac("aa:bb:cc:00:00:01"),
+            ReservedIp = IPAddress.Parse("10.0.0.42")
+        });
+        await SeedLeaseAsync("aa:bb:cc:00:00:01", "10.0.0.42");
+
+        r.Description = "renamed"; // MAC and IP unchanged
+        await _svc.UpdateReservationAsync(r);
+
+        Assert.Equal(1, await CountLeasesOnIpAsync("10.0.0.42"));
+        _notifier.Verify(n => n.NotifySubnetChangedAsync(
+            It.Is<string>(s => s.StartsWith("lease.release:")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateReservationAsync_SquatterLeaseOnReservedIp_IsPurged()
+    {
+        await SeedLeaseAsync("11:22:33:44:55:66", "10.0.0.42"); // dynamic squatter
+
+        await _svc.CreateReservationAsync(new DhcpMacReservation
+        {
+            MacAddress = Mac("aa:bb:cc:00:00:01"),
+            ReservedIp = IPAddress.Parse("10.0.0.42")
+        });
+
+        Assert.Equal(0, await CountLeasesOnIpAsync("10.0.0.42"));
+        _notifier.Verify(n => n.NotifySubnetChangedAsync(
+            "lease.release:10.0.0.42", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ── Client classes ─────────────────────────────────────────────────
 
     [Fact]
