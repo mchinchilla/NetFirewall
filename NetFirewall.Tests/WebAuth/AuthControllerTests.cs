@@ -229,7 +229,9 @@ public class AuthControllerTests
         var redirect = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("EnrollTotp", redirect.ActionName);
         Assert.Equal("Account", redirect.ControllerName);
-        _pending.Verify(p => p.Issue(u.Id, null, null), Times.Once);
+        // No ReturnUrl on the form → ReturnUrlGuard.Sanitize normalises it to
+        // "/". The ticket always carries a navigable path, never null.
+        _pending.Verify(p => p.Issue(u.Id, "/", null), Times.Once);
     }
 
     // ── LoginTotp ──────────────────────────────────────────────────────

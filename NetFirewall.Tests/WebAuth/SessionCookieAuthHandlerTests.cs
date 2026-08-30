@@ -238,7 +238,12 @@ public class SessionCookieAuthHandlerTests
     {
         var (handler, ctx) = await BuildHandlerAsync(cookieValue: null);
         ctx.Request.Headers["HX-Request"] = "true";
-        ctx.Request.Path = "/firewall/rules";
+        ctx.Request.Host = new HostString("firewall.local");
+        // HX-Current-URL is the page the operator is actually looking at.
+        // Request.Path is the polled partial, which ResolveReturnUrl ignores
+        // on purpose — set it to one here so this test proves that.
+        ctx.Request.Headers["HX-Current-URL"] = "https://firewall.local/firewall/rules";
+        ctx.Request.Path = "/Home/Throughput";
 
         await handler.ChallengeAsync(properties: null);
 
@@ -246,6 +251,38 @@ public class SessionCookieAuthHandlerTests
         var hxRedirect = ctx.Response.Headers["HX-Redirect"].ToString();
         Assert.Contains("/login?returnUrl=", hxRedirect);
         Assert.Contains("%2Ffirewall%2Frules", hxRedirect);
+        Assert.DoesNotContain("Throughput", hxRedirect);
+    }
+
+    [Fact]
+    public async Task Challenge_HtmxRequestWithoutCurrentUrl_FallsBackToRoot()
+    {
+        // Nothing trustworthy to return to: echoing Request.Path would bounce
+        // the user onto a layout-less partial after re-login.
+        var (handler, ctx) = await BuildHandlerAsync(cookieValue: null);
+        ctx.Request.Headers["HX-Request"] = "true";
+        ctx.Request.Path = "/Home/Throughput";
+
+        await handler.ChallengeAsync(properties: null);
+
+        Assert.Equal(401, ctx.Response.StatusCode);
+        Assert.Equal("/login?returnUrl=%2F", ctx.Response.Headers["HX-Redirect"].ToString());
+    }
+
+    [Fact]
+    public async Task Challenge_HtmxCurrentUrlFromAnotherHost_FallsBackToRoot()
+    {
+        // Open-redirect guard: HX-Current-URL is a client-supplied header, so a
+        // foreign host must never survive into the post-login redirect.
+        var (handler, ctx) = await BuildHandlerAsync(cookieValue: null);
+        ctx.Request.Headers["HX-Request"] = "true";
+        ctx.Request.Host = new HostString("firewall.local");
+        ctx.Request.Headers["HX-Current-URL"] = "https://evil.example/firewall/rules";
+
+        await handler.ChallengeAsync(properties: null);
+
+        Assert.Equal(401, ctx.Response.StatusCode);
+        Assert.Equal("/login?returnUrl=%2F", ctx.Response.Headers["HX-Redirect"].ToString());
     }
 
     // ── HandleForbiddenAsync ───────────────────────────────────────────
