@@ -1,0 +1,28 @@
+@model NetFirewall.Web.Models.Firewall.RulePreviewViewModel
+
+<div class="rounded-md border p-3 bg-surface-muted border-surface-border">
+    <div class="flex items-center gap-2 mb-1.5">
+        <svg class="h-3.5 w-3.5 text-surface-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M6.75 7.5 3 11.25l3.75 3.75M17.25 7.5 21 11.25l-3.75 3.75M14.25 4.5l-4.5 15"/>
+        </svg>
+        <span class="text-xs font-medium text-surface-fg">Generated rule</span>
+        <span class="text-[11px] text-surface-fg-muted">exactly what gets written on apply</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Model.Problem))
+    {
+        <p class="text-xs text-surface-fg-muted">@Model.Problem</p>
+    }
+    else
+    {
+        <code class="block font-mono text-[11px] leading-relaxed break-all text-surface-fg">@Model.Line</code>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Bypass))
+    {
+        <p class="mt-2 pt-2 border-t text-[11px] leading-relaxed border-surface-border text-feedback-danger-fg">
+            @Model.Bypass
+        </p>
+    }
+</div>

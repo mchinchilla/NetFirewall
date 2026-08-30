@@ -1,0 +1,37 @@
+@model NetFirewall.Web.Models.Firewall.ConnStatePickerViewModel
+@*
+    Connection states as toggles instead of a typed comma list.
+
+    Nobody remembers conntrack's vocabulary, and a typo ("establised") silently
+    produces a rule that matches nothing — nft accepts the ruleset and the
+    service quietly stops working. Four buttons can't be misspelled, and each
+    one says what it means in traffic terms rather than kernel terms.
+
+    The posted value stays the same comma-separated string the server already
+    parses, so nothing downstream changes.
+*@
+<div class="space-y-1.5" x-data="connStatePicker" data-initial="@Model.Value">
+    <label class="block text-xs font-medium text-surface-fg">@Model.Label</label>
+
+    <input type="hidden" name="@Model.Name" :value="csv" x-ref="hidden" />
+
+    <div class="flex flex-wrap gap-1.5">
+        <template x-for="opt in options" :key="opt.id">
+            <button type="button"
+                    class="px-2.5 py-1 rounded-md border text-xs transition"
+                    :class="has(opt.id)
+                        ? 'bg-accent-soft border-accent text-accent font-medium'
+                        : 'bg-surface border-surface-border text-surface-fg-muted hover:text-surface-fg'"
+                    :title="opt.hint"
+                    :aria-pressed="has(opt.id)"
+                    @@click="toggle(opt.id)">
+                <span x-text="opt.label"></span>
+            </button>
+        </template>
+    </div>
+
+    <p class="text-xs text-surface-fg-muted"
+       x-text="states.length === 0
+            ? 'Nothing selected — the rule matches packets in any state.'
+            : (options.find(o => o.id === states[states.length - 1])?.hint || '')"></p>
+</div>

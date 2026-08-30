@@ -1,24 +1,7 @@
-@model IReadOnlyList<NetFirewall.Models.Firewall.FwFilterRule>
-@{
-    var ifaceNames = (IDictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+@model NetFirewall.Web.Models.Firewall.FilterRulesTableViewModel
+@using NetFirewall.Web.Models.Firewall
 
-    string ActionBadge(string action) => action switch
-    {
-        "accept" => "var(--feedback-success-bg)",
-        "drop"   => "var(--feedback-danger-bg)",
-        "reject" => "var(--feedback-warning-bg)",
-        _        => "var(--feedback-info-bg)"
-    };
-    string ActionColor(string action) => action switch
-    {
-        "accept" => "var(--feedback-success-fg)",
-        "drop"   => "var(--feedback-danger-fg)",
-        "reject" => "var(--feedback-warning-fg)",
-        _        => "var(--feedback-info-fg)"
-    };
-}
-
-@if (Model.Count == 0)
+@if (Model.TotalRows == 0)
 {
     <div class="text-sm py-10 text-center text-surface-fg-muted">
         No filter rules in this chain. Click <span class="font-medium text-surface-fg">Add rule</span> to create one.
@@ -26,84 +9,66 @@
 }
 else
 {
+    @if (!Model.PreservesEvaluationOrder)
+    {
+        @* Every non-evaluation view breaks the one property that decides what
+           the firewall actually does. Say it plainly, every time. *@
+        <div class="mb-3 mx-5 rounded-md border px-3 py-2 text-xs leading-relaxed
+                    bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+            Grouped for reading, <span class="font-semibold">not evaluation order</span>. The kernel walks each
+            chain top to bottom and the first match wins, so switch back to
+            <span class="font-semibold">Evaluation</span> before judging whether a rule can be reached.
+        </div>
+    }
+    else if (Model.TotalShadowed > 0)
+    {
+        <div class="mb-3 mx-5 rounded-md border px-3 py-2 text-xs leading-relaxed
+                    bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+            <span class="font-semibold">@Model.TotalShadowed rule(s) can never run.</span>
+            An earlier rule in the same chain already matches everything they match, so they are dead code —
+            hover the <span class="font-semibold">unreachable</span> tag to see which one.
+        </div>
+    }
+
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Pri</th>
-                    <th class="px-5 py-2 font-medium">Chain</th>
-                    <th class="px-5 py-2 font-medium">Action</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Match</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Interfaces</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var r in Model.OrderBy(x => x.Chain).ThenBy(x => x.Priority))
-                {
+            @foreach (var group in Model.Groups)
+            {
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-mono text-xs">@r.Priority</td>
-                        <td class="px-5 py-3 font-mono text-xs">@r.Chain</td>
-                        <td class="px-5 py-3">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium uppercase"
-                                  style="background-color: @ActionBadge(r.Action); color: @ActionColor(r.Action);">@r.Action</span>
-                        </td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">
-                            @if (!string.IsNullOrEmpty(r.Description)) { <span class="block font-medium text-surface-fg">@r.Description</span> }
-                            @{
-                                var match = new List<string>();
-                                if (!string.IsNullOrEmpty(r.Protocol)) match.Add($"proto {r.Protocol}");
-                                if (r.DestinationPorts is { Length: > 0 }) match.Add($"dport {string.Join(",", r.DestinationPorts)}");
-                                if (r.SourceAddresses is { Length: > 0 }) match.Add($"src {string.Join(",", r.SourceAddresses)}");
-                                if (r.DestinationAddresses is { Length: > 0 }) match.Add($"dst {string.Join(",", r.DestinationAddresses)}");
-                                if (r.ConnectionState is { Length: > 0 }) match.Add($"state {string.Join(",", r.ConnectionState)}");
-                                if (!string.IsNullOrEmpty(r.RateLimit)) match.Add($"rate {r.RateLimit}");
-                            }
-                            <span class="font-mono">@(match.Count == 0 ? "any" : string.Join(" · ", match))</span>
-                        </td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs font-mono text-surface-fg-muted">
-                            @{
-                                var inName  = r.InterfaceInId  is { } iin && ifaceNames.TryGetValue(iin, out var n1) ? n1 : null;
-                                var outName = r.InterfaceOutId is { } iou && ifaceNames.TryGetValue(iou, out var n2) ? n2 : null;
-                            }
-                            in: @(inName ?? "any") · out: @(outName ?? "any")
-                        </td>
-                        <td class="px-5 py-3">
-                            @if (r.Enabled)
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
-                            }
-                            else
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/FilterRules/edit/@r.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit filter rule')">Edit</button>
-                                @{ var msg = $"Delete {r.Chain}/{r.Action} rule (priority {r.Priority})? Apply firewall after to push the change."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/FilterRules/delete/@r.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete rule?',
-                                                message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete',
-                                                level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="6" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Title</span>
+                                @if (group.Subtitle is not null)
+                                {
+                                    <span class="text-xs font-normal text-surface-fg-muted">@group.Subtitle</span>
+                                }
+                                <span class="text-xs font-normal text-surface-fg-muted">
+                                    · @group.EnabledCount active@(group.Rows.Count > group.EnabledCount ? $", {group.Rows.Count - group.EnabledCount} off" : "")
+                                </span>
+                                @if (group.ShadowedCount > 0)
+                                {
+                                    <span class="text-xs font-medium text-feedback-warning-fg">· @group.ShadowedCount unreachable</span>
+                                }
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium w-12">Pri</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Action</th>
+                        <th class="px-2 py-1.5 font-medium">Rule</th>
+                        <th class="px-2 py-1.5 font-medium hidden lg:table-cell w-32">Interfaces</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var row in group.Rows)
+                    {
+                        @await Html.PartialAsync("_FilterRuleRow", row)
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

@@ -43,6 +43,7 @@
             <input type="text" id="@fieldId" x-ref="text"
                    x-model="input"
                    @@input="search()"
+                   @@focus="search()"
                    @@keydown="onKey($event)"
                    @@blur="setTimeout(() => open = false, 150)"
                    @@focus="if (suggestions.length > 0) open = true"

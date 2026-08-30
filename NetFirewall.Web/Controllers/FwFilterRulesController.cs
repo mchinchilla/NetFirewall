@@ -26,13 +26,23 @@ public sealed class FwFilterRulesController : Controller
     public IActionResult Index() => View();
 
     [HttpGet("table")]
-    public async Task<IActionResult> Table([FromQuery] string? chain, CancellationToken ct)
+    public async Task<IActionResult> Table([FromQuery] string? chain, [FromQuery] string? view, CancellationToken ct)
     {
         var rows = await _firewall.GetFilterRulesAsync(chain, ct);
         var ifaces = await _firewall.GetInterfacesAsync(ct);
-        ViewBag.InterfaceNames = ifaces.ToDictionary(i => i.Id, i => i.Name);
-        ViewBag.ChainFilter = chain;
-        return PartialView("_FilterRulesTable", rows);
+
+        // Unknown or missing view falls back to evaluation order — the only
+        // arrangement that tells the truth about how the ruleset runs.
+        if (!Enum.TryParse<FilterRuleView>(view, ignoreCase: true, out var mode))
+            mode = FilterRuleView.Evaluation;
+
+        var model = FilterRuleGrouper.Build(
+            rows,
+            ifaces.ToDictionary(i => i.Id, i => i.Name),
+            mode,
+            chain);
+
+        return PartialView("_FilterRulesTable", model);
     }
 
     [HttpGet("edit/{id:guid?}")]
@@ -71,6 +81,38 @@ public sealed class FwFilterRulesController : Controller
         {
             _logger.LogError(ex, "Failed to save filter rule");
             return this.ToHtmxResponse(ServiceResponse<FwFilterRule>.Fail($"Save failed: {ex.Message}"));
+        }
+    }
+
+    /// <summary>
+    /// Live preview of the nft line the form currently describes. Rendered by
+    /// the same generator an apply uses, so what the operator reads here is
+    /// literally what would be written — the form stops being a set of fields
+    /// whose combined effect you have to imagine.
+    /// </summary>
+    [HttpPost("preview"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> Preview(FilterRuleFormViewModel form, CancellationToken ct)
+    {
+        var entity = ToEntity(form);
+
+        try
+        {
+            var line = await _firewall.PreviewFilterRuleAsync(entity, ct);
+            return PartialView("_RulePreview", new RulePreviewViewModel
+            {
+                Line = line,
+                Bypass = FwFilterRuleGuard.DescribeBypass(entity)
+            });
+        }
+        catch (Exception ex)
+        {
+            // A preview must never break the form it is helping with.
+            _logger.LogDebug(ex, "Filter rule preview failed");
+            return PartialView("_RulePreview", new RulePreviewViewModel
+            {
+                Line = "",
+                Problem = "Preview unavailable for the current values."
+            });
         }
     }
 

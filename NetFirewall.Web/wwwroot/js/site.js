@@ -212,6 +212,48 @@ window.NetFw.downloadRecoveryCodes = function (codes) {
 };
 
 /* =====================================================================
+ * Log-prefix suggestion for filter rules.
+ *
+ * A drop rule with no prefix is invisible in `journalctl -k`: you know traffic
+ * is being dropped but not by which rule. Almost nobody fills this in, and the
+ * ones who do invent a different convention every time. Derive a stable one
+ * from what the form already says — verdict, port or protocol, interface —
+ * e.g. DROP-22-ENS224:. Purely a suggestion; typing anything wins.
+ * ===================================================================== */
+window.NetFw.suggestLogPrefix = function (form) {
+    if (!form || !form.elements) return "";
+
+    const val = (name) => {
+        const el = form.elements[name];
+        return el && typeof el.value === "string" ? el.value.trim() : "";
+    };
+    // Interface selects carry the display text ("ens224 (WAN)"); we want the name.
+    const ifaceName = (name) => {
+        const el = form.elements[name];
+        if (!el || !el.options || el.selectedIndex < 0) return "";
+        const text = el.options[el.selectedIndex].text || "";
+        return text === "any" ? "" : text.split(" ")[0];
+    };
+
+    const parts = [val("Action")];
+
+    const ports = val("DestinationPorts");
+    if (ports) parts.push(ports.split(",")[0]);
+    else if (val("Protocol")) parts.push(val("Protocol"));
+
+    parts.push(ifaceName("InterfaceInId"));
+
+    const label = parts
+        .filter(Boolean)
+        .join("-")
+        .replace(/[^A-Za-z0-9_-]/g, "")
+        .toUpperCase()
+        .slice(0, 28);
+
+    return label ? label + ": " : "";
+};
+
+/* =====================================================================
  * Filter-rule default-deny guard — client mirror of FwFilterRuleGuard.cs
  * (NetFirewall.Models/Firewall). Given the filter-rule form, returns the
  * reason the rule would make its chain's default-deny policy unreachable, or
@@ -309,6 +351,17 @@ window.NetFw._applyTableFilter = function (tableId) {
         tr.classList.toggle("hidden", !hit);
         if (hit) shown++;
     });
+    // Grouped tables (filter rules) repeat thead/tbody per section. A section
+    // header left standing over zero visible rows reads as an empty group that
+    // exists, so hide any header whose own tbody got filtered away.
+    root.querySelectorAll("thead").forEach((head) => {
+        const body = head.nextElementSibling;
+        if (!body || body.tagName !== "TBODY") return;
+        const anyVisible = Array.from(body.querySelectorAll("tr"))
+            .some((tr) => !tr.classList.contains("hidden"));
+        head.classList.toggle("hidden", !anyVisible);
+    });
+
     // "No matches" feedback (rule #6) when a query hides every row.
     let notice = root.querySelector("[data-filter-empty]");
     if (q !== "" && rows.length > 0 && shown === 0) {
@@ -919,6 +972,75 @@ document.addEventListener("alpine:init", () => {
         }
     }));
 
+    /* ---------- filterRulesPage ---------- header controls for Filter rules.
+     * Holds the chain filter and the view mode, both sent to the table
+     * endpoint via hx-vals, so grouping is decided server-side where it can be
+     * unit tested (FilterRuleGrouper) instead of reshuffled in the DOM.
+     *
+     * "Evaluation" is first and default on purpose: it is the only arrangement
+     * that matches how the kernel walks the chains. The others regroup for
+     * answering a question and the table banners say so.
+     */
+    Alpine.data("filterRulesPage", () => ({
+        chain: "",
+        view: "evaluation",
+        viewsOpen: false,
+
+        views: [
+            { id: "evaluation", label: "Evaluation order", hint: "By chain, as the kernel runs it" },
+            { id: "interface",  label: "By interface",     hint: "What reaches me on each NIC" },
+            { id: "action",     label: "By verdict",       hint: "Accept, drop, reject, log" },
+            { id: "service",    label: "By service",       hint: "Protocol and port" }
+        ],
+
+        get viewLabel() {
+            return (this.views.find(v => v.id === this.view) || this.views[0]).label;
+        },
+
+        pick(id) {
+            this.view = id;
+            this.viewsOpen = false;
+            this.refresh();
+        },
+
+        refresh() {
+            const table = document.getElementById("filter-rules-table");
+            if (table) window.htmx?.trigger(table, "manual-refresh");
+        }
+    }));
+
+    /* ---------- connStatePicker ---------- conntrack states as toggles.
+     * Backs _ConnStatePicker.cshtml. Hints are written in traffic terms, not
+     * kernel terms, because that is the part people actually get wrong: they
+     * know "replies to connections I allowed out", not "established".
+     */
+    Alpine.data("connStatePicker", () => ({
+        states: [],
+        options: [
+            { id: "new",         label: "New",         hint: "The first packet of a connection - someone starting a conversation." },
+            { id: "established", label: "Established", hint: "Traffic belonging to a conversation already allowed." },
+            { id: "related",     label: "Related",     hint: "A side channel of an allowed conversation: FTP data, ICMP errors." },
+            { id: "invalid",     label: "Invalid",     hint: "Packets conntrack cannot place. Normally dropped, never accepted." }
+        ],
+
+        init() {
+            this.states = (this.$el.dataset.initial || "")
+                .split(",")
+                .map(s => s.trim().toLowerCase())
+                .filter(s => s.length > 0);
+        },
+
+        has(id) { return this.states.includes(id); },
+
+        toggle(id) {
+            const i = this.states.indexOf(id);
+            if (i >= 0) this.states.splice(i, 1);
+            else this.states.push(id);
+        },
+
+        get csv() { return this.states.join(", "); }
+    }));
+
     /* ---------- filterRuleGuard ---------- wraps the filter-rule form.
      * Blocks the submit while the rule would make its chain's default-deny
      * policy unreachable, showing the same sentence the server would answer
@@ -931,6 +1053,7 @@ document.addEventListener("alpine:init", () => {
      */
     Alpine.data("filterRuleGuard", () => ({
         bypass: null,
+        _suggested: "",
 
         init() {
             this.recheck();
@@ -939,7 +1062,31 @@ document.addEventListener("alpine:init", () => {
         recheck() {
             this.$nextTick(() => {
                 this.bypass = window.NetFw.filterRuleBypass(this.$el);
+                this.updateLogPrefix();
             });
+        },
+
+        /**
+         * Keep the log prefix in step with the rule while it is still ours.
+         * The moment the operator types their own, `current` stops matching the
+         * last value we wrote and we never touch the field again.
+         */
+        updateLogPrefix() {
+            const el = this.$el.elements["LogPrefix"];
+            if (!el) return;
+
+            const current = (el.value || "").trim();
+            if (current !== "" && current !== this._suggested) return;
+
+            const action = (this.$el.elements["Action"]?.value || "").trim().toLowerCase();
+            if (action !== "drop" && action !== "reject" && action !== "log") {
+                // An accept rule logs nothing; clear a prefix only if we put it there.
+                if (current === this._suggested) { el.value = ""; this._suggested = ""; }
+                return;
+            }
+
+            this._suggested = window.NetFw.suggestLogPrefix(this.$el);
+            el.value = this._suggested;
         }
     }));
 
@@ -996,8 +1143,10 @@ document.addEventListener("alpine:init", () => {
 
         async search() {
             if (this._searchTimer) clearTimeout(this._searchTimer);
+            // Empty query is allowed on purpose: focusing the field lists the
+            // service catalogue, so an operator who doesn't know the port names
+            // discovers them instead of facing a blank box.
             const q = this.input.trim();
-            if (!q) { this.suggestions = []; this.open = false; return; }
 
             this._searchTimer = setTimeout(async () => {
                 try {

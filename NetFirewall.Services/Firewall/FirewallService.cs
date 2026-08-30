@@ -506,6 +506,19 @@ public sealed class FirewallService : IFirewallService
         return rule;
     }
 
+    /// <inheritdoc />
+    public async Task<string> PreviewFilterRuleAsync(FwFilterRule rule, CancellationToken ct = default)
+    {
+        var interfaces = await GetInterfacesAsync(ct);
+        var ifaceMap = interfaces.ToDictionary(i => i.Id, i => i.Name);
+
+        // Same resolution the generator does: network-object and service names
+        // become literal CIDRs and ports. Mutates the throwaway rule only.
+        await ResolveAddressesAsync(new[] { rule }, ct);
+
+        return GenerateFilterRule(rule, ifaceMap).Trim();
+    }
+
     /// <summary>
     /// Refuse to store an enabled filter rule that would make its chain's
     /// default-deny policy unreachable — an accept with no interface, no

@@ -89,11 +89,8 @@
                 Placeholder = "Type port or pick a service…",
                 Help = "Literal ports (22, 80, 8000-9000) or Network Service names (SSH, HTTP, RTP). Empty = any port."
             })
-            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                Name = nameof(Model.ConnectionStates), Label = "Connection states",
-                Value = Model.ConnectionStates,
-                Placeholder = "established, related",
-                Help = "Comma-separated: new, established, related, invalid."
+            @await Html.PartialAsync("_ConnStatePicker", new NetFirewall.Web.Models.Firewall.ConnStatePickerViewModel {
+                Name = nameof(Model.ConnectionStates), Value = Model.ConnectionStates
             })
         </div>
 
@@ -105,8 +102,9 @@
             })
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = nameof(Model.LogPrefix), Label = "Log prefix", Value = Model.LogPrefix,
-                Placeholder = "DROPPED-INVALID:",
-                Help = "Used when action = log."
+                Placeholder = "suggested from the rule",
+                Help = "Tags matching packets in the kernel log (journalctl -k). Suggested automatically "
+                     + "for drop/reject/log rules — type to override."
             })
         </div>
 
@@ -132,6 +130,15 @@
             Value = Model.Enabled ? "true" : "false"
         })
     </div>
+
+    @* Live preview: the nft line these fields produce, rendered server-side by
+       the same generator an apply uses. Turns the form from a set of fields
+       whose combined effect you must imagine into something you can read. *@
+    <div id="rule-preview" class="mt-4"
+         hx-post="/Firewall/FilterRules/preview"
+         hx-include="closest form"
+         hx-trigger="load, change from:closest form delay:150ms, keyup changed delay:400ms from:closest form"
+         hx-swap="innerHTML"></div>
 
     @* Default-deny guard. An accept with no interface, no address and no port
        matches everything and would shadow the rest of the chain — the server

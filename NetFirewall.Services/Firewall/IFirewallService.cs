@@ -29,6 +29,14 @@ public interface IFirewallService
     Task<FwFilterRule> UpdateFilterRuleAsync(FwFilterRule rule, CancellationToken ct = default);
     Task<bool> DeleteFilterRuleAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>
+    /// Render one (unsaved) rule exactly as the generator would write it into
+    /// the ruleset, so the operator can see the nft line their form produces
+    /// before saving. Uses the same renderer and the same object/service
+    /// resolution as a real apply, so the preview cannot drift from reality.
+    /// </summary>
+    Task<string> PreviewFilterRuleAsync(FwFilterRule rule, CancellationToken ct = default);
+
     // Port forward operations
     Task<IReadOnlyList<FwPortForward>> GetPortForwardsAsync(CancellationToken ct = default);
     Task<FwPortForward?> GetPortForwardByIdAsync(Guid id, CancellationToken ct = default);

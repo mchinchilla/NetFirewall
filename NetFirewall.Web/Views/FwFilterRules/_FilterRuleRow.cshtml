@@ -1,0 +1,112 @@
+@model NetFirewall.Web.Models.Firewall.FilterRuleRowViewModel
+@{
+    var r = Model.Rule;
+
+    // Verdict colours come from the feedback tokens, never raw palette names.
+    var (badgeBg, badgeFg) = r.Action switch
+    {
+        "accept" => ("var(--feedback-success-bg)", "var(--feedback-success-fg)"),
+        "drop"   => ("var(--feedback-danger-bg)",  "var(--feedback-danger-fg)"),
+        "reject" => ("var(--feedback-warning-bg)", "var(--feedback-warning-fg)"),
+        _        => ("var(--feedback-info-bg)",    "var(--feedback-info-fg)")
+    };
+
+    // A disabled rule is not in the generated ruleset at all, so it must read
+    // as absent rather than merely "off" — that is what made the wide-open
+    // accept hard to spot in the flat list.
+    var rowCls = r.Enabled ? "" : "opacity-50";
+
+    var delMsg = $"Delete {r.Chain}/{r.Action} rule (priority {r.Priority})? Apply firewall after to push the change.";
+    var srcTitle = r.SourceAddresses is { Length: > 0 } ? string.Join(", ", r.SourceAddresses) : null;
+}
+<tr class="@rowCls align-top">
+    <td class="pl-5 pr-2 py-2.5 font-mono text-xs tabular-nums text-surface-fg-muted">@r.Priority</td>
+
+    <td class="px-2 py-2.5">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium uppercase"
+              style="background-color: @badgeBg; color: @badgeFg;">@r.Action</span>
+    </td>
+
+    <td class="px-2 py-2.5" title="@srcTitle">
+        <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-surface-fg">@(string.IsNullOrEmpty(r.Description) ? "(no description)" : r.Description)</span>
+
+            @if (Model.ShadowedBy is { } by)
+            {
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium
+                             bg-feedback-warning-bg text-feedback-warning-fg"
+                      title="Never runs: priority @by.Priority (@(by.Description ?? by.Action)) already matches everything this rule matches.">
+                    unreachable
+                </span>
+            }
+        </div>
+
+        <div class="flex items-center gap-1 flex-wrap mt-1">
+            @if (Model.Chips.Count == 0)
+            {
+                <span class="text-xs text-surface-fg-muted">matches everything</span>
+            }
+            else
+            {
+                @foreach (var (label, value) in Model.Chips)
+                {
+                    <span class="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-surface-muted">
+                        <span class="text-surface-fg-muted">@label</span><span class="text-surface-fg">@value</span>
+                    </span>
+                }
+            }
+        </div>
+    </td>
+
+    @* Interfaces are only worth pixels when they narrow the rule — "any/any"
+       repeated down the whole table was pure noise. *@
+    <td class="px-2 py-2.5 hidden lg:table-cell text-xs font-mono text-surface-fg-muted whitespace-nowrap">
+        @if (Model.InterfaceIn is null && Model.InterfaceOut is null)
+        {
+            <span class="opacity-60">—</span>
+        }
+        else
+        {
+            @if (Model.InterfaceIn is not null) { <span>in @Model.InterfaceIn</span> }
+            @if (Model.InterfaceOut is not null) { <span class="block">out @Model.InterfaceOut</span> }
+        }
+    </td>
+
+    <td class="px-2 py-2.5 whitespace-nowrap">
+        @if (r.Enabled)
+        {
+            <span class="inline-flex items-center gap-1.5 text-xs text-surface-fg-muted">
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--feedback-success-fg);"></span>active
+            </span>
+        }
+        else
+        {
+            <span class="inline-flex items-center gap-1.5 text-xs text-surface-fg-muted"
+                  title="Disabled rules are not written into the ruleset at all.">
+                <span class="h-1.5 w-1.5 rounded-full border border-surface-border"></span>off
+            </span>
+        }
+    </td>
+
+    <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+        <div class="inline-flex items-center gap-1">
+            <button type="button" class="btn btn-ghost text-xs"
+                    hx-get="/Firewall/FilterRules/edit/@r.Id"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Edit filter rule')">Edit</button>
+            <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+                    hx-post="/Firewall/FilterRules/delete/@r.Id"
+                    hx-trigger="confirmed-del"
+                    data-msg="@delMsg"
+                    @@click.prevent="(async () => {
+                        const ok = await $store.confirm.ask({
+                            title: 'Delete rule?',
+                            message: $event.currentTarget.dataset.msg,
+                            confirmLabel: 'Delete',
+                            level: 'danger'
+                        });
+                        if (ok) htmx.trigger($el, 'confirmed-del');
+                    })()">Delete</button>
+        </div>
+    </td>
+</tr>
