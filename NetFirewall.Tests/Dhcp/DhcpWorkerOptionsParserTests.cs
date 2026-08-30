@@ -268,6 +268,7 @@ public class DhcpWorkerOptionsParserTests
         Assert.NotNull(req.ClientIdentifier);
         Assert.Equal("laptop", req.Hostname);
         Assert.Equal(new byte[] { 1, 3, 6, 15 }, req.ParameterRequestList);
+        Assert.NotNull(req.RequestedIp);
         Assert.Equal("192.168.1.100", req.RequestedIp.ToString());
     }
 

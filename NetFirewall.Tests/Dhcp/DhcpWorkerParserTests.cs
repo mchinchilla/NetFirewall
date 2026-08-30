@@ -113,6 +113,7 @@ public class DhcpWorkerParserTests
         Assert.True(worker.TryParseDhcpRequest(pkt, AnyEndPoint, out var req));
 
         Assert.Equal(DhcpMessageType.Request, req.MessageType);
+        Assert.NotNull(req.RequestedIp);
         Assert.Equal("10.0.0.42", req.RequestedIp.ToString());
         Assert.Equal("laptop", req.Hostname);
     }
