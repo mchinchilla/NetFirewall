@@ -14,15 +14,18 @@ public sealed class StaticRoutesController : Controller
 {
     private readonly IFirewallService _firewall;
     private readonly IStaticRouteApplicator _applicator;
+    private readonly IPolicyRoutingService _routing;
     private readonly ILogger<StaticRoutesController> _logger;
 
     public StaticRoutesController(
         IFirewallService firewall,
         IStaticRouteApplicator applicator,
+        IPolicyRoutingService routing,
         ILogger<StaticRoutesController> logger)
     {
         _firewall = firewall;
         _applicator = applicator;
+        _routing = routing;
         _logger = logger;
     }
 
@@ -41,6 +44,7 @@ public sealed class StaticRoutesController : Controller
     {
         var ifaces = await _firewall.GetInterfacesAsync(ct);
         ViewBag.Interfaces = ifaces;
+        ViewBag.RouteTables = await _routing.GetRouteTablesAsync(ct);
 
         if (id.HasValue)
         {
@@ -130,7 +134,8 @@ public sealed class StaticRoutesController : Controller
         Gateway = r.Gateway?.ToString(),
         Metric = r.Metric,
         Description = r.Description,
-        Enabled = r.Enabled
+        Enabled = r.Enabled,
+        TableId = r.TableId
     };
 
     private static FwStaticRoute ToEntity(StaticRouteFormViewModel f) => new()
@@ -140,7 +145,8 @@ public sealed class StaticRoutesController : Controller
         Gateway = string.IsNullOrWhiteSpace(f.Gateway) ? null : IPAddress.Parse(f.Gateway),
         Metric = f.Metric,
         Description = f.Description,
-        Enabled = f.Enabled
+        Enabled = f.Enabled,
+        TableId = f.TableId
     };
 
     private static string AppendTrigger(string existing, string evt)

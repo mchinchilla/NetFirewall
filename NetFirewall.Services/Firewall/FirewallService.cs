@@ -286,8 +286,10 @@ public sealed class FirewallService : IFirewallService
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         // Cast cidr → text so the reader hands us a System.String for destination.
-        var sql = @"SELECT id, interface_id, destination::text AS destination, gateway,
-                           metric, description, enabled, created_at
+        // `SELECT *` (plus the cidr->text cast) rather than an explicit column
+        // list, so table_id is picked up when present and simply absent on a
+        // host whose schema predates migration 00023 — the reader tolerates it.
+        var sql = @"SELECT *, destination::text AS destination_text
                     FROM fw_static_routes";
         if (interfaceId.HasValue) sql += " WHERE interface_id = @ifaceId";
         sql += " ORDER BY metric, created_at";
@@ -301,8 +303,7 @@ public sealed class FirewallService : IFirewallService
     public async Task<FwStaticRoute?> GetStaticRouteByIdAsync(Guid id, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        const string sql = @"SELECT id, interface_id, destination::text AS destination, gateway,
-                                    metric, description, enabled, created_at
+        const string sql = @"SELECT *, destination::text AS destination_text
                              FROM fw_static_routes WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -320,8 +321,8 @@ public sealed class FirewallService : IFirewallService
         route.CreatedAt = DateTime.UtcNow;
 
         const string sql = @"
-            INSERT INTO fw_static_routes (id, interface_id, destination, gateway, metric, description, enabled, created_at)
-            VALUES (@id, @ifaceId, @dest::cidr, @gateway, @metric, @desc, @enabled, @created)";
+            INSERT INTO fw_static_routes (id, interface_id, destination, gateway, metric, description, enabled, table_id, created_at)
+            VALUES (@id, @ifaceId, @dest::cidr, @gateway, @metric, @desc, @enabled, @tableId, @created)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddStaticRouteParams(cmd, route);
@@ -343,7 +344,7 @@ public sealed class FirewallService : IFirewallService
         const string sql = @"
             UPDATE fw_static_routes
             SET interface_id = @ifaceId, destination = @dest::cidr, gateway = @gateway,
-                metric = @metric, description = @desc, enabled = @enabled
+                metric = @metric, description = @desc, enabled = @enabled, table_id = @tableId
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -388,6 +389,11 @@ public sealed class FirewallService : IFirewallService
         cmd.Parameters.AddWithValue("metric", route.Metric);
         cmd.Parameters.AddWithValue("desc", route.Description ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", route.Enabled);
+        // The named routing table this route lives in. NULL = the main table.
+        // Non-null is what makes PolicyRoutingApplyService install it with
+        // `ip route replace … table <name>` instead of into main — i.e. it is
+        // what wires a route into policy routing at all.
+        cmd.Parameters.AddWithValue("tableId", route.TableId ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("created", route.CreatedAt);
     }
 
@@ -402,11 +408,14 @@ public sealed class FirewallService : IFirewallService
             {
                 Id = reader.GetGuid(reader.GetOrdinal("id")),
                 InterfaceId = reader.GetGuid(reader.GetOrdinal("interface_id")),
-                Destination = reader.GetString(reader.GetOrdinal("destination")),
+                Destination = reader.GetString(reader.GetOrdinal("destination_text")),
                 Gateway = reader.IsDBNull(reader.GetOrdinal("gateway")) ? null : reader.GetFieldValue<System.Net.IPAddress>(reader.GetOrdinal("gateway")),
                 Metric = reader.GetInt32(reader.GetOrdinal("metric")),
                 Description = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString(reader.GetOrdinal("description")),
                 Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
+                // Optional column (migration 00023) — tolerate a host whose
+                // schema is behind, same as schedule_id on filter rules.
+                TableId = SafeNullableGuid(reader, "table_id"),
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
             });
         }

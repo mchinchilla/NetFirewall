@@ -58,6 +58,22 @@
             })
         </div>
 
+        @{
+            var routeTables = (IReadOnlyList<NetFirewall.Models.Firewall.FwRouteTable>)(ViewBag.RouteTables
+                ?? Array.Empty<NetFirewall.Models.Firewall.FwRouteTable>());
+            var tableOptions = new List<FormFieldViewModel.SelectOption> { new("", "main (default)") };
+            foreach (var t in routeTables.Where(t => t.Enabled))
+                tableOptions.Add(new(t.Id.ToString(), $"{t.Name} (id {t.TableId})"));
+        }
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.TableId), Label = "Routing table", Kind = FormFieldKind.Select,
+            Value = Model.TableId?.ToString(), Options = tableOptions,
+            Help = "Leave on main unless this route belongs to a policy-routing table. "
+                 + "A named table is what lets an fwmark steer traffic out of this interface — "
+                 + "manage the tables and their ip rules under Network → Policy routing."
+        })
+
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = "Description",
             Label = "Description",

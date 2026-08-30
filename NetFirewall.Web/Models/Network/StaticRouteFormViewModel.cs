@@ -29,6 +29,14 @@ public sealed class StaticRouteFormViewModel : IValidatableObject
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// Optional named routing table this route belongs to. Null = the main
+    /// table. Setting it is what wires the route into policy routing: the
+    /// applier then installs it with `ip route replace … table &lt;name&gt;`,
+    /// which is how an fwmark ends up steering traffic out of an interface.
+    /// </summary>
+    public Guid? TableId { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext context)
     {
         // CIDR sanity: parse network + prefix length manually.

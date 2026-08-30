@@ -217,6 +217,50 @@ public sealed class FirewallServiceCrudTests : IAsyncLifetime
         Assert.Null(await _svc.GetStaticRouteByIdAsync(route.Id));
     }
 
+    /// <summary>
+    /// <c>table_id</c> is what puts a route into a policy-routing table instead
+    /// of main — PolicyRoutingApplyService reads it to decide between
+    /// <c>ip route replace … table wan2</c> and plain <c>ip route replace</c>,
+    /// and it is the chain that makes an fwmark steer traffic out of an
+    /// interface. It went unwritten for a while: the column and the model
+    /// property existed, but neither INSERT nor UPDATE nor the reader touched
+    /// it, so it was silently NULL forever and policy routing could only be set
+    /// up by hand outside the application. Round-trip it here so that can't
+    /// regress unnoticed.
+    /// </summary>
+    [Fact]
+    public async Task StaticRoute_RoundTripsItsRoutingTable()
+    {
+        var iface = await CreateInterfaceAsync();
+
+        Guid tableId;
+        await using (var cmd = _pg.DataSource.CreateCommand(
+            @"INSERT INTO fw_route_tables (table_id, table_name, enabled)
+              VALUES (202, 'wan2', true) RETURNING id"))
+        {
+            tableId = (Guid)(await cmd.ExecuteScalarAsync())!;
+        }
+
+        var route = await _svc.CreateStaticRouteAsync(new FwStaticRoute
+        {
+            InterfaceId = iface.Id,
+            Destination = "0.0.0.0/0",
+            Gateway = IPAddress.Parse("192.168.1.254"),
+            TableId = tableId,
+            Enabled = true
+        });
+
+        var afterCreate = await _svc.GetStaticRouteByIdAsync(route.Id);
+        Assert.Equal(tableId, afterCreate!.TableId);
+
+        // …and an update must be able to move it back to the main table.
+        afterCreate.TableId = null;
+        await _svc.UpdateStaticRouteAsync(afterCreate);
+
+        var afterUpdate = await _svc.GetStaticRouteByIdAsync(route.Id);
+        Assert.Null(afterUpdate!.TableId);
+    }
+
     [Fact]
     public async Task StaticRoutes_FilterByInterface()
     {
