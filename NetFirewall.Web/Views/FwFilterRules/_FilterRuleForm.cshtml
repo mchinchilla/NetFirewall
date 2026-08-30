@@ -134,9 +134,14 @@
     @* Live preview: the nft line these fields produce, rendered server-side by
        the same generator an apply uses. Turns the form from a set of fields
        whose combined effect you must imagine into something you can read. *@
+    @* hx-target is explicit and NOT "this": HTMX inherits attributes from the
+       form, and an inherited hx-target="this" resolves to the element that
+       declared it — the <form> — so the preview response would replace the
+       whole form with itself on the very first (load) trigger. *@
     <div id="rule-preview" class="mt-4"
          hx-post="/Firewall/FilterRules/preview"
          hx-include="closest form"
+         hx-target="#rule-preview"
          hx-trigger="load, change from:closest form delay:150ms, keyup changed delay:400ms from:closest form"
          hx-swap="innerHTML"></div>
 
