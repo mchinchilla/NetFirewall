@@ -1929,25 +1929,36 @@ public sealed class FirewallService : IFirewallService
         }
 
         // Protocol (handle tcp/udp) — now adjacent to dport, which is what nft expects.
-        var protocols = pf.Protocol.ToLower().Split('/');
+        //
+        // nft has no bare `dport`: it must be qualified by the L4 protocol
+        // (`tcp dport 53`) or, when the rule spans several protocols, by `th`
+        // — the transport header, which exposes sport/dport for any L4 proto.
+        // `meta l4proto { tcp, udp } dport 53` is a SYNTAX ERROR, and `nft -f`
+        // rejects the WHOLE ruleset on one bad line, so a single "TCP + UDP"
+        // port forward (the natural choice for DNS) would take the entire
+        // apply down — not just its own rule.
+        var protocols = pf.Protocol.ToLower()
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        string portMatcher;
         if (protocols.Length == 1)
         {
-            sb.Append($"{protocols[0]} ");
+            portMatcher = protocols[0];
         }
         else
         {
-            // For tcp/udp, we generate separate rules in practice, but here we simplify
-            sb.Append($"meta l4proto {{ tcp, udp }} ");
+            sb.Append($"meta l4proto {{ {string.Join(", ", protocols)} }} ");
+            portMatcher = "th";
         }
 
         // Port range
         if (pf.ExternalPortEnd.HasValue && pf.ExternalPortEnd != pf.ExternalPortStart)
         {
-            sb.Append($"dport {pf.ExternalPortStart}-{pf.ExternalPortEnd} ");
+            sb.Append($"{portMatcher} dport {pf.ExternalPortStart}-{pf.ExternalPortEnd} ");
         }
         else
         {
-            sb.Append($"dport {pf.ExternalPortStart} ");
+            sb.Append($"{portMatcher} dport {pf.ExternalPortStart} ");
         }
 
         // DNAT

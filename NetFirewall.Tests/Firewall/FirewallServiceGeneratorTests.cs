@@ -264,6 +264,37 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         Assert.Contains("dnat to 10.0.0.10:80", prerouting);
     }
 
+    /// <summary>
+    /// The "TCP + UDP" option in the port-forward form (the natural choice for
+    /// DNS) must qualify the port with <c>th</c> — the transport header. nft
+    /// has no bare <c>dport</c>, so <c>meta l4proto { tcp, udp } dport 53</c>
+    /// is a syntax error, and <c>nft -f</c> rejects the WHOLE ruleset on one
+    /// bad line: a single such row would take the entire apply down.
+    /// </summary>
+    [Fact]
+    public async Task Generate_DualProtocolPortForward_QualifiesPortWithTransportHeader()
+    {
+        var wan = await CreateInterfaceAsync("eth0", "WAN");
+        await _svc.CreatePortForwardAsync(new FwPortForward
+        {
+            Description = "dns",
+            Protocol = "tcp/udp",
+            InterfaceId = wan.Id,
+            ExternalPortStart = 53,
+            InternalIp = IPAddress.Parse("10.0.0.53"),
+            InternalPort = 53,
+            Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var prerouting = ExtractChain(cfg, "prerouting");
+
+        Assert.Contains("meta l4proto { tcp, udp } th dport 53", prerouting);
+        Assert.Contains("dnat to 10.0.0.53:53", prerouting);
+        // The shape that made nft reject the whole file.
+        Assert.DoesNotContain("} dport", prerouting);
+    }
+
     [Fact]
     public async Task Generate_DisabledPortForward_IsNotEmitted()
     {
