@@ -371,6 +371,91 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         Assert.DoesNotContain("limit rate 10/second accept", cfg);
     }
 
+    // ── dual-WAN inbound reply steering ────────────────────────────────
+
+    /// <summary>
+    /// A WAN interface with its egress fwmark declared where the generator
+    /// reads it: <c>wan_health_config.probe_fwmark</c>, the same value the
+    /// failover monitor stamps on its probes. Pass <c>null</c> for a WAN whose
+    /// mark the operator never filled in.
+    /// </summary>
+    private async Task<FwInterface> CreateMarkedWanAsync(string name, long? fwmark)
+    {
+        var wan = await CreateInterfaceAsync(name, "WAN");
+
+        await using var cmd = _pg.DataSource.CreateCommand(
+            @"INSERT INTO wan_health_config (interface_id, priority, monitor_targets, probe_fwmark, enabled)
+              VALUES (@id, 1, '{}'::text[], @mark, true)");
+        cmd.Parameters.AddWithValue("id", wan.Id);
+        cmd.Parameters.AddWithValue("mark", fwmark.HasValue ? fwmark.Value : DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+
+        return wan;
+    }
+
+    /// <summary>
+    /// The fix for the 2026-08-30 report: DNS published on the SECOND WAN was
+    /// answered by the LAN host, but the reply left through the FIRST WAN
+    /// carrying the second WAN's source address and died upstream. Proven on
+    /// the box with `ip route get … mark 0x100` → `dev ens192`.
+    /// </summary>
+    [Fact]
+    public async Task Generate_TwoWansWithDistinctMarks_SteersRepliesBackOutTheIngressWan()
+    {
+        await CreateMarkedWanAsync("eth0", 0x100);
+        await CreateMarkedWanAsync("eth1", 0x200);
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        // NOT ExtractChain(cfg, "prerouting") — that finds the nat one first.
+        var prerouting = ExtractChain(ExtractTable(cfg, "ip mangle"), "prerouting");
+
+        Assert.Contains("iif eth0 ct state new ct mark set 0x00000100", prerouting);
+        Assert.Contains("iif eth1 ct state new ct mark set 0x00000200", prerouting);
+        // `return` is what stops the broad LAN-default rule below from
+        // overwriting the mark we just restored.
+        Assert.Contains("ct direction reply ct mark != 0x00000000 meta mark set ct mark return", prerouting);
+    }
+
+    [Fact]
+    public async Task Generate_SingleWan_EmitsNoIngressMarking()
+    {
+        // One WAN: nothing to steer between, so the rules would be pure noise.
+        await CreateMarkedWanAsync("eth0", 0x100);
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        Assert.DoesNotContain("ct mark set", cfg);
+        Assert.DoesNotContain("ct direction reply", cfg);
+    }
+
+    [Fact]
+    public async Task Generate_WanWithoutDeclaredMark_IsSkipped()
+    {
+        // eth1's probe_fwmark was never filled in. Guessing one could send
+        // replies out the wrong WAN — the exact bug this prevents — so it stays
+        // unmarked, which drops us below the two-WAN threshold entirely.
+        await CreateMarkedWanAsync("eth0", 0x100);
+        await CreateMarkedWanAsync("eth1", null);
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        Assert.DoesNotContain("ct mark set", cfg);
+        Assert.DoesNotContain("ct direction reply", cfg);
+    }
+
+    [Fact]
+    public async Task Generate_TwoWansSharingOneMark_EmitsNoIngressMarking()
+    {
+        // Same mark on both WANs means the policy routing itself can't tell
+        // them apart; stamping it would steer nothing and only add noise.
+        await CreateMarkedWanAsync("eth0", 0x100);
+        await CreateMarkedWanAsync("eth1", 0x100);
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        Assert.DoesNotContain("ct mark set", cfg);
+    }
+
     // ── mangle table ───────────────────────────────────────────────────
 
     [Fact]
@@ -444,11 +529,21 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
     /// Pulls the body of a named chain from the rendered config. Lets tests
     /// assert against rule placement without false positives from siblings.
     /// </summary>
-    private static string ExtractChain(string cfg, string chainName)
+    private static string ExtractChain(string cfg, string chainName) =>
+        ExtractBlock(cfg, $"chain {chainName} {{");
+
+    /// <summary>
+    /// Narrow to one table before looking for a chain — several chain names
+    /// (prerouting, postrouting) exist in more than one table, and
+    /// <see cref="ExtractChain"/> takes the first match.
+    /// </summary>
+    private static string ExtractTable(string cfg, string tableName) =>
+        ExtractBlock(cfg, $"table {tableName} {{");
+
+    private static string ExtractBlock(string cfg, string marker)
     {
-        var marker = $"chain {chainName} {{";
         var start = cfg.IndexOf(marker, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"chain '{chainName}' not found in config");
+        Assert.True(start >= 0, $"'{marker}' not found in config");
         // Walk forward to the matching '}'.
         var depth = 0;
         var i = cfg.IndexOf('{', start);

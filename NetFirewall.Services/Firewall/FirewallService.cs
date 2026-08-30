@@ -1506,6 +1506,7 @@ public sealed class FirewallService : IFirewallService
         var mangleRules = await GetMangleRulesAsync(null, ct);
         var trafficMarks = await GetTrafficMarksAsync(ct);
         var schedules = await GetSchedulesForGenerationAsync(ct);
+        var wanIngressMarks = await GetWanIngressMarksAsync(ct);
 
         // Create interface name lookup
         var ifaceMap = interfaces.ToDictionary(i => i.Id, i => i.Name);
@@ -1642,12 +1643,45 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("}");
         sb.AppendLine();
 
-        // Mangle table (for QoS marking)
-        if (mangleRules.Any(m => m.Enabled))
+        // Mangle table (for QoS marking, and dual-WAN inbound reply steering).
+        //
+        // Reply steering needs at least two WANs with DISTINCT marks: with one
+        // WAN there is nothing to choose between, and with colliding marks the
+        // policy routing itself is misconfigured and stamping can't help.
+        var steerInboundReplies = wanIngressMarks
+            .Select(w => w.Fwmark)
+            .Distinct()
+            .Count() >= 2;
+
+        if (mangleRules.Any(m => m.Enabled) || steerInboundReplies)
         {
             sb.AppendLine("table ip mangle {");
             sb.AppendLine("    chain prerouting {");
             sb.AppendLine("        type filter hook prerouting priority mangle; policy accept;");
+
+            if (steerInboundReplies)
+            {
+                sb.AppendLine("        # Dual-WAN inbound: remember which WAN a connection arrived on, and");
+                sb.AppendLine("        # steer its replies back out the same one. Without this the");
+                sb.AppendLine("        # LAN-default mark below sends every reply out the primary WAN while");
+                sb.AppendLine("        # NAT restores the SECONDARY WAN's address as the source — the packet");
+                sb.AppendLine("        # is dropped upstream and every DNAT'd service looks dead on the");
+                sb.AppendLine("        # secondary WAN, even though the LAN host answered correctly.");
+                sb.AppendLine("        #");
+                sb.AppendLine("        # Only the REPLY direction is marked. Marking the inbound direction");
+                sb.AppendLine("        # too would push WAN->LAN packets into the WAN routing table instead");
+                sb.AppendLine("        # of delivering them to the LAN.");
+
+                foreach (var (iface, mark) in wanIngressMarks)
+                {
+                    sb.AppendLine($"        iif {iface} ct state new ct mark set 0x{mark:x8}");
+                }
+
+                // `return` is mandatory: `meta mark set` is non-terminal, so
+                // without it the broad LAN-default rule further down overwrites
+                // the mark we just restored.
+                sb.AppendLine("        ct direction reply ct mark != 0x00000000 meta mark set ct mark return");
+            }
 
             foreach (var rule in mangleRules.Where(m => m.Enabled && m.Chain == "prerouting").OrderBy(m => m.Priority))
             {
@@ -2081,6 +2115,59 @@ public sealed class FirewallService : IFirewallService
     private static string EscapeComment(string comment)
     {
         return comment.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+    }
+
+    /// <summary>
+    /// WAN interfaces paired with the fwmark that routes traffic out of them.
+    /// Used to make an inbound (DNAT'd) connection answer through the interface
+    /// it arrived on — see the ingress-marking block in
+    /// <see cref="GenerateNftablesConfigAsync"/>.
+    ///
+    /// <para>The mapping is read from <c>wan_health_config.probe_fwmark</c>,
+    /// which already means exactly this: the fwmark that makes a packet leave
+    /// through this WAN. The failover monitor stamps it on its probes so they
+    /// egress the link being measured. Reusing it keeps ONE operator-visible
+    /// place for the fact (Monitoring → WAN failover) instead of a second
+    /// column that could silently drift out of sync with the first — and it
+    /// gives the value two consumers, so a wrong entry shows up as broken
+    /// failover probes as well as unreachable inbound services.</para>
+    ///
+    /// <para>Deliberately NOT derived from <c>fw_static_routes.table_id</c>:
+    /// that column is read by the policy-routing applier but written by
+    /// nothing — no service method and no UI sets it — so on a host whose
+    /// routing tables were set up by hand it is always NULL.</para>
+    ///
+    /// <para>Fail-soft, like the schedule loader below: on a host whose
+    /// migrations are behind (the column arrived in 00026) this returns empty
+    /// and the generator emits no ingress marking.</para>
+    /// </summary>
+    private async Task<IReadOnlyList<(string Interface, long Fwmark)>> GetWanIngressMarksAsync(CancellationToken ct)
+    {
+        const string sql = @"
+            SELECT i.name AS name, w.probe_fwmark AS fwmark
+              FROM fw_interfaces     i
+              JOIN wan_health_config w ON w.interface_id = i.id AND w.enabled
+             WHERE i.type = 'WAN' AND i.enabled AND w.probe_fwmark IS NOT NULL
+             ORDER BY i.name";
+
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            var list = new List<(string, long)>();
+            while (await reader.ReadAsync(ct))
+                list.Add((reader.GetString(0), reader.GetInt64(1)));
+            return list;
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42703")
+        {
+            _logger.LogDebug(
+                "wan_health_config.probe_fwmark not present — dual-WAN ingress marking skipped. " +
+                "Inbound services on a secondary WAN will answer through the primary one.");
+            return Array.Empty<(string, long)>();
+        }
     }
 
     /// <summary>
