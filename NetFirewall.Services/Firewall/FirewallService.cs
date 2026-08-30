@@ -446,6 +446,8 @@ public sealed class FirewallService : IFirewallService
 
     public async Task<FwFilterRule> CreateFilterRuleAsync(FwFilterRule rule, CancellationToken ct = default)
     {
+        GuardAgainstDefaultDenyBypass(rule);
+
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         rule.Id = Guid.NewGuid();
@@ -470,6 +472,8 @@ public sealed class FirewallService : IFirewallService
 
     public async Task<FwFilterRule> UpdateFilterRuleAsync(FwFilterRule rule, CancellationToken ct = default)
     {
+        GuardAgainstDefaultDenyBypass(rule);
+
         var existing = await GetFilterRuleByIdAsync(rule.Id, ct);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -491,6 +495,25 @@ public sealed class FirewallService : IFirewallService
         await LogAuditAsync("fw_filter_rules", rule.Id, "UPDATE", existing, rule, null, ct);
 
         return rule;
+    }
+
+    /// <summary>
+    /// Refuse to store an enabled filter rule that would make its chain's
+    /// default-deny policy unreachable — an accept with no interface, no
+    /// address, no port and a state match that still admits new connections.
+    /// See <see cref="FwFilterRuleGuard"/> for the incident this prevents.
+    ///
+    /// Throws rather than returning a flag: the callers are the Web's save
+    /// action and the API, both of which already turn an exception into a
+    /// failed <c>ServiceResponse</c> carrying this message to the operator.
+    /// </summary>
+    private void GuardAgainstDefaultDenyBypass(FwFilterRule rule)
+    {
+        if (FwFilterRuleGuard.DescribeBypass(rule) is not { } reason) return;
+
+        _logger.LogWarning("Rejected filter rule {Description}: {Reason}",
+            rule.Description ?? rule.Action, reason);
+        throw new InvalidOperationException(reason);
     }
 
     public async Task<bool> DeleteFilterRuleAsync(Guid id, CancellationToken ct = default)
@@ -1559,6 +1582,34 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("}");
         sb.AppendLine();
 
+        // Emit one filter chain, in priority order. Single place deciding what
+        // reaches the ruleset, so the three chains can't drift apart.
+        //
+        // A rule the guard flags is SKIPPED, not emitted: an accept with no
+        // interface, no address and no port matches everything and would shadow
+        // every rule below it, leaving `policy drop` unreachable. Refusing it
+        // here as well as on save means a row inserted straight into the DB
+        // (a hand-written migration, a restored dump) can't silently open the
+        // box either. Same fail-soft contract as the port-forward SKIPs below —
+        // we drop the one bad rule, never the whole apply.
+        void EmitFilterChain(string chain)
+        {
+            foreach (var rule in filterRules
+                         .Where(r => r.Enabled && r.Chain == chain && RuleActiveNow(r))
+                         .OrderBy(r => r.Priority))
+            {
+                if (FwFilterRuleGuard.DescribeBypass(rule) is { } bypass)
+                {
+                    _logger.LogWarning("Skipped filter rule {Id} ({Description}) while generating the ruleset: {Reason}",
+                        rule.Id, rule.Description ?? rule.Action, bypass);
+                    sb.AppendLine($"        # SKIP filter rule {rule.Id} — default-deny bypass (accept with no interface/address/port)");
+                    continue;
+                }
+
+                sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
+            }
+        }
+
         // Filter table
         sb.AppendLine("table ip filter {");
 
@@ -1567,10 +1618,7 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("        type filter hook input priority filter; policy drop;");
         sb.AppendLine("        iif lo accept");
 
-        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "input" && RuleActiveNow(r)).OrderBy(r => r.Priority))
-        {
-            sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
-        }
+        EmitFilterChain("input");
 
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -1579,10 +1627,7 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("    chain forward {");
         sb.AppendLine("        type filter hook forward priority filter; policy drop;");
 
-        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "forward" && RuleActiveNow(r)).OrderBy(r => r.Priority))
-        {
-            sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
-        }
+        EmitFilterChain("forward");
 
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -1591,10 +1636,7 @@ public sealed class FirewallService : IFirewallService
         sb.AppendLine("    chain output {");
         sb.AppendLine("        type filter hook output priority filter; policy accept;");
 
-        foreach (var rule in filterRules.Where(r => r.Enabled && r.Chain == "output" && RuleActiveNow(r)).OrderBy(r => r.Priority))
-        {
-            sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
-        }
+        EmitFilterChain("output");
 
         sb.AppendLine("    }");
         sb.AppendLine("}");

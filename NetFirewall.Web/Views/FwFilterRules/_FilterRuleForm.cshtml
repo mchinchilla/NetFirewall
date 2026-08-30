@@ -6,7 +6,9 @@
     foreach (var i in ifaces)
         ifaceOptions.Add(new(i.Id.ToString(), $"{i.Name} ({i.Type})"));
 }
-<form id="filter-rule-form" hx-post="/Firewall/FilterRules/save" hx-target="this" hx-swap="outerHTML">
+<form id="filter-rule-form" hx-post="/Firewall/FilterRules/save" hx-target="this" hx-swap="outerHTML"
+      x-data="filterRuleGuard()"
+      @@input="recheck()" @@change="recheck()" @@click="recheck()" @@keyup="recheck()">
     @Html.AntiForgeryToken()
     @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
 
@@ -131,8 +133,16 @@
         })
     </div>
 
+    @* Default-deny guard. An accept with no interface, no address and no port
+       matches everything and would shadow the rest of the chain — the server
+       refuses to store it, so explain it here before the operator hits save. *@
+    <div x-cloak x-show="bypass"
+         class="mt-4 rounded-md border px-3 py-2 text-xs leading-relaxed
+                bg-feedback-danger-bg text-feedback-danger-fg border-feedback-danger-bd"
+         x-text="bypass"></div>
+
     <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
         <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save" : "Create rule")</button>
+        <button type="submit" class="btn btn-primary" :disabled="!!bypass">@(Model.Id.HasValue ? "Save" : "Create rule")</button>
     </div>
 </form>

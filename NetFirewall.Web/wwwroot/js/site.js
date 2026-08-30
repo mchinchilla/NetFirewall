@@ -212,6 +212,76 @@ window.NetFw.downloadRecoveryCodes = function (codes) {
 };
 
 /* =====================================================================
+ * Filter-rule default-deny guard — client mirror of FwFilterRuleGuard.cs
+ * (NetFirewall.Models/Firewall). Given the filter-rule form, returns the
+ * reason the rule would make its chain's default-deny policy unreachable, or
+ * null when it is legitimately narrowed.
+ *
+ * An accept with no interface, no address and no port matches EVERY packet
+ * reaching the chain, shadowing every rule below it. The trap is `limit rate`:
+ * it reads like a throttle but only bounds *when the rule matches*, so all
+ * traffic under the limit is still accepted — that is how a `policy drop`
+ * firewall ended up answering on every listening TCP port from the Internet.
+ *
+ * The server rejects the same shape on save (and the nft generator skips it),
+ * so this is a courtesy, not the enforcement point. Keep the two in step: any
+ * change here needs the same change in FwFilterRuleGuard.DescribeBypass.
+ * ===================================================================== */
+window.NetFw.filterRuleBypass = function (form) {
+    if (!form || !form.elements) return null;
+
+    const field = (name) => {
+        const el = form.elements[name];
+        return el && typeof el.value === "string" ? el.value.trim() : "";
+    };
+    const checked = (name) => {
+        const el = form.elements[name];
+        return !!(el && el.checked);
+    };
+    const csvHasEntries = (csv) => csv.split(",").some((v) => v.trim().length > 0);
+
+    // A disabled rule never reaches the ruleset, so it cannot open anything.
+    if (!checked("Enabled")) return null;
+    if (field("Action").toLowerCase() !== "accept") return null;
+
+    // output is `policy accept` by design — only the default-deny chains.
+    const chain = field("Chain").toLowerCase();
+    if (chain !== "input" && chain !== "forward") return null;
+
+    // ICMP has no ports to narrow by; a rate-limited "allow ping" is deliberate.
+    const protocol = field("Protocol").toLowerCase();
+    if (protocol === "icmp" || protocol === "icmpv6") return null;
+
+    // Any single narrowing condition means the operator scoped the rule.
+    if (field("InterfaceInId") || field("InterfaceOutId")) return null;
+    if (csvHasEntries(field("SourceAddresses"))) return null;
+    if (csvHasEntries(field("DestinationAddresses"))) return null;
+    if (csvHasEntries(field("DestinationPorts"))) return null;
+
+    // `established, related` only readmits return traffic — not a way in.
+    // No state match at all means every state, new included.
+    const states = field("ConnectionStates");
+    const admitsNew =
+        !csvHasEntries(states) ||
+        states.split(",").some((s) => s.trim().toLowerCase() === "new");
+    if (!admitsNew) return null;
+
+    let reason =
+        `This '${chain}' accept matches all ${protocol ? protocol.toUpperCase() : "IP"} traffic — ` +
+        "no interface, no address and no port narrow it — so it would shadow every rule below it and " +
+        "make the chain's default-deny policy unreachable. Add a destination port, a source address, " +
+        "or an interface.";
+
+    const rate = field("RateLimit");
+    if (rate) {
+        reason +=
+            " The rate limit does not narrow it: 'limit rate' only bounds when the rule matches, " +
+            `so all traffic under ${rate} is still accepted.`;
+    }
+    return reason;
+};
+
+/* =====================================================================
  * Client-side table filter — backs _TableSearch.cshtml in ClientSide mode.
  * Hides <tbody> rows of a target table whose text doesn't contain the query.
  * Used by the non-polling list pages (firewall rules, NAT, port forwards,
@@ -846,6 +916,30 @@ document.addEventListener("alpine:init", () => {
                 this.open = false;
                 this.active = -1;
             }
+        }
+    }));
+
+    /* ---------- filterRuleGuard ---------- wraps the filter-rule form.
+     * Blocks the submit while the rule would make its chain's default-deny
+     * policy unreachable, showing the same sentence the server would answer
+     * with. FirewallService rejects the shape too — this only saves the
+     * round-trip and explains the problem before the operator hits save.
+     *
+     * Re-checks on click and keyup as well as input/change: the address and
+     * port pickers write their hidden inputs directly (no input event fires),
+     * and the $nextTick here lands after their own $nextTick write.
+     */
+    Alpine.data("filterRuleGuard", () => ({
+        bypass: null,
+
+        init() {
+            this.recheck();
+        },
+
+        recheck() {
+            this.$nextTick(() => {
+                this.bypass = window.NetFw.filterRuleBypass(this.$el);
+            });
         }
     }));
 

@@ -545,6 +545,11 @@
     }
     .btn-danger:hover { filter: brightness(1.08); }
     .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+    /* Any button gated by a client-side guard (filter-rule bypass check,
+       type-to-confirm dialogs) must read as inert rather than merely
+       unresponsive. Declared after the :hover rules so it wins on equal
+       specificity — a disabled button must not brighten under the cursor. */
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
     .nav-link {
         @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium

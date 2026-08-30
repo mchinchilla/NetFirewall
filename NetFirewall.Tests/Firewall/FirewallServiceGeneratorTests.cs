@@ -316,16 +316,43 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         await Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Defence in depth for the default-deny bypass. <c>CreateFilterRuleAsync</c>
+    /// refuses this shape, so a row can only reach the table by another path —
+    /// a hand-written migration, a restored dump, someone at psql. The
+    /// generator must still refuse to render it: this is the rule that let the
+    /// public Internet reach every listening TCP port on a `policy drop` box.
+    /// </summary>
+    [Fact]
+    public async Task Generate_BypassRuleAlreadyInDatabase_IsSkippedNotRendered()
+    {
+        await using (var cmd = _pg.DataSource.CreateCommand(
+            @"INSERT INTO fw_filter_rules (id, chain, description, action, protocol, rate_limit, enabled, priority, created_at)
+              VALUES (@id, 'input', 'SYN flood rate-limited', 'accept', 'tcp', '10/second', true, 60, now())"))
+        {
+            cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        Assert.Contains("# SKIP filter rule", cfg);
+        Assert.DoesNotContain("limit rate 10/second accept", cfg);
+    }
+
     // ── mangle table ───────────────────────────────────────────────────
 
     [Fact]
     public async Task Generate_NoMangleRules_OmitsMangleTableEntirely()
     {
-        // Add unrelated state — should still skip mangle.
+        // Add unrelated state — should still skip mangle. The rule carries a
+        // destination port because FwFilterRuleGuard refuses an accept with no
+        // narrowing condition at all (it would shadow the whole chain).
         await CreateInterfaceAsync("eth0", "LAN");
         await _svc.CreateFilterRuleAsync(new FwFilterRule
         {
-            Chain = "input", Action = "accept", Enabled = true
+            Chain = "input", Action = "accept", Enabled = true,
+            Protocol = "tcp", DestinationPorts = ["22"]
         });
 
         var cfg = await _svc.GenerateNftablesConfigAsync();
