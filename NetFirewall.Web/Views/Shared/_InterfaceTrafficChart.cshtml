@@ -1,0 +1,78 @@
+@model NetFirewall.Web.Models.Monitoring.InterfaceTrafficChartViewModel
+@{
+    var url = Model.SeriesUrlWithHours;
+}
+
+<section class="card"
+         x-data="interfaceTrafficChart()">
+    @* HTMX loads JSON; Alpine owns Chart.js. hx-swap=none so the canvas is never replaced. *@
+    <div class="hidden" aria-hidden="true"
+         hx-get="@url"
+         hx-trigger="load"
+         hx-swap="none"
+         @@htmx:after-request="onHtmx($event)"></div>
+    <header class="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+            <h2 class="text-base font-semibold">@Model.Heading</h2>
+            @if (!string.IsNullOrEmpty(Model.Subheading))
+            {
+                <p class="text-xs text-surface-fg-muted">@Model.Subheading</p>
+            }
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-ghost text-xs"
+                    x-show="hasNonWan" x-cloak
+                    @@click="showWanOnly()">WAN only</button>
+            <button type="button" class="btn btn-ghost text-xs"
+                    x-show="hasNonWan" x-cloak
+                    @@click="showAll()">Show all</button>
+        </div>
+    </header>
+
+    <p class="text-sm py-10 text-center text-surface-fg-muted" x-show="status === 'loading'" x-cloak>Loading traffic…</p>
+    <p class="text-sm py-10 text-center text-surface-fg-muted" x-show="status === 'empty'" x-cloak>
+        No hourly samples yet. The collector rolls up once an hour after the daemon starts.
+    </p>
+    <p class="text-sm py-10 text-center text-surface-fg-muted" x-show="status === 'error'" x-cloak>
+        Could not load interface traffic.
+    </p>
+
+    <div x-show="status === 'ready'" x-cloak>
+        <div class="flex flex-wrap gap-2 mb-3">
+            <template x-for="(iface, idx) in ifaces" :key="iface.name">
+                <button type="button"
+                        class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition"
+                        :class="iface.visible
+                            ? 'bg-surface-elevated text-surface-fg'
+                            : 'opacity-40 text-surface-fg-muted'"
+                        :style="'border-color: ' + colorFor(idx)"
+                        :aria-pressed="iface.visible.toString()"
+                        @@click="toggle(iface.name)">
+                    <span class="inline-block h-2 w-2 rounded-full shrink-0" :style="'background-color: ' + colorFor(idx)"></span>
+                    <span class="font-mono" x-text="iface.name"></span>
+                    <span class="text-surface-fg-muted" x-text="iface.label"></span>
+                </button>
+            </template>
+        </div>
+
+        <div class="relative h-56">
+            <canvas x-init="bindCanvas($el)"></canvas>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
+            <div>
+                <p class="font-semibold text-sm tabular-nums" x-text="fmtMbps(stats.avgIn)">—</p>
+                <p class="text-surface-fg-muted">Avg in</p>
+            </div>
+            <div>
+                <p class="font-semibold text-sm tabular-nums" x-text="fmtMbps(stats.avgOut)">—</p>
+                <p class="text-surface-fg-muted">Avg out</p>
+            </div>
+            <div>
+                <p class="font-semibold text-sm tabular-nums" x-text="fmtBytes(stats.totalBytes)">—</p>
+                <p class="text-surface-fg-muted">24h total</p>
+            </div>
+        </div>
+        <p class="text-[10px] mt-2 text-right text-surface-fg-muted">Totals follow the interfaces that are currently shown.</p>
+    </div>
+</section>

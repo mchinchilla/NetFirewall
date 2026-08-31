@@ -910,6 +910,77 @@ window.NetFw.charts = {
             if (chart.options.scales.y?.grid) chart.options.scales.y.grid.color = bd;
         });
         return chart;
+    },
+
+    /** Semantic palette for per-interface 24h series (one hue per NIC). */
+    ifacePalette() {
+        return [
+            this.readColor("accent"),
+            this.readColor("feedback-info-bd"),
+            this.readColor("feedback-success-bd"),
+            this.readColor("feedback-warning-bd"),
+            this.readColor("feedback-danger-bd"),
+            this.readColor("surface-fg-muted")
+        ];
+    },
+
+    /**
+     * Multi-interface 24h traffic chart. Datasets are pre-built by the Alpine
+     * host (two per NIC: down solid, up dashed) so toggling visibility is
+     * just dataset.hidden + update.
+     */
+    makeInterfaceTraffic(canvasEl, labels, datasets) {
+        const ctx = canvasEl.getContext("2d");
+        const fgMuted = this.readColor("surface-fg-muted");
+        const border = this.readColor("surface-border");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+
+        const fmt = (v) => {
+            if (v >= 1000) return `${(v / 1000).toFixed(2)} Gbps`;
+            if (Math.abs(v) >= 1) return `${Number(v).toFixed(1)} Mbps`;
+            if (Math.abs(v) >= 0.001) return `${(v * 1000).toFixed(0)} kbps`;
+            return "0";
+        };
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted,
+                        borderColor: border, borderWidth: 1, padding: 10,
+                        callbacks: { label: (c) => `${c.dataset.label}: ${fmt(c.parsed.y)}` }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: fgMuted, maxTicksLimit: 8, font: { size: 10 } } },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: border, drawTicks: false },
+                        ticks: { color: fgMuted, font: { size: 10 }, callback: fmt }
+                    }
+                }
+            }
+        });
+        this.register(chart, () => {
+            const fm = this.readColor("surface-fg-muted");
+            const bd = this.readColor("surface-border");
+            chart.options.plugins.tooltip.backgroundColor = this.readColor("surface-elevated");
+            chart.options.plugins.tooltip.titleColor = this.readColor("surface-fg");
+            chart.options.plugins.tooltip.bodyColor = fm;
+            chart.options.plugins.tooltip.borderColor = bd;
+            chart.options.scales.x.ticks.color = fm;
+            chart.options.scales.y.ticks.color = fm;
+            chart.options.scales.y.grid.color = bd;
+        });
+        return chart;
     }
 };
 
@@ -948,121 +1019,76 @@ document.addEventListener("alpine:init", () => {
         get uptime() { return window.NetFw.formatUptime(this.nowMs - this.startedAtMs); }
     }));
 
-    /* ---------- liveSparkline ---------- polls a JSON series endpoint and
-     * updates a Chart.js sparkline IN PLACE every `intervalMs`. Pauses while the
-     * tab is hidden. Cleans up its chart + timer on destroy so HTMX swaps and
-     * navigations don't leak. Usage:
-     *   x-data="liveSparkline('/Home/ThroughputSeries', 10000)"
+    function htmxJson(event) {
+        if (!event?.detail?.successful) return null;
+        try { return JSON.parse(event.detail.xhr.response); }
+        catch { return null; }
+    }
+
+    /* ---------- liveSparkline ---------- HTMX loads JSON; Alpine keeps one
+     * Chart.js sparkline and updates it in place (never swap the canvas).
+     *   x-data="liveSparkline()"
+     *   <div hx-get="..." hx-trigger="load, every 10s" hx-swap="none"
+     *        @htmx:after-request="onHtmx($event)">
      *   <canvas x-ref="spark"></canvas>
      */
-    Alpine.data("liveSparkline", (url, intervalMs) => ({
-        _chart: null,
-        _timer: null,
-        async init() {
-            const data = await this._fetch();
-            this._chart = window.NetFw.charts.makeSparkline(this.$refs.spark, data);
-            this._timer = window.setInterval(() => {
-                if (!document.hidden) this._refresh();
-            }, Number(intervalMs) || 10000);
-        },
-        destroy() {
-            if (this._timer) window.clearInterval(this._timer);
-            try { this._chart?.destroy(); } catch { /* already gone */ }
-        },
-        async _fetch() {
-            try {
-                const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
-                if (!r.ok) return { labels: [], inSeries: [], outSeries: [] };
-                return await r.json();
-            } catch {
-                return { labels: [], inSeries: [], outSeries: [] };
+    Alpine.data("liveSparkline", () => {
+        let chart = null;
+        return {
+            destroy() { try { chart?.destroy(); } catch { /* gone */ } chart = null; },
+            onHtmx(event) {
+                const data = htmxJson(event) || { labels: [], inSeries: [], outSeries: [] };
+                if (!chart) {
+                    if (!this.$refs.spark) return;
+                    chart = window.NetFw.charts.makeSparkline(this.$refs.spark, data);
+                    return;
+                }
+                window.NetFw.charts.updateSparkline(chart, data);
             }
-        },
-        async _refresh() {
-            const data = await this._fetch();
-            window.NetFw.charts.updateSparkline(this._chart, data);
-        }
-    }));
+        };
+    });
 
-    /* ---------- liveStat ---------- like liveSparkline but for a single metric
-     * (CPU% / Memory%). Polls a JSON endpoint, reads `field` from the response,
-     * shows the latest value reactively (x-text="current") and keeps a fixed
-     * 0-100 sparkline updated in place. Usage:
-     *   x-data="liveStat('/Home/SystemSeries', 'cpu', 10000)"
-     *   <span x-text="current + '%'"></span>
-     *   <canvas x-ref="spark"></canvas>
+    /* ---------- liveStat ---------- HTMX + Alpine sparkline for one metric
+     * (CPU% / Memory%). Usage:
+     *   x-data="liveStat('cpu')"
+     *   hx-get="/Home/SystemSeries" hx-swap="none" @htmx:after-request="onHtmx($event)"
      */
-    Alpine.data("liveStat", (url, field, intervalMs) => ({
-        current: "—",
-        _chart: null,
-        _timer: null,
-        async init() {
-            const data = await this._series();
-            this._chart = window.NetFw.charts.makeSparklineSingle(this.$refs.spark, data, true);
-            this._setCurrent(data.values);
-            this._timer = window.setInterval(() => {
-                if (!document.hidden) this._refresh();
-            }, Number(intervalMs) || 10000);
-        },
-        destroy() {
-            if (this._timer) window.clearInterval(this._timer);
-            try { this._chart?.destroy(); } catch { /* already gone */ }
-        },
-        async _series() {
-            try {
-                const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
-                if (!r.ok) return { labels: [], values: [] };
-                const j = await r.json();
-                return { labels: j.labels || [], values: (j[field] || []) };
-            } catch {
-                return { labels: [], values: [] };
+    Alpine.data("liveStat", (field) => {
+        let chart = null;
+        return {
+            current: "—",
+            destroy() { try { chart?.destroy(); } catch { /* gone */ } chart = null; },
+            onHtmx(event) {
+                const j = htmxJson(event);
+                const data = { labels: j?.labels || [], values: (j && j[field]) || [] };
+                this.current = data.values.length ? data.values[data.values.length - 1] : "—";
+                if (!chart) {
+                    if (!this.$refs.spark) return;
+                    chart = window.NetFw.charts.makeSparklineSingle(this.$refs.spark, data, true);
+                    return;
+                }
+                window.NetFw.charts.updateSparklineSingle(chart, data);
             }
-        },
-        _setCurrent(values) {
-            this.current = values.length ? values[values.length - 1] : "—";
-        },
-        async _refresh() {
-            const data = await this._series();
-            window.NetFw.charts.updateSparklineSingle(this._chart, data);
-            this._setCurrent(data.values);
-        }
-    }));
+        };
+    });
 
-    /* ---------- liveWanCharts ---------- one live up/down Chart.js canvas
-     * per WAN. Polls a JSON series endpoint, updates in place (no canvas
-     * re-create). Pauses when the tab is hidden or when an ancestor Alpine
-     * scope sets `paused` (Monitoring's Pause button). Usage:
-     *   x-data="liveWanCharts('/Monitoring/wan-traffic-series?minutes=15', 5000, true)"
+    /* ---------- liveWanCharts ---------- HTMX polls JSON; Alpine owns one
+     * Chart.js canvas per WAN and updates in place. Pause/History come from
+     * the parent via :hx-trigger. Usage:
+     *   x-data="liveWanCharts(true)"
+     *   hx-get="..." hx-swap="none" @htmx:after-request="onHtmx($event)"
      */
-    Alpine.data("liveWanCharts", (url, intervalMs, compact) => ({
+    Alpine.data("liveWanCharts", (compact) => {
+        const charts = {};
+        return {
         wans: [],
         status: "loading",
         compact: compact === true,
-        _charts: {},
-        _timer: null,
-        async init() {
-            await this._refresh();
-            this._timer = window.setInterval(() => {
-                if (document.hidden) return;
-                if (this.$root && this.$root.paused === true) return;
-                if (this.$root && this.$root.tab === "history") return;
-                this._refresh();
-            }, Number(intervalMs) || 5000);
-            this.$watch(() => this.$root && this.$root.tab, (t) => {
-                if (t !== "live") return;
-                this.$nextTick(() => {
-                    for (const chart of Object.values(this._charts)) {
-                        try { chart.resize(); } catch { /* gone */ }
-                    }
-                });
-            });
-        },
         destroy() {
-            if (this._timer) window.clearInterval(this._timer);
-            for (const name of Object.keys(this._charts)) {
-                try { this._charts[name].destroy(); } catch { /* already gone */ }
+            for (const name of Object.keys(charts)) {
+                try { charts[name].destroy(); } catch { /* already gone */ }
+                delete charts[name];
             }
-            this._charts = {};
         },
         fmtMbps(v) {
             const n = Number(v);
@@ -1072,17 +1098,8 @@ document.addEventListener("alpine:init", () => {
             if (n >= 0.001) return `${(n * 1000).toFixed(0)} kbps`;
             return "0";
         },
-        async _fetch() {
-            try {
-                const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
-                if (!r.ok) return null;
-                return await r.json();
-            } catch {
-                return null;
-            }
-        },
-        async _refresh() {
-            const payload = await this._fetch();
+        async onHtmx(event) {
+            const payload = htmxJson(event);
             if (!payload) {
                 if (this.status === "loading") this.status = "error";
                 return;
@@ -1099,24 +1116,158 @@ document.addEventListener("alpine:init", () => {
                 seen.add(wan.name);
                 const canvas = this.$el.querySelector(`canvas[data-iface="${cssEscape(wan.name)}"]`);
                 if (!canvas) continue;
-                if (!this._charts[wan.name]) {
-                    this._charts[wan.name] = window.NetFw.charts.makeLiveTraffic(canvas, wan, this.compact);
+                if (!charts[wan.name]) {
+                    charts[wan.name] = window.NetFw.charts.makeLiveTraffic(canvas, wan, this.compact);
                 } else {
-                    window.NetFw.charts.updateSparkline(this._charts[wan.name], wan);
+                    window.NetFw.charts.updateSparkline(charts[wan.name], wan);
                 }
             }
-            for (const name of Object.keys(this._charts)) {
+            for (const name of Object.keys(charts)) {
                 if (seen.has(name)) continue;
-                try { this._charts[name].destroy(); } catch { /* already gone */ }
-                delete this._charts[name];
+                try { charts[name].destroy(); } catch { /* already gone */ }
+                delete charts[name];
             }
         }
-    }));
+        };
+    });
 
     function cssEscape(value) {
         if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
         return String(value).replace(/"/g, '\\"');
     }
+
+    /* ---------- interfaceTrafficChart ---------- 24h per-interface traffic
+     * with chip toggles. WAN defaults visible; LAN/other start hidden.
+     *   x-data="interfaceTrafficChart('/Monitoring/interface-traffic-hourly?hours=24')"
+     */
+    Alpine.data("interfaceTrafficChart", () => {
+        // Chart.js instances must NOT live on Alpine reactive state — the
+        // proxy breaks hide/show and meta updates (chips change, lines don't).
+        let chart = null;
+        let canvas = null;
+        return {
+        status: "loading",
+        labels: [],
+        ifaces: [],
+        destroy() {
+            try { chart?.destroy(); } catch { /* already gone */ }
+            chart = null;
+            canvas = null;
+        },
+        get hasNonWan() {
+            return this.ifaces.some(i => String(i.type).toUpperCase() !== "WAN");
+        },
+        get stats() {
+            const vis = this.ifaces.filter(i => i.visible);
+            const n = this.labels.length;
+            if (!vis.length || n === 0)
+                return { avgIn: 0, avgOut: 0, totalBytes: 0 };
+            let inSum = 0, outSum = 0, bytes = 0;
+            for (const i of vis) {
+                inSum += (i.inMbps || []).reduce((a, b) => a + b, 0);
+                outSum += (i.outMbps || []).reduce((a, b) => a + b, 0);
+                bytes += i.totalBytes || 0;
+            }
+            return { avgIn: inSum / n, avgOut: outSum / n, totalBytes: bytes };
+        },
+        colorFor(idx) {
+            const pal = window.NetFw.charts.ifacePalette();
+            return pal[idx % pal.length];
+        },
+        fmtMbps(v) {
+            const n = Number(v);
+            if (!Number.isFinite(n)) return "—";
+            if (n >= 1000) return `${(n / 1000).toFixed(2)} Gbps`;
+            if (n >= 1) return `${n.toFixed(1)} Mbps`;
+            if (n >= 0.001) return `${(n * 1000).toFixed(0)} kbps`;
+            return "0";
+        },
+        fmtBytes(bytes) {
+            const u = ["B", "KB", "MB", "GB", "TB", "PB"];
+            let i = 0; let x = Number(bytes) || 0;
+            while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+            return `${x.toFixed(x >= 10 || i === 0 ? 0 : 2)} ${u[i]}`;
+        },
+        bindCanvas(el) {
+            canvas = el;
+            this._syncChart();
+        },
+        toggle(name) {
+            this.ifaces = this.ifaces.map(i =>
+                i.name === name ? { ...i, visible: !i.visible } : i);
+            this._syncChart();
+        },
+        showAll() {
+            this.ifaces = this.ifaces.map(i => ({ ...i, visible: true }));
+            this._syncChart();
+        },
+        showWanOnly() {
+            this.ifaces = this.ifaces.map(i => ({
+                ...i,
+                visible: String(i.type).toUpperCase() === "WAN"
+            }));
+            this._syncChart();
+        },
+        _visibleDatasets() {
+            return this.ifaces.flatMap((iface, idx) => {
+                if (!iface.visible) return [];
+                const color = this.colorFor(idx);
+                return [
+                    {
+                        label: `${iface.name} ↓`,
+                        data: iface.inMbps, borderColor: color,
+                        backgroundColor: "transparent", fill: false,
+                        tension: 0.35, pointRadius: 0, borderWidth: 2
+                    },
+                    {
+                        label: `${iface.name} ↑`,
+                        data: iface.outMbps, borderColor: color,
+                        backgroundColor: "transparent", borderDash: [4, 4],
+                        fill: false, tension: 0.35, pointRadius: 0, borderWidth: 2
+                    }
+                ];
+            });
+        },
+        _syncChart() {
+            if (!canvas) return;
+            const datasets = this._visibleDatasets();
+            if (!chart) {
+                chart = window.NetFw.charts.makeInterfaceTraffic(canvas, this.labels, datasets);
+            } else {
+                chart.data.labels = this.labels;
+                chart.data.datasets = datasets;
+                chart.update("none");
+            }
+            try { chart.resize(); } catch { /* canvas not laid out yet */ }
+        },
+        onHtmx(event) {
+            const j = htmxJson(event);
+            if (!j) { this.status = "error"; return; }
+            const list = Array.isArray(j.interfaces) ? j.interfaces : [];
+            const prev = new Map(this.ifaces.map(i => [i.name, i.visible]));
+            this.labels = j.labels || [];
+            this.ifaces = list.map(i => {
+                const type = String(i.type || i.Type || "");
+                const flagged = i.defaultVisible === true || i.DefaultVisible === true;
+                const name = i.name || i.Name;
+                const visible = prev.has(name)
+                    ? prev.get(name)
+                    : (flagged || type.toUpperCase() === "WAN");
+                return {
+                    name,
+                    label: i.label || i.Label,
+                    type,
+                    inMbps: i.inMbps || i.InMbps || [],
+                    outMbps: i.outMbps || i.OutMbps || [],
+                    totalBytes: i.totalBytes || i.TotalBytes || 0,
+                    visible
+                };
+            });
+            this.status = this.ifaces.length === 0 ? "empty" : "ready";
+            this._syncChart();
+        }
+        };
+    });
 
     /* ---------- addressPicker ---------- tag input with object autocomplete.
      * Used in firewall rule editors (filter/NAT/port forward/mangle) for

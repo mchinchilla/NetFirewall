@@ -23,6 +23,7 @@ public sealed class MonitoringController : Controller
     private readonly ISystemMonitorService _monitor;
     private readonly IMetricsQueryService _query;
     private readonly IWanTrafficService _wanTraffic;
+    private readonly IInterfaceTrafficService _ifaceTraffic;
     private readonly IScheduleService _schedules;
     private readonly IWanHealthCardBuilder _cardBuilder;
     private readonly IDaemonClient _daemon;
@@ -33,6 +34,7 @@ public sealed class MonitoringController : Controller
         ISystemMonitorService monitor,
         IMetricsQueryService query,
         IWanTrafficService wanTraffic,
+        IInterfaceTrafficService ifaceTraffic,
         IScheduleService schedules,
         IWanHealthCardBuilder cardBuilder,
         IDaemonClient daemon,
@@ -42,6 +44,7 @@ public sealed class MonitoringController : Controller
         _monitor = monitor;
         _query = query;
         _wanTraffic = wanTraffic;
+        _ifaceTraffic = ifaceTraffic;
         _schedules = schedules;
         _cardBuilder = cardBuilder;
         _daemon = daemon;
@@ -57,10 +60,20 @@ public sealed class MonitoringController : Controller
     /// (in-place Chart.js update — swapping HTML would leak canvases).
     /// </summary>
     [HttpGet("wan-traffic-series")]
-    public async Task<IActionResult> WanTrafficSeries(int minutes = 15, CancellationToken ct = default)
+    public async Task<IActionResult> WanTrafficSeries(int minutes = 60, CancellationToken ct = default)
     {
         var series = await _wanTraffic.GetLiveAsync(minutes, ct);
         return Json(new { wans = series });
+    }
+
+    /// <summary>
+    /// JSON for the reusable 24h per-interface chart (chips show/hide each NIC).
+    /// </summary>
+    [HttpGet("interface-traffic-hourly")]
+    public async Task<IActionResult> InterfaceTrafficHourly(int hours = 24, CancellationToken ct = default)
+    {
+        var data = await _ifaceTraffic.GetHourlyAsync(hours, ct);
+        return Json(data);
     }
 
     [HttpGet("snapshot")]

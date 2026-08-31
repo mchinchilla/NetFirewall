@@ -1,0 +1,7 @@
+# Vendored client libraries (no npm). Pin exact versions; bump by replacing
+# the minified file from jsDelivr. Do not jump major versions without a
+# migration (HTMX 4 changes event names and attribute inheritance).
+#
+# htmx     2.0.9   https://cdn.jsdelivr.net/npm/htmx.org@2.0.9/dist/htmx.min.js
+# alpine   3.17.1  https://cdn.jsdelivr.net/npm/alpinejs@3.17.1/dist/cdn.min.js
+# chart.js 4.5.1   https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js

@@ -228,6 +228,24 @@ public sealed class MetricsQueryServiceTests : IAsyncLifetime
         Assert.Empty(series);
     }
 
+    [Fact]
+    public async Task GetInterfaceTrafficHourlyAsync_ReturnsAllNonLoopback_WithType()
+    {
+        var hour = DateTime.UtcNow.AddHours(-2);
+        hour = new DateTime(hour.Year, hour.Month, hour.Day, hour.Hour, 0, 0, DateTimeKind.Utc);
+        await InsertIfaceAsync("ens192", "WAN");
+        await InsertIfaceAsync("ens160", "LAN");
+        await InsertNetHourlyAsync(hour, "ens192", rx: 1000, tx: 100);
+        await InsertNetHourlyAsync(hour, "ens160", rx: 500, tx: 50);
+        await InsertNetHourlyAsync(hour, "lo", rx: 9, tx: 9);
+
+        var rows = await _svc.GetInterfaceTrafficHourlyAsync(hour.AddHours(-1), hour.AddHours(1));
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.InterfaceName == "ens192" && r.Type == "WAN" && r.RxBytes == 1000);
+        Assert.Contains(rows, r => r.InterfaceName == "ens160" && r.Type == "LAN");
+        Assert.DoesNotContain(rows, r => r.InterfaceName == "lo");
+    }
+
     private async Task InsertIfaceAsync(string name, string type)
     {
         await using var conn = await _pg.DataSource.OpenConnectionAsync();
@@ -248,6 +266,20 @@ public sealed class MetricsQueryServiceTests : IAsyncLifetime
                 (timestamp, hostname, interface_name, rx_bytes, tx_bytes, rx_rate, tx_rate)
             VALUES (@ts, 'host1', @iface, 0, 0, @rx, @tx)", conn);
         cmd.Parameters.AddWithValue("ts", ts);
+        cmd.Parameters.AddWithValue("iface", iface);
+        cmd.Parameters.AddWithValue("rx", rx);
+        cmd.Parameters.AddWithValue("tx", tx);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task InsertNetHourlyAsync(DateTime hour, string iface, long rx, long tx)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            INSERT INTO system_metrics_net_hourly
+                (hour_bucket, hostname, interface_name, rx_total, tx_total, rx_rate_avg, tx_rate_avg, sample_count)
+            VALUES (@h, 'host1', @iface, @rx, @tx, 0, 0, 1)", conn);
+        cmd.Parameters.AddWithValue("h", hour);
         cmd.Parameters.AddWithValue("iface", iface);
         cmd.Parameters.AddWithValue("rx", rx);
         cmd.Parameters.AddWithValue("tx", tx);

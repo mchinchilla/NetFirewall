@@ -55,6 +55,14 @@ public interface IMetricsQueryService
         int minutes, CancellationToken ct = default);
 
     /// <summary>
+    /// Hourly rx/tx totals per interface (non-loopback) for the 24h chart
+    /// with show/hide toggles. LEFT JOIN to fw_interfaces supplies type/role
+    /// so WAN can default visible and LAN can start hidden.
+    /// </summary>
+    Task<IReadOnlyList<InterfaceHourlyPoint>> GetInterfaceTrafficHourlyAsync(
+        DateTime from, DateTime to, CancellationToken ct = default);
+
+    /// <summary>
     /// Per-minute CPU% and memory% over the last <paramref name="minutes"/>
     /// minutes, for the dashboard's live CPU/Mem sparklines. Averages the raw
     /// system_metrics samples per minute bucket.
@@ -104,6 +112,15 @@ public sealed record WanInterfaceRatePoint(DateTime Timestamp, double RxBytesPer
 
 /// <summary>Time series of instantaneous rates for one WAN interface.</summary>
 public sealed record WanInterfaceRateSeries(string InterfaceName, IReadOnlyList<WanInterfaceRatePoint> Points);
+
+/// <summary>One hour of traffic for a single interface.</summary>
+public sealed record InterfaceHourlyPoint(
+    DateTime Bucket,
+    string InterfaceName,
+    string Type,
+    string? Role,
+    long RxBytes,
+    long TxBytes);
 
 /// <summary>One minute bucket of avg CPU% and memory%.</summary>
 public sealed record SystemRatePoint(DateTime Bucket, double CpuPercent, double MemoryPercent);
@@ -321,13 +338,17 @@ public sealed class MetricsQueryService : IMetricsQueryService
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         const string sql = @"
-            SELECT n.interface_name, n.timestamp, n.rx_rate, n.tx_rate
+            SELECT n.interface_name,
+                   date_trunc('minute', n.timestamp) AS minute,
+                   AVG(n.rx_rate) AS rx_rate,
+                   AVG(n.tx_rate) AS tx_rate
             FROM system_metrics_net n
             JOIN fw_interfaces fi
               ON lower(fi.name) = lower(n.interface_name)
              AND upper(fi.type) = 'WAN'
             WHERE n.timestamp > now() - make_interval(mins => @minutes)
-            ORDER BY n.interface_name, n.timestamp ASC";
+            GROUP BY n.interface_name, date_trunc('minute', n.timestamp)
+            ORDER BY n.interface_name, minute ASC";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("minutes", minutes);
@@ -352,6 +373,45 @@ public sealed class MetricsQueryService : IMetricsQueryService
             .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
             .Select(kv => new WanInterfaceRateSeries(kv.Key, kv.Value))
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<InterfaceHourlyPoint>> GetInterfaceTrafficHourlyAsync(
+        DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        const string sql = @"
+            SELECT n.hour_bucket,
+                   n.interface_name,
+                   COALESCE(fi.type, '') AS type,
+                   fi.role,
+                   SUM(n.rx_total)::bigint AS rx,
+                   SUM(n.tx_total)::bigint AS tx
+            FROM system_metrics_net_hourly n
+            LEFT JOIN fw_interfaces fi
+              ON lower(fi.name) = lower(n.interface_name)
+            WHERE n.hour_bucket >= @from AND n.hour_bucket <= @to
+              AND n.interface_name <> 'lo'
+            GROUP BY n.hour_bucket, n.interface_name, fi.type, fi.role
+            ORDER BY n.hour_bucket ASC, n.interface_name ASC";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("from", from);
+        cmd.Parameters.AddWithValue("to", to);
+
+        var list = new List<InterfaceHourlyPoint>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            list.Add(new InterfaceHourlyPoint(
+                r.GetFieldValue<DateTime>(0),
+                r.GetString(1),
+                r.GetString(2),
+                r.IsDBNull(3) ? null : r.GetString(3),
+                r.GetInt64(4),
+                r.GetInt64(5)));
+        }
+        return list;
     }
 
     public async Task<IReadOnlyList<SystemRatePoint>> GetSystemRatePerMinuteAsync(

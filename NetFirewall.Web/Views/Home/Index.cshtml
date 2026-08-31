@@ -3,12 +3,6 @@
 @using NetFirewall.Web.Models.Monitoring
 @{
     ViewData["Title"] = "Dashboard";
-    var trafficJson = System.Text.Json.JsonSerializer.Serialize(new
-    {
-        labels = Model.TrafficLabels,
-        inSeries = Model.TrafficRxMbps,
-        outSeries = Model.TrafficTxMbps,
-    });
 
     static string FmtBytes(long bytes)
     {
@@ -130,11 +124,15 @@
     }
 </div>
 
-@* System-health row: live sparklines — CPU | Memory | Network — last 60 min,
-   one point per minute, each updating its Chart.js sparkline in place every 10s
-   (no canvas re-create = no leak). Sits right under the KPI cards. *@
-<div class="grid gap-4 grid-cols-1 sm:grid-cols-3 mb-6" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
-    <section class="card" x-data="liveStat('/Home/SystemSeries', 'cpu', 10000)">
+@* System-health row: CPU | Memory — last 60 min. Per-WAN traffic lives in
+   the reusable charts below (the old combined "Network" sparkline duplicated them). *@
+<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 mb-6" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
+    <section class="card" x-data="liveStat('cpu')">
+        <div class="hidden" aria-hidden="true"
+             hx-get="/Home/SystemSeries"
+             hx-trigger="load, every 10s"
+             hx-swap="none"
+             @@htmx:after-request="onHtmx($event)"></div>
         <div class="flex items-baseline justify-between mb-2">
             <h2 class="text-sm font-semibold">CPU</h2>
             <span class="text-2xl font-semibold tabular-nums" x-text="current + '%'">—</span>
@@ -143,22 +141,18 @@
         <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · % used</p>
     </section>
 
-    <section class="card" x-data="liveStat('/Home/SystemSeries', 'mem', 10000)">
+    <section class="card" x-data="liveStat('mem')">
+        <div class="hidden" aria-hidden="true"
+             hx-get="/Home/SystemSeries"
+             hx-trigger="load, every 10s"
+             hx-swap="none"
+             @@htmx:after-request="onHtmx($event)"></div>
         <div class="flex items-baseline justify-between mb-2">
             <h2 class="text-sm font-semibold">Memory</h2>
             <span class="text-2xl font-semibold tabular-nums" x-text="current + '%'">—</span>
         </div>
         <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
         <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · % used</p>
-    </section>
-
-    <section class="card" x-data="liveSparkline('/Home/ThroughputSeries', 10000)">
-        <div class="flex items-baseline justify-between mb-2">
-            <h2 class="text-sm font-semibold">Network</h2>
-            <span class="text-xs text-surface-fg-muted">WAN ↓ in / ↑ out</span>
-        </div>
-        <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
-        <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · Mbps</p>
     </section>
 </div>
 
@@ -168,41 +162,9 @@
         WanTrafficChartsViewModel.Dashboard(Url.Action("Interfaces", "Network")))
 </div>
 
-@* Traffic chart — full-width 24h history. *@
-<div class="mb-6">
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 45ms;">
-        <header class="flex items-center justify-between mb-4">
-            <div>
-                <h2 class="text-base font-semibold">Traffic — last 24h</h2>
-                <p class="text-xs text-surface-fg-muted">Hourly WAN throughput — real Internet in/out</p>
-            </div>
-            <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
-        </header>
-
-        @if (Model.TrafficLabels.Length == 0)
-        {
-            <div class="h-56 flex flex-col items-center justify-center text-center">
-                <p class="text-sm font-medium text-surface-fg">No traffic samples yet.</p>
-                <p class="text-xs mt-1 text-surface-fg-muted">
-                    The collector aggregates hourly. Wait ~1 hour after the daemon starts, or check
-                    <a class="hover:underline text-accent" href="@Url.Action("Index", "Monitoring")">live monitoring</a>.
-                </p>
-            </div>
-        }
-        else
-        {
-            <div class="relative h-56">
-                <canvas x-data='{ data: @Html.Raw(trafficJson) }'
-                        x-init="$nextTick(() => NetFw.charts.makeTraffic($el, data))"></canvas>
-            </div>
-
-            <div class="grid grid-cols-3 gap-4 mt-4 text-center text-xs">
-                <div><p class="font-semibold text-sm">@Model.TrafficAvgInMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg in</p></div>
-                <div><p class="font-semibold text-sm">@Model.TrafficAvgOutMbps.ToString("0.#") Mbps</p><p class="text-surface-fg-muted">Avg out</p></div>
-                <div><p class="font-semibold text-sm">@FmtBytes(Model.TrafficTotalBytes)</p><p class="text-surface-fg-muted">24h total</p></div>
-            </div>
-        }
-    </section>
+@* Per-interface 24h — same reusable chart; chips show/hide each NIC. *@
+<div class="mb-6" style="animation: var(--animate-slide-up); animation-delay: 45ms;">
+    @await Html.PartialAsync("_InterfaceTrafficChart", InterfaceTrafficChartViewModel.Last24h())
 </div>
 
 @* Pending-changes banner: only renders when there's drift from kernel state. *@

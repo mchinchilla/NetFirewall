@@ -22,6 +22,8 @@ public static class ReturnUrlGuard
         "/Home/ThroughputSeries",
         "/Home/TopDestinations",
         "/Home/SystemSeries",
+        "/Monitoring/wan-traffic-series",
+        "/Monitoring/interface-traffic-hourly",
     };
 
     private static readonly string[] NonNavigablePaths =

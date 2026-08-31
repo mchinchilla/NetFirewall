@@ -10,7 +10,7 @@ public sealed class WanTrafficChartsViewModel
 {
     public string SeriesUrl { get; init; } = "/Monitoring/wan-traffic-series";
     public int IntervalMs { get; init; } = 5000;
-    public int Minutes { get; init; } = 15;
+    public int Minutes { get; init; } = 60;
     public bool Compact { get; init; }
     public string Heading { get; init; } = "WAN traffic";
     public string? Subheading { get; init; }
@@ -19,20 +19,20 @@ public sealed class WanTrafficChartsViewModel
     public static WanTrafficChartsViewModel Dashboard(string? manageUrl = null) => new()
     {
         Compact = true,
-        Minutes = 15,
+        Minutes = 60,
         IntervalMs = 5000,
         Heading = "WAN traffic",
-        Subheading = "Live download / upload per WAN · last 15 min",
+        Subheading = "Live download / upload per WAN · last 60 min",
         ManageUrl = manageUrl ?? "/Network/Interfaces"
     };
 
     public static WanTrafficChartsViewModel Monitoring(string? manageUrl = null) => new()
     {
         Compact = false,
-        Minutes = 15,
+        Minutes = 60,
         IntervalMs = 5000,
         Heading = "WAN traffic",
-        Subheading = "Live ↓ download / ↑ upload per WAN · last 15 min · 5s samples",
+        Subheading = "Live ↓ download / ↑ upload per WAN · last 60 min",
         ManageUrl = manageUrl ?? "/Network/Interfaces"
     };
 

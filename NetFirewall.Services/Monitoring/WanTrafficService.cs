@@ -96,7 +96,7 @@ public sealed class WanTrafficService : IWanTrafficService
             var inSeries = points.Select(p => Math.Round(p.RxBytesPerSec * BytesToMbps, 2)).ToArray();
             var outSeries = points.Select(p => Math.Round(p.TxBytesPerSec * BytesToMbps, 2)).ToArray();
             var labels = points
-                .Select(p => DateTime.SpecifyKind(p.Timestamp, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm:ss"))
+                .Select(p => DateTime.SpecifyKind(p.Timestamp, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm"))
                 .ToArray();
 
             result.Add(new WanLiveSeries

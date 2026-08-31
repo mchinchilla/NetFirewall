@@ -59,7 +59,6 @@ public class HomeController : Controller
         var ifacesTask     = _firewall.GetInterfacesAsync(ct);
         var filterTask     = _firewall.GetFilterRulesAsync(null, ct);
         var snapshotTask   = _monitor.GetSnapshotAsync(ct);
-        var historyTask    = SafeQueryHistoryAsync(ct);
         var wgTask         = SafeQueryWireGuardAsync(ct);
         var schedulesTask  = SafeQuerySchedulesAsync(ct);
 
@@ -73,7 +72,7 @@ public class HomeController : Controller
             WanCardOptions.Summary(Url.Action("Index", "WanFailover") ?? "/Network/Wan"), ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
-                           filterTask, snapshotTask, historyTask, wgTask, schedulesTask,
+                           filterTask, snapshotTask, wgTask, schedulesTask,
                            servicesTask, pendingTask, wanCardTask);
 
         var leases    = leasesTask.Result;
@@ -82,7 +81,6 @@ public class HomeController : Controller
         var ifaces    = ifacesTask.Result;
         var filters   = filterTask.Result;
         var snapshot  = snapshotTask.Result;
-        var history   = historyTask.Result;
         var wg        = wgTask.Result;
         var sched     = schedulesTask.Result;
         var services  = servicesTask.Result;
@@ -113,13 +111,6 @@ public class HomeController : Controller
 
             ScheduleCount = sched.Total,
             ActiveScheduleCount = sched.ActiveNow,
-
-            TrafficLabels   = history.Labels,
-            TrafficRxMbps   = history.RxMbps,
-            TrafficTxMbps   = history.TxMbps,
-            TrafficAvgInMbps  = history.RxMbps.Length > 0 ? Math.Round(history.RxMbps.Average(), 1) : 0,
-            TrafficAvgOutMbps = history.TxMbps.Length > 0 ? Math.Round(history.TxMbps.Average(), 1) : 0,
-            TrafficTotalBytes = history.TotalBytes,
 
             Host = new HostInfo
             {
@@ -341,47 +332,6 @@ public class HomeController : Controller
         public static readonly WireGuardSnapshot Empty = new(false, 0, 0);
     }
 
-    private async Task<TrafficHistory> SafeQueryHistoryAsync(CancellationToken ct)
-    {
-        // Metrics tables may not exist on a fresh install; degrade gracefully.
-        try
-        {
-            var to = DateTime.UtcNow;
-            var from = to.AddHours(-24);
-            const double bytesToMbps = 8.0 / 1_000_000;
-
-            // Preferred: WAN-only per-interface data — real download/upload, no
-            // NAT double-count (which made in≈out on the all-NIC sum).
-            var wan = await _query.GetWanTrafficHourlyAsync(from, to, ct);
-            if (wan.Count > 0)
-            {
-                return new TrafficHistory(
-                    Labels: wan.Select(r => r.Bucket.ToLocalTime().ToString("HH:mm")).ToArray(),
-                    RxMbps: wan.Select(r => Math.Round(r.RxBytes * bytesToMbps / 3600, 1)).ToArray(),
-                    TxMbps: wan.Select(r => Math.Round(r.TxBytes * bytesToMbps / 3600, 1)).ToArray(),
-                    TotalBytes: wan.Sum(r => r.RxBytes + r.TxBytes));
-            }
-
-            // Fallback (no per-interface hour yet, or no WAN configured): the old
-            // summed series. Double-counted, but better than a blank chart until
-            // the new pipeline has collected an hour.
-            var rows = await _query.GetHourlyMetricsAsync(from, to, hostname: null, ct);
-            if (rows.Count == 0)
-                return TrafficHistory.Empty;
-
-            return new TrafficHistory(
-                Labels: rows.Select(r => r.Bucket.ToLocalTime().ToString("HH:mm")).ToArray(),
-                RxMbps: rows.Select(r => Math.Round(r.NetworkRxTotal * bytesToMbps / 3600, 1)).ToArray(),
-                TxMbps: rows.Select(r => Math.Round(r.NetworkTxTotal * bytesToMbps / 3600, 1)).ToArray(),
-                TotalBytes: rows.Sum(r => r.NetworkRxTotal + r.NetworkTxTotal));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Metrics history unavailable — likely fresh install or daemon down");
-            return TrafficHistory.Empty;
-        }
-    }
-
     private static List<SubnetSummary> BuildSubnetSummaries(
         IReadOnlyList<NetFirewall.Models.Dhcp.DhcpSubnet> subnets,
         IReadOnlyList<NetFirewall.Models.Dhcp.DhcpPool> pools,
@@ -472,8 +422,4 @@ public class HomeController : Controller
         }
     }
 
-    private sealed record TrafficHistory(string[] Labels, double[] RxMbps, double[] TxMbps, long TotalBytes)
-    {
-        public static readonly TrafficHistory Empty = new([], [], [], 0);
-    }
 }

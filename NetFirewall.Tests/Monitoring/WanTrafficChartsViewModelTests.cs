@@ -9,8 +9,8 @@ public class WanTrafficChartsViewModelTests
     {
         var vm = WanTrafficChartsViewModel.Dashboard();
         Assert.True(vm.Compact);
-        Assert.Equal(15, vm.Minutes);
-        Assert.Equal("/Monitoring/wan-traffic-series?minutes=15", vm.SeriesUrlWithMinutes);
+        Assert.Equal(60, vm.Minutes);
+        Assert.Equal("/Monitoring/wan-traffic-series?minutes=60", vm.SeriesUrlWithMinutes);
     }
 
     [Fact]
@@ -19,6 +19,6 @@ public class WanTrafficChartsViewModelTests
         var vm = WanTrafficChartsViewModel.Monitoring();
         Assert.False(vm.Compact);
         Assert.StartsWith("/Monitoring/wan-traffic-series", vm.SeriesUrlWithMinutes);
-        Assert.Contains("minutes=15", vm.SeriesUrlWithMinutes);
+        Assert.Contains("minutes=60", vm.SeriesUrlWithMinutes);
     }
 }

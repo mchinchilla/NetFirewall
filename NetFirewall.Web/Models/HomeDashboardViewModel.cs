@@ -26,14 +26,6 @@ public sealed class HomeDashboardViewModel
     /// <summary>How many schedules are currently active (in their timezone, day-of-week + window).</summary>
     public int ActiveScheduleCount { get; init; }
 
-    /// <summary>Last 24h network bandwidth — labels + RX/TX series for Chart.js.</summary>
-    public string[] TrafficLabels { get; init; } = [];
-    public double[] TrafficRxMbps { get; init; } = [];
-    public double[] TrafficTxMbps { get; init; } = [];
-    public double TrafficAvgInMbps { get; init; }
-    public double TrafficAvgOutMbps { get; init; }
-    public long TrafficTotalBytes { get; init; }
-
     public IReadOnlyList<SubnetSummary> Subnets { get; init; } = [];
 
     /// <summary>systemd units (daemon, web, nginx, postgres, …) with active/failed state.</summary>

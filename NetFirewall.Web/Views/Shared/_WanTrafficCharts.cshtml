@@ -4,7 +4,16 @@
 }
 
 <section class="mb-6"
-         x-data="liveWanCharts('@url', @Model.IntervalMs, @(Model.Compact ? "true" : "false"))">
+         x-data="liveWanCharts(@(Model.Compact ? "true" : "false"))">
+    @{
+        var pollSec = Math.Max(1, Model.IntervalMs / 1000);
+    }
+    @* Poll via HTMX (pauses with Monitoring's Pause / History tab). Canvas stays put. *@
+    <div class="hidden" aria-hidden="true"
+         hx-get="@url"
+         :hx-trigger="($root.paused || $root.tab === 'history') ? 'load' : 'load, every @(pollSec)s'"
+         hx-swap="none"
+         @@htmx:after-request="onHtmx($event)"></div>
     <header class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <div>
             <h2 class="text-base font-semibold">@Model.Heading</h2>
