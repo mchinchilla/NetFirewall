@@ -192,6 +192,62 @@ window.NetFw.formatLocalDateTime = function (date) {
 };
 
 /**
+ * IANA timezone catalog for the schedule (and profile) picker. Built from
+ * `Intl.supportedValuesOf('timeZone')` so the list is the same database the
+ * browser uses; falls back to a short common set if the API is missing.
+ */
+window.NetFw.ianaTimezones = (function () {
+    const FALLBACK = Object.freeze([
+        "UTC",
+        "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
+        "America/Mexico_City", "America/Bogota", "America/Lima", "America/Sao_Paulo",
+        "America/Tegucigalpa", "America/Argentina/Buenos_Aires",
+        "Europe/London", "Europe/Madrid", "Europe/Berlin", "Europe/Paris",
+        "Europe/Rome", "Europe/Amsterdam", "Europe/Athens",
+        "Africa/Cairo", "Africa/Johannesburg", "Africa/Lagos",
+        "Asia/Dubai", "Asia/Kolkata", "Asia/Bangkok", "Asia/Shanghai",
+        "Asia/Tokyo", "Asia/Seoul", "Australia/Sydney", "Pacific/Auckland"
+    ]);
+
+    function ids() {
+        let list = [];
+        try {
+            if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
+                list = Intl.supportedValuesOf("timeZone");
+            }
+        } catch { /* ignore — use fallback */ }
+        if (!Array.isArray(list) || list.length === 0) list = FALLBACK.slice();
+        if (!list.includes("UTC")) list = ["UTC", ...list];
+        return list;
+    }
+
+    function offset(id) {
+        try {
+            const fmt = new Intl.DateTimeFormat("en-US", {
+                timeZone: id,
+                timeZoneName: "shortOffset"
+            });
+            const name = fmt.formatToParts(new Date()).find(p => p.type === "timeZoneName")?.value;
+            if (name) return name.replace(/^GMT/, "UTC");
+        } catch { /* shortOffset unsupported — leave blank */ }
+        return "";
+    }
+
+    function local() {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+        catch { return "UTC"; }
+    }
+
+    function region(id) {
+        if (id === "UTC") return "UTC";
+        const slash = id.indexOf("/");
+        return slash < 0 ? "Other" : id.slice(0, slash);
+    }
+
+    return { ids, offset, local, region };
+})();
+
+/**
  * Trigger a browser download of the user's TOTP recovery codes as a .txt file.
  * Called from the enrollment view + Account/Security after regeneration.
  */
@@ -1039,6 +1095,177 @@ document.addEventListener("alpine:init", () => {
         },
 
         get csv() { return this.states.join(", "); }
+    }));
+
+    /* ---------- dayOfWeekPicker ---------- Sun–Sat toggles for schedules.
+     * The checkboxes themselves are the posted values; Alpine only drives
+     * Weekdays/Weekend/Every-day presets and the empty-state hint. Visual
+     * on/off is CSS :checked (.dow-pill) so a click restyles without JS.
+     *
+     *   <div x-data="dayOfWeekPicker()" data-initial="1,2,3,4,5">
+     */
+    Alpine.data("dayOfWeekPicker", () => ({
+        empty: false,
+
+        init() {
+            this.onChange();
+            const form = this.$el.closest("form");
+            if (form) {
+                form.addEventListener("submit", (e) => {
+                    this.onChange();
+                    if (this.empty) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                });
+            }
+        },
+
+        boxes() {
+            return [...this.$el.querySelectorAll('input[type="checkbox"]')];
+        },
+
+        onChange() {
+            this.empty = this.boxes().filter(b => b.checked).length === 0;
+        },
+
+        setDays(ids) {
+            const want = new Set(ids);
+            for (const b of this.boxes()) b.checked = want.has(Number(b.value));
+            this.onChange();
+        },
+
+        weekdays() { this.setDays([1, 2, 3, 4, 5]); },
+        weekend()  { this.setDays([0, 6]); },
+        everyday() { this.setDays([0, 1, 2, 3, 4, 5, 6]); }
+    }));
+
+    /* ---------- timezonePicker ---------- searchable IANA combobox.
+     * Hidden input holds the last valid id (what the server receives). The
+     * visible field filters the list. Focusing it with the current value
+     * still shows EVERY zone — a <datalist> would filter down to "UTC" and
+     * look empty, which is the bug this replaces.
+     *
+     *   <div x-data="timezonePicker()" data-initial="UTC">
+     *     <input type="hidden" x-ref="hidden" name="Timezone">
+     */
+    Alpine.data("timezonePicker", () => ({
+        value: "UTC",
+        query: "",
+        open: false,
+        active: -1,
+        zones: [],
+        listId: "",
+        _blurTimer: null,
+
+        init() {
+            this.value = this.$el.dataset.initial || "UTC";
+            this.query = this.value;
+            this.listId = (this.$refs.text?.id || "tz") + "-list";
+            const tz = window.NetFw.ianaTimezones;
+            this.zones = tz.ids().map(id => ({
+                id,
+                label: id,
+                region: tz.region(id),
+                offset: tz.offset(id),
+                search: `${id} ${id.replace(/_/g, " ")} ${tz.offset(id)}`.toLowerCase()
+            }));
+            if (this.$refs.hidden) this.$refs.hidden.value = this.value;
+        },
+
+        get filtered() {
+            const q = (this.query || "").trim().toLowerCase();
+            // Show the full catalog when the field still holds the selected id
+            // (i.e. the user opened the list, they didn't start typing).
+            if (!q || q === (this.value || "").toLowerCase()) return this.zones;
+            const needle = q.replace(/_/g, " ");
+            return this.zones.filter(z => z.search.includes(needle));
+        },
+
+        get grouped() {
+            const groups = [];
+            const map = new Map();
+            for (const z of this.filtered) {
+                if (!map.has(z.region)) {
+                    const g = { region: z.region, zones: [] };
+                    map.set(z.region, g);
+                    groups.push(g);
+                }
+                map.get(z.region).zones.push(z);
+            }
+            return groups;
+        },
+
+        get flat() { return this.filtered; },
+
+        flatIndex(gi, i) {
+            let n = 0;
+            const groups = this.grouped;
+            for (let k = 0; k < gi; k++) n += groups[k].zones.length;
+            return n + i;
+        },
+
+        select(id) {
+            this.value = id;
+            this.query = id;
+            this.open = false;
+            this.active = -1;
+            if (this.$refs.hidden) this.$refs.hidden.value = id;
+        },
+
+        useLocal() {
+            this.select(window.NetFw.ianaTimezones.local());
+        },
+
+        openList() {
+            this.open = true;
+            this.$refs.text?.focus();
+            this.$nextTick(() => {
+                const el = this.$refs.list?.querySelector("[data-selected='true']");
+                el?.scrollIntoView({ block: "nearest" });
+            });
+        },
+
+        closeList() { this.open = false; this.active = -1; },
+
+        onInput() {
+            this.open = true;
+            this.active = this.filtered.length > 0 ? 0 : -1;
+        },
+
+        onBlur() {
+            if (this._blurTimer) clearTimeout(this._blurTimer);
+            this._blurTimer = setTimeout(() => {
+                const typed = (this.query || "").trim();
+                const exact = this.zones.find(z => z.id.toLowerCase() === typed.toLowerCase());
+                if (exact) this.select(exact.id);
+                else if (this.filtered.length === 1) this.select(this.filtered[0].id);
+                else this.query = this.value;
+                this.closeList();
+            }, 150);
+        },
+
+        onKey(e) {
+            const list = this.filtered;
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                this.open = true;
+                this.active = list.length === 0 ? -1 : (this.active + 1) % list.length;
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                this.open = true;
+                this.active = list.length === 0 ? -1
+                    : (this.active - 1 + list.length) % list.length;
+            } else if (e.key === "Enter") {
+                if (this.open && this.active >= 0 && list[this.active]) {
+                    e.preventDefault();
+                    this.select(list[this.active].id);
+                }
+            } else if (e.key === "Escape") {
+                this.query = this.value;
+                this.closeList();
+            }
+        }
     }));
 
     /* ---------- filterRuleGuard ---------- wraps the filter-rule form.

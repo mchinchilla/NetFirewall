@@ -580,6 +580,30 @@
     .input::placeholder { color: var(--surface-fg-muted); opacity: 0.7; }
     .input-error { border-color: var(--feedback-danger-bd); }
 
+    /* Day-of-week toggle. The checkbox itself is a full-size transparent hit
+     * target (not sr-only — clipped 1×1 inputs don't toggle reliably inside
+     * <label>, so the visual never changed). Adjacent-sibling styles the pill
+     * from :checked so it updates without Alpine or inline styles. */
+    .dow-pill {
+        @apply inline-flex items-center justify-center h-9 w-12 rounded-md text-xs font-medium border;
+        background: var(--surface-elevated);
+        color: var(--surface-fg-muted);
+        border-color: var(--surface-border);
+    }
+    label:hover input:not(:checked) + .dow-pill {
+        color: var(--surface-fg);
+    }
+    input:checked + .dow-pill {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: var(--accent);
+        font-weight: 600;
+    }
+    input:focus-visible + .dow-pill {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
     /* ----- Badges (status pills) -----
      * Soft-tinted pill: background = color-mix(token, 14%, transparent),
      * foreground = same token. Replaces every inline

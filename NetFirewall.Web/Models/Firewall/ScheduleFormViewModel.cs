@@ -31,7 +31,24 @@ public sealed class ScheduleFormViewModel : IValidatableObject
         if (StartTime >= EndTime)
             yield return new ValidationResult("Start time must be earlier than end time.",
                 new[] { nameof(StartTime), nameof(EndTime) });
-        if (DaysOfWeek.Length == 0)
+        if (DaysOfWeek is not { Length: > 0 })
             yield return new ValidationResult("Pick at least one day.", new[] { nameof(DaysOfWeek) });
+        else if (DaysOfWeek.Any(d => d < 0 || d > 6))
+            yield return new ValidationResult("Days of week must be 0-6 (Sun-Sat).",
+                new[] { nameof(DaysOfWeek) });
+
+        if (string.IsNullOrWhiteSpace(Timezone))
+            yield return new ValidationResult("Timezone is required.", new[] { nameof(Timezone) });
+        else if (!TryResolveTimezone(Timezone.Trim()))
+            yield return new ValidationResult(
+                $"Unknown timezone '{Timezone}'. Use an IANA name like America/New_York.",
+                new[] { nameof(Timezone) });
+    }
+
+    private static bool TryResolveTimezone(string id)
+    {
+        try { TimeZoneInfo.FindSystemTimeZoneById(id); return true; }
+        catch (TimeZoneNotFoundException) { return false; }
+        catch (InvalidTimeZoneException) { return false; }
     }
 }

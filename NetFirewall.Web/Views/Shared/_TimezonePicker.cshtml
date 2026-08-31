@@ -1,0 +1,88 @@
+@model NetFirewall.Web.Models.TimezonePickerViewModel
+@*
+    Searchable IANA timezone combobox. The hidden input is what the server
+    receives (always a previously-validated id). The visible field is a
+    filter: focusing it opens the full list; typing narrows it. A datalist
+    cannot do this — once the input holds "UTC" the browser only suggests
+    UTC, which is why the old control looked empty.
+*@
+@{
+    var fieldId = $"tz-{Model.Name.Replace(".", "-")}";
+    var initial = string.IsNullOrWhiteSpace(Model.Value) ? "UTC" : Model.Value;
+}
+
+<div class="space-y-1.5"
+     x-data="timezonePicker()"
+     data-initial="@initial">
+    <label for="@fieldId" class="block text-xs font-medium text-surface-fg">
+        @Model.Label
+        @if (Model.Required)
+        {
+            <span class="text-feedback-danger-fg">*</span>
+        }
+    </label>
+
+    <input type="hidden" name="@Model.Name" value="@initial" x-ref="hidden" :value="value" />
+
+    <div class="relative">
+        <input type="text" id="@fieldId" x-ref="text"
+               x-model="query"
+               autocomplete="off"
+               spellcheck="false"
+               role="combobox"
+               aria-autocomplete="list"
+               :aria-expanded="open.toString()"
+               :aria-controls="listId"
+               class="input font-mono pr-9"
+               placeholder="UTC"
+               @@focus="openList()"
+               @@input="onInput()"
+               @@keydown="onKey($event)"
+               @@blur="onBlur()" />
+        <button type="button" tabindex="-1"
+                class="absolute inset-y-0 right-1 flex items-center px-2 rounded text-surface-fg-muted"
+                :aria-label="open ? 'Close timezone list' : 'Open timezone list'"
+                @@mousedown.prevent="open ? closeList() : openList()">
+            <svg class="h-4 w-4 transition" :class="open ? 'rotate-180' : ''"
+                 fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/>
+            </svg>
+        </button>
+
+        <div x-show="open" x-cloak x-ref="list"
+             :id="listId"
+             role="listbox"
+             x-transition.opacity.duration.100ms
+             class="absolute z-20 left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-md shadow-lg border bg-surface-elevated border-surface-border">
+            <template x-for="(group, gi) in grouped" :key="group.region">
+                <div>
+                    <div class="sticky top-0 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-surface-fg-muted bg-surface-muted"
+                         x-text="group.region"></div>
+                    <template x-for="(z, i) in group.zones" :key="z.id">
+                        <button type="button" role="option"
+                                :aria-selected="(z.id === value).toString()"
+                                :data-selected="(z.id === value).toString()"
+                                class="w-full text-left px-3 py-1.5 text-sm flex items-baseline justify-between gap-3"
+                                :class="flatIndex(gi, i) === active
+                                    ? 'bg-accent-soft text-accent'
+                                    : (z.id === value ? 'text-accent' : '')"
+                                @@mousedown.prevent="select(z.id)"
+                                @@mouseenter="active = flatIndex(gi, i)">
+                            <span class="font-mono" x-text="z.label"></span>
+                            <span class="text-[11px] text-surface-fg-muted font-mono" x-text="z.offset"></span>
+                        </button>
+                    </template>
+                </div>
+            </template>
+            <p x-show="flat.length === 0" class="px-3 py-2 text-xs text-surface-fg-muted">No matching timezone.</p>
+        </div>
+    </div>
+
+    <p class="text-xs text-surface-fg-muted">
+        <button type="button" class="text-accent hover:underline" @@click="useLocal()">Use this browser's timezone</button>
+        <span> · </span>
+        @(string.IsNullOrEmpty(Model.Help)
+            ? "Used to interpret start/end as local time."
+            : Model.Help)
+    </p>
+</div>

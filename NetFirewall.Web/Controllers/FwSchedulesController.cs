@@ -98,7 +98,7 @@ public sealed class FwSchedulesController : Controller
     {
         Name        = f.Name.Trim(),
         Description = string.IsNullOrWhiteSpace(f.Description) ? null : f.Description,
-        DaysOfWeek  = f.DaysOfWeek,
+        DaysOfWeek  = f.DaysOfWeek ?? Array.Empty<int>(),
         StartTime   = f.StartTime,
         EndTime     = f.EndTime,
         Timezone    = string.IsNullOrWhiteSpace(f.Timezone) ? "UTC" : f.Timezone.Trim(),

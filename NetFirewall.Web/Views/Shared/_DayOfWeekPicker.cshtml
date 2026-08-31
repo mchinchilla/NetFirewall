@@ -1,0 +1,47 @@
+@model NetFirewall.Web.Models.DayOfWeekPickerViewModel
+@*
+    Sun–Sat toggles that post as repeated `name=value` checkboxes (0..6).
+    The visual is CSS :checked (see .dow-pill in site.css) so a click always
+    restyles even before Alpine boots. Alpine only drives the presets and the
+    "pick at least one" hint.
+*@
+@{
+    var dayNames = new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    var selected = Model.Selected ?? Array.Empty<int>();
+    var initial = string.Join(",", selected);
+}
+
+<div class="space-y-1.5" x-data="dayOfWeekPicker()" data-initial="@initial">
+    <div class="flex items-center justify-between gap-2">
+        <label class="block text-xs font-medium text-surface-fg">
+            @Model.Label
+            @if (Model.Required)
+            {
+                <span class="text-feedback-danger-fg">*</span>
+            }
+        </label>
+        <div class="flex items-center gap-2 text-[11px]">
+            <button type="button" class="text-accent hover:underline" @@click="weekdays()">Weekdays</button>
+            <button type="button" class="text-accent hover:underline" @@click="weekend()">Weekend</button>
+            <button type="button" class="text-accent hover:underline" @@click="everyday()">Every day</button>
+        </div>
+    </div>
+
+    <div class="flex gap-1.5 flex-wrap" role="group" aria-label="@Model.Label">
+        @for (var d = 0; d < 7; d++)
+        {
+            var isOn = selected.Contains(d);
+            <label class="relative inline-flex h-9 w-12 cursor-pointer select-none">
+                <input type="checkbox"
+                       name="@Model.Name"
+                       value="@d"
+                       @(isOn ? "checked" : null)
+                       class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                       @@change="onChange()" />
+                <span class="dow-pill pointer-events-none w-full">@dayNames[d]</span>
+            </label>
+        }
+    </div>
+
+    <p x-cloak x-show="empty" class="text-xs text-feedback-danger-fg">Pick at least one day.</p>
+</div>
