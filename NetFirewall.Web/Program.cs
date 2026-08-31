@@ -253,6 +253,8 @@ builder.Services.AddSingleton<NetFirewall.Services.Monitoring.ISystemMonitorServ
                               NetFirewall.Services.Monitoring.SystemMonitorService>();
 builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
                            NetFirewall.Services.Monitoring.MetricsQueryService>();
+builder.Services.AddScoped<NetFirewall.Services.Monitoring.IWanTrafficService,
+                           NetFirewall.Services.Monitoring.WanTrafficService>();
 
 var app = builder.Build();
 
@@ -281,6 +283,7 @@ var app = builder.Build();
         typeof(NetFirewall.Services.Daemon.IDaemonClient),
         typeof(NetFirewall.Services.Dhcp.IDhcpAdminService),
         typeof(NetFirewall.Services.Monitoring.IGeoIpLookupService),
+        typeof(NetFirewall.Services.Monitoring.IWanTrafficService),
         typeof(NetFirewall.Web.Services.ITerminalProxyService),
     };
     var missing = new List<string>();

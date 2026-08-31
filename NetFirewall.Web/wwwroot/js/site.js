@@ -819,6 +819,97 @@ window.NetFw.charts = {
         chart.data.labels = data.labels;
         chart.data.datasets[0].data = data.values;
         chart.update("none");
+    },
+
+    /**
+     * Live per-WAN up/down chart. Same data shape as makeSparkline
+     * ({ labels, inSeries, outSeries }). `compact` hides axes/legend for
+     * dashboard cards; the full variant is the Monitoring page.
+     */
+    makeLiveTraffic(canvasEl, data, compact) {
+        const ctx = canvasEl.getContext("2d");
+        const inbound = this.readColor("chart-in");
+        const outbound = this.readColor("chart-out");
+        const fgMuted = this.readColor("surface-fg-muted");
+        const border = this.readColor("surface-border");
+        const elevated = this.readColor("surface-elevated");
+        const fg = this.readColor("surface-fg");
+        const isCompact = compact === true;
+
+        const fmt = (v) => {
+            if (v >= 1000) return `${(v / 1000).toFixed(2)} Gbps`;
+            if (v >= 1) return `${v.toFixed(1)} Mbps`;
+            if (v >= 0.001) return `${(v * 1000).toFixed(0)} kbps`;
+            return "0";
+        };
+
+        const chart = new Chart(canvasEl, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [
+                    {
+                        label: "Down", data: data.inSeries,
+                        borderColor: inbound,
+                        backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, inbound),
+                        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2
+                    },
+                    {
+                        label: "Up", data: data.outSeries,
+                        borderColor: outbound, backgroundColor: "transparent",
+                        borderDash: [4, 4], tension: 0.35, pointRadius: 0, borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: {
+                        display: !isCompact,
+                        position: "bottom",
+                        labels: { color: fgMuted, boxWidth: 10, boxHeight: 10, padding: 12, font: { size: 11 } }
+                    },
+                    tooltip: {
+                        backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted,
+                        borderColor: border, borderWidth: 1, padding: 8,
+                        callbacks: { label: (c) => `${c.dataset.label}: ${fmt(c.parsed.y)}` }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: !isCompact,
+                        grid: { display: false },
+                        ticks: { color: fgMuted, maxTicksLimit: 6, font: { size: 10 } }
+                    },
+                    y: {
+                        display: !isCompact,
+                        beginAtZero: true,
+                        grid: { color: border, drawTicks: false },
+                        ticks: { color: fgMuted, font: { size: 10 }, callback: fmt }
+                    }
+                }
+            }
+        });
+
+        this.register(chart, () => {
+            const inn = this.readColor("chart-in");
+            const out = this.readColor("chart-out");
+            const fm = this.readColor("surface-fg-muted");
+            const bd = this.readColor("surface-border");
+            chart.data.datasets[0].borderColor = inn;
+            chart.data.datasets[0].backgroundColor =
+                this._verticalGradient(ctx, canvasEl.clientHeight, inn);
+            chart.data.datasets[1].borderColor = out;
+            if (chart.options.plugins.legend?.labels)
+                chart.options.plugins.legend.labels.color = fm;
+            if (chart.options.scales.x?.ticks) chart.options.scales.x.ticks.color = fm;
+            if (chart.options.scales.y?.ticks) chart.options.scales.y.ticks.color = fm;
+            if (chart.options.scales.y?.grid) chart.options.scales.y.grid.color = bd;
+        });
+        return chart;
     }
 };
 
@@ -936,6 +1027,96 @@ document.addEventListener("alpine:init", () => {
             this._setCurrent(data.values);
         }
     }));
+
+    /* ---------- liveWanCharts ---------- one live up/down Chart.js canvas
+     * per WAN. Polls a JSON series endpoint, updates in place (no canvas
+     * re-create). Pauses when the tab is hidden or when an ancestor Alpine
+     * scope sets `paused` (Monitoring's Pause button). Usage:
+     *   x-data="liveWanCharts('/Monitoring/wan-traffic-series?minutes=15', 5000, true)"
+     */
+    Alpine.data("liveWanCharts", (url, intervalMs, compact) => ({
+        wans: [],
+        status: "loading",
+        compact: compact === true,
+        _charts: {},
+        _timer: null,
+        async init() {
+            await this._refresh();
+            this._timer = window.setInterval(() => {
+                if (document.hidden) return;
+                if (this.$root && this.$root.paused === true) return;
+                if (this.$root && this.$root.tab === "history") return;
+                this._refresh();
+            }, Number(intervalMs) || 5000);
+            this.$watch(() => this.$root && this.$root.tab, (t) => {
+                if (t !== "live") return;
+                this.$nextTick(() => {
+                    for (const chart of Object.values(this._charts)) {
+                        try { chart.resize(); } catch { /* gone */ }
+                    }
+                });
+            });
+        },
+        destroy() {
+            if (this._timer) window.clearInterval(this._timer);
+            for (const name of Object.keys(this._charts)) {
+                try { this._charts[name].destroy(); } catch { /* already gone */ }
+            }
+            this._charts = {};
+        },
+        fmtMbps(v) {
+            const n = Number(v);
+            if (!Number.isFinite(n)) return "—";
+            if (n >= 1000) return `${(n / 1000).toFixed(2)} Gbps`;
+            if (n >= 1) return `${n.toFixed(1)} Mbps`;
+            if (n >= 0.001) return `${(n * 1000).toFixed(0)} kbps`;
+            return "0";
+        },
+        async _fetch() {
+            try {
+                const r = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
+                if (!r.ok) return null;
+                return await r.json();
+            } catch {
+                return null;
+            }
+        },
+        async _refresh() {
+            const payload = await this._fetch();
+            if (!payload) {
+                if (this.status === "loading") this.status = "error";
+                return;
+            }
+            const next = Array.isArray(payload.wans) ? payload.wans : [];
+            this.wans = next;
+            this.status = next.length === 0 ? "empty" : "ready";
+            await this.$nextTick();
+            this._syncCharts();
+        },
+        _syncCharts() {
+            const seen = new Set();
+            for (const wan of this.wans) {
+                seen.add(wan.name);
+                const canvas = this.$el.querySelector(`canvas[data-iface="${cssEscape(wan.name)}"]`);
+                if (!canvas) continue;
+                if (!this._charts[wan.name]) {
+                    this._charts[wan.name] = window.NetFw.charts.makeLiveTraffic(canvas, wan, this.compact);
+                } else {
+                    window.NetFw.charts.updateSparkline(this._charts[wan.name], wan);
+                }
+            }
+            for (const name of Object.keys(this._charts)) {
+                if (seen.has(name)) continue;
+                try { this._charts[name].destroy(); } catch { /* already gone */ }
+                delete this._charts[name];
+            }
+        }
+    }));
+
+    function cssEscape(value) {
+        if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
+        return String(value).replace(/"/g, '\\"');
+    }
 
     /* ---------- addressPicker ---------- tag input with object autocomplete.
      * Used in firewall rule editors (filter/NAT/port forward/mangle) for

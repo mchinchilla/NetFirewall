@@ -104,6 +104,12 @@
     --feedback-info-fg:     var(--jordy-blue-900);
     --feedback-info-bd:     var(--jordy-blue-500);
 
+    /* Chart series: download (in) vs upload (out). Views/JS must use these
+       tokens, never a raw palette name. --accent is theme-defined and
+       resolves at use time. */
+    --chart-in:  var(--accent);
+    --chart-out: var(--feedback-info-bd);
+
     /* Solid button colors for destructive / warning actions. Foreground is
      * always near-white because the bd color is dark enough for AA contrast. */
     --feedback-danger-btn-bg:  #b94545;

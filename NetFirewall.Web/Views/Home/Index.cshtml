@@ -1,5 +1,6 @@
 @model NetFirewall.Web.Models.HomeDashboardViewModel
 @using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Monitoring
 @{
     ViewData["Title"] = "Dashboard";
     var trafficJson = System.Text.Json.JsonSerializer.Serialize(new
@@ -161,7 +162,13 @@
     </section>
 </div>
 
-@* Traffic chart — full-width 24h history with the live throughput KPI on top. *@
+@* Per-WAN live up/down — same reusable charts Monitoring renders. *@
+<div style="animation: var(--animate-slide-up); animation-delay: 35ms;">
+    @await Html.PartialAsync("_WanTrafficCharts",
+        WanTrafficChartsViewModel.Dashboard(Url.Action("Interfaces", "Network")))
+</div>
+
+@* Traffic chart — full-width 24h history. *@
 <div class="mb-6">
     <section class="card" style="animation: var(--animate-slide-up); animation-delay: 45ms;">
         <header class="flex items-center justify-between mb-4">
@@ -171,17 +178,6 @@
             </div>
             <a href="@Url.Action("Index", "Monitoring")?tab=history" class="text-xs hover:underline text-accent">Open in monitoring →</a>
         </header>
-
-        @* Live throughput pulse — polls every 5s. Pauses when the tab is hidden. *@
-        <div class="pb-4 mb-4 border-b" style="border-color: var(--surface-border);"
-             x-data="{ paused: false }"
-             x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
-            <div hx-get="/Home/Throughput"
-                 :hx-trigger="paused ? 'load' : 'load, every 5s'"
-                 hx-swap="innerHTML">
-                <div class="text-xs text-surface-fg-muted">Loading live throughput…</div>
-            </div>
-        </div>
 
         @if (Model.TrafficLabels.Length == 0)
         {

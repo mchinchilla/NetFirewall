@@ -197,4 +197,60 @@ public sealed class MetricsQueryServiceTests : IAsyncLifetime
         Assert.Single(alphaOnly);
         Assert.Equal("alpha", alphaOnly[0].Hostname);
     }
+
+    // ── per-WAN live series ────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetWanRatePerInterfaceAsync_OnlyReturnsWan_AndGroupsByName()
+    {
+        var now = DateTime.UtcNow;
+        await InsertIfaceAsync("ens192", "WAN");
+        await InsertIfaceAsync("ens160", "LAN");
+        await InsertNetAsync(now.AddMinutes(-2), "ens192", rx: 100, tx: 10);
+        await InsertNetAsync(now.AddMinutes(-1), "ens192", rx: 200, tx: 20);
+        await InsertNetAsync(now.AddMinutes(-1), "ens160", rx: 999, tx: 999);
+
+        var series = await _svc.GetWanRatePerInterfaceAsync(15);
+        var wan = Assert.Single(series);
+        Assert.Equal("ens192", wan.InterfaceName);
+        Assert.Equal(2, wan.Points.Count);
+        Assert.Equal(100, wan.Points[0].RxBytesPerSec);
+        Assert.Equal(200, wan.Points[1].RxBytesPerSec);
+    }
+
+    [Fact]
+    public async Task GetWanRatePerInterfaceAsync_IgnoresSamplesOutsideWindow()
+    {
+        await InsertIfaceAsync("ens192", "WAN");
+        await InsertNetAsync(DateTime.UtcNow.AddHours(-3), "ens192", rx: 50, tx: 5);
+
+        var series = await _svc.GetWanRatePerInterfaceAsync(15);
+        Assert.Empty(series);
+    }
+
+    private async Task InsertIfaceAsync(string name, string type)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            INSERT INTO fw_interfaces (id, name, type, addressing_mode, auto_start, enabled, created_at, updated_at)
+            VALUES (@id, @n, @t, 'static', true, true, now(), now())", conn);
+        cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+        cmd.Parameters.AddWithValue("n", name);
+        cmd.Parameters.AddWithValue("t", type);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task InsertNetAsync(DateTime ts, string iface, double rx, double tx)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            INSERT INTO system_metrics_net
+                (timestamp, hostname, interface_name, rx_bytes, tx_bytes, rx_rate, tx_rate)
+            VALUES (@ts, 'host1', @iface, 0, 0, @rx, @tx)", conn);
+        cmd.Parameters.AddWithValue("ts", ts);
+        cmd.Parameters.AddWithValue("iface", iface);
+        cmd.Parameters.AddWithValue("rx", rx);
+        cmd.Parameters.AddWithValue("tx", tx);
+        await cmd.ExecuteNonQueryAsync();
+    }
 }

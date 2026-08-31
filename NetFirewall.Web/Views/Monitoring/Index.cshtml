@@ -1,3 +1,4 @@
+@using NetFirewall.Web.Models.Monitoring
 @{
     ViewData["Title"] = "Monitoring";
     Layout = "_Layout";
@@ -48,6 +49,10 @@
             <span class="text-xs text-surface-fg-muted"
                   x-text="paused ? '⏸ Polling paused' : '● Polling every 5s'"></span>
         </div>
+
+        @await Html.PartialAsync("_WanTrafficCharts",
+            WanTrafficChartsViewModel.Monitoring(Url.Action("Interfaces", "Network")))
+
         <div id="monitoring-snapshot" class="loading-host"
              hx-get="/Monitoring/snapshot"
              :hx-trigger="paused ? 'load' : 'load, every 5s'"

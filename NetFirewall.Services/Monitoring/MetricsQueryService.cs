@@ -47,6 +47,14 @@ public interface IMetricsQueryService
         int minutes, CancellationToken ct = default);
 
     /// <summary>
+    /// Raw per-WAN rate samples (bytes/sec in/out) over the last
+    /// <paramref name="minutes"/> minutes. One series per interface marked
+    /// type='WAN'. Powers the live per-WAN up/down charts.
+    /// </summary>
+    Task<IReadOnlyList<WanInterfaceRateSeries>> GetWanRatePerInterfaceAsync(
+        int minutes, CancellationToken ct = default);
+
+    /// <summary>
     /// Per-minute CPU% and memory% over the last <paramref name="minutes"/>
     /// minutes, for the dashboard's live CPU/Mem sparklines. Averages the raw
     /// system_metrics samples per minute bucket.
@@ -90,6 +98,12 @@ public sealed record WanTrafficPoint(DateTime Bucket, long RxBytes, long TxBytes
 
 /// <summary>One minute bucket of WAN-only throughput RATES (avg bytes/sec in/out).</summary>
 public sealed record WanRatePoint(DateTime Bucket, double RxBytesPerSec, double TxBytesPerSec);
+
+/// <summary>One raw sample of a single WAN interface's instantaneous rate.</summary>
+public sealed record WanInterfaceRatePoint(DateTime Timestamp, double RxBytesPerSec, double TxBytesPerSec);
+
+/// <summary>Time series of instantaneous rates for one WAN interface.</summary>
+public sealed record WanInterfaceRateSeries(string InterfaceName, IReadOnlyList<WanInterfaceRatePoint> Points);
 
 /// <summary>One minute bucket of avg CPU% and memory%.</summary>
 public sealed record SystemRatePoint(DateTime Bucket, double CpuPercent, double MemoryPercent);
@@ -298,6 +312,46 @@ public sealed class MetricsQueryService : IMetricsQueryService
         while (await r.ReadAsync(ct))
             list.Add(new WanRatePoint(r.GetFieldValue<DateTime>(0), r.GetDouble(1), r.GetDouble(2)));
         return list;
+    }
+
+    public async Task<IReadOnlyList<WanInterfaceRateSeries>> GetWanRatePerInterfaceAsync(
+        int minutes, CancellationToken ct = default)
+    {
+        minutes = Math.Clamp(minutes, 1, 60);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        const string sql = @"
+            SELECT n.interface_name, n.timestamp, n.rx_rate, n.tx_rate
+            FROM system_metrics_net n
+            JOIN fw_interfaces fi
+              ON lower(fi.name) = lower(n.interface_name)
+             AND upper(fi.type) = 'WAN'
+            WHERE n.timestamp > now() - make_interval(mins => @minutes)
+            ORDER BY n.interface_name, n.timestamp ASC";
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("minutes", minutes);
+
+        var buckets = new Dictionary<string, List<WanInterfaceRatePoint>>(StringComparer.OrdinalIgnoreCase);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var name = r.GetString(0);
+            if (!buckets.TryGetValue(name, out var points))
+            {
+                points = new List<WanInterfaceRatePoint>();
+                buckets[name] = points;
+            }
+            points.Add(new WanInterfaceRatePoint(
+                r.GetFieldValue<DateTime>(1),
+                r.GetDouble(2),
+                r.GetDouble(3)));
+        }
+
+        return buckets
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => new WanInterfaceRateSeries(kv.Key, kv.Value))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<SystemRatePoint>> GetSystemRatePerMinuteAsync(

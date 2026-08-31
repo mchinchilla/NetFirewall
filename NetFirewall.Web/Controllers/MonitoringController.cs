@@ -22,6 +22,7 @@ public sealed class MonitoringController : Controller
 {
     private readonly ISystemMonitorService _monitor;
     private readonly IMetricsQueryService _query;
+    private readonly IWanTrafficService _wanTraffic;
     private readonly IScheduleService _schedules;
     private readonly IWanHealthCardBuilder _cardBuilder;
     private readonly IDaemonClient _daemon;
@@ -31,6 +32,7 @@ public sealed class MonitoringController : Controller
     public MonitoringController(
         ISystemMonitorService monitor,
         IMetricsQueryService query,
+        IWanTrafficService wanTraffic,
         IScheduleService schedules,
         IWanHealthCardBuilder cardBuilder,
         IDaemonClient daemon,
@@ -39,6 +41,7 @@ public sealed class MonitoringController : Controller
     {
         _monitor = monitor;
         _query = query;
+        _wanTraffic = wanTraffic;
         _schedules = schedules;
         _cardBuilder = cardBuilder;
         _daemon = daemon;
@@ -48,6 +51,17 @@ public sealed class MonitoringController : Controller
 
     [HttpGet("")]
     public IActionResult Index() => View();
+
+    /// <summary>
+    /// JSON series for the reusable per-WAN live charts. Polled by Alpine
+    /// (in-place Chart.js update — swapping HTML would leak canvases).
+    /// </summary>
+    [HttpGet("wan-traffic-series")]
+    public async Task<IActionResult> WanTrafficSeries(int minutes = 15, CancellationToken ct = default)
+    {
+        var series = await _wanTraffic.GetLiveAsync(minutes, ct);
+        return Json(new { wans = series });
+    }
 
     [HttpGet("snapshot")]
     public async Task<IActionResult> Snapshot(CancellationToken ct)

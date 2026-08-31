@@ -1,0 +1,41 @@
+@model NetFirewall.Web.Models.Monitoring.WanTrafficChartsViewModel
+@{
+    var url = Model.SeriesUrlWithMinutes;
+}
+
+<section class="mb-6"
+         x-data="liveWanCharts('@url', @Model.IntervalMs, @(Model.Compact ? "true" : "false"))">
+    <header class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+        <div>
+            <h2 class="text-base font-semibold">@Model.Heading</h2>
+            @if (!string.IsNullOrEmpty(Model.Subheading))
+            {
+                <p class="text-xs text-surface-fg-muted">@Model.Subheading</p>
+            }
+        </div>
+        <span class="flex items-center gap-1.5 text-xs text-surface-fg-muted">
+            <span class="h-2 w-2 rounded-full bg-feedback-success-bd"
+                  x-data x-init="$el.animate([{opacity:1},{opacity:0.3},{opacity:1}],{duration:2000,iterations:Infinity})"></span>
+            live
+        </span>
+    </header>
+
+    <div class="card" x-show="status !== 'ready'" x-cloak>
+        <p class="text-sm py-8 text-center text-surface-fg-muted" x-show="status === 'empty'">
+            No WAN interfaces configured.
+            <a class="hover:underline text-accent" href="@Model.ManageUrl">Mark an interface as WAN</a>.
+        </p>
+        <p class="text-sm py-8 text-center text-surface-fg-muted" x-show="status === 'error'">
+            Could not load WAN traffic. Is the daemon collecting metrics?
+        </p>
+        <p class="text-sm py-8 text-center text-surface-fg-muted" x-show="status === 'loading'">
+            Loading WAN traffic…
+        </p>
+    </div>
+
+    <div class="flex flex-col md:flex-row gap-4" x-show="status === 'ready'" x-cloak>
+        <template x-for="wan in wans" :key="wan.name">
+            @await Html.PartialAsync("_WanTrafficChart")
+        </template>
+    </div>
+</section>
