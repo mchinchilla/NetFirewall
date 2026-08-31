@@ -621,6 +621,78 @@
     .badge-info    { background: color-mix(in srgb, var(--feedback-info-fg) 14%, transparent);    color: var(--feedback-info-fg); }
     .badge-muted   { background: color-mix(in srgb, var(--surface-fg-muted) 14%, transparent);    color: var(--surface-fg-muted); }
 
+    /* ----- Filter-rule evaluation cards -----
+     * Each chain is a card; each rule is a step with a verdict-coloured
+     * left rail so "first match wins" is spatial, not a number in a column.
+     */
+    .rule-chain {
+        @apply rounded-xl border shadow-sm overflow-hidden;
+        background-color: var(--surface-elevated);
+        border-color: var(--surface-border);
+        scroll-margin-top: 5.5rem;
+    }
+    .rule-chain-closed { transform: rotate(-90deg); }
+    .rule-step {
+        display: grid;
+        grid-template-columns: 3.25rem auto minmax(0, 1fr) auto;
+        column-gap: 0.75rem;
+        align-items: start;
+        padding: 0.7rem 1.25rem;
+        border-left: 3px solid var(--surface-border);
+        border-bottom: 1px solid color-mix(in srgb, var(--surface-border) 65%, transparent);
+    }
+    .rule-step:last-child { border-bottom-color: transparent; }
+    .rule-step[data-verdict="accept"] { border-left-color: var(--feedback-success-fg); }
+    .rule-step[data-verdict="drop"]    { border-left-color: var(--feedback-danger-fg); }
+    .rule-step[data-verdict="reject"]  { border-left-color: var(--feedback-warning-fg); }
+    .rule-step[data-verdict="log"]     { border-left-color: var(--feedback-info-fg); }
+    .rule-step[data-catchall="true"] {
+        background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
+    }
+    .rule-step[data-disabled="true"] { opacity: 0.45; }
+    .rule-step:hover {
+        background: color-mix(in srgb, var(--surface-muted) 35%, transparent);
+    }
+    .rule-pri {
+        @apply font-mono text-xs tabular-nums text-right pt-0.5 text-surface-fg-muted;
+    }
+    .rule-gap {
+        height: 0.65rem;
+        background: var(--surface-muted);
+        border-bottom: 1px dashed var(--surface-border);
+    }
+    .rule-band {
+        @apply px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-surface-fg-muted;
+        background: var(--surface-muted);
+        border-bottom: 1px solid var(--surface-border);
+    }
+    .hide-disabled-rules [data-disabled="true"] { display: none !important; }
+    .hide-disabled-rules [data-filter-group]:not(:has([data-disabled="false"])) { display: none; }
+
+    .seg {
+        @apply inline-flex items-center rounded-md border p-0.5;
+        border-color: var(--surface-border);
+        background: var(--surface-muted);
+    }
+    .seg-btn {
+        @apply px-2.5 py-1 rounded text-xs font-medium;
+        color: var(--surface-fg-muted);
+    }
+    .seg-btn.is-on {
+        background: var(--surface-elevated);
+        color: var(--surface-fg);
+    }
+
+    @media (max-width: 640px) {
+        .rule-step {
+            grid-template-columns: 2.5rem minmax(0, 1fr);
+        }
+        .rule-step .rule-verdict,
+        .rule-step .rule-body,
+        .rule-step .rule-actions { grid-column: 2; }
+        .rule-step .rule-actions { justify-self: start; }
+    }
+
     .kpi {
         @apply rounded-xl border p-5 shadow-sm relative overflow-hidden
                transition duration-300 hover:-translate-y-0.5 hover:shadow-md;

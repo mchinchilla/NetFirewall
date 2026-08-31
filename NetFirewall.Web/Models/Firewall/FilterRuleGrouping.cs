@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using NetFirewall.Models.Firewall;
 
 namespace NetFirewall.Web.Models.Firewall;
@@ -56,10 +57,21 @@ public sealed class FilterRuleRowViewModel
             if (r.SourceAddresses is { Length: > 0 }) chips.Add(("src", Summarise(r.SourceAddresses)));
             if (r.DestinationAddresses is { Length: > 0 }) chips.Add(("dst", Summarise(r.DestinationAddresses)));
             if (!string.IsNullOrWhiteSpace(r.RateLimit)) chips.Add(("rate", r.RateLimit));
+            if (!string.IsNullOrWhiteSpace(ScheduleName)) chips.Add(("when", ScheduleName));
 
             return chips;
         }
     }
+
+    /// <summary>Resolved schedule name, when the rule is gated by one.</summary>
+    public string? ScheduleName { get; init; }
+
+    /// <summary>
+    /// True when the rule has no match conditions and no interface — it is
+    /// the chain's catch-all. "matches everything" in the UI.
+    /// </summary>
+    public bool MatchesEverything =>
+        Chips.Count == 0 && InterfaceIn is null && InterfaceOut is null;
 
     /// <summary>
     /// Long address lists become "5 addresses" — the anti-spoof rules carry
@@ -70,15 +82,53 @@ public sealed class FilterRuleRowViewModel
         values.Length > 3 ? $"{values.Length} addresses" : string.Join(", ", values);
 }
 
-/// <summary>One titled block of rows.</summary>
+/// <summary>
+/// One or more rows that the evaluation view treats as a single step.
+/// Interface variants (same match, different NIC) stay separate nft rules
+/// but read as one decision with several "in/out" lines.
+/// </summary>
+public sealed class FilterRuleClusterViewModel
+{
+    public required IReadOnlyList<FilterRuleRowViewModel> Members { get; init; }
+    public required string Title { get; init; }
+
+    /// <summary>Priority jumped by 10+ from the previous step — draw a break.</summary>
+    public bool ShowGap { get; init; }
+
+    /// <summary>Optional band label, e.g. "Default policy" at priority ≥ 900.</summary>
+    public string? BandLabel { get; init; }
+
+    public FilterRuleRowViewModel Primary => Members[0];
+    public bool IsCluster => Members.Count > 1;
+}
+
+/// <summary>One titled block of rows — a chain, an interface, a verdict, …</summary>
 public sealed class FilterRuleGroupViewModel
 {
     public required string Title { get; init; }
     public string? Subtitle { get; init; }
-    public required IReadOnlyList<FilterRuleRowViewModel> Rows { get; init; }
+
+    /// <summary>
+    /// One-line explanation of what happens if nothing matches, shown on
+    /// evaluation-order chain cards. Null for regrouped views.
+    /// </summary>
+    public string? Summary { get; init; }
+
+    /// <summary>drop / accept — the chain policy, when this group is a chain.</summary>
+    public string? Policy { get; init; }
+
+    public required IReadOnlyList<FilterRuleClusterViewModel> Clusters { get; init; }
+
+    public IReadOnlyList<FilterRuleRowViewModel> Rows =>
+        Clusters.SelectMany(c => c.Members).ToList();
 
     public int EnabledCount => Rows.Count(r => r.Rule.Enabled);
     public int ShadowedCount => Rows.Count(r => r.ShadowedBy is not null);
+    public int DisabledCount => Rows.Count - EnabledCount;
+
+    /// <summary>Stable id for in-page jump links.</summary>
+    public string Anchor =>
+        "chain-" + Regex.Replace(Title.ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
 }
 
 /// <summary>The whole table.</summary>
@@ -97,4 +147,6 @@ public sealed class FilterRulesTableViewModel
 
     public int TotalRows => Groups.Sum(g => g.Rows.Count);
     public int TotalShadowed => Groups.Sum(g => g.ShadowedCount);
+    public int TotalEnabled => Groups.Sum(g => g.EnabledCount);
+    public int TotalDisabled => TotalRows - TotalEnabled;
 }

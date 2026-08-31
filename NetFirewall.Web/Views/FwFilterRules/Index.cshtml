@@ -3,34 +3,47 @@
     Layout = "_Layout";
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);"
-     x-data="filterRulesPage()">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Filter rules</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
-            Stateful packet filter — input / forward / output chains. Within a chain the first match wins,
-            so lower priority is checked first.
-        </p>
+<div x-data="filterRulesPage()">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Filter rules</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+                Each chain is a top-to-bottom walk. The first matching rule wins; everything below it is skipped.
+                Lower priority runs first. The coloured rail is the verdict.
+            </p>
+        </div>
+        <button type="button" class="btn btn-primary"
+                hx-get="/Firewall/FilterRules/edit"
+                hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('Add filter rule')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add rule
+        </button>
     </div>
-    <div class="flex flex-wrap items-center gap-2">
+
+    <div class="flex flex-wrap items-center gap-2 mb-4"
+         style="animation: var(--animate-slide-up); animation-delay: 40ms;">
         @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "filter-rules-table", Placeholder = "Filter by action, address, port…", ClientSide = true })
 
-        <label class="text-xs flex items-center gap-2">
-            Chain
-            <select x-model="chain"
-                    @@change="refresh()"
-                    class="input py-1 text-xs">
-                <option value="">All</option>
-                <option value="input">Input</option>
-                <option value="forward">Forward</option>
-                <option value="output">Output</option>
-            </select>
+        <div class="seg" role="group" aria-label="Chain">
+            <button type="button" class="seg-btn" :class="chain === '' ? 'is-on' : ''"
+                    :aria-pressed="chain === ''" @@click="setChain('')">All</button>
+            <button type="button" class="seg-btn" :class="chain === 'input' ? 'is-on' : ''"
+                    :aria-pressed="chain === 'input'" @@click="setChain('input')">Input</button>
+            <button type="button" class="seg-btn" :class="chain === 'forward' ? 'is-on' : ''"
+                    :aria-pressed="chain === 'forward'" @@click="setChain('forward')">Forward</button>
+            <button type="button" class="seg-btn" :class="chain === 'output' ? 'is-on' : ''"
+                    :aria-pressed="chain === 'output'" @@click="setChain('output')">Output</button>
+        </div>
+
+        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+            <input type="checkbox" class="rounded" x-model="hideDisabled" />
+            Hide disabled
         </label>
 
-        @* View switcher. Grouping happens server-side; this only picks the mode. *@
-        <div class="relative" @@click.outside="viewsOpen = false">
+        <div class="relative ml-auto" @@click.outside="viewsOpen = false">
             <button type="button" class="btn btn-ghost text-xs gap-1.5"
                     @@click="viewsOpen = !viewsOpen"
                     :aria-expanded="viewsOpen" aria-haspopup="true">
@@ -62,23 +75,15 @@
                 </template>
             </div>
         </div>
-
-        <button type="button" class="btn btn-primary"
-                hx-get="/Firewall/FilterRules/edit"
-                hx-target="#drawer-body" hx-swap="innerHTML"
-                @@click="$store.drawer.openRaw('Add filter rule')">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-            Add rule
-        </button>
     </div>
 
-    <section class="card mt-3 w-full" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-        <div id="filter-rules-table"
-             hx-get="/Firewall/FilterRules/table"
-             :hx-vals="JSON.stringify({ chain, view })"
-             hx-trigger="load, refreshFilterRules from:body, manual-refresh"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-        </div>
-    </section>
+    <div id="filter-rules-table"
+         style="animation: var(--animate-slide-up); animation-delay: 80ms;"
+         :class="{ 'hide-disabled-rules': hideDisabled }"
+         hx-get="/Firewall/FilterRules/table"
+         :hx-vals="JSON.stringify({ chain, view })"
+         hx-trigger="load, refreshFilterRules from:body, manual-refresh"
+         hx-swap="innerHTML">
+        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+    </div>
 </div>

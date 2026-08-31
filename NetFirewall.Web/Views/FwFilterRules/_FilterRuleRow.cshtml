@@ -1,112 +1,113 @@
-@model NetFirewall.Web.Models.Firewall.FilterRuleRowViewModel
+@model NetFirewall.Web.Models.Firewall.FilterRuleClusterViewModel
+@using NetFirewall.Web.Models.Firewall
 @{
-    var r = Model.Rule;
-
-    // Verdict colours come from the feedback tokens, never raw palette names.
-    var (badgeBg, badgeFg) = r.Action switch
+    var primary = Model.Primary;
+    var r = primary.Rule;
+    var badgeCls = r.Action switch
     {
-        "accept" => ("var(--feedback-success-bg)", "var(--feedback-success-fg)"),
-        "drop"   => ("var(--feedback-danger-bg)",  "var(--feedback-danger-fg)"),
-        "reject" => ("var(--feedback-warning-bg)", "var(--feedback-warning-fg)"),
-        _        => ("var(--feedback-info-bg)",    "var(--feedback-info-fg)")
+        "accept" => "badge-success",
+        "drop"   => "badge-danger",
+        "reject" => "badge-warning",
+        _        => "badge-info"
     };
-
-    // A disabled rule is not in the generated ruleset at all, so it must read
-    // as absent rather than merely "off" — that is what made the wide-open
-    // accept hard to spot in the flat list.
-    var rowCls = r.Enabled ? "" : "opacity-50";
-
-    var delMsg = $"Delete {r.Chain}/{r.Action} rule (priority {r.Priority})? Apply firewall after to push the change.";
+    var catchAll = primary.MatchesEverything && !Model.IsCluster;
     var srcTitle = r.SourceAddresses is { Length: > 0 } ? string.Join(", ", r.SourceAddresses) : null;
+    var dstTitle = r.DestinationAddresses is { Length: > 0 } ? string.Join(", ", r.DestinationAddresses) : null;
 }
-<tr class="@rowCls align-top">
-    <td class="pl-5 pr-2 py-2.5 font-mono text-xs tabular-nums text-surface-fg-muted">@r.Priority</td>
 
-    <td class="px-2 py-2.5">
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium uppercase"
-              style="background-color: @badgeBg; color: @badgeFg;">@r.Action</span>
-    </td>
+@if (Model.BandLabel is not null)
+{
+    <div class="rule-band">@Model.BandLabel</div>
+}
+else if (Model.ShowGap)
+{
+    <div class="rule-gap" aria-hidden="true"></div>
+}
 
-    <td class="px-2 py-2.5" title="@srcTitle">
+<div class="rule-step"
+     data-filter-row
+     data-verdict="@r.Action"
+     data-disabled="@(r.Enabled ? "false" : "true")"
+     data-catchall="@(catchAll ? "true" : "false")">
+
+    <div class="rule-pri">@r.Priority</div>
+
+    <div class="rule-verdict pt-0.5">
+        <span class="badge @badgeCls uppercase tracking-wide">@r.Action</span>
+    </div>
+
+    <div class="rule-body min-w-0">
         <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="text-surface-fg">@(string.IsNullOrEmpty(r.Description) ? "(no description)" : r.Description)</span>
+            <span class="text-sm text-surface-fg">@Model.Title</span>
 
-            @if (Model.ShadowedBy is { } by)
+            @if (!r.Enabled)
             {
-                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium
-                             bg-feedback-warning-bg text-feedback-warning-fg"
-                      title="Never runs: priority @by.Priority (@(by.Description ?? by.Action)) already matches everything this rule matches.">
-                    unreachable
-                </span>
+                <span class="badge badge-muted" title="Disabled rules are not written into the ruleset at all.">off</span>
+            }
+
+            @if (catchAll)
+            {
+                <span class="badge badge-muted">matches everything</span>
             }
         </div>
 
-        <div class="flex items-center gap-1 flex-wrap mt-1">
-            @if (Model.Chips.Count == 0)
-            {
-                <span class="text-xs text-surface-fg-muted">matches everything</span>
-            }
-            else
-            {
-                @foreach (var (label, value) in Model.Chips)
+        @if (primary.Chips.Count > 0)
+        {
+            <div class="flex items-center gap-1 flex-wrap mt-1">
+                @foreach (var (label, value) in primary.Chips)
                 {
-                    <span class="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-surface-muted">
+                    var tip = label == "src" ? srcTitle : label == "dst" ? dstTitle : null;
+                    <span class="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-surface-muted" title="@tip">
                         <span class="text-surface-fg-muted">@label</span><span class="text-surface-fg">@value</span>
                     </span>
                 }
-            }
-        </div>
-    </td>
+            </div>
+        }
 
-    @* Interfaces are only worth pixels when they narrow the rule — "any/any"
-       repeated down the whole table was pure noise. *@
-    <td class="px-2 py-2.5 hidden lg:table-cell text-xs font-mono text-surface-fg-muted whitespace-nowrap">
-        @if (Model.InterfaceIn is null && Model.InterfaceOut is null)
+        @if (Model.IsCluster)
         {
-            <span class="opacity-60">—</span>
+            <ul class="mt-1.5 space-y-1">
+                @foreach (var m in Model.Members)
+                {
+                    <li class="flex items-center justify-between gap-2 flex-wrap">
+                        <span class="text-xs font-mono text-surface-fg-muted">
+                            @if (m.InterfaceIn is not null) { <span>in @m.InterfaceIn</span> }
+                            @if (m.InterfaceOut is not null) { <span>out @m.InterfaceOut</span> }
+                            @if (m.InterfaceIn is null && m.InterfaceOut is null) { <span>any interface</span> }
+                            @if (m.ShadowedBy is { } by)
+                            {
+                                <span class="badge badge-warning ml-1"
+                                      title="Never runs: priority @by.Priority (@(by.Description ?? by.Action)) already matches everything this rule matches.">unreachable</span>
+                            }
+                        </span>
+                        @await Html.PartialAsync("_FilterRuleActions", m.Rule)
+                    </li>
+                }
+            </ul>
         }
         else
         {
-            @if (Model.InterfaceIn is not null) { <span>in @Model.InterfaceIn</span> }
-            @if (Model.InterfaceOut is not null) { <span class="block">out @Model.InterfaceOut</span> }
+            <div class="flex items-center gap-2 flex-wrap mt-1">
+                @if (primary.InterfaceIn is not null || primary.InterfaceOut is not null)
+                {
+                    <span class="text-xs font-mono text-surface-fg-muted">
+                        @if (primary.InterfaceIn is not null) { <span>in @primary.InterfaceIn</span> }
+                        @if (primary.InterfaceOut is not null) { <span>out @primary.InterfaceOut</span> }
+                    </span>
+                }
+                @if (primary.ShadowedBy is { } by)
+                {
+                    <span class="badge badge-warning"
+                          title="Never runs: priority @by.Priority (@(by.Description ?? by.Action)) already matches everything this rule matches.">unreachable</span>
+                }
+            </div>
         }
-    </td>
+    </div>
 
-    <td class="px-2 py-2.5 whitespace-nowrap">
-        @if (r.Enabled)
+    <div class="rule-actions pt-0.5">
+        @if (!Model.IsCluster)
         {
-            <span class="inline-flex items-center gap-1.5 text-xs text-surface-fg-muted">
-                <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--feedback-success-fg);"></span>active
-            </span>
+            @await Html.PartialAsync("_FilterRuleActions", r)
         }
-        else
-        {
-            <span class="inline-flex items-center gap-1.5 text-xs text-surface-fg-muted"
-                  title="Disabled rules are not written into the ruleset at all.">
-                <span class="h-1.5 w-1.5 rounded-full border border-surface-border"></span>off
-            </span>
-        }
-    </td>
-
-    <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
-        <div class="inline-flex items-center gap-1">
-            <button type="button" class="btn btn-ghost text-xs"
-                    hx-get="/Firewall/FilterRules/edit/@r.Id"
-                    hx-target="#drawer-body" hx-swap="innerHTML"
-                    @@click="$store.drawer.openRaw('Edit filter rule')">Edit</button>
-            <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                    hx-post="/Firewall/FilterRules/delete/@r.Id"
-                    hx-trigger="confirmed-del"
-                    data-msg="@delMsg"
-                    @@click.prevent="(async () => {
-                        const ok = await $store.confirm.ask({
-                            title: 'Delete rule?',
-                            message: $event.currentTarget.dataset.msg,
-                            confirmLabel: 'Delete',
-                            level: 'danger'
-                        });
-                        if (ok) htmx.trigger($el, 'confirmed-del');
-                    })()">Delete</button>
-        </div>
-    </td>
-</tr>
+    </div>
+</div>

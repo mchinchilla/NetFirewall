@@ -3,7 +3,7 @@
 
 @if (Model.TotalRows == 0)
 {
-    <div class="text-sm py-10 text-center text-surface-fg-muted">
+    <div class="card text-sm py-10 text-center text-surface-fg-muted">
         No filter rules in this chain. Click <span class="font-medium text-surface-fg">Add rule</span> to create one.
     </div>
 }
@@ -11,64 +11,106 @@ else
 {
     @if (!Model.PreservesEvaluationOrder)
     {
-        @* Every non-evaluation view breaks the one property that decides what
-           the firewall actually does. Say it plainly, every time. *@
-        <div class="mb-3 mx-5 rounded-md border px-3 py-2 text-xs leading-relaxed
+        <div class="mb-3 rounded-md border px-3 py-2 text-xs leading-relaxed
                     bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
             Grouped for reading, <span class="font-semibold">not evaluation order</span>. The kernel walks each
             chain top to bottom and the first match wins, so switch back to
-            <span class="font-semibold">Evaluation</span> before judging whether a rule can be reached.
+            <span class="font-semibold">Evaluation order</span> before judging whether a rule can be reached.
         </div>
     }
     else if (Model.TotalShadowed > 0)
     {
-        <div class="mb-3 mx-5 rounded-md border px-3 py-2 text-xs leading-relaxed
+        <div class="mb-3 rounded-md border px-3 py-2 text-xs leading-relaxed
                     bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
             <span class="font-semibold">@Model.TotalShadowed rule(s) can never run.</span>
-            An earlier rule in the same chain already matches everything they match, so they are dead code —
-            hover the <span class="font-semibold">unreachable</span> tag to see which one.
+            An earlier rule in the same chain already matches everything they match —
+            look for the <span class="font-semibold">unreachable</span> tag.
         </div>
     }
 
-    <div class="overflow-x-auto -mx-5">
-        <table class="min-w-full text-sm">
-            @foreach (var group in Model.Groups)
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <p class="text-xs text-surface-fg-muted">
+            <span class="font-medium text-surface-fg">@Model.TotalEnabled</span> active
+            @if (Model.TotalDisabled > 0)
             {
-                <thead>
-                    <tr>
-                        <th colspan="6" class="px-5 pt-5 pb-2 text-left">
-                            <div class="flex items-baseline gap-2 flex-wrap">
-                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Title</span>
-                                @if (group.Subtitle is not null)
-                                {
-                                    <span class="text-xs font-normal text-surface-fg-muted">@group.Subtitle</span>
-                                }
-                                <span class="text-xs font-normal text-surface-fg-muted">
-                                    · @group.EnabledCount active@(group.Rows.Count > group.EnabledCount ? $", {group.Rows.Count - group.EnabledCount} off" : "")
-                                </span>
-                                @if (group.ShadowedCount > 0)
-                                {
-                                    <span class="text-xs font-medium text-feedback-warning-fg">· @group.ShadowedCount unreachable</span>
-                                }
-                            </div>
-                        </th>
-                    </tr>
-                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
-                        <th class="pl-5 pr-2 py-1.5 font-medium w-12">Pri</th>
-                        <th class="px-2 py-1.5 font-medium w-20">Action</th>
-                        <th class="px-2 py-1.5 font-medium">Rule</th>
-                        <th class="px-2 py-1.5 font-medium hidden lg:table-cell w-32">Interfaces</th>
-                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
-                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y border-surface-border">
-                    @foreach (var row in group.Rows)
-                    {
-                        @await Html.PartialAsync("_FilterRuleRow", row)
-                    }
-                </tbody>
+                <span>· @Model.TotalDisabled off</span>
             }
-        </table>
+            @if (Model.TotalShadowed > 0)
+            {
+                <span class="text-feedback-warning-fg">· @Model.TotalShadowed unreachable</span>
+            }
+            <span>· @Model.TotalRows total</span>
+        </p>
+
+        @if (Model.Groups.Count > 1)
+        {
+            <nav class="flex flex-wrap gap-1" aria-label="Jump to group">
+                @foreach (var g in Model.Groups)
+                {
+                    <a href="#@g.Anchor"
+                       class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border border-surface-border hover:bg-surface-muted">
+                        <span class="font-semibold uppercase">@g.Title</span>
+                        <span class="text-surface-fg-muted">@g.EnabledCount</span>
+                    </a>
+                }
+            </nav>
+        }
+    </div>
+
+    <div class="space-y-4">
+        @foreach (var group in Model.Groups)
+        {
+            var policyCls = group.Policy switch
+            {
+                "drop"   => "badge-danger",
+                "accept" => "badge-success",
+                _        => "badge-muted"
+            };
+            <article id="@group.Anchor" class="rule-chain" data-filter-group
+                     x-data="{ open: true }">
+                <header class="flex items-start justify-between gap-3 px-5 py-3 border-b border-surface-border cursor-pointer"
+                        @@click="open = !open">
+                    <div class="min-w-0">
+                        <div class="flex items-baseline gap-2 flex-wrap">
+                            <h2 class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Title</h2>
+                            @if (group.Policy is not null)
+                            {
+                                <span class="badge @policyCls">policy @group.Policy</span>
+                            }
+                            else if (group.Subtitle is not null)
+                            {
+                                <span class="text-xs text-surface-fg-muted">@group.Subtitle</span>
+                            }
+                            <span class="text-xs text-surface-fg-muted">
+                                @group.EnabledCount active
+                                @if (group.DisabledCount > 0)
+                                {
+                                    <span>, @group.DisabledCount off</span>
+                                }
+                            </span>
+                            @if (group.ShadowedCount > 0)
+                            {
+                                <span class="text-xs font-medium text-feedback-warning-fg">· @group.ShadowedCount unreachable</span>
+                            }
+                        </div>
+                        @if (group.Summary is not null)
+                        {
+                            <p class="text-xs mt-0.5 text-surface-fg-muted">@group.Summary</p>
+                        }
+                    </div>
+                    <svg class="h-4 w-4 shrink-0 mt-0.5 text-surface-fg-muted transition"
+                         :class="open ? '' : 'rule-chain-closed'"
+                         fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/>
+                    </svg>
+                </header>
+                <div x-show="open">
+                    @foreach (var cluster in group.Clusters)
+                    {
+                        @await Html.PartialAsync("_FilterRuleRow", cluster)
+                    }
+                </div>
+            </article>
+        }
     </div>
 }

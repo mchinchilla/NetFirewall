@@ -14,11 +14,16 @@ namespace NetFirewall.Web.Controllers;
 public sealed class FwFilterRulesController : Controller
 {
     private readonly IFirewallService _firewall;
+    private readonly IScheduleService _schedules;
     private readonly ILogger<FwFilterRulesController> _logger;
 
-    public FwFilterRulesController(IFirewallService firewall, ILogger<FwFilterRulesController> logger)
+    public FwFilterRulesController(
+        IFirewallService firewall,
+        IScheduleService schedules,
+        ILogger<FwFilterRulesController> logger)
     {
         _firewall = firewall;
+        _schedules = schedules;
         _logger = logger;
     }
 
@@ -28,8 +33,10 @@ public sealed class FwFilterRulesController : Controller
     [HttpGet("table")]
     public async Task<IActionResult> Table([FromQuery] string? chain, [FromQuery] string? view, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(chain)) chain = null;
         var rows = await _firewall.GetFilterRulesAsync(chain, ct);
         var ifaces = await _firewall.GetInterfacesAsync(ct);
+        var schedules = await _schedules.GetAllAsync(ct);
 
         // Unknown or missing view falls back to evaluation order — the only
         // arrangement that tells the truth about how the ruleset runs.
@@ -40,16 +47,17 @@ public sealed class FwFilterRulesController : Controller
             rows,
             ifaces.ToDictionary(i => i.Id, i => i.Name),
             mode,
-            chain);
+            chain,
+            schedules.ToDictionary(s => s.Id, s => s.Name));
 
         return PartialView("_FilterRulesTable", model);
     }
 
     [HttpGet("edit/{id:guid?}")]
-    public async Task<IActionResult> Edit(Guid? id, [FromServices] IScheduleService schedules, CancellationToken ct)
+    public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {
         ViewBag.Interfaces = await _firewall.GetInterfacesAsync(ct);
-        ViewBag.Schedules  = await schedules.GetAllAsync(ct);
+        ViewBag.Schedules  = await _schedules.GetAllAsync(ct);
         if (id is null) return PartialView("_FilterRuleForm", new FilterRuleFormViewModel());
         var r = await _firewall.GetFilterRuleByIdAsync(id.Value, ct);
         return r is null ? NotFound() : PartialView("_FilterRuleForm", FromEntity(r));

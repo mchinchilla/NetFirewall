@@ -1,0 +1,23 @@
+@model NetFirewall.Models.Firewall.FwFilterRule
+@{
+    var delMsg = $"Delete {Model.Chain}/{Model.Action} rule (priority {Model.Priority})? Apply firewall after to push the change.";
+}
+<div class="inline-flex items-center gap-1">
+    <button type="button" class="btn btn-ghost text-xs"
+            hx-get="/Firewall/FilterRules/edit/@Model.Id"
+            hx-target="#drawer-body" hx-swap="innerHTML"
+            @@click="$store.drawer.openRaw('Edit filter rule')">Edit</button>
+    <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+            hx-post="/Firewall/FilterRules/delete/@Model.Id"
+            hx-trigger="confirmed-del"
+            data-msg="@delMsg"
+            @@click.prevent="(async () => {
+                const ok = await $store.confirm.ask({
+                    title: 'Delete rule?',
+                    message: $event.currentTarget.dataset.msg,
+                    confirmLabel: 'Delete',
+                    level: 'danger'
+                });
+                if (ok) htmx.trigger($el, 'confirmed-del');
+            })()">Delete</button>
+</div>

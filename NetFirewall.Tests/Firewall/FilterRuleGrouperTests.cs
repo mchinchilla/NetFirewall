@@ -187,5 +187,104 @@ public class FilterRuleGrouperTests
             .Groups.Single().Rows.Single();
 
         Assert.Empty(row.Chips);
+        Assert.True(row.MatchesEverything);
+    }
+
+    [Fact]
+    public void EvaluationView_ClustersConsecutiveInterfaceVariants()
+    {
+        var a = Rule("input", 31, protocol: "tcp", ports: ["22"], ifIn: Wan);
+        a.Description = "SSH allowed source IPs via ens224";
+        var b = Rule("input", 31, protocol: "tcp", ports: ["22"], ifIn: Lan);
+        b.Description = "SSH allowed source IPs via ens256";
+
+        var vm = FilterRuleGrouper.Build([a, b], Ifaces, FilterRuleView.Evaluation, null);
+        var clusters = vm.Groups.Single().Clusters;
+
+        Assert.Single(clusters);
+        Assert.True(clusters[0].IsCluster);
+        Assert.Equal(2, clusters[0].Members.Count);
+        Assert.Equal("SSH allowed source IPs", clusters[0].Title);
+        Assert.Equal(new[] { a.Id, b.Id }, clusters[0].Members.Select(m => m.Rule.Id));
+    }
+
+    [Fact]
+    public void EvaluationView_DoesNotClusterWhenMatchDiffers()
+    {
+        var a = Rule("input", 31, protocol: "tcp", ports: ["22"], ifIn: Wan);
+        var b = Rule("input", 31, protocol: "tcp", ports: ["443"], ifIn: Lan);
+
+        var vm = FilterRuleGrouper.Build([a, b], Ifaces, FilterRuleView.Evaluation, null);
+        Assert.Equal(2, vm.Groups.Single().Clusters.Count);
+    }
+
+    [Fact]
+    public void EvaluationView_DoesNotClusterDifferentPriority()
+    {
+        var a = Rule("input", 30, protocol: "tcp", ports: ["22"], ifIn: Wan);
+        var b = Rule("input", 31, protocol: "tcp", ports: ["22"], ifIn: Lan);
+
+        var vm = FilterRuleGrouper.Build([a, b], Ifaces, FilterRuleView.Evaluation, null);
+        Assert.Equal(2, vm.Groups.Single().Clusters.Count);
+    }
+
+    [Fact]
+    public void EvaluationView_MarksDefaultPolicyBand_AndPriorityGap()
+    {
+        var early = Rule("input", 5, "drop");
+        var terminal = Rule("input", 1000, "drop");
+
+        var vm = FilterRuleGrouper.Build([early, terminal], Ifaces, FilterRuleView.Evaluation, null);
+        var clusters = vm.Groups.Single().Clusters;
+
+        Assert.False(clusters[0].ShowGap);
+        Assert.Null(clusters[0].BandLabel);
+        Assert.True(clusters[1].ShowGap);
+        Assert.Equal("Default policy", clusters[1].BandLabel);
+    }
+
+    [Fact]
+    public void RegroupedViews_DoNotClusterInterfaceVariants()
+    {
+        // Service view is for "who can reach 22?", so the two NIC copies
+        // should stay separate rows under the same service group.
+        var a = Rule("input", 31, protocol: "tcp", ports: ["22"], ifIn: Wan);
+        var b = Rule("input", 31, protocol: "tcp", ports: ["22"], ifIn: Lan);
+
+        var vm = FilterRuleGrouper.Build([a, b], Ifaces, FilterRuleView.Service, null);
+        var group = vm.Groups.Single(g => g.Title == "tcp · 22");
+        Assert.Equal(2, group.Clusters.Count);
+        Assert.All(group.Clusters, c => Assert.False(c.IsCluster));
+    }
+
+    [Fact]
+    public void Chips_IncludeScheduleName_WhenProvided()
+    {
+        var rule = Rule("input", 10, protocol: "tcp", ports: ["22"]);
+        var schedId = Guid.NewGuid();
+        rule.ScheduleId = schedId;
+
+        var row = FilterRuleGrouper
+            .Build([rule], Ifaces, FilterRuleView.Evaluation, null,
+                new Dictionary<Guid, string> { [schedId] = "WORK_HOURS" })
+            .Groups.Single().Rows.Single();
+
+        Assert.Contains(row.Chips, c => c is { Label: "when", Value: "WORK_HOURS" });
+    }
+
+    [Fact]
+    public void EvaluationView_PreservesPriorityOrderInsideAClusteredChain()
+    {
+        var rules = new[]
+        {
+            Rule("input", 100, ifIn: Wan),
+            Rule("input", 5, "drop", ifIn: Wan),
+            Rule("input", 5, "drop", ifIn: Lan),
+            Rule("input", 40, protocol: "tcp", ports: ["22"])
+        };
+
+        var vm = FilterRuleGrouper.Build(rules, Ifaces, FilterRuleView.Evaluation, null);
+        var pris = vm.Groups.Single().Rows.Select(r => r.Rule.Priority).ToList();
+        Assert.Equal([5, 5, 40, 100], pris);
     }
 }

@@ -400,23 +400,34 @@ window.NetFw._applyTableFilter = function (tableId) {
     const root = document.getElementById(tableId);
     if (!root) return;
     const q = (window.NetFw._tableFilters[tableId] || "").trim().toLowerCase();
-    const rows = root.querySelectorAll("tbody > tr");
+    // Filter-rule cards mark rows with [data-filter-row]; classic tables keep
+    // using tbody > tr. Prefer the explicit marker when present so a redesigned
+    // list doesn't silently stop filtering.
+    const marked = root.querySelectorAll("[data-filter-row]");
+    const rows = marked.length > 0 ? marked : root.querySelectorAll("tbody > tr");
     let shown = 0;
-    rows.forEach((tr) => {
-        const hit = q === "" || tr.textContent.toLowerCase().includes(q);
-        tr.classList.toggle("hidden", !hit);
+    rows.forEach((el) => {
+        const hit = q === "" || el.textContent.toLowerCase().includes(q);
+        el.classList.toggle("hidden", !hit);
         if (hit) shown++;
     });
-    // Grouped tables (filter rules) repeat thead/tbody per section. A section
-    // header left standing over zero visible rows reads as an empty group that
-    // exists, so hide any header whose own tbody got filtered away.
-    root.querySelectorAll("thead").forEach((head) => {
-        const body = head.nextElementSibling;
-        if (!body || body.tagName !== "TBODY") return;
-        const anyVisible = Array.from(body.querySelectorAll("tr"))
-            .some((tr) => !tr.classList.contains("hidden"));
-        head.classList.toggle("hidden", !anyVisible);
-    });
+    if (marked.length > 0) {
+        root.querySelectorAll("[data-filter-group]").forEach((group) => {
+            const anyVisible = Array.from(group.querySelectorAll("[data-filter-row]"))
+                .some((el) => !el.classList.contains("hidden"));
+            group.classList.toggle("hidden", !anyVisible);
+        });
+    } else {
+        // Grouped tables (legacy filter-rules thead/tbody) hide a section
+        // header whose own tbody got filtered away.
+        root.querySelectorAll("thead").forEach((head) => {
+            const body = head.nextElementSibling;
+            if (!body || body.tagName !== "TBODY") return;
+            const anyVisible = Array.from(body.querySelectorAll("tr"))
+                .some((tr) => !tr.classList.contains("hidden"));
+            head.classList.toggle("hidden", !anyVisible);
+        });
+    }
 
     // "No matches" feedback (rule #6) when a query hides every row.
     let notice = root.querySelector("[data-filter-empty]");
@@ -1041,6 +1052,7 @@ document.addEventListener("alpine:init", () => {
         chain: "",
         view: "evaluation",
         viewsOpen: false,
+        hideDisabled: false,
 
         views: [
             { id: "evaluation", label: "Evaluation order", hint: "By chain, as the kernel runs it" },
@@ -1051,6 +1063,11 @@ document.addEventListener("alpine:init", () => {
 
         get viewLabel() {
             return (this.views.find(v => v.id === this.view) || this.views[0]).label;
+        },
+
+        setChain(id) {
+            this.chain = id;
+            this.refresh();
         },
 
         pick(id) {
