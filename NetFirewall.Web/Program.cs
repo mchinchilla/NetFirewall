@@ -256,6 +256,13 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.IMetricsQueryService,
 
 var app = builder.Build();
 
+{
+    var ds = app.Services.GetRequiredService<NpgsqlDataSource>();
+    var logFactory = app.Services.GetRequiredService<ILoggerFactory>();
+    await NetFirewall.Migrations.StartupMigrations.ApplyAsync(
+        ds, logFactory, app.Environment.ContentRootPath);
+}
+
 // Fail-fast DI sanity check. A controller dependency that isn't registered only
 // blows up at runtime on the first request to that page (an opaque 500) — e.g.
 // IPolicyRoutingService was daemon-only and a Web service started needing it.

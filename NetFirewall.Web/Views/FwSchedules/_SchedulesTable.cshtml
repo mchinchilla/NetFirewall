@@ -66,6 +66,10 @@ else
                         <td class="px-5 py-3 text-right">
                             <div class="inline-flex items-center gap-1">
                                 <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Firewall/FilterRules/time-policy?scheduleId=@s.Id"
+                                        hx-target="#drawer-body" hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('Apply @s.Name')">Apply to devices</button>
+                                <button type="button" class="btn btn-ghost text-xs"
                                         hx-get="/Firewall/Schedules/edit/@s.Id"
                                         hx-target="#drawer-body" hx-swap="innerHTML"
                                         @@click="$store.drawer.openRaw('Edit @s.Name')">Edit</button>

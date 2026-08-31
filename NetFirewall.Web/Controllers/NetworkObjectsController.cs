@@ -48,15 +48,34 @@ public sealed class NetworkObjectsController : Controller
         return obj is null ? NotFound() : PartialView("_ObjectForm", FromEntity(obj));
     }
 
-    /// <summary>Lightweight name-only listing for autocomplete in rule editors.</summary>
+    /// <summary>
+    /// Catalog for the address/object picker. HTMX swaps the HTML fragment
+    /// into the combo; JSON remains for any non-HTMX caller.
+    /// </summary>
     [HttpGet("autocomplete")]
-    public async Task<IActionResult> Autocomplete(string? q, CancellationToken ct)
+    public async Task<IActionResult> Autocomplete(string? q, string? except, CancellationToken ct)
     {
         var all = await _objects.GetAllAsync(includeMembers: false, ct);
-        var filtered = string.IsNullOrWhiteSpace(q)
-            ? all
-            : all.Where(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
-        return Json(filtered.Select(o => new { o.Id, o.Name, o.Type, o.Value }).Take(20));
+        var skip = new HashSet<string>(
+            (except ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+
+        IEnumerable<NetFirewall.Models.Network.NetworkObject> filtered = all.Where(o => !skip.Contains(o.Name));
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            filtered = filtered.Where(o =>
+                o.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (o.Type ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (o.Value ?? "").Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var take = string.IsNullOrWhiteSpace(q) ? 100 : 40;
+        var page = filtered.Take(take).ToList();
+
+        if (string.Equals(Request.Headers["HX-Request"], "true", StringComparison.OrdinalIgnoreCase))
+            return PartialView("_ObjectSuggest", page);
+
+        return Json(page.Select(o => new { o.Id, o.Name, o.Type, o.Value }));
     }
 
     /// <summary>

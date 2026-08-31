@@ -25,7 +25,12 @@ public class FwSchedule
     [Map("created_at")]    public DateTime CreatedAt   { get; set; }
     [Map("updated_at")]    public DateTime UpdatedAt   { get; set; }
 
-    /// <summary>True iff "now" (in this schedule's timezone) falls inside the window AND today's dow is enabled.</summary>
+    /// <summary>
+    /// True iff "now" (in this schedule's timezone) falls inside the window
+    /// AND the relevant day-of-week is enabled. A window with start &gt; end
+    /// wraps midnight (e.g. 22:00–06:00): the starting day owns the night
+    /// (Friday 22:00 through Saturday 06:00 if Friday is selected).
+    /// </summary>
     public bool IsActiveAt(DateTimeOffset utcNow)
     {
         if (!Enabled) return false;
@@ -35,9 +40,83 @@ public class FwSchedule
 
         var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow.UtcDateTime, tz);
         var dow = (int)local.DayOfWeek; // matches Postgres dow (0=Sun..6=Sat)
-        if (Array.IndexOf(DaysOfWeek, dow) < 0) return false;
-
         var t = local.TimeOfDay;
-        return t >= StartTime && t < EndTime;
+        var overnight = StartTime > EndTime;
+
+        if (!overnight)
+            return DayEnabled(dow) && t >= StartTime && t < EndTime;
+
+        // Overnight: [Start, 24h) on the start day, or [00:00, End) the next morning.
+        if (t >= StartTime) return DayEnabled(dow);
+        if (t < EndTime) return DayEnabled((dow + 6) % 7); // yesterday
+        return false;
     }
+
+    /// <summary>
+    /// Next UTC instant at which <see cref="IsActiveAt"/> flips for this
+    /// schedule (start inclusive or end exclusive). Null when the schedule
+    /// is disabled, has no days, or has no future edge in the next week.
+    /// The daemon watcher sleeps until this instant so nft is rebuilt at
+    /// the programmed hour instead of up to a minute later.
+    /// </summary>
+    public DateTimeOffset? NextTransitionUtc(DateTimeOffset utcNow)
+    {
+        if (!Enabled) return null;
+        if (DaysOfWeek is not { Length: > 0 }) return null;
+
+        TimeZoneInfo tz;
+        try { tz = TimeZoneInfo.FindSystemTimeZoneById(Timezone); }
+        catch { tz = TimeZoneInfo.Utc; }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow.UtcDateTime, tz);
+        var overnight = StartTime > EndTime;
+        DateTimeOffset? soonest = null;
+
+        // 8 days covers a full week plus an overnight spill into day 8.
+        for (var offset = 0; offset <= 8; offset++)
+        {
+            var day = local.Date.AddDays(offset);
+            var dow = (int)day.DayOfWeek;
+
+            if (overnight)
+            {
+                if (DayEnabled(dow))
+                    Consider(day.Add(StartTime));
+                // End of yesterday's overnight window lands on this morning.
+                if (DayEnabled((dow + 6) % 7))
+                    Consider(day.Add(EndTime));
+            }
+            else if (DayEnabled(dow))
+            {
+                Consider(day.Add(StartTime));
+                Consider(day.Add(EndTime));
+            }
+        }
+
+        return soonest;
+
+        void Consider(DateTime localInstant)
+        {
+            var utc = TryToUtc(localInstant, tz);
+            if (utc is { } t && t > utcNow && (soonest is null || t < soonest))
+                soonest = t;
+        }
+    }
+
+    private static DateTimeOffset? TryToUtc(DateTime localInstant, TimeZoneInfo tz)
+    {
+        var unspecified = DateTime.SpecifyKind(localInstant, DateTimeKind.Unspecified);
+        try
+        {
+            if (tz.IsInvalidTime(unspecified)) return null;
+            var utc = TimeZoneInfo.ConvertTimeToUtc(unspecified, tz);
+            return new DateTimeOffset(utc, TimeSpan.Zero);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private bool DayEnabled(int dow) => Array.IndexOf(DaysOfWeek, dow) >= 0;
 }

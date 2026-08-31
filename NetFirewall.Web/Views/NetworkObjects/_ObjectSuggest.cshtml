@@ -1,0 +1,21 @@
+@model IReadOnlyList<NetFirewall.Models.Network.NetworkObject>
+@if (Model.Count == 0)
+{
+    <p class="px-3 py-2 text-xs text-surface-fg-muted">
+        No matching objects. Add them under Network → Objects.
+    </p>
+}
+else
+{
+    @foreach (var o in Model)
+    {
+        <button type="button" data-object="@o.Name"
+                class="object-suggest-row w-full text-left px-3 py-2 text-sm flex items-baseline justify-between gap-3">
+            <span class="font-mono font-medium">@o.Name</span>
+            <span class="text-xs text-surface-fg-muted">
+                <span class="uppercase tracking-wide">@o.Type</span>@if (!string.IsNullOrEmpty(o.Value))
+                { <span> · <span class="font-mono">@o.Value</span></span> }
+            </span>
+        </button>
+    }
+}

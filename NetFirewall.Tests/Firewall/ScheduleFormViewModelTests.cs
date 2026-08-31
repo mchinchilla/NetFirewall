@@ -56,12 +56,22 @@ public class ScheduleFormViewModelTests
     }
 
     [Fact]
-    public void Validate_StartNotBeforeEnd_Fails()
+    public void Validate_OvernightWindow_Passes()
+    {
+        Assert.Empty(Run(Valid(m =>
+        {
+            m.StartTime = new TimeSpan(22, 1, 0);
+            m.EndTime = new TimeSpan(5, 59, 0);
+        })));
+    }
+
+    [Fact]
+    public void Validate_ZeroLengthWindow_Fails()
     {
         var results = Run(Valid(m =>
         {
-            m.StartTime = new TimeSpan(17, 0, 0);
-            m.EndTime = new TimeSpan(9, 0, 0);
+            m.StartTime = new TimeSpan(10, 0, 0);
+            m.EndTime = new TimeSpan(10, 0, 0);
         }));
         Assert.Contains(results, r => r.MemberNames.Contains(nameof(ScheduleFormViewModel.StartTime)));
     }

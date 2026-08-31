@@ -45,6 +45,7 @@ public sealed class ScheduleService : IScheduleService
         await using var cmd = new NpgsqlCommand(sql, conn);
         Bind(cmd, s);
         await cmd.ExecuteNonQueryAsync(ct);
+        await ScheduleApplyNotify.TrySendAsync(conn, $"schedule.create:{s.Id:N}", _logger, ct);
 
         _logger.LogInformation("Schedule created: {Name}", s.Name);
         return s;
@@ -65,6 +66,7 @@ public sealed class ScheduleService : IScheduleService
         await using var cmd = new NpgsqlCommand(sql, conn);
         Bind(cmd, s);
         await cmd.ExecuteNonQueryAsync(ct);
+        await ScheduleApplyNotify.TrySendAsync(conn, $"schedule.update:{s.Id:N}", _logger, ct);
         return s;
     }
 
@@ -73,15 +75,18 @@ public sealed class ScheduleService : IScheduleService
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand("DELETE FROM fw_schedules WHERE id = @id", conn);
         cmd.Parameters.AddWithValue("id", id);
-        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        var deleted = await cmd.ExecuteNonQueryAsync(ct) > 0;
+        if (deleted)
+            await ScheduleApplyNotify.TrySendAsync(conn, $"schedule.delete:{id:N}", _logger, ct);
+        return deleted;
     }
 
     private static void Validate(FwSchedule s)
     {
         if (string.IsNullOrWhiteSpace(s.Name))
             throw new ArgumentException("Schedule name is required.");
-        if (s.StartTime >= s.EndTime)
-            throw new ArgumentException("Start time must be earlier than end time.");
+        if (s.StartTime == s.EndTime)
+            throw new ArgumentException("Start and end time cannot be the same. A window that starts after it ends wraps midnight.");
         if (s.DaysOfWeek.Length == 0)
             throw new ArgumentException("Pick at least one day of week.");
         if (s.DaysOfWeek.Any(d => d < 0 || d > 6))

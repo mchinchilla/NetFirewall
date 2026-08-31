@@ -60,6 +60,13 @@ public class FwFilterRule
     [Map("schedule_id")]
     public Guid? ScheduleId { get; set; }
 
+    /// <summary>
+    /// When true, the rule is applied while its schedule is <em>idle</em>
+    /// (outside the window). Null schedule ignores this flag.
+    /// </summary>
+    [Map("schedule_invert")]
+    public bool ScheduleInvert { get; set; }
+
     // Navigation properties (not mapped)
     public FwInterface? InterfaceIn { get; set; }
     public FwInterface? InterfaceOut { get; set; }

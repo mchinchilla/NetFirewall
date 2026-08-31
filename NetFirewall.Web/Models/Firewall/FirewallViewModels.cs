@@ -51,6 +51,52 @@ public sealed class FilterRuleFormViewModel
 
     /// <summary>Optional time-window gating (FK to fw_schedules). Null = always-on.</summary>
     public Guid? ScheduleId { get; set; }
+
+    /// <summary>
+    /// When a schedule is set: false = rule lives inside the window;
+    /// true = rule lives outside it (the bedtime-block pattern).
+    /// </summary>
+    public bool ScheduleInvert { get; set; }
+}
+
+/// <summary>
+/// Focused composer: attach a schedule to network objects as a time policy
+/// (allow-only during the window, or block during the window). Produces one
+/// drop rule; invert + priority 2 is what actually cuts kids off at bedtime
+/// instead of leaving established streams up.
+/// </summary>
+public sealed class TimePolicyFormViewModel : IValidatableObject
+{
+    [Required(ErrorMessage = "Pick a schedule.")]
+    public Guid? ScheduleId { get; set; }
+
+    /// <summary>allow-during | block-during</summary>
+    [Required, RegularExpression("^(allow-during|block-during)$",
+        ErrorMessage = "Pick whether to allow or block during the window.")]
+    public string Mode { get; set; } = "allow-during";
+
+    [Required, RegularExpression("^(input|forward|output)$",
+        ErrorMessage = "Chain must be input, forward or output.")]
+    public string Chain { get; set; } = "forward";
+
+    /// <summary>Comma-separated object names and/or CIDRs.</summary>
+    [Required(ErrorMessage = "Pick at least one network object or address.")]
+    public string Sources { get; set; } = string.Empty;
+
+    [StringLength(255)]
+    public string? Description { get; set; }
+
+    [Range(0, 10000)]
+    public int Priority { get; set; } = 2;
+
+    public bool Enabled { get; set; } = true;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext context)
+    {
+        if (FwArrayHelpers.Split(Sources) is not { Length: > 0 })
+            yield return new ValidationResult("Pick at least one network object or address.",
+                new[] { nameof(Sources) });
+    }
 }
 
 // =====================================================================

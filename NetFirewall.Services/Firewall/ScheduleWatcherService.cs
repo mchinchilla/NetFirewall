@@ -1,27 +1,32 @@
+using System.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace NetFirewall.Services.Firewall;
 
 /// <summary>
-/// Background service that ticks every minute, computes the set of currently-
-/// active schedule ids, and triggers an nft re-apply when that set changed
-/// since the last tick. Hosted in the daemon (needs CAP_NET_ADMIN to actually
-/// load the new ruleset).
+/// Background service hosted in the daemon (needs CAP_NET_ADMIN). Rebuilds
+/// nftables whenever the set of currently-active scheduled rules would
+/// change: at daemon start (so a restart after a missed edge is not stale),
+/// at each schedule Start/End, and when a schedule or scheduled filter rule
+/// is written (Postgres NOTIFY).
 ///
-/// Cheap by design: a tick reads <c>fw_schedules</c> once and runs an
-/// in-process predicate per schedule. Apply only happens on transitions, so
-/// most ticks are no-ops even with dozens of schedules.
+/// Generation still snapshots "is this rule live right now" — invert drops
+/// for an allow-during policy are in the ruleset outside the window and
+/// gone inside it. Sleeping until the next edge (plus a 15s safety cap)
+/// is what makes the programmed hour actually take effect.
 /// </summary>
 public sealed class ScheduleWatcherService : BackgroundService
 {
-    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(2);
 
     private readonly IServiceProvider _services;
     private readonly ILogger<ScheduleWatcherService> _logger;
 
-    private HashSet<Guid> _lastActive = new();
+    private string? _lastFingerprint;
+    private NpgsqlConnection? _listen;
 
     public ScheduleWatcherService(IServiceProvider services, ILogger<ScheduleWatcherService> logger)
     {
@@ -31,63 +36,161 @@ public sealed class ScheduleWatcherService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Wait a beat so the daemon's DB pool warms up before the first tick.
-        try { await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken); }
+        try { await Task.Delay(StartupDelay, stoppingToken); }
         catch (OperationCanceledException) { return; }
 
-        // Seed the "last active" set so we don't re-apply on the very first
-        // tick just because we don't know the prior state.
-        _lastActive = await ComputeActiveAsync(stoppingToken);
-        _logger.LogInformation("Schedule watcher started — initial active set has {Count} schedule(s)", _lastActive.Count);
+        // Always apply on start: seeding without apply left nft stale after
+        // a restart that missed a transition (or a time-policy saved while
+        // the daemon was down).
+        await SafeTickAsync(forceApply: true, stoppingToken);
 
-        using var timer = new PeriodicTimer(TickInterval);
-        while (!stoppingToken.IsCancellationRequested && await SafeWaitAsync(timer, stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var current = await ComputeActiveAsync(stoppingToken);
-                if (!current.SetEquals(_lastActive))
-                {
-                    _logger.LogInformation(
-                        "Schedule transition: was [{Before}] now [{After}] — re-applying firewall",
-                        string.Join(",", _lastActive),
-                        string.Join(",", current));
-                    await ReApplyAsync(stoppingToken);
-                    _lastActive = current;
-                }
+                var delay = await ComputeDelayAsync(stoppingToken);
+                await WaitForWakeAsync(delay, stoppingToken);
+                await SafeTickAsync(forceApply: false, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Schedule watcher tick failed; will retry next minute");
+                _logger.LogWarning(ex, "Schedule watcher tick failed; retrying shortly");
+                try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+                catch (OperationCanceledException) { break; }
             }
         }
 
+        await DisposeListenAsync();
         _logger.LogInformation("Schedule watcher stopped");
     }
 
-    private async Task<HashSet<Guid>> ComputeActiveAsync(CancellationToken ct)
+    /// <summary>
+    /// Compare the live schedule/rule fingerprint to the last apply and
+    /// rebuild nft when it changed (or when <paramref name="forceApply"/>).
+    /// Internal so tests can drive one evaluation without the host loop.
+    /// </summary>
+    internal async Task<bool> TickAsync(bool forceApply, CancellationToken ct)
     {
         using var scope = _services.CreateScope();
-        var schedules = scope.ServiceProvider.GetRequiredService<IScheduleService>();
-        var nowUtc = DateTimeOffset.UtcNow;
-        var all = await schedules.GetAllAsync(ct);
-        return all.Where(s => s.IsActiveAt(nowUtc)).Select(s => s.Id).ToHashSet();
+        var scheduleSvc = scope.ServiceProvider.GetRequiredService<IScheduleService>();
+        var firewall = scope.ServiceProvider.GetRequiredService<IFirewallService>();
+        var schedules = await scheduleSvc.GetAllAsync(ct);
+        var rules = await firewall.GetFilterRulesAsync(null, ct);
+        var now = DateTimeOffset.UtcNow;
+        var fp = ScheduleApplyPlanner.Fingerprint(schedules, rules, now);
+
+        if (!forceApply && fp == _lastFingerprint)
+            return false;
+
+        _logger.LogInformation(
+            "Schedule-triggered nft apply ({Reason}) — {Count} scheduled rule(s)",
+            forceApply && _lastFingerprint is null ? "startup" : "transition",
+            rules.Count(r => r.Enabled && r.ScheduleId.HasValue));
+
+        await ReApplyAsync(scope.ServiceProvider, ct);
+        _lastFingerprint = fp;
+        return true;
     }
 
-    private async Task ReApplyAsync(CancellationToken ct)
+    private async Task SafeTickAsync(bool forceApply, CancellationToken ct)
+    {
+        try
+        {
+            await TickAsync(forceApply, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Schedule watcher apply failed; will retry");
+        }
+    }
+
+    private async Task<TimeSpan> ComputeDelayAsync(CancellationToken ct)
     {
         using var scope = _services.CreateScope();
-        var nft = scope.ServiceProvider.GetRequiredService<INftApplyService>();
+        var scheduleSvc = scope.ServiceProvider.GetRequiredService<IScheduleService>();
+        var firewall = scope.ServiceProvider.GetRequiredService<IFirewallService>();
+        var schedules = await scheduleSvc.GetAllAsync(ct);
+        var rules = await firewall.GetFilterRulesAsync(null, ct);
+        var now = DateTimeOffset.UtcNow;
+        var edge = ScheduleApplyPlanner.NextEdge(schedules, rules, now);
+        var delay = ScheduleApplyPlanner.DelayUntil(now, edge);
+        if (edge is { } t && delay < ScheduleApplyPlanner.MaxTick)
+            _logger.LogDebug("Schedule watcher sleeping {Delay} until next edge {Edge:o}", delay, t);
+        return delay;
+    }
+
+    private async Task WaitForWakeAsync(TimeSpan delay, CancellationToken ct)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linked.CancelAfter(delay);
+        try
+        {
+            try { await EnsureListenAsync(linked.Token); }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Schedule watcher LISTEN unavailable; falling back to timer");
+                await Task.Delay(delay, ct);
+                return;
+            }
+
+            if (_listen is null)
+            {
+                await Task.Delay(delay, ct);
+                return;
+            }
+
+            await _listen.WaitAsync(linked.Token);
+            _logger.LogDebug("Schedule watcher woken by NOTIFY");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Timer elapsed — next clock edge or the safety cap.
+        }
+        catch (NpgsqlException ex)
+        {
+            _logger.LogDebug(ex, "Schedule watcher LISTEN dropped; will reconnect");
+            await DisposeListenAsync();
+        }
+    }
+
+    private async Task EnsureListenAsync(CancellationToken ct)
+    {
+        if (_listen is { State: ConnectionState.Open }) return;
+        await DisposeListenAsync();
+
+        var ds = _services.GetService<NpgsqlDataSource>();
+        if (ds is null) return;
+
+        var conn = await ds.OpenConnectionAsync(ct);
+        await using (var cmd = new NpgsqlCommand($"LISTEN {ScheduleApplyNotify.Channel}", conn))
+            await cmd.ExecuteNonQueryAsync(ct);
+
+        _listen = conn;
+        _logger.LogInformation("Schedule watcher listening on {Channel}", ScheduleApplyNotify.Channel);
+    }
+
+    private async Task DisposeListenAsync()
+    {
+        if (_listen is null) return;
+        try { await _listen.DisposeAsync(); }
+        catch { /* already gone */ }
+        _listen = null;
+    }
+
+    private async Task ReApplyAsync(IServiceProvider sp, CancellationToken ct)
+    {
+        var nft = sp.GetRequiredService<INftApplyService>();
         var result = await nft.ApplyConfigurationAsync(ct);
         if (!result.Success)
             _logger.LogWarning("Schedule-triggered nft apply failed (exit {Exit}): {Err}",
                 result.ExitCode, result.Error);
-    }
-
-    private static async Task<bool> SafeWaitAsync(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
     }
 }

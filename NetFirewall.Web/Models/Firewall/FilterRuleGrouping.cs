@@ -30,6 +30,9 @@ public sealed class FilterRuleRowViewModel
     public required FwFilterRule Rule { get; init; }
     public string? InterfaceIn { get; init; }
     public string? InterfaceOut { get; init; }
+    /// <summary>WAN / LAN / VPN, when the interface is in the catalog.</summary>
+    public string? InterfaceInType { get; init; }
+    public string? InterfaceOutType { get; init; }
 
     /// <summary>
     /// The earlier rule that makes this one unreachable, when there is one.
@@ -57,7 +60,8 @@ public sealed class FilterRuleRowViewModel
             if (r.SourceAddresses is { Length: > 0 }) chips.Add(("src", Summarise(r.SourceAddresses)));
             if (r.DestinationAddresses is { Length: > 0 }) chips.Add(("dst", Summarise(r.DestinationAddresses)));
             if (!string.IsNullOrWhiteSpace(r.RateLimit)) chips.Add(("rate", r.RateLimit));
-            if (!string.IsNullOrWhiteSpace(ScheduleName)) chips.Add(("when", ScheduleName));
+            if (!string.IsNullOrWhiteSpace(ScheduleName))
+                chips.Add((ScheduleInvert ? "unless" : "when", ScheduleName));
 
             return chips;
         }
@@ -65,6 +69,9 @@ public sealed class FilterRuleRowViewModel
 
     /// <summary>Resolved schedule name, when the rule is gated by one.</summary>
     public string? ScheduleName { get; init; }
+
+    /// <summary>True when the rule applies outside the named window.</summary>
+    public bool ScheduleInvert { get; init; }
 
     /// <summary>
     /// True when the rule has no match conditions and no interface — it is
@@ -149,4 +156,12 @@ public sealed class FilterRulesTableViewModel
     public int TotalShadowed => Groups.Sum(g => g.ShadowedCount);
     public int TotalEnabled => Groups.Sum(g => g.EnabledCount);
     public int TotalDisabled => TotalRows - TotalEnabled;
+}
+
+/// <summary>One WAN/LAN/VPN chip in the filter-rule table's interface column.</summary>
+public sealed class IfaceChipViewModel
+{
+    public required string Name { get; init; }
+    public string? Type { get; init; }
+    public string? Dir { get; init; } // "in" / "out" / null
 }

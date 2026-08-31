@@ -1,0 +1,110 @@
+@model NetFirewall.Web.Models.Firewall.TimePolicyFormViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Firewall
+@{
+    var schedules = (IReadOnlyList<NetFirewall.Models.Firewall.FwSchedule>)(ViewBag.Schedules
+        ?? Array.Empty<NetFirewall.Models.Firewall.FwSchedule>());
+    var schedOptions = new List<FormFieldViewModel.SelectOption> { new("", "Pick a schedule…") };
+    foreach (var s in schedules)
+        schedOptions.Add(new(s.Id.ToString(),
+            $"{s.Name} · {s.StartTime:hh\\:mm}–{s.EndTime:hh\\:mm} {s.Timezone}",
+            s.Id == Model.ScheduleId));
+}
+
+<form id="time-policy-form" hx-post="/Firewall/FilterRules/time-policy" hx-target="this" hx-swap="outerHTML"
+      x-data="timePolicyForm()"
+      @@submit="onSubmit($event)">
+    @Html.AntiForgeryToken()
+
+    <p class="text-sm mb-4 text-surface-fg-muted">
+        Attach a schedule to devices you already named as network objects
+        (a kid's phone, PC, laptop, or a group of them). This writes one drop
+        rule; the daemon installs it now and at each schedule edge.
+    </p>
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.ScheduleId), Label = "Schedule", Kind = FormFieldKind.Select, Required = true,
+            Value = Model.ScheduleId?.ToString(), Options = schedOptions,
+            Help = "Create windows under Firewall → Schedules. Example: KIDS_ONLINE 06:00–22:00."
+        })
+
+        @await Html.PartialAsync("_AddressPicker", new AddressPickerViewModel {
+            Name = nameof(Model.Sources), Label = "Who", Required = true,
+            Value = Model.Sources,
+            Placeholder = "Search objects…",
+            OpenOnEmpty = true,
+            Help = "Click to pick from Network → Objects (hosts, groups). You can select several."
+        })
+
+        <div>
+            <p class="block text-xs font-medium mb-2 text-surface-fg">During the window <span class="text-feedback-danger-fg">*</span></p>
+            <div class="space-y-2">
+                <label class="flex items-start gap-2.5 cursor-pointer">
+                    <input type="radio" name="Mode" value="allow-during" class="mt-0.5 h-4 w-4"
+                           checked="@(Model.Mode != "block-during")"
+                           @@change="mode = 'allow-during'" />
+                    <span class="text-sm">
+                        Allow only then
+                        <span class="block text-xs mt-0.5 text-surface-fg-muted">
+                            They can go online inside the window. Outside it, traffic is dropped — including
+                            streams already open. Priority 2 sits in front of established.
+                        </span>
+                    </span>
+                </label>
+                <label class="flex items-start gap-2.5 cursor-pointer">
+                    <input type="radio" name="Mode" value="block-during" class="mt-0.5 h-4 w-4"
+                           checked="@(Model.Mode == "block-during")"
+                           @@change="mode = 'block-during'" />
+                    <span class="text-sm">
+                        Block during the window
+                        <span class="block text-xs mt-0.5 text-surface-fg-muted">
+                            Use this for a “no internet at dinner” schedule. The drop is live only while the window is active.
+                        </span>
+                    </span>
+                </label>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Chain), Label = "Chain", Kind = FormFieldKind.Select, Required = true,
+                Value = Model.Chain,
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("forward", "Forward — LAN clients to the internet"),
+                    new FormFieldViewModel.SelectOption("input",   "Input — to this firewall"),
+                    new FormFieldViewModel.SelectOption("output",  "Output — from this firewall")
+                },
+                Help = "Kids' phones and laptops leaving the LAN use Forward."
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.Priority), Label = "Priority", Kind = FormFieldKind.Number, Required = true,
+                Value = Model.Priority.ToString(), Min = "0", Max = "10000",
+                Help = "2 beats the usual established-allow at 3, so bedtime actually ends sessions."
+            })
+        </div>
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description (optional)",
+            Value = Model.Description,
+            Placeholder = "auto: Time limit · allow KIDS_DEVICES during KIDS_ONLINE"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,
+            Value = Model.Enabled ? "true" : "false"
+        })
+    </div>
+
+    <p class="mt-4 text-xs rounded-md border px-3 py-2 bg-accent-soft text-accent border-surface-border"
+       x-text="mode === 'allow-during'
+            ? 'Allow-only: a drop is inserted while the schedule is idle. During the window the drop is gone and your other accepts apply.'
+            : 'Block-during: a drop is inserted while the schedule is active. Outside the window this rule is gone.'"></p>
+
+    <p x-cloak x-show="missingSources" class="mt-2 text-xs text-feedback-danger-fg">Pick at least one network object or address.</p>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create time policy</button>
+    </div>
+</form>

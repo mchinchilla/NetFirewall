@@ -28,8 +28,9 @@ public sealed class ScheduleFormViewModel : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext context)
     {
-        if (StartTime >= EndTime)
-            yield return new ValidationResult("Start time must be earlier than end time.",
+        if (StartTime == EndTime)
+            yield return new ValidationResult(
+                "Start and end time cannot be the same. A window that starts after it ends wraps midnight (e.g. 22:00–06:00).",
                 new[] { nameof(StartTime), nameof(EndTime) });
         if (DaysOfWeek is not { Length: > 0 })
             yield return new ValidationResult("Pick at least one day.", new[] { nameof(DaysOfWeek) });

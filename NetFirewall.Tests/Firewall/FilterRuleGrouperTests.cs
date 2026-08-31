@@ -273,6 +273,48 @@ public class FilterRuleGrouperTests
     }
 
     [Fact]
+    public void Chips_InvertedSchedule_UsesUnless()
+    {
+        var rule = Rule("forward", 2, "drop");
+        var schedId = Guid.NewGuid();
+        rule.ScheduleId = schedId;
+        rule.ScheduleInvert = true;
+
+        var row = FilterRuleGrouper
+            .Build([rule], Ifaces, FilterRuleView.Evaluation, null,
+                new Dictionary<Guid, string> { [schedId] = "KIDS_ONLINE" })
+            .Groups.Single().Rows.Single();
+
+        Assert.Contains(row.Chips, c => c is { Label: "unless", Value: "KIDS_ONLINE" });
+    }
+
+    [Fact]
+    public void Row_CarriesInterfaceType_WhenCatalogProvidesIt()
+    {
+        var rule = Rule("input", 10, ifIn: Wan);
+        var types = new Dictionary<Guid, string> { [Wan] = "WAN", [Lan] = "LAN" };
+
+        var row = FilterRuleGrouper
+            .Build([rule], Ifaces, FilterRuleView.Evaluation, null, interfaceTypes: types)
+            .Groups.Single().Rows.Single();
+
+        Assert.Equal("ens224", row.InterfaceIn);
+        Assert.Equal("WAN", row.InterfaceInType);
+    }
+
+    [Fact]
+    public void InterfaceView_SubtitleIsTheInterfaceType()
+    {
+        var rule = Rule("input", 10, ifIn: Wan);
+        var types = new Dictionary<Guid, string> { [Wan] = "WAN" };
+
+        var vm = FilterRuleGrouper.Build([rule], Ifaces, FilterRuleView.Interface, null, interfaceTypes: types);
+
+        Assert.Equal("ens224", vm.Groups.Single().Title);
+        Assert.Equal("WAN", vm.Groups.Single().Subtitle);
+    }
+
+    [Fact]
     public void EvaluationView_PreservesPriorityOrderInsideAClusteredChain()
     {
         var rules = new[]

@@ -668,6 +668,82 @@
     }
     .hide-disabled-rules [data-disabled="true"] { display: none !important; }
     .hide-disabled-rules [data-filter-group]:not(:has([data-disabled="false"])) { display: none; }
+    .hide-disabled-rules tbody:not(:has(tr[data-disabled="false"])) { display: none; }
+    .hide-disabled-rules thead:not(:has(+ tbody tr[data-disabled="false"])) { display: none; }
+
+    /* Interface identity. One chip, three labelled parts — dir is sans-caps,
+     * name is mono, role is a nested tag — so "in ens192 WAN" doesn't read
+     * as three strings glued together. Height matches .badge so Action /
+     * Interface / Status sit on the same row axis. */
+    .iface-chip {
+        display: inline-flex;
+        align-items: center;
+        height: 1.5rem;
+        padding: 0 0.2rem 0 0.5rem;
+        gap: 0.35rem;
+        border-radius: 9999px;
+        line-height: 1;
+        vertical-align: middle;
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        color: var(--accent);
+        border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    }
+    .iface-chip-dir {
+        font-size: 0.625rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        line-height: 1;
+        opacity: 0.7;
+    }
+    .iface-chip-name {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        line-height: 1;
+    }
+    .iface-chip-role {
+        font-size: 0.625rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        line-height: 1;
+        padding: 0.15rem 0.4rem;
+        border-radius: 9999px;
+        background: color-mix(in srgb, currentColor 16%, transparent);
+    }
+    .iface-chip-wan {
+        background: color-mix(in srgb, var(--feedback-warning-fg) 14%, transparent);
+        color: var(--feedback-warning-fg);
+        border-color: color-mix(in srgb, var(--feedback-warning-fg) 30%, transparent);
+    }
+    .iface-chip-lan {
+        background: color-mix(in srgb, var(--feedback-info-fg) 14%, transparent);
+        color: var(--feedback-info-fg);
+        border-color: color-mix(in srgb, var(--feedback-info-fg) 30%, transparent);
+    }
+    .iface-chip-vpn {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    }
+    .iface-chip-any {
+        background: var(--surface-muted);
+        color: var(--surface-fg-muted);
+        border-color: var(--surface-border);
+        padding-right: 0.5rem;
+        font-weight: 500;
+    }
+    /* Evaluation view already groups by chain, so the Chain column is noise. */
+    .rule-table-eval .col-chain { display: none; }
+    .rule-table-eval td,
+    .rule-table-grouped td {
+        vertical-align: middle;
+    }
+    .rule-table-eval .badge,
+    .rule-table-grouped .badge {
+        min-height: 1.5rem;
+    }
 
     .seg {
         @apply inline-flex items-center rounded-md border p-0.5;
@@ -675,12 +751,15 @@
         background: var(--surface-muted);
     }
     .seg-btn {
-        @apply px-2.5 py-1 rounded text-xs font-medium;
+        @apply px-2.5 py-1 rounded text-xs font-medium cursor-pointer;
         color: var(--surface-fg-muted);
     }
     .seg-btn.is-on {
         background: var(--surface-elevated);
         color: var(--surface-fg);
+    }
+    .object-suggest-row.is-active {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
 
     @media (max-width: 640px) {

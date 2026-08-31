@@ -122,8 +122,26 @@
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.ScheduleId), Label = "Schedule", Kind = FormFieldKind.Select,
             Value = Model.ScheduleId?.ToString(), Options = schedOptions,
-            Help = "Time-window gate. The daemon re-applies the firewall when the schedule transitions active/inactive. Manage under Firewall → Schedules."
+            Help = "Time-window gate. The daemon re-applies the firewall when the schedule transitions. For bedtime-style policies use Filter rules → Time policy."
         })
+
+        <div x-cloak x-show="scheduleOn" class="rounded-md border px-3 py-2 space-y-2 border-surface-border">
+            <p class="text-xs font-medium text-surface-fg">When the rule is live</p>
+            <label class="flex items-start gap-2.5 cursor-pointer">
+                <input type="radio" name="ScheduleInvert" value="false" class="mt-0.5 h-4 w-4"
+                       checked="@(!Model.ScheduleInvert)" />
+                <span class="text-sm">While the schedule is <span class="font-medium">active</span>
+                    <span class="block text-xs text-surface-fg-muted">Normal: the rule is in the ruleset only inside the window.</span>
+                </span>
+            </label>
+            <label class="flex items-start gap-2.5 cursor-pointer">
+                <input type="radio" name="ScheduleInvert" value="true" class="mt-0.5 h-4 w-4"
+                       checked="@(Model.ScheduleInvert)" />
+                <span class="text-sm">While the schedule is <span class="font-medium">idle</span>
+                    <span class="block text-xs text-surface-fg-muted">Bedtime: a drop with this set sits outside the window and cuts traffic when the clock is off-hours.</span>
+                </span>
+            </label>
+        </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
             Name = nameof(Model.Enabled), Label = "Enabled", Kind = FormFieldKind.Checkbox,

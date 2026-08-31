@@ -1,0 +1,23 @@
+@model NetFirewall.Web.Models.Firewall.IfaceChipViewModel
+@{
+    var kind = (Model.Type ?? "").Trim().ToLowerInvariant();
+    var isAny = string.Equals(Model.Name, "any", StringComparison.OrdinalIgnoreCase);
+    var cls = isAny ? "iface-chip-any" : kind switch
+    {
+        "wan" => "iface-chip-wan",
+        "lan" => "iface-chip-lan",
+        "vpn" => "iface-chip-vpn",
+        _     => ""
+    };
+}
+<span class="iface-chip @cls">
+    @if (!string.IsNullOrEmpty(Model.Dir))
+    {
+        <span class="iface-chip-dir">@Model.Dir</span>
+    }
+    <span class="iface-chip-name">@Model.Name</span>
+    @if (!isAny && !string.IsNullOrWhiteSpace(Model.Type))
+    {
+        <span class="iface-chip-role">@Model.Type</span>
+    }
+</span>

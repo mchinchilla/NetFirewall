@@ -31,6 +31,7 @@
                 <input type="time" name="EndTime" value="@Model.EndTime.ToString(@"hh\:mm")" class="input font-mono" required />
             </div>
         </div>
+        <p class="text-xs text-surface-fg-muted">If start is later than end, the window wraps midnight (e.g. 22:00–06:00).</p>
 
         @await Html.PartialAsync("_TimezonePicker", new TimezonePickerViewModel {
             Name = nameof(Model.Timezone), Label = "Timezone", Required = true,

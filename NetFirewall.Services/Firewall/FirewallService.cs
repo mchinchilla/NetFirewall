@@ -465,13 +465,14 @@ public sealed class FirewallService : IFirewallService
         const string sql = @"
             INSERT INTO fw_filter_rules (id, chain, description, action, protocol, interface_in_id, interface_out_id,
                 source_addresses, destination_addresses, destination_ports, connection_state, rate_limit, log_prefix,
-                enabled, priority, schedule_id, created_at)
-            VALUES (@id, @chain, @desc, @action, @proto, @ifin, @ifout, @src, @dst, @ports, @state, @rate, @log, @enabled, @priority, @sched, @created)";
+                enabled, priority, schedule_id, schedule_invert, created_at)
+            VALUES (@id, @chain, @desc, @action, @proto, @ifin, @ifout, @src, @dst, @ports, @state, @rate, @log, @enabled, @priority, @sched, @invert, @created)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddFilterRuleParams(cmd, rule);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await ScheduleApplyNotify.TrySendAsync(conn, $"filter.create:{rule.Id:N}", _logger, ct);
 
         await LogAuditAsync("fw_filter_rules", rule.Id, "INSERT", null, rule, null, ct);
 
@@ -493,13 +494,14 @@ public sealed class FirewallService : IFirewallService
                 interface_in_id = @ifin, interface_out_id = @ifout, source_addresses = @src,
                 destination_addresses = @dst, destination_ports = @ports, connection_state = @state,
                 rate_limit = @rate, log_prefix = @log, enabled = @enabled, priority = @priority,
-                schedule_id = @sched
+                schedule_id = @sched, schedule_invert = @invert
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         AddFilterRuleParams(cmd, rule);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await ScheduleApplyNotify.TrySendAsync(conn, $"filter.update:{rule.Id:N}", _logger, ct);
 
         await LogAuditAsync("fw_filter_rules", rule.Id, "UPDATE", existing, rule, null, ct);
 
@@ -553,6 +555,7 @@ public sealed class FirewallService : IFirewallService
 
         if (rows > 0)
         {
+            await ScheduleApplyNotify.TrySendAsync(conn, $"filter.delete:{id:N}", _logger, ct);
             await LogAuditAsync("fw_filter_rules", id, "DELETE", existing, null, null, ct);
         }
 
@@ -577,6 +580,7 @@ public sealed class FirewallService : IFirewallService
         cmd.Parameters.AddWithValue("enabled", rule.Enabled);
         cmd.Parameters.AddWithValue("priority", rule.Priority);
         cmd.Parameters.AddWithValue("sched", (object?)rule.ScheduleId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("invert", rule.ScheduleInvert);
         cmd.Parameters.AddWithValue("created", rule.CreatedAt);
     }
 
@@ -605,6 +609,7 @@ public sealed class FirewallService : IFirewallService
                 Enabled = reader.GetBoolean(reader.GetOrdinal("enabled")),
                 Priority = reader.GetInt32(reader.GetOrdinal("priority")),
                 ScheduleId = SafeNullableGuid(reader, "schedule_id"),
+                ScheduleInvert = SafeBool(reader, "schedule_invert"),
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("created_at"))
             });
         }
@@ -1543,7 +1548,8 @@ public sealed class FirewallService : IFirewallService
         bool RuleActiveNow(FwFilterRule r)
         {
             if (!r.ScheduleId.HasValue) return true;
-            return scheduleMap.TryGetValue(r.ScheduleId.Value, out var s) && s.IsActiveAt(nowUtc);
+            var live = scheduleMap.TryGetValue(r.ScheduleId.Value, out var s) && s.IsActiveAt(nowUtc);
+            return r.ScheduleInvert ? !live : live;
         }
 
         // Resolve named network objects in source/destination of every rule
@@ -2233,6 +2239,19 @@ public sealed class FirewallService : IFirewallService
     /// Read a nullable uuid column without exploding when the column doesn't
     /// exist yet (e.g. <c>schedule_id</c> on a DB where migration 19 hasn't run).
     /// </summary>
+    private static bool SafeBool(NpgsqlDataReader r, string col, bool fallback = false)
+    {
+        try
+        {
+            var ord = r.GetOrdinal(col);
+            return r.IsDBNull(ord) ? fallback : r.GetBoolean(ord);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            return fallback;
+        }
+    }
+
     private static Guid? SafeNullableGuid(NpgsqlDataReader r, string col)
     {
         try

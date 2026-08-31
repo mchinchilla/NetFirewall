@@ -111,11 +111,22 @@ public sealed class ScheduleServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CreateAsync_StartTimeNotBeforeEnd_Throws()
+    public async Task CreateAsync_OvernightWindow_Persists()
+    {
+        var s = MakeBusinessHours("nights");
+        s.StartTime = new TimeSpan(22, 1, 0);
+        s.EndTime = new TimeSpan(5, 59, 0);
+        var created = await _svc.CreateAsync(s);
+        Assert.Equal(new TimeSpan(22, 1, 0), created.StartTime);
+        Assert.Equal(new TimeSpan(5, 59, 0), created.EndTime);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ZeroLengthWindow_Throws()
     {
         var s = MakeBusinessHours();
-        s.StartTime = new TimeSpan(17, 0, 0);
-        s.EndTime = new TimeSpan(9, 0, 0);
+        s.StartTime = new TimeSpan(10, 0, 0);
+        s.EndTime = new TimeSpan(10, 0, 0);
         await Assert.ThrowsAsync<ArgumentException>(() => _svc.CreateAsync(s));
     }
 
@@ -227,5 +238,30 @@ public sealed class ScheduleServiceTests : IAsyncLifetime
     public async Task DeleteAsync_UnknownId_ReturnsFalse()
     {
         Assert.False(await _svc.DeleteAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task CreateAsync_NotifiesScheduleApplyChannel()
+    {
+        string? received = null;
+        await using var listenConn = await _pg.DataSource.OpenConnectionAsync();
+        listenConn.Notification += (_, e) => received = e.Payload;
+        await using (var listen = new NpgsqlCommand($"LISTEN {ScheduleApplyNotify.Channel}", listenConn))
+            await listen.ExecuteNonQueryAsync();
+
+        await _svc.CreateAsync(MakeBusinessHours("notify-me"));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (received is null)
+                await listenConn.WaitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // fall through to the assert
+        }
+
+        Assert.StartsWith("schedule.create:", received);
     }
 }

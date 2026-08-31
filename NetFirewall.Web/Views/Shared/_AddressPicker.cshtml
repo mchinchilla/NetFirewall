@@ -1,19 +1,21 @@
 @model NetFirewall.Web.Models.AddressPickerViewModel
 @*
-    Tag-input with autocomplete for firewall rule address fields.
-    Each tag is either a literal CIDR/IP/range OR a network-object name (the
-    server-side resolver disambiguates at apply time, so we just pass strings).
-
-    Backing store is a hidden <input> so server-side parsing of comma-separated
-    values stays unchanged — no controller changes required to swap _FormField
-    for _AddressPicker.
+    Tag-input whose suggestion list is loaded with HTMX (GET /Network/Objects/autocomplete)
+    and whose chips/hidden CSV live in Alpine. The search input is detached from the
+    parent <form> via form="…" so `q` never posts with the rule/policy.
 *@
 @{
     var fieldId = $"addr-{Model.Name.Replace(".", "-")}";
+    var suggestId = $"suggest-{fieldId}";
+    var hxForm = $"hx-{fieldId}";
+    var hxTrigger = Model.OpenOnEmpty
+        ? "focus, keyup changed delay:150ms, suggest"
+        : "keyup changed delay:150ms, suggest";
 }
 
 <div class="space-y-1.5"
      data-initial="@(Model.Value ?? string.Empty)"
+     data-open-empty="@(Model.OpenOnEmpty ? "true" : "false")"
      x-data="addressPicker()"
      x-init="$nextTick(() => $refs.hidden.value = csv)">
     <label for="@fieldId" class="block text-xs font-medium text-surface-fg">
@@ -24,8 +26,9 @@
         }
     </label>
 
-    @* Hidden input — what the server actually receives. *@
     <input type="hidden" name="@Model.Name" :value="csv" x-ref="hidden" />
+    @* Detached from the parent form — HTMX include only. *@
+    <input type="hidden" name="except" form="@hxForm" :value="csv" />
 
     <div class="relative">
         <div class="input flex flex-wrap items-center gap-1.5 min-h-9 cursor-text"
@@ -45,35 +48,38 @@
                     </button>
                 </span>
             </template>
-            <input type="text" id="@fieldId" x-ref="text"
+            <input type="text" id="@fieldId" name="q" form="@hxForm" x-ref="text"
                    x-model="input"
-                   @@input="search()"
+                   autocomplete="off"
+                   hx-get="/Network/Objects/autocomplete"
+                   hx-target="#@suggestId"
+                   hx-swap="innerHTML"
+                   hx-include="[form='@hxForm']"
+                   hx-sync="this:replace"
+                   hx-trigger="@hxTrigger"
                    @@keydown="onKey($event)"
-                   @@blur="setTimeout(() => open = false, 150)"
-                   @@focus="if (suggestions.length > 0) open = true"
+                   @@blur="onBlur()"
                    class="flex-1 min-w-32 outline-none bg-transparent text-sm"
                    placeholder="@(Model.Placeholder ?? "Type CIDR or object name…")" />
+            @if (Model.OpenOnEmpty)
+            {
+                <button type="button" tabindex="-1"
+                        class="shrink-0 px-1 text-surface-fg-muted"
+                        :aria-label="open ? 'Close object list' : 'Open object list'"
+                        @@mousedown.prevent="open ? closeList() : suggest()">
+                    <svg class="h-4 w-4 transition" :class="open ? 'rotate-180' : ''"
+                         fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/>
+                    </svg>
+                </button>
+            }
         </div>
 
-        @* Suggestion dropdown. *@
-        <div x-show="open && suggestions.length > 0" x-cloak
+        <div id="@suggestId" x-ref="list" x-show="open" x-cloak
              x-transition.opacity.duration.100ms
-             class="absolute z-20 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md shadow-lg border"
-             style="background: var(--surface-elevated); border-color: var(--surface-border);">
-            <template x-for="(s, i) in suggestions" :key="s.id">
-                <button type="button"
-                        @@mousedown.prevent="addTag(s.name)"
-                        @@mouseenter="active = i"
-                        class="w-full text-left px-3 py-2 text-sm flex items-baseline justify-between gap-3"
-                        :style="i === active
-                            ? 'background: color-mix(in srgb, var(--accent) 12%, transparent);'
-                            : ''">
-                    <span class="font-mono font-medium" x-text="s.name"></span>
-                    <span class="text-xs text-surface-fg-muted">
-                        <span x-text="s.type"></span><span x-show="s.value"> · <span x-text="s.value" class="font-mono"></span></span>
-                    </span>
-                </button>
-            </template>
+             class="absolute z-30 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md shadow-lg border bg-surface-elevated border-surface-border"
+             @@mousedown.prevent="pick($event)"
+             @@htmx:after-swap="onSuggestSwap()">
         </div>
     </div>
 
@@ -82,3 +88,4 @@
         <p class="text-xs text-surface-fg-muted">@Model.Help</p>
     }
 </div>
+

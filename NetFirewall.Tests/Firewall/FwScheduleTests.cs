@@ -4,9 +4,10 @@ using Xunit;
 namespace NetFirewall.Tests.Firewall;
 
 /// <summary>
-/// Time-window logic for <see cref="FwSchedule.IsActiveAt"/>. The watcher
-/// service in the daemon polls this on every tick; getting it wrong means
-/// rules turn on/off at the wrong moment, so we want explicit boundary tests.
+/// Time-window logic for <see cref="FwSchedule.IsActiveAt"/> and
+/// <see cref="FwSchedule.NextTransitionUtc"/>. The watcher sleeps until
+/// the next edge; getting the boundary wrong means rules turn on/off at
+/// the wrong moment.
 /// </summary>
 public class FwScheduleTests
 {
@@ -159,5 +160,116 @@ public class FwScheduleTests
     {
         var s = Make(TimeSpan.Zero, TimeSpan.FromHours(23), days: Array.Empty<int>());
         Assert.False(s.IsActiveAt(new DateTimeOffset(2026, 4, 27, 12, 0, 0, TimeSpan.Zero)));
+    }
+
+    [Fact]
+    public void Overnight_ActiveOnStartDayAfterStart()
+    {
+        // 2026-05-01 is Friday (dow=5). 22:00–06:00, Friday selected.
+        var s = Make(new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0), days: new[] { 5 });
+        Assert.True(s.IsActiveAt(new DateTimeOffset(2026, 5, 1, 22, 1, 0, TimeSpan.Zero)));
+        Assert.False(s.IsActiveAt(new DateTimeOffset(2026, 5, 1, 21, 59, 0, TimeSpan.Zero)));
+    }
+
+    [Fact]
+    public void Overnight_ActiveNextMorning_IfStartDayWasSelected()
+    {
+        // Saturday 01:00 belongs to Friday night if Friday is in the list.
+        var s = Make(new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0), days: new[] { 5 });
+        Assert.True(s.IsActiveAt(new DateTimeOffset(2026, 5, 2, 1, 0, 0, TimeSpan.Zero)));
+        Assert.False(s.IsActiveAt(new DateTimeOffset(2026, 5, 2, 6, 0, 0, TimeSpan.Zero)));
+    }
+
+    [Fact]
+    public void Overnight_NextMorningInactive_IfOnlyTodaySelected()
+    {
+        // Saturday-only: Saturday 01:00 is Friday's overnight, so it is off.
+        var s = Make(new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0), days: new[] { 6 });
+        Assert.False(s.IsActiveAt(new DateTimeOffset(2026, 5, 2, 1, 0, 0, TimeSpan.Zero)));
+        Assert.True(s.IsActiveAt(new DateTimeOffset(2026, 5, 2, 22, 30, 0, TimeSpan.Zero)));
+    }
+
+    // ── next transition (watcher wake-up) ──────────────────────────────
+
+    [Fact]
+    public void NextTransition_Disabled_IsNull()
+    {
+        var s = Make(TimeSpan.FromHours(9), TimeSpan.FromHours(17), enabled: false);
+        Assert.Null(s.NextTransitionUtc(new DateTimeOffset(2026, 4, 27, 12, 0, 0, TimeSpan.Zero)));
+    }
+
+    [Fact]
+    public void NextTransition_BeforeStart_IsTodaysStart()
+    {
+        var s = Make(TimeSpan.FromHours(9), TimeSpan.FromHours(17));
+        var now = new DateTimeOffset(2026, 4, 27, 8, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 4, 27, 9, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(now));
+    }
+
+    [Fact]
+    public void NextTransition_InsideWindow_IsTodaysEnd()
+    {
+        var s = Make(TimeSpan.FromHours(9), TimeSpan.FromHours(17));
+        var now = new DateTimeOffset(2026, 4, 27, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 4, 27, 17, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(now));
+    }
+
+    [Fact]
+    public void NextTransition_AfterEnd_IsTomorrowsStart()
+    {
+        var s = Make(TimeSpan.FromHours(9), TimeSpan.FromHours(17));
+        var now = new DateTimeOffset(2026, 4, 27, 18, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 4, 28, 9, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(now));
+    }
+
+    [Fact]
+    public void NextTransition_WeekdaysOnly_SkipsWeekend()
+    {
+        var s = Make(TimeSpan.FromHours(9), TimeSpan.FromHours(17), days: new[] { 1, 2, 3, 4, 5 });
+        // Friday 18:00 → next is Monday 09:00
+        var fridayEvening = new DateTimeOffset(2026, 5, 1, 18, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 5, 4, 9, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(fridayEvening));
+    }
+
+    [Fact]
+    public void NextTransition_Overnight_BeforeStart_IsTonight()
+    {
+        var s = Make(new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0));
+        var now = new DateTimeOffset(2026, 5, 1, 20, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 5, 1, 22, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(now));
+    }
+
+    [Fact]
+    public void NextTransition_Overnight_DuringNight_IsMorningEnd()
+    {
+        var s = Make(new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0), days: new[] { 5 }); // Friday
+        var saturdayNight = new DateTimeOffset(2026, 5, 2, 1, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 5, 2, 6, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(saturdayNight));
+    }
+
+    [Fact]
+    public void NextTransition_Overnight_AfterMorningEnd_IsNextStartDay()
+    {
+        var s = Make(new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0), days: new[] { 5 }); // Friday
+        var saturdayNoon = new DateTimeOffset(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 5, 8, 22, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(saturdayNoon));
+    }
+
+    [Fact]
+    public void NextTransition_Timezone_UsesLocalWallClock()
+    {
+        // 14:00–15:00 America/New_York. EDT = UTC-4 in late April.
+        // 12:00 UTC = 08:00 EDT → next edge is 14:00 EDT = 18:00 UTC.
+        var s = Make(TimeSpan.FromHours(14), TimeSpan.FromHours(15), tz: "America/New_York");
+        var now = new DateTimeOffset(2026, 4, 27, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 4, 27, 18, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(now));
+    }
+
+    [Fact]
+    public void NextTransition_AtExactStart_ReturnsEndNotStart()
+    {
+        var s = Make(TimeSpan.FromHours(9), TimeSpan.FromHours(17));
+        var atStart = new DateTimeOffset(2026, 4, 27, 9, 0, 0, TimeSpan.Zero);
+        Assert.Equal(new DateTimeOffset(2026, 4, 27, 17, 0, 0, TimeSpan.Zero), s.NextTransitionUtc(atStart));
     }
 }

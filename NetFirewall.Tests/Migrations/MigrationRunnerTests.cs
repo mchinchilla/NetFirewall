@@ -33,6 +33,15 @@ public sealed class MigrationRunnerTests : IAsyncLifetime, IDisposable
         try { Directory.Delete(_migrationsDir, recursive: true); } catch { /* best-effort */ }
     }
 
+    [Fact]
+    public void ResolveDirectory_FindsRepoMigrations_FromContentRoot()
+    {
+        var repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var dir = StartupMigrations.ResolveDirectory(repo);
+        Assert.NotNull(dir);
+        Assert.True(File.Exists(Path.Combine(dir!, "00039_fw_filter_schedule_invert.sql")));
+    }
+
     private MigrationRunner CreateRunner() =>
         new(_pg.DataSource, _migrationsDir, NullLogger<MigrationRunner>.Instance);
 

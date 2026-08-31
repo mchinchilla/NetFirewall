@@ -238,6 +238,62 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         Assert.Contains("8899", cfg);
     }
 
+    [Fact]
+    public async Task Generate_InvertedRule_OnAlwaysActiveSchedule_IsSkipped()
+    {
+        var schedSvc = new ScheduleService(_pg.DataSource, NullLogger<ScheduleService>.Instance);
+        var sched = await schedSvc.CreateAsync(new FwSchedule
+        {
+            Name = "always-invert",
+            DaysOfWeek = new[] { 0, 1, 2, 3, 4, 5, 6 },
+            StartTime = TimeSpan.Zero,
+            EndTime = new TimeSpan(23, 59, 0),
+            Timezone = "UTC",
+            Enabled = true
+        });
+
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward", Action = "drop", Protocol = "tcp",
+            DestinationPorts = new[] { "9901" },
+            ScheduleId = sched.Id,
+            ScheduleInvert = true,
+            Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        Assert.DoesNotContain("9901", cfg);
+    }
+
+    [Fact]
+    public async Task Generate_InvertedRule_OnDisabledSchedule_IsEmitted()
+    {
+        // A disabled schedule is treated as idle, so invert=true keeps the
+        // drop in the ruleset (a kill-switch: turn the window off → block).
+        var schedSvc = new ScheduleService(_pg.DataSource, NullLogger<ScheduleService>.Instance);
+        var sched = await schedSvc.CreateAsync(new FwSchedule
+        {
+            Name = "idle-invert",
+            DaysOfWeek = new[] { 0, 1, 2, 3, 4, 5, 6 },
+            StartTime = TimeSpan.Zero,
+            EndTime = new TimeSpan(23, 59, 0),
+            Timezone = "UTC",
+            Enabled = false
+        });
+
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward", Action = "drop", Protocol = "tcp",
+            DestinationPorts = new[] { "9902" },
+            ScheduleId = sched.Id,
+            ScheduleInvert = true,
+            Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        Assert.Contains("9902", cfg);
+    }
+
     // ── port forwards (DNAT) ───────────────────────────────────────────
 
     [Fact]

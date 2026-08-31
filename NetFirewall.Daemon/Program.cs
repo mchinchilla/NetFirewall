@@ -171,8 +171,8 @@ builder.Services.Configure<NetFirewall.Services.Monitoring.MetricsCollectorOptio
     builder.Configuration.GetSection("Metrics"));
 builder.Services.AddHostedService<NetFirewall.Services.Monitoring.MetricsCollectorService>();
 builder.Services.AddHostedService<NetFirewall.Services.Firewall.AuditPrunerService>();
-// Schedule watcher — re-applies nft when any time-based filter rule
-// transitions active/inactive. Ticks every 60s, no-op when nothing changed.
+// Schedule watcher — re-applies nft at daemon start, at each schedule
+// Start/End, and when a scheduled filter rule is written (NOTIFY).
 builder.Services.AddHostedService<NetFirewall.Services.Firewall.ScheduleWatcherService>();
 
 // ----- Auth services (sessions read from same Postgres as Web) -----
@@ -246,6 +246,13 @@ builder.Services
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+{
+    var ds = app.Services.GetRequiredService<NpgsqlDataSource>();
+    var logFactory = app.Services.GetRequiredService<ILoggerFactory>();
+    await NetFirewall.Migrations.StartupMigrations.ApplyAsync(
+        ds, logFactory, app.Environment.ContentRootPath);
+}
 
 app.UseSerilogRequestLogging();
 

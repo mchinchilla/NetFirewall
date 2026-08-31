@@ -5,7 +5,7 @@ namespace NetFirewall.Services.Firewall;
 /// <summary>
 /// CRUD over <c>fw_schedules</c>. Schedules attach to filter rules via
 /// <see cref="FwFilterRule.ScheduleId"/>. The watcher service in the daemon
-/// triggers nft re-apply when any schedule transitions active/inactive.
+/// triggers nft re-apply at start, at each Start/End, and on schedule writes.
 /// </summary>
 public interface IScheduleService
 {

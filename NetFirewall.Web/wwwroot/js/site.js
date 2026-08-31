@@ -954,24 +954,28 @@ document.addEventListener("alpine:init", () => {
      *   </div>
      */
     Alpine.data("addressPicker", () => ({
-        tags: [],            // current chips
-        input: "",           // text the user is typing
-        suggestions: [],     // current dropdown rows
-        open: false,         // dropdown open?
-        active: -1,          // keyboard-highlighted suggestion index
-        _searchTimer: null,
+        tags: [],
+        input: "",
+        open: false,
+        active: -1,
+        openOnEmpty: false,
+        _blurTimer: null,
 
         init() {
-            // Initial CSV comes from data-initial (set server-side). Reading it
-            // from a data-attribute instead of an x-data argument avoids quoting
-            // bugs when the value contains commas/quotes inside the HTML attribute.
             this.tags = (this.$el.dataset.initial || "")
                 .split(",")
                 .map(s => s.trim())
                 .filter(s => s.length > 0);
+            this.openOnEmpty = this.$el.dataset.openEmpty === "true";
         },
 
         get csv() { return this.tags.join(", "); },
+
+        rows() {
+            return this.$refs.list
+                ? [...this.$refs.list.querySelectorAll("[data-object]")]
+                : [];
+        },
 
         looksLikeLiteral(v) {
             return v.includes("/") || v.includes("-") || /^\d+\.\d+\.\d+\.\d+$/.test(v);
@@ -982,10 +986,12 @@ document.addEventListener("alpine:init", () => {
             if (!v) return;
             if (!this.tags.includes(v)) this.tags.push(v);
             this.input = "";
-            this.suggestions = [];
-            this.open = false;
             this.active = -1;
-            this.$nextTick(() => this.$refs.hidden && (this.$refs.hidden.value = this.csv));
+            this.$nextTick(() => {
+                if (this.$refs.hidden) this.$refs.hidden.value = this.csv;
+                if (this.openOnEmpty) this.suggest();
+                else this.closeList();
+            });
         },
 
         removeTag(idx) {
@@ -993,48 +999,61 @@ document.addEventListener("alpine:init", () => {
             this.$nextTick(() => this.$refs.hidden && (this.$refs.hidden.value = this.csv));
         },
 
-        async search() {
-            if (this._searchTimer) clearTimeout(this._searchTimer);
-            const q = this.input.trim();
-            if (!q) { this.suggestions = []; this.open = false; return; }
+        pick(e) {
+            const el = e.target.closest("[data-object]");
+            if (el) this.addTag(el.dataset.object);
+        },
 
-            this._searchTimer = setTimeout(async () => {
-                try {
-                    const resp = await fetch(`/Network/Objects/autocomplete?q=${encodeURIComponent(q)}`, {
-                        headers: { "Accept": "application/json" }
-                    });
-                    if (!resp.ok) { this.suggestions = []; return; }
-                    this.suggestions = await resp.json();
-                    this.open = this.suggestions.length > 0;
-                    this.active = this.suggestions.length > 0 ? 0 : -1;
-                } catch {
-                    this.suggestions = [];
-                    this.open = false;
-                }
-            }, 150); // debounce
+        suggest() {
+            if (this.$refs.text && window.htmx) window.htmx.trigger(this.$refs.text, "suggest");
+        },
+
+        onSuggestSwap() {
+            this.open = true;
+            this.active = this.rows().length > 0 ? 0 : -1;
+            this.highlight();
+        },
+
+        highlight() {
+            this.rows().forEach((el, i) => el.classList.toggle("is-active", i === this.active));
+            const cur = this.rows()[this.active];
+            if (cur) cur.scrollIntoView({ block: "nearest" });
+        },
+
+        closeList() {
+            this.open = false;
+            this.active = -1;
+        },
+
+        onBlur() {
+            if (this._blurTimer) clearTimeout(this._blurTimer);
+            this._blurTimer = setTimeout(() => this.closeList(), 150);
         },
 
         onKey(e) {
+            const n = this.rows().length;
             if (e.key === "ArrowDown") {
                 e.preventDefault();
-                if (this.suggestions.length === 0) return;
-                this.active = (this.active + 1) % this.suggestions.length;
+                if (n === 0) { this.suggest(); return; }
+                this.active = (this.active + 1) % n;
+                this.highlight();
                 this.open = true;
             } else if (e.key === "ArrowUp") {
                 e.preventDefault();
-                if (this.suggestions.length === 0) return;
-                this.active = (this.active - 1 + this.suggestions.length) % this.suggestions.length;
+                if (n === 0) return;
+                this.active = (this.active - 1 + n) % n;
+                this.highlight();
             } else if (e.key === "Enter") {
                 e.preventDefault();
-                if (this.open && this.active >= 0) this.addTag(this.suggestions[this.active].name);
+                const cur = this.rows()[this.active];
+                if (this.open && cur) this.addTag(cur.dataset.object);
                 else if (this.input.trim()) this.addTag(this.input);
             } else if (e.key === "," || e.key === " ") {
                 if (this.input.trim()) { e.preventDefault(); this.addTag(this.input); }
             } else if (e.key === "Backspace" && !this.input && this.tags.length > 0) {
                 this.removeTag(this.tags.length - 1);
             } else if (e.key === "Escape") {
-                this.open = false;
-                this.active = -1;
+                this.closeList();
             }
         }
     }));
@@ -1051,35 +1070,31 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("filterRulesPage", () => ({
         chain: "",
         view: "evaluation",
-        viewsOpen: false,
-        hideDisabled: false,
+        hideDisabled: false
+    }));
 
-        views: [
-            { id: "evaluation", label: "Evaluation order", hint: "By chain, as the kernel runs it" },
-            { id: "interface",  label: "By interface",     hint: "What reaches me on each NIC" },
-            { id: "action",     label: "By verdict",       hint: "Accept, drop, reject, log" },
-            { id: "service",    label: "By service",       hint: "Protocol and port" }
-        ],
+    /* ---------- timePolicyForm ---------- bedtime / online-hours composer.
+     * Mode drives the summary sentence. Submit is blocked client-side when
+     * the address picker hasn't produced any sources (hidden input).
+     */
+    Alpine.data("timePolicyForm", () => ({
+        mode: "allow-during",
 
-        get viewLabel() {
-            return (this.views.find(v => v.id === this.view) || this.views[0]).label;
+        init() {
+            const picked = this.$el.querySelector("input[name=Mode]:checked");
+            if (picked) this.mode = picked.value;
         },
 
-        setChain(id) {
-            this.chain = id;
-            this.refresh();
+        onSubmit(e) {
+            const src = (this.$el.querySelector("[name=Sources]")?.value || "").trim();
+            if (!src) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.missingSources = true;
+            }
         },
 
-        pick(id) {
-            this.view = id;
-            this.viewsOpen = false;
-            this.refresh();
-        },
-
-        refresh() {
-            const table = document.getElementById("filter-rules-table");
-            if (table) window.htmx?.trigger(table, "manual-refresh");
-        }
+        missingSources: false
     }));
 
     /* ---------- connStatePicker ---------- conntrack states as toggles.
@@ -1297,6 +1312,7 @@ document.addEventListener("alpine:init", () => {
      */
     Alpine.data("filterRuleGuard", () => ({
         bypass: null,
+        scheduleOn: false,
         _suggested: "",
 
         init() {
@@ -1307,6 +1323,8 @@ document.addEventListener("alpine:init", () => {
             this.$nextTick(() => {
                 this.bypass = window.NetFw.filterRuleBypass(this.$el);
                 this.updateLogPrefix();
+                const el = this.$el.elements["ScheduleId"];
+                this.scheduleOn = !!(el && el.value);
             });
         },
 
@@ -2085,12 +2103,11 @@ document.addEventListener("showElevationModal", (event) => {
  * (the elevation modal handles those). */
 document.addEventListener("htmx:responseError", async (event) => {
     const status = event.detail?.xhr?.status ?? "?";
-    if (status === 401) {
-        // If the server triggered the elevation modal, htmx already dispatched
-        // showElevationModal — don't double-toast.
-        const trigger = event.detail?.xhr?.getResponseHeader?.("HX-Trigger") ?? "";
-        if (trigger.includes("showElevationModal")) return;
-    }
+    const trigger = event.detail?.xhr?.getResponseHeader?.("HX-Trigger") ?? "";
+    if (status === 401 && trigger.includes("showElevationModal")) return;
+    // 400/422 already emit showToast via HX-Trigger — don't stack a second
+    // generic "Server returned HTTP 422" on top of the real message.
+    if ((status === 400 || status === 422) && trigger.includes("showToast")) return;
     const store = window.Alpine?.store("toasts");
     if (!store) return;
     store.error(`Server returned HTTP ${status}.`);

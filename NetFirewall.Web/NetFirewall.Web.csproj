@@ -24,6 +24,14 @@
         <ProjectReference Include="..\NetFirewall.ServiceDefaults\NetFirewall.ServiceDefaults.csproj" />
         <ProjectReference Include="..\NetFirewall.Services\NetFirewall.Services.csproj" />
         <ProjectReference Include="..\NetFirewall.Models\NetFirewall.Models.csproj" />
+        <ProjectReference Include="..\NetFirewall.Migrations\NetFirewall.Migrations.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\NetFirewall.Services\sql\migrations\*.sql"
+              Link="sql\migrations\%(Filename)%(Extension)"
+              CopyToOutputDirectory="PreserveNewest"
+              CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
 
     <ItemGroup>

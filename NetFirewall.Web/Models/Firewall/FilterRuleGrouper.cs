@@ -33,14 +33,15 @@ public static class FilterRuleGrouper
         IReadOnlyDictionary<Guid, string> interfaceNames,
         FilterRuleView view,
         string? chainFilter,
-        IReadOnlyDictionary<Guid, string>? scheduleNames = null)
+        IReadOnlyDictionary<Guid, string>? scheduleNames = null,
+        IReadOnlyDictionary<Guid, string>? interfaceTypes = null)
     {
         var groups = view switch
         {
-            FilterRuleView.Interface => ByInterface(rules, interfaceNames, scheduleNames),
-            FilterRuleView.Action    => ByAction(rules, interfaceNames, scheduleNames),
-            FilterRuleView.Service   => ByService(rules, interfaceNames, scheduleNames),
-            _                        => ByChain(rules, interfaceNames, scheduleNames)
+            FilterRuleView.Interface => ByInterface(rules, interfaceNames, scheduleNames, interfaceTypes),
+            FilterRuleView.Action    => ByAction(rules, interfaceNames, scheduleNames, interfaceTypes),
+            FilterRuleView.Service   => ByService(rules, interfaceNames, scheduleNames, interfaceTypes),
+            _                        => ByChain(rules, interfaceNames, scheduleNames, interfaceTypes)
         };
 
         return new FilterRulesTableViewModel
@@ -60,7 +61,8 @@ public static class FilterRuleGrouper
     private static List<FilterRuleGroupViewModel> ByChain(
         IReadOnlyList<FwFilterRule> rules,
         IReadOnlyDictionary<Guid, string> ifaces,
-        IReadOnlyDictionary<Guid, string>? schedules)
+        IReadOnlyDictionary<Guid, string>? schedules,
+        IReadOnlyDictionary<Guid, string>? ifaceTypes)
     {
         var groups = new List<FilterRuleGroupViewModel>();
 
@@ -73,7 +75,7 @@ public static class FilterRuleGrouper
 
             var rows = inChain
                 .OrderBy(r => r.Priority)
-                .Select(r => Row(r, ifaces, shadowed.GetValueOrDefault(r.Id), schedules))
+                .Select(r => Row(r, ifaces, shadowed.GetValueOrDefault(r.Id), schedules, ifaceTypes))
                 .ToList();
 
             groups.Add(new FilterRuleGroupViewModel
@@ -90,27 +92,36 @@ public static class FilterRuleGrouper
 
         // Anything with an unrecognised chain value still has to be visible —
         // an invisible rule is worse than an oddly grouped one.
-        AppendUnknownChains(rules, ifaces, schedules, groups);
+        AppendUnknownChains(rules, ifaces, schedules, ifaceTypes, groups);
         return groups;
     }
 
     private static List<FilterRuleGroupViewModel> ByInterface(
         IReadOnlyList<FwFilterRule> rules,
         IReadOnlyDictionary<Guid, string> ifaces,
-        IReadOnlyDictionary<Guid, string>? schedules)
+        IReadOnlyDictionary<Guid, string>? schedules,
+        IReadOnlyDictionary<Guid, string>? ifaceTypes)
     {
         return rules
             .GroupBy(r => r.InterfaceInId is { } id && ifaces.TryGetValue(id, out var n) ? n : "any interface")
             .OrderBy(g => g.Key == "any interface" ? 1 : 0) // concrete interfaces first
             .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new FilterRuleGroupViewModel
+            .Select(g =>
             {
-                Title = g.Key,
-                Subtitle = "inbound interface",
-                Clusters = Cluster(
-                    g.OrderBy(r => r.Chain).ThenBy(r => r.Priority)
-                     .Select(r => Row(r, ifaces, null, schedules)).ToList(),
-                    mergeInterfaceVariants: false)
+                var sample = g.First();
+                string? type = sample.InterfaceInId is { } id
+                    && ifaceTypes is not null
+                    && ifaceTypes.TryGetValue(id, out var t)
+                    ? t : null;
+                return new FilterRuleGroupViewModel
+                {
+                    Title = g.Key,
+                    Subtitle = string.IsNullOrWhiteSpace(type) ? "inbound interface" : type,
+                    Clusters = Cluster(
+                        g.OrderBy(r => r.Chain).ThenBy(r => r.Priority)
+                         .Select(r => Row(r, ifaces, null, schedules, ifaceTypes)).ToList(),
+                        mergeInterfaceVariants: false)
+                };
             })
             .ToList();
     }
@@ -118,7 +129,8 @@ public static class FilterRuleGrouper
     private static List<FilterRuleGroupViewModel> ByAction(
         IReadOnlyList<FwFilterRule> rules,
         IReadOnlyDictionary<Guid, string> ifaces,
-        IReadOnlyDictionary<Guid, string>? schedules)
+        IReadOnlyDictionary<Guid, string>? schedules,
+        IReadOnlyDictionary<Guid, string>? ifaceTypes)
     {
         string[] order = ["accept", "drop", "reject", "log"];
 
@@ -132,7 +144,7 @@ public static class FilterRuleGrouper
                 Subtitle = "verdict",
                 Clusters = Cluster(
                     g.OrderBy(r => r.Chain).ThenBy(r => r.Priority)
-                     .Select(r => Row(r, ifaces, null, schedules)).ToList(),
+                     .Select(r => Row(r, ifaces, null, schedules, ifaceTypes)).ToList(),
                     mergeInterfaceVariants: false)
             })
             .ToList();
@@ -145,7 +157,8 @@ public static class FilterRuleGrouper
     private static List<FilterRuleGroupViewModel> ByService(
         IReadOnlyList<FwFilterRule> rules,
         IReadOnlyDictionary<Guid, string> ifaces,
-        IReadOnlyDictionary<Guid, string>? schedules)
+        IReadOnlyDictionary<Guid, string>? schedules,
+        IReadOnlyDictionary<Guid, string>? ifaceTypes)
     {
         return rules
             .GroupBy(ServiceKey)
@@ -157,7 +170,7 @@ public static class FilterRuleGrouper
                 Subtitle = "protocol and port",
                 Clusters = Cluster(
                     g.OrderBy(r => r.Chain).ThenBy(r => r.Priority)
-                     .Select(r => Row(r, ifaces, null, schedules)).ToList(),
+                     .Select(r => Row(r, ifaces, null, schedules, ifaceTypes)).ToList(),
                     mergeInterfaceVariants: false)
             })
             .ToList();
@@ -181,6 +194,7 @@ public static class FilterRuleGrouper
         IReadOnlyList<FwFilterRule> rules,
         IReadOnlyDictionary<Guid, string> ifaces,
         IReadOnlyDictionary<Guid, string>? schedules,
+        IReadOnlyDictionary<Guid, string>? ifaceTypes,
         List<FilterRuleGroupViewModel> groups)
     {
         var known = Chains.Select(c => c.Chain).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -194,7 +208,7 @@ public static class FilterRuleGrouper
                 Title = g.Key,
                 Subtitle = "unrecognised chain",
                 Clusters = Cluster(
-                    g.OrderBy(r => r.Priority).Select(r => Row(r, ifaces, null, schedules)).ToList(),
+                    g.OrderBy(r => r.Priority).Select(r => Row(r, ifaces, null, schedules, ifaceTypes)).ToList(),
                     mergeInterfaceVariants: true)
             });
         }
@@ -256,6 +270,7 @@ public static class FilterRuleGrouper
         if (!Eq(a.Protocol, b.Protocol)) return false;
         if (!Eq(a.RateLimit, b.RateLimit)) return false;
         if (a.ScheduleId != b.ScheduleId) return false;
+        if (a.ScheduleInvert != b.ScheduleInvert) return false;
         if (!SetEq(a.DestinationPorts, b.DestinationPorts)) return false;
         if (!SetEq(a.ConnectionState, b.ConnectionState)) return false;
         if (!SetEq(a.SourceAddresses, b.SourceAddresses)) return false;
@@ -306,13 +321,17 @@ public static class FilterRuleGrouper
         FwFilterRule r,
         IReadOnlyDictionary<Guid, string> ifaces,
         FwFilterRule? shadowedBy,
-        IReadOnlyDictionary<Guid, string>? schedules) => new()
+        IReadOnlyDictionary<Guid, string>? schedules,
+        IReadOnlyDictionary<Guid, string>? ifaceTypes) => new()
     {
         Rule = r,
         InterfaceIn = r.InterfaceInId is { } i && ifaces.TryGetValue(i, out var n1) ? n1 : null,
         InterfaceOut = r.InterfaceOutId is { } o && ifaces.TryGetValue(o, out var n2) ? n2 : null,
+        InterfaceInType = r.InterfaceInId is { } it && ifaceTypes is not null && ifaceTypes.TryGetValue(it, out var t1) ? t1 : null,
+        InterfaceOutType = r.InterfaceOutId is { } ot && ifaceTypes is not null && ifaceTypes.TryGetValue(ot, out var t2) ? t2 : null,
         ShadowedBy = shadowedBy,
         ScheduleName = r.ScheduleId is { } sid && schedules is not null && schedules.TryGetValue(sid, out var sn)
-            ? sn : null
+            ? sn : null,
+        ScheduleInvert = r.ScheduleInvert
     };
 }

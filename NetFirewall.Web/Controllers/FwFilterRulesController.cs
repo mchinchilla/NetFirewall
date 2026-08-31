@@ -48,7 +48,8 @@ public sealed class FwFilterRulesController : Controller
             ifaces.ToDictionary(i => i.Id, i => i.Name),
             mode,
             chain,
-            schedules.ToDictionary(s => s.Id, s => s.Name));
+            schedules.ToDictionary(s => s.Id, s => s.Name),
+            ifaces.ToDictionary(i => i.Id, i => i.Type));
 
         return PartialView("_FilterRulesTable", model);
     }
@@ -146,7 +147,8 @@ public sealed class FwFilterRulesController : Controller
         ConnectionStates = FwArrayHelpers.Join(r.ConnectionState),
         RateLimit = r.RateLimit, LogPrefix = r.LogPrefix,
         Priority = r.Priority, Enabled = r.Enabled,
-        ScheduleId = r.ScheduleId
+        ScheduleId = r.ScheduleId,
+        ScheduleInvert = r.ScheduleInvert
     };
 
     private static FwFilterRule ToEntity(FilterRuleFormViewModel f) => new()
@@ -161,6 +163,46 @@ public sealed class FwFilterRulesController : Controller
         RateLimit = string.IsNullOrWhiteSpace(f.RateLimit) ? null : f.RateLimit,
         LogPrefix = f.LogPrefix,
         Priority = f.Priority, Enabled = f.Enabled,
-        ScheduleId = f.ScheduleId
+        ScheduleId = f.ScheduleId,
+        ScheduleInvert = f.ScheduleInvert
     };
+
+    [HttpGet("time-policy")]
+    public async Task<IActionResult> TimePolicy(Guid? scheduleId, CancellationToken ct)
+    {
+        ViewBag.Schedules = await _schedules.GetAllAsync(ct);
+        return PartialView("_TimePolicyForm", new TimePolicyFormViewModel
+        {
+            ScheduleId = scheduleId
+        });
+    }
+
+    [HttpPost("time-policy"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> TimePolicySave(TimePolicyFormViewModel form, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+            return this.ToHtmxResponse(ServiceResponse<FwFilterRule>.Fail(
+                string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
+
+        var sched = await _schedules.GetByIdAsync(form.ScheduleId!.Value, ct);
+        if (sched is null)
+            return this.ToHtmxResponse(ServiceResponse<FwFilterRule>.Fail("Pick a schedule."));
+
+        try
+        {
+            var rule = TimePolicyComposer.Compose(form, sched.Name);
+            var saved = await _firewall.CreateFilterRuleAsync(rule, ct);
+            var envelope = ServiceResponse<FwFilterRule>.Ok(saved,
+                $"Time policy saved as a drop on {saved.Chain}. The daemon installs it now and at each schedule edge.");
+            this.AttachToastTrigger(envelope);
+            this.AttachHxEvent("refreshFilterRules", new { });
+            this.AttachHxEvent("refreshSchedules", new { });
+            return Json(envelope);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Time policy save failed");
+            return this.ToHtmxResponse(ServiceResponse<FwFilterRule>.Fail($"Save failed: {ex.Message}"));
+        }
+    }
 }
