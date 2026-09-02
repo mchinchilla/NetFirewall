@@ -1,10 +1,12 @@
+@using NetFirewall.Web.Models.Firewall
 @{
     ViewData["Title"] = "Firewall — QoS classes";
     Layout = "_Layout";
     var config = (NetFirewall.Models.Firewall.FwQosConfig)ViewBag.Config;
     var ifaceName = (string)ViewBag.InterfaceName;
+    var ifaceType = ViewBag.InterfaceType as string;
 }
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4"
      style="animation: var(--animate-slide-up);">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">
@@ -12,14 +14,16 @@
             <span class="text-surface-fg-muted"> / </span>
             @ifaceName
         </p>
-        <h1 class="text-2xl font-semibold tracking-tight">QoS classes — @ifaceName</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
+        <h1 class="text-2xl font-semibold tracking-tight flex flex-wrap items-center gap-2">
+            <span>QoS classes</span>
+            @await Html.PartialAsync("_IfaceChip", new IfaceChipViewModel { Name = ifaceName, Type = ifaceType })
+        </h1>
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
             Total budget: <span class="font-mono">@config.TotalBandwidthMbps Mbps</span>.
             Sum of guaranteed values must not exceed it; ceilings can overlap (HTB borrowing).
         </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "qos-classes-table", Placeholder = "Filter by class name…", ClientSide = true })
         <button type="button" class="btn btn-primary"
                 hx-get="/Firewall/Qos/@config.Id/Classes/edit"
                 hx-target="#drawer-body" hx-swap="innerHTML"
@@ -29,11 +33,17 @@
         </button>
     </div>
 </div>
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+
+<div class="flex flex-wrap items-center gap-2 mb-4"
+     style="animation: var(--animate-slide-up); animation-delay: 40ms;">
+    @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "qos-classes-table", Placeholder = "Filter by class name…", ClientSide = true })
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
     <div id="qos-classes-table"
          hx-get="/Firewall/Qos/@config.Id/Classes/table"
          hx-trigger="load, refreshQosClasses from:body"
          hx-swap="innerHTML">
-         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
     </div>
 </section>

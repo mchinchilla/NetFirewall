@@ -98,11 +98,11 @@ public sealed class WanCardOptions
         ManageUrl = manageUrl,
     };
 
-    /// <summary>Read-only live pod for the Monitoring page (compact list, no controls).</summary>
+    /// <summary>Read-only live pod for the Monitoring page (compact list + failover events).</summary>
     public static WanCardOptions Pod(string manageUrl) => new()
     {
         ShowControls = false,
-        ShowEvents = false,
+        ShowEvents = true,
         ShowHysteresis = false,
         ShowModeBanner = true,
         Layout = WanCardLayout.List,

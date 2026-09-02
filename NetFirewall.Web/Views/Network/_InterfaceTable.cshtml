@@ -1,111 +1,132 @@
 @model IReadOnlyList<NetFirewall.Web.Models.Network.InterfaceRowViewModel>
+@using NetFirewall.Web.Models.Firewall
 @using NetFirewall.Web.Models.Network
+@using NetFirewall.Web.Models.Shared
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-8 text-center text-surface-fg-muted">
-        No network interfaces detected. Re-detect, or check that the host has at least one NIC.
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No network interfaces detected. Click <span class="font-medium text-surface-fg">Re-detect</span>, or check that the host has at least one NIC.
     </div>
 }
 else
 {
+    string RoleKey(InterfaceRowViewModel row)
+    {
+        var t = (row.Configured?.Type ?? row.SuggestedType ?? "").Trim();
+        return string.IsNullOrEmpty(t) ? "other" : t;
+    }
+
+    var grouped = Model.GroupBy(RoleKey).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+    var configured = Model.Count(r => r.Status == InterfaceRowStatus.Configured);
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@configured</span> configured
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Interface</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium">Role</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">IP</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">MAC</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var row in Model)
-                {
+            @foreach (var group in grouped)
+            {
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 align-top">
-                            <div class="flex items-center gap-2">
-                                <span class="relative flex h-2 w-2">
-                                    @if (row.IsUp)
-                                    {
-                                        <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 bg-feedback-success-bd"></span>
-                                        <span class="relative inline-flex rounded-full h-2 w-2 bg-feedback-success-bd"></span>
-                                    }
-                                    else
-                                    {
-                                        <span class="inline-flex rounded-full h-2 w-2 bg-surface-fg-muted"></span>
-                                    }
-                                </span>
-                                <span class="font-medium">@row.Name</span>
-                                @if (row.IsVirtual)
-                                {
-                                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-surface-muted text-surface-fg-muted">virtual</span>
-                                }
+                        <th colspan="5" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">· @group.Count()</span>
                             </div>
-                            @if (row.Configured == null)
-                            {
-                                <p class="text-xs mt-0.5 text-surface-fg-muted">
-                                    Suggested:
-                                    <span class="font-medium text-surface-fg">@row.SuggestedType</span>
-                                    <span class="opacity-70">· @row.SuggestionConfidence% confidence</span>
-                                </p>
-                            }
-                        </td>
-                        <td class="px-5 py-3 align-top">
-                            @switch (row.Status)
-                            {
-                                case InterfaceRowStatus.Configured:
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Configured</span>
-                                    break;
-                                case InterfaceRowStatus.Detected:
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-info-bg text-feedback-info-fg">Detected</span>
-                                    break;
-                                case InterfaceRowStatus.Missing:
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-warning-bg text-feedback-warning-fg">Missing</span>
-                                    break;
-                            }
-                        </td>
-                        <td class="px-5 py-3 align-top">
-                            @if (row.Configured != null)
-                            {
-                                <span class="font-medium">@row.Configured.Type</span>
-                                @if (!string.IsNullOrEmpty(row.Configured.Role))
-                                {
-                                    <span class="text-xs ml-1 text-surface-fg-muted">/ @row.Configured.Role</span>
-                                }
-                            }
-                            else
-                            {
-                                <span class="text-surface-fg-muted">—</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 hidden md:table-cell align-top font-mono text-xs">
-                            @if (row.Configured != null)
-                            {
-                                @(row.Configured.AddressingMode == "dhcp" ? "DHCP" : row.Configured.IpAddress?.ToString() ?? "—")
-                            }
-                            else
-                            {
-                                @(row.CurrentIp ?? "—")
-                            }
-                        </td>
-                        <td class="px-5 py-3 hidden lg:table-cell align-top font-mono text-xs text-surface-fg-muted">
-                            @(row.MacAddress ?? "—")
-                        </td>
-                        <td class="px-5 py-3 align-top text-right">
-                            <button type="button" class="btn btn-ghost text-xs"
-                                    hx-get="/Network/Edit/@row.Name"
-                                    hx-target="#drawer-body"
-                                    hx-swap="innerHTML"
-                                    @@click="$store.drawer.openRaw('@(row.Configured == null ? "Configure" : "Edit") @row.Name')">
-                                @(row.Configured == null ? "Configure" : "Edit")
-                            </button>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium">Interface</th>
+                        <th class="px-2 py-1.5 font-medium">Address</th>
+                        <th class="px-2 py-1.5 font-medium hidden lg:table-cell">MAC</th>
+                        <th class="px-2 py-1.5 font-medium w-28">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var row in group)
+                    {
+                        var type = row.Configured?.Type ?? row.SuggestedType;
+                        var ip = row.Configured != null
+                            ? (row.Configured.AddressingMode == "dhcp" ? "DHCP" : row.Configured.IpAddress?.ToString() ?? "—")
+                            : (row.CurrentIp ?? "—");
+                        var statusCls = row.Status switch
+                        {
+                            InterfaceRowStatus.Configured => "badge-success",
+                            InterfaceRowStatus.Detected   => "badge-info",
+                            _                             => "badge-warning"
+                        };
+                        var statusLabel = row.Status switch
+                        {
+                            InterfaceRowStatus.Configured => "Configured",
+                            InterfaceRowStatus.Detected   => "Detected",
+                            _                             => "Missing"
+                        };
+                        <tr>
+                            <td class="pl-5 pr-2 py-2.5">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="relative flex h-2 w-2 shrink-0">
+                                        @if (row.IsUp)
+                                        {
+                                            <span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 bg-feedback-success-bd"></span>
+                                            <span class="relative inline-flex rounded-full h-2 w-2 bg-feedback-success-bd"></span>
+                                        }
+                                        else
+                                        {
+                                            <span class="inline-flex rounded-full h-2 w-2 bg-surface-fg-muted"></span>
+                                        }
+                                    </span>
+                                    @await Html.PartialAsync("_IfaceChip", new IfaceChipViewModel { Name = row.Name, Type = type })
+                                    @if (row.IsVirtual)
+                                    {
+                                        <span class="badge badge-muted">virtual</span>
+                                    }
+                                </div>
+                                @if (row.Configured == null)
+                                {
+                                    <p class="text-xs mt-1 text-surface-fg-muted">
+                                        Suggested <span class="font-medium text-surface-fg">@row.SuggestedType</span>
+                                        · @row.SuggestionConfidence%
+                                    </p>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5">
+                                @if (ip != "—")
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ip", Value = ip })
+                                }
+                                else
+                                {
+                                    <span class="text-xs text-surface-fg-muted">—</span>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5 hidden lg:table-cell">
+                                @if (!string.IsNullOrEmpty(row.MacAddress))
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "mac", Value = row.MacAddress, Title = row.MacAddress })
+                                }
+                                else
+                                {
+                                    <span class="text-xs text-surface-fg-muted">—</span>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5 whitespace-nowrap">
+                                <span class="badge @statusCls">@statusLabel</span>
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                <button type="button" class="btn btn-ghost text-xs"
+                                        hx-get="/Network/Edit/@row.Name"
+                                        hx-target="#drawer-body"
+                                        hx-swap="innerHTML"
+                                        @@click="$store.drawer.openRaw('@(row.Configured == null ? "Configure" : "Edit") @row.Name')">
+                                    @(row.Configured == null ? "Configure" : "Edit")
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

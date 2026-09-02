@@ -6,34 +6,45 @@
         NetFirewall.Web.Models.DeltaTrend.Down => "kpi-delta-down",
         _                                       => string.Empty
     };
+    var tintClass = Model.Tint switch
+    {
+        NetFirewall.Web.Models.KpiTint.Coral  => "kpi-tint-coral",
+        NetFirewall.Web.Models.KpiTint.Mint   => "kpi-tint-mint",
+        NetFirewall.Web.Models.KpiTint.Blue   => "kpi-tint-blue",
+        NetFirewall.Web.Models.KpiTint.Violet => "kpi-tint-violet",
+        NetFirewall.Web.Models.KpiTint.Gold   => "kpi-tint-gold",
+        _                                     => "kpi-tint-accent"
+    };
 }
 <article class="kpi">
-    <div class="flex items-start justify-between">
-        <p class="kpi-label">@Model.Label</p>
-        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-accent">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+    <div class="flex items-start gap-3">
+        <span class="kpi-icon @tintClass">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" d="@Model.IconPath" />
             </svg>
         </span>
+        <div class="min-w-0 flex-1">
+            <p class="kpi-label">@Model.Label</p>
+            <p class="kpi-value mt-0.5">
+                @Model.Value
+                @if (!string.IsNullOrEmpty(Model.ValueSuffix))
+                {
+                    <span class="text-base font-normal text-surface-fg-muted">@Model.ValueSuffix</span>
+                }
+            </p>
+            @if (!string.IsNullOrEmpty(Model.Delta) || !string.IsNullOrEmpty(Model.DeltaContext))
+            {
+                <p class="text-xs mt-1">
+                    @if (!string.IsNullOrEmpty(Model.Delta))
+                    {
+                        <span class="@deltaClass font-medium">@Model.Delta</span>
+                    }
+                    @if (!string.IsNullOrEmpty(Model.DeltaContext))
+                    {
+                        <span class="text-surface-fg-muted">@Model.DeltaContext</span>
+                    }
+                </p>
+            }
+        </div>
     </div>
-    <p class="kpi-value mt-3">
-        @Model.Value
-        @if (!string.IsNullOrEmpty(Model.ValueSuffix))
-        {
-            <span class="text-base font-normal text-surface-fg-muted">@Model.ValueSuffix</span>
-        }
-    </p>
-    @if (!string.IsNullOrEmpty(Model.Delta) || !string.IsNullOrEmpty(Model.DeltaContext))
-    {
-        <p class="text-xs mt-1">
-            @if (!string.IsNullOrEmpty(Model.Delta))
-            {
-                <span class="@deltaClass font-medium">@Model.Delta</span>
-            }
-            @if (!string.IsNullOrEmpty(Model.DeltaContext))
-            {
-                <span class="text-surface-fg-muted">@Model.DeltaContext</span>
-            }
-        </p>
-    }
 </article>

@@ -24,6 +24,12 @@ public sealed class NetworkObjectFormViewModel : IValidatableObject
     /// <summary>Group members — only meaningful when Type == "group".</summary>
     public List<Guid> MemberIds { get; set; } = new();
 
+    /// <summary>
+    /// Extra IPs/CIDRs to fold into a group on save (creates host objects as
+    /// needed). Lets you grow DIEGO_DEVICES without pre-creating each host.
+    /// </summary>
+    public string? ExtraAddresses { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext context)
     {
         if (!NetworkObjectTypes.IsValid(Type))
@@ -35,8 +41,14 @@ public sealed class NetworkObjectFormViewModel : IValidatableObject
 
         if (Type == NetworkObjectTypes.Group)
         {
-            if (MemberIds.Count == 0)
-                yield return new ValidationResult("A group needs at least one member.", new[] { nameof(MemberIds) });
+            var extras = NetworkObjectValues.Split(ExtraAddresses);
+            if (MemberIds.Count == 0 && extras.Length == 0)
+                yield return new ValidationResult("A group needs at least one member or IP.", new[] { nameof(MemberIds) });
+            foreach (var token in extras)
+            {
+                if (!NetworkObjectValues.IsIpv4Host(token) && !token.Contains('/'))
+                    yield return new ValidationResult($"'{token}' is not an IPv4 address or CIDR.", new[] { nameof(ExtraAddresses) });
+            }
         }
         else
         {
@@ -46,18 +58,27 @@ public sealed class NetworkObjectFormViewModel : IValidatableObject
                 yield break;
             }
 
-            var v = Value.Trim();
+            var tokens = NetworkObjectValues.Split(Value);
             switch (Type)
             {
                 case NetworkObjectTypes.Host:
-                    if (!System.Net.IPAddress.TryParse(v.Replace("/32", ""), out _))
-                        yield return new ValidationResult("Host must be a valid IPv4 address.", new[] { nameof(Value) });
+                    if (tokens.Length == 0)
+                        yield return new ValidationResult("Host must list at least one IPv4 address.", new[] { nameof(Value) });
+                    foreach (var token in tokens)
+                    {
+                        if (!NetworkObjectValues.IsIpv4Host(token))
+                            yield return new ValidationResult($"'{token}' is not a valid IPv4 address.", new[] { nameof(Value) });
+                    }
                     break;
                 case NetworkObjectTypes.Network:
-                    if (!v.Contains('/'))
-                        yield return new ValidationResult("Network must be a CIDR (e.g. 10.0.0.0/24).", new[] { nameof(Value) });
+                    foreach (var token in tokens)
+                    {
+                        if (!token.Contains('/'))
+                            yield return new ValidationResult($"'{token}' must be a CIDR (e.g. 10.0.0.0/24).", new[] { nameof(Value) });
+                    }
                     break;
                 case NetworkObjectTypes.Range:
+                    var v = Value.Trim();
                     var parts = v.Split('-', 2);
                     if (parts.Length != 2 ||
                         !System.Net.IPAddress.TryParse(parts[0].Trim(), out _) ||
@@ -65,7 +86,7 @@ public sealed class NetworkObjectFormViewModel : IValidatableObject
                         yield return new ValidationResult("Range must be 'start-end' IPs (e.g. 10.0.0.10-10.0.0.50).", new[] { nameof(Value) });
                     break;
                 case NetworkObjectTypes.Fqdn:
-                    if (!System.Text.RegularExpressions.Regex.IsMatch(v,
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(Value.Trim(),
                             @"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"))
                         yield return new ValidationResult(
                             "FQDN must be a valid hostname (e.g. slack.com, api.example.org).",

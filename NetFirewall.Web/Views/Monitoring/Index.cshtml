@@ -22,33 +22,29 @@
             </p>
         </div>
 
-        <div class="inline-flex p-1 rounded-md text-xs bg-surface-muted">
-            <button class="px-3 py-1 rounded font-medium transition"
-                    :class="tab === 'live'
-                        ? 'shadow-sm'
-                        : ''"
-                    :style="tab === 'live'
-                        ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
-                        : 'color: var(--surface-fg-muted);'"
-                    @@click="tab = 'live'">Live</button>
-            <button class="px-3 py-1 rounded font-medium transition"
-                    :class="tab === 'history' ? 'shadow-sm' : ''"
-                    :style="tab === 'history'
-                        ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
-                        : 'color: var(--surface-fg-muted);'"
-                    @@click="tab = 'history'; $nextTick(() => htmx.trigger(document.getElementById('monitoring-history'), 'manual-refresh'))">History</button>
+        <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" class="btn text-xs"
+                    x-show="tab === 'live'"
+                    :class="paused ? 'btn-primary' : 'btn-ghost'"
+                    @@click="paused = !paused">
+                <span class="inline-flex h-1.5 w-1.5 rounded-full"
+                      :class="paused ? 'bg-accent-fg' : 'bg-feedback-success-bd'"
+                      x-show="!paused"></span>
+                <span x-text="paused ? 'Resume polling' : 'Live · 5s'"></span>
+            </button>
+            <div class="seg text-xs">
+                <button class="seg-btn"
+                        :class="tab === 'live' ? 'is-on' : ''"
+                        @@click="tab = 'live'">Live</button>
+                <button class="seg-btn"
+                        :class="tab === 'history' ? 'is-on' : ''"
+                        @@click="tab = 'history'; $nextTick(() => htmx.trigger(document.getElementById('monitoring-history'), 'manual-refresh'))">History</button>
+            </div>
         </div>
     </div>
 
     @* ---------- Live tab ---------- *@
     <div x-show="tab === 'live'">
-        <div class="flex items-center justify-end gap-2 mb-2">
-            <button type="button" class="btn btn-ghost text-xs"
-                    @@click="paused = !paused"
-                    x-text="paused ? 'Resume' : 'Pause'"></button>
-            <span class="text-xs text-surface-fg-muted"
-                  x-text="paused ? '⏸ Polling paused' : '● Polling every 5s'"></span>
-        </div>
 
         @await Html.PartialAsync("_WanTrafficCharts",
             WanTrafficChartsViewModel.Monitoring(Url.Action("Interfaces", "Network")))
@@ -60,26 +56,44 @@
             @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder, Size = LoadingOverlaySize.Lg })
         </div>
 
-        @* ---------- WAN interfaces health (failover state, polled every 10s) ---------- *@
-        <section class="card mt-4">
-            <header class="flex items-baseline justify-between mb-3">
-                <div>
-                    <h2 class="text-base font-semibold">WAN interfaces</h2>
-                    <p class="text-xs text-surface-fg-muted">
-                        Health verdict (with hysteresis), probe RTT, and which WAN is the active default route.
-                    </p>
+        <div class="grid gap-4 grid-cols-1 xl:grid-cols-2 mt-4">
+            <section class="card">
+                <header class="flex items-baseline justify-between mb-3">
+                    <div>
+                        <h2 class="text-base font-semibold">WAN interfaces</h2>
+                        <p class="text-xs text-surface-fg-muted">
+                            Health verdict, probe RTT, and the active default route.
+                        </p>
+                    </div>
+                    <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
+                </header>
+                <div id="monitoring-wan" class="loading-host"
+                     hx-get="/Monitoring/wan-interfaces"
+                     :hx-trigger="paused ? 'load' : 'load, every 10s'"
+                     hx-swap="innerHTML">
+                    @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
                 </div>
-                <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
-            </header>
-            <div id="monitoring-wan" class="loading-host"
-                 hx-get="/Monitoring/wan-interfaces"
-                 :hx-trigger="paused ? 'load' : 'load, every 10s'"
-                 hx-swap="innerHTML">
-                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-            </div>
-        </section>
+            </section>
 
-        @* ---------- Top talkers (refreshed every 30s — daemon's sampler cadence) ---------- *@
+            <section class="card">
+                <header class="flex items-baseline justify-between mb-3">
+                    <div>
+                        <h2 class="text-base font-semibold">WireGuard peers</h2>
+                        <p class="text-xs text-surface-fg-muted">
+                            From <span class="font-mono">wg show</span> via the daemon.
+                        </p>
+                    </div>
+                    <a href="@Url.Action("Index", "WireGuard")" class="text-xs hover:underline text-accent">Manage →</a>
+                </header>
+                <div id="monitoring-wg" class="loading-host"
+                     hx-get="/Vpn/WireGuard/status"
+                     :hx-trigger="paused ? 'load' : 'load, every 10s'"
+                     hx-swap="innerHTML">
+                    @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+                </div>
+            </section>
+        </div>
+
         @* The 30s poll carries the selected window via hx-vals so the chosen
            range survives auto-refresh; the in-partial selector updates talkersRange. *@
         <div id="monitoring-toptalkers" class="mt-4 loading-host"
@@ -90,56 +104,42 @@
             @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
 
-        @* ---------- WireGuard live status (polled at the same cadence) ---------- *@
-        <section class="card mt-4">
-            <header class="flex items-baseline justify-between mb-3">
-                <div>
-                    <h2 class="text-base font-semibold">WireGuard peers</h2>
-                    <p class="text-xs text-surface-fg-muted">
-                        From <span class="font-mono">wg show</span> via the daemon. Empty if no server is configured or the interface isn't up.
-                    </p>
+        <div class="grid gap-4 grid-cols-1 xl:grid-cols-2 mt-4">
+            <section class="card">
+                <header class="flex items-baseline justify-between mb-3">
+                    <div>
+                        <h2 class="text-base font-semibold">Active schedules</h2>
+                        <p class="text-xs text-surface-fg-muted">
+                            Re-applied by the daemon when a window transitions.
+                        </p>
+                    </div>
+                    <a href="@Url.Action("Index", "FwSchedules")" class="text-xs hover:underline text-accent">Manage →</a>
+                </header>
+                <div id="monitoring-schedules" class="loading-host"
+                     hx-get="/Monitoring/schedules"
+                     :hx-trigger="paused ? 'load' : 'load, every 30s'"
+                     hx-swap="innerHTML">
+                    @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
                 </div>
-                <a href="@Url.Action("Index", "WireGuard")" class="text-xs hover:underline text-accent">Manage →</a>
-            </header>
-            <div id="monitoring-wg" class="loading-host"
-                 hx-get="/Vpn/WireGuard/status"
-                 :hx-trigger="paused ? 'load' : 'load, every 10s'"
-                 hx-swap="innerHTML">
-                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-            </div>
-        </section>
+            </section>
 
-        @* ---------- Time-based rules (schedules) ---------- *@
-        <section class="card mt-4">
-            <header class="flex items-baseline justify-between mb-3">
-                <div>
-                    <h2 class="text-base font-semibold">Active schedules</h2>
-                    <p class="text-xs text-surface-fg-muted">
-                        The daemon's watcher re-applies the firewall the moment a schedule transitions. Polled every 30s here for visibility.
-                    </p>
-                </div>
-                <a href="@Url.Action("Index", "FwSchedules")" class="text-xs hover:underline text-accent">Manage →</a>
-            </header>
-            <div id="monitoring-schedules" class="loading-host"
-                 hx-get="/Monitoring/schedules"
+            <div id="monitoring-drops" class="loading-host"
+                 hx-get="/Monitoring/drop-rules"
                  :hx-trigger="paused ? 'load' : 'load, every 30s'"
                  hx-swap="innerHTML">
                 @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
             </div>
-        </section>
+        </div>
     </div>
 
     @* ---------- History tab ---------- *@
     <div x-show="tab === 'history'" x-cloak>
         <div class="flex items-center justify-end gap-2 mb-2">
             <span class="text-xs text-surface-fg-muted">Range:</span>
-            <div class="inline-flex p-1 rounded-md text-xs bg-surface-muted">
+            <div class="seg text-xs">
                 <template x-for="r in ['1h','6h','24h','7d']" :key="r">
-                    <button class="px-2.5 py-1 rounded font-medium transition"
-                            :class="range === r ? 'shadow-sm' : ''"
-                            :style="range === r
-                                ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
-                                : 'color: var(--surface-fg-muted);'"
+                    <button class="seg-btn"
+                            :class="range === r ? 'is-on' : ''"
                             @@click="range = r; htmx.trigger(document.getElementById('monitoring-history'), 'manual-refresh')"
                             x-text="r"></button>
                 </template>

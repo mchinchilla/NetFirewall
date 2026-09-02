@@ -1,88 +1,103 @@
 @model IReadOnlyList<NetFirewall.Models.Network.NetworkObject>
 @using NetFirewall.Models.Network
+@using NetFirewall.Web.Models.Shared
 
 @if (Model.Count == 0)
 {
-    <p class="text-sm py-10 text-center text-surface-fg-muted">
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
         No objects yet. Click <span class="font-medium text-surface-fg">Add object</span> to create your first one.
-    </p>
+    </div>
 }
 else
 {
+    var grouped = Model
+        .OrderBy(o => o.Name)
+        .GroupBy(o => string.IsNullOrWhiteSpace(o.Type) ? "other" : o.Type);
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.Count</span> object@(Model.Count == 1 ? "" : "s")
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    <th class="px-5 py-2 font-medium">Type</th>
-                    <th class="px-5 py-2 font-medium">Value / members</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Description</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var o in Model)
-                {
-                    var typeBg = o.Type switch
-                    {
-                        NetworkObjectTypes.Host    => "var(--feedback-info-bg)",
-                        NetworkObjectTypes.Network => "var(--accent-soft)",
-                        NetworkObjectTypes.Range   => "var(--feedback-warning-bg)",
-                        _                          => "var(--surface-muted)"
-                    };
-                    var typeFg = o.Type switch
-                    {
-                        NetworkObjectTypes.Host    => "var(--feedback-info-fg)",
-                        NetworkObjectTypes.Network => "var(--accent)",
-                        NetworkObjectTypes.Range   => "var(--feedback-warning-fg)",
-                        _                          => "var(--surface-fg-muted)"
-                    };
+            @foreach (var group in grouped)
+            {
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-mono font-medium">@o.Name</td>
-                        <td class="px-5 py-3">
-                            <span class="badge" style="background: @typeBg; color: @typeFg;">@o.Type</span>
-                        </td>
-                        <td class="px-5 py-3 font-mono text-xs">
-                            @if (o.Type == NetworkObjectTypes.Group)
-                            {
-                                <span class="text-surface-fg-muted">
-                                    @(o.Members?.Count ?? 0) member@((o.Members?.Count ?? 0) == 1 ? "" : "s"):
-                                </span>
-                                @if (o.Members is { Count: > 0 })
-                                {
-                                    @string.Join(", ", o.Members.Take(5).Select(m => m.Name))
-                                    @if (o.Members.Count > 5) { <span class="text-surface-fg-muted"> · +@(o.Members.Count - 5) more</span> }
-                                }
-                            }
-                            else
-                            {
-                                @o.Value
-                            }
-                        </td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">@(o.Description ?? "—")</td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Network/Objects/edit/@o.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit @o.Name')">Edit</button>
-                                @{ var msg = $"Delete object '{o.Name}'? Any firewall rules referencing it by name will silently skip the reference at next apply (the resolver logs a warning)."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Network/Objects/delete/@o.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete object?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="4" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">· @group.Count()</span>
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium">Name</th>
+                        <th class="px-2 py-1.5 font-medium">Value</th>
+                        <th class="px-2 py-1.5 font-medium hidden md:table-cell">Description</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var o in group)
+                    {
+                        var typeCls = o.Type switch
+                        {
+                            NetworkObjectTypes.Host    => "badge-info",
+                            NetworkObjectTypes.Network => "badge-accent",
+                            NetworkObjectTypes.Range   => "badge-warning",
+                            NetworkObjectTypes.Fqdn    => "badge-muted",
+                            _                          => "badge-accent"
+                        };
+                        <tr>
+                            <td class="pl-5 pr-2 py-2.5">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="font-mono font-medium text-surface-fg">@o.Name</span>
+                                    <span class="badge @typeCls">@o.Type</span>
+                                </div>
+                            </td>
+                            <td class="px-2 py-2.5">
+                                @if (o.Type == NetworkObjectTypes.Group)
+                                {
+                                    <div class="flex items-center gap-1 flex-wrap">
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "members", Value = (o.Members?.Count ?? 0).ToString() })
+                                        @foreach (var m in (o.Members ?? []).Take(4))
+                                        {
+                                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = m.Type, Value = m.Name, Title = m.Value })
+                                        }
+                                        @if ((o.Members?.Count ?? 0) > 4)
+                                        {
+                                            <span class="text-xs text-surface-fg-muted">+@(o.Members!.Count - 4)</span>
+                                        }
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(o.Value))
+                                {
+                                    <div class="flex items-center gap-1 flex-wrap">
+                                        @foreach (var part in o.Value.Split(new[] { ',', '\n', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(6))
+                                        {
+                                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = o.Type, Value = part, Title = part })
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="text-xs text-surface-fg-muted">—</span>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5 hidden md:table-cell text-xs text-surface-fg-muted">@(o.Description ?? "—")</td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Network/Objects/edit/{o.Id}",
+                                    EditDrawerTitle = $"Edit {o.Name}",
+                                    DeleteUrl = $"/Network/Objects/delete/{o.Id}",
+                                    DeleteDialogTitle = "Delete object?",
+                                    DeleteMessage = $"Delete object '{o.Name}'? Any firewall rules referencing it by name will silently skip the reference at next apply (the resolver logs a warning)."
+                                })
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

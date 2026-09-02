@@ -6,21 +6,24 @@
 <article class="card flex-1 min-w-0">
     <header class="flex items-start justify-between gap-3 mb-2">
         <div class="min-w-0">
-            <h3 class="text-sm font-semibold truncate" x-text="wan.name">—</h3>
-            <p class="text-[10px] uppercase tracking-wider text-surface-fg-muted" x-text="wan.label">WAN</p>
+            <div class="flex items-center gap-2">
+                <h3 class="text-sm font-semibold truncate" x-text="wan.name">—</h3>
+                <span class="badge badge-accent" x-text="wan.label" x-show="wan.label">WAN</span>
+            </div>
         </div>
         <div class="flex items-baseline gap-3 shrink-0">
             <div class="text-right">
                 <p class="text-[10px] uppercase tracking-wider text-surface-fg-muted">↓ in</p>
-                <p class="text-sm font-semibold tabular-nums" x-text="fmtMbps(wan.inMbps)">—</p>
+                <p class="text-sm font-semibold tabular-nums" style="color: var(--chart-in);" x-text="fmtMbps(wan.inMbps)">—</p>
             </div>
             <div class="text-right">
                 <p class="text-[10px] uppercase tracking-wider text-surface-fg-muted">↑ out</p>
-                <p class="text-sm font-semibold tabular-nums" x-text="fmtMbps(wan.outMbps)">—</p>
+                <p class="text-sm font-semibold tabular-nums" style="color: var(--chart-out);" x-text="fmtMbps(wan.outMbps)">—</p>
             </div>
         </div>
     </header>
-    <div class="relative" :class="compact ? 'h-20' : 'h-40'">
-        <canvas :data-iface="wan.name"></canvas>
+    <div class="relative w-full" :class="compact ? 'h-24' : 'h-44'">
+        <canvas class="block w-full h-full"
+                x-init="bindCanvas($el, wan.name)"></canvas>
     </div>
 </article>

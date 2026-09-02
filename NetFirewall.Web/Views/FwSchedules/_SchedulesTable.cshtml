@@ -1,4 +1,5 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwSchedule>
+@using NetFirewall.Web.Models.Shared
 @{
     static string FormatDays(int[] dows)
     {
@@ -9,47 +10,61 @@
         return string.Join(" ", dows.OrderBy(d => d).Select(d => names[d]));
     }
     var nowUtc = DateTimeOffset.UtcNow;
+    var enabled = Model.Count(s => s.Enabled);
+    var disabled = Model.Count - enabled;
 }
 
 @if (Model.Count == 0)
 {
-    <p class="text-sm py-10 text-center text-surface-fg-muted">
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
         No schedules yet. Click <span class="font-medium text-surface-fg">Add schedule</span> to create one.
-    </p>
+    </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    <th class="px-5 py-2 font-medium">Window</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Days</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Timezone</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Name</th>
+                    <th class="px-2 py-1.5 font-medium">Window</th>
+                    <th class="px-2 py-1.5 font-medium hidden md:table-cell">Days</th>
+                    <th class="px-2 py-1.5 font-medium w-24">Status</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-44">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
                 @foreach (var s in Model)
                 {
                     var active = s.IsActiveAt(nowUtc);
-                    <tr>
-                        <td class="px-5 py-3 font-medium">
-                            @s.Name
+                    var window = $"{s.StartTime.ToString(@"hh\:mm")}–{s.EndTime.ToString(@"hh\:mm")}";
+                    var days = FormatDays(s.DaysOfWeek);
+                    <tr data-disabled="@(s.Enabled ? "false" : "true")">
+                        <td class="pl-5 pr-2 py-2.5">
+                            <div class="font-medium text-surface-fg">@s.Name</div>
                             @if (!string.IsNullOrEmpty(s.Description))
                             {
                                 <p class="text-xs font-normal text-surface-fg-muted">@s.Description</p>
                             }
                         </td>
-                        <td class="px-5 py-3 font-mono text-xs">@s.StartTime.ToString(@"hh\:mm") – @s.EndTime.ToString(@"hh\:mm")</td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">@FormatDays(s.DaysOfWeek)</td>
-                        <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs text-surface-fg-muted">@s.Timezone</td>
-                        <td class="px-5 py-3">
+                        <td class="px-2 py-2.5">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "window", Value = window })
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "tz", Value = s.Timezone })
+                            </div>
+                        </td>
+                        <td class="px-2 py-2.5 hidden md:table-cell">
+                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "days", Value = days })
+                        </td>
+                        <td class="px-2 py-2.5 whitespace-nowrap">
                             @if (!s.Enabled)
                             {
-                                <span class="badge badge-muted">Disabled</span>
+                                <span class="badge badge-muted">Off</span>
                             }
                             else if (active)
                             {
@@ -63,28 +78,20 @@ else
                                 <span class="badge badge-muted">Idle</span>
                             }
                         </td>
-                        <td class="px-5 py-3 text-right">
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
                             <div class="inline-flex items-center gap-1">
                                 <button type="button" class="btn btn-ghost text-xs"
                                         hx-get="/Firewall/FilterRules/time-policy?scheduleId=@s.Id"
                                         hx-target="#drawer-body" hx-swap="innerHTML"
                                         @@click="$store.drawer.openRaw('Apply @s.Name')">Apply to devices</button>
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/Schedules/edit/@s.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit @s.Name')">Edit</button>
-                                @{ var msg = $"Delete schedule '{s.Name}'? Filter rules currently attached will become unconditional (always-on)."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/Schedules/delete/@s.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete schedule?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Firewall/Schedules/edit/{s.Id}",
+                                    EditDrawerTitle = $"Edit {s.Name}",
+                                    DeleteUrl = $"/Firewall/Schedules/delete/{s.Id}",
+                                    DeleteDialogTitle = "Delete schedule?",
+                                    DeleteMessage = $"Delete schedule '{s.Name}'? Time-limit policies attached to it will be removed. Other filter rules that used this window will be disabled — not left always-on."
+                                })
                             </div>
                         </td>
                     </tr>

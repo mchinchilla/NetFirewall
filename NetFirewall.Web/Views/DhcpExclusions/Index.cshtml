@@ -4,34 +4,41 @@
     Layout = "_Layout";
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4"
      style="animation: var(--animate-slide-up);">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">
-            <a href="/Dhcp/Subnets" class="hover:underline text-accent">Subnets</a>
-            <span> / </span>
-            <span>@subnet.Name</span>
+            <a href="/Dhcp/Subnets" class="hover:underline text-accent">DHCP · Subnets</a>
+            <span class="text-surface-fg-muted"> / </span>
+            @subnet.Name
         </p>
         <h1 class="text-2xl font-semibold tracking-tight">Exclusions</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
             IPs (or ranges) inside <span class="font-mono">@subnet.Network</span> that the server will never auto-assign.
-            Use for static infrastructure (gateways, printers without reservations, etc.).
+            Use for static infrastructure (gateways, printers without reservations).
         </p>
     </div>
-    <button type="button" class="btn btn-primary"
-            hx-get="/Dhcp/Subnets/@subnet.Id/Exclusions/edit"
-            hx-target="#drawer-body" hx-swap="innerHTML"
-            @@click="$store.drawer.openRaw('Add exclusion')">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-        Add exclusion
-    </button>
+    <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="btn btn-primary"
+                hx-get="/Dhcp/Subnets/@subnet.Id/Exclusions/edit"
+                hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('Add exclusion')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add exclusion
+        </button>
+    </div>
 </div>
 
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+<div class="flex flex-wrap items-center gap-2 mb-4"
+     style="animation: var(--animate-slide-up); animation-delay: 40ms;">
+    @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "exclusions-table", Placeholder = "Filter by IP, reason…", ClientSide = true })
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
     <div id="exclusions-table"
          hx-get="/Dhcp/Subnets/@subnet.Id/Exclusions/table"
          hx-trigger="load, refreshExclusions from:body"
          hx-swap="innerHTML">
-         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
     </div>
 </section>

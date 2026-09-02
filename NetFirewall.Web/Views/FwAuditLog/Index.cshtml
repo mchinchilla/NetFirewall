@@ -3,71 +3,98 @@
     Layout = "_Layout";
     var tableNames = (IReadOnlyList<string>)(ViewBag.TableNames ?? Array.Empty<string>());
 }
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);"
-     x-data="{ table: '', action: '', since: '24h', page: 1 }">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Audit log</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">Every CRUD on firewall tables — who, when, before/after.</p>
+<div x-data="{ table: '', action: '', since: '24h' }">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Audit log</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">Every CRUD on firewall tables — who, when, before/after.</p>
+        </div>
     </div>
 
-    <div class="flex flex-wrap items-end gap-2">
-        <label class="text-xs flex flex-col gap-1">
-            <span class="text-surface-fg-muted">Table</span>
-            <select x-model="table"
-                    @@change="page = 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')"
-                    class="input py-1 text-xs">
-                <option value="">All tables</option>
-                @foreach (var t in tableNames)
-                {
-                    <option value="@t">@t</option>
-                }
-            </select>
-        </label>
-        <label class="text-xs flex flex-col gap-1">
-            <span class="text-surface-fg-muted">Action</span>
-            <select x-model="action"
-                    @@change="page = 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')"
-                    class="input py-1 text-xs">
-                <option value="">All actions</option>
-                <option value="INSERT">INSERT</option>
-                <option value="UPDATE">UPDATE</option>
-                <option value="DELETE">DELETE</option>
-            </select>
-        </label>
-        <label class="text-xs flex flex-col gap-1">
-            <span class="text-surface-fg-muted">Since</span>
-            <select x-model="since"
-                    @@change="page = 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')"
-                    class="input py-1 text-xs">
-                <option value="1h">Last hour</option>
-                <option value="24h">Last 24 h</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="">All time</option>
-            </select>
-        </label>
-    </div>
-
-    <section class="card mt-3 w-full" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-        <div id="audit-log-table"
-             hx-get="/Firewall/AuditLog/table"
-             :hx-vals="JSON.stringify({ table, action, since, page })"
-             hx-trigger="load, manual-refresh"
-             hx-swap="innerHTML">
-             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+    <div class="flex flex-wrap items-center gap-2 mb-4"
+         style="animation: var(--animate-slide-up); animation-delay: 40ms;"
+         hx-target="#audit-log-table"
+         hx-swap="innerHTML"
+         hx-sync="#audit-log-table:replace">
+        <div class="seg" role="group" aria-label="Table">
+            <button type="button" class="seg-btn" :class="table === '' ? 'is-on' : ''"
+                    :aria-pressed="(table === '').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table: '', op: action, since, page: 1 })"
+                    @@click="table = ''">All</button>
+            @foreach (var t in tableNames)
+            {
+                var label = t.StartsWith("fw_", StringComparison.Ordinal) ? t[3..].Replace('_', ' ') : t.Replace('_', ' ');
+                <button type="button" class="seg-btn" :class="table === '@t' ? 'is-on' : ''"
+                        :aria-pressed="(table === '@t').toString()"
+                        hx-get="/Firewall/AuditLog/table"
+                        :hx-vals="JSON.stringify({ table: '@t', op: action, since, page: 1 })"
+                        @@click="table = '@t'">@label</button>
+            }
         </div>
 
-        <div class="mt-4 flex items-center justify-between text-xs text-surface-fg-muted">
-            <span>Page <span x-text="page"></span></span>
-            <div class="inline-flex items-center gap-1">
-                <button type="button" class="btn btn-ghost text-xs"
-                        :disabled="page <= 1"
-                        @@click="page = Math.max(1, page - 1); htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')">Previous</button>
-                <button type="button" class="btn btn-ghost text-xs"
-                        @@click="page = page + 1; htmx.trigger(document.getElementById('audit-log-table'), 'manual-refresh')">Next</button>
-            </div>
+        <div class="seg" role="group" aria-label="Action">
+            <button type="button" class="seg-btn" :class="action === '' ? 'is-on' : ''"
+                    :aria-pressed="(action === '').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: '', since, page: 1 })"
+                    @@click="action = ''">All</button>
+            <button type="button" class="seg-btn" :class="action === 'INSERT' ? 'is-on' : ''"
+                    :aria-pressed="(action === 'INSERT').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: 'INSERT', since, page: 1 })"
+                    @@click="action = 'INSERT'">Insert</button>
+            <button type="button" class="seg-btn" :class="action === 'UPDATE' ? 'is-on' : ''"
+                    :aria-pressed="(action === 'UPDATE').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: 'UPDATE', since, page: 1 })"
+                    @@click="action = 'UPDATE'">Update</button>
+            <button type="button" class="seg-btn" :class="action === 'DELETE' ? 'is-on' : ''"
+                    :aria-pressed="(action === 'DELETE').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: 'DELETE', since, page: 1 })"
+                    @@click="action = 'DELETE'">Delete</button>
+        </div>
+
+        <div class="seg" role="group" aria-label="Since">
+            <button type="button" class="seg-btn" :class="since === '1h' ? 'is-on' : ''"
+                    :aria-pressed="(since === '1h').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: action, since: '1h', page: 1 })"
+                    @@click="since = '1h'">1 h</button>
+            <button type="button" class="seg-btn" :class="since === '24h' ? 'is-on' : ''"
+                    :aria-pressed="(since === '24h').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: action, since: '24h', page: 1 })"
+                    @@click="since = '24h'">24 h</button>
+            <button type="button" class="seg-btn" :class="since === '7d' ? 'is-on' : ''"
+                    :aria-pressed="(since === '7d').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: action, since: '7d', page: 1 })"
+                    @@click="since = '7d'">7 d</button>
+            <button type="button" class="seg-btn" :class="since === '30d' ? 'is-on' : ''"
+                    :aria-pressed="(since === '30d').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: action, since: '30d', page: 1 })"
+                    @@click="since = '30d'">30 d</button>
+            <button type="button" class="seg-btn" :class="since === '' ? 'is-on' : ''"
+                    :aria-pressed="(since === '').toString()"
+                    hx-get="/Firewall/AuditLog/table"
+                    :hx-vals="JSON.stringify({ table, op: action, since: '', page: 1 })"
+                    @@click="since = ''">All time</button>
+        </div>
+    </div>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
+        <div id="audit-log-table"
+             hx-get="/Firewall/AuditLog/table"
+             :hx-vals="JSON.stringify({ table, op: action, since, page: 1 })"
+             hx-trigger="load, manual-refresh"
+             hx-sync="this:replace"
+             hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     </section>
 </div>

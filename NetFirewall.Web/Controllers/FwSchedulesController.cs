@@ -77,8 +77,9 @@ public sealed class FwSchedulesController : Controller
     {
         var ok = await _schedules.DeleteAsync(id, ct);
         this.AttachHxEvent("refreshSchedules", new { });
+        this.AttachHxEvent("refreshFilterRules", new { });
         return this.ToHtmxResponse(ok
-            ? ServiceResponse<object>.Ok(new { }, "Schedule deleted. Filter rules referencing it now apply unconditionally.")
+            ? ServiceResponse<object>.Ok(new { }, "Schedule deleted. Time-limit rules were removed; other attached rules were disabled.")
             : ServiceResponse<object>.Fail("Schedule not found."));
     }
 

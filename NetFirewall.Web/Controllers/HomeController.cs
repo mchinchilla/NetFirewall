@@ -70,10 +70,12 @@ public class HomeController : Controller
         // on). The builder swallows its own failures, so no extra safe-wrapper.
         var wanCardTask    = _wanCard.BuildAsync(
             WanCardOptions.Summary(Url.Action("Index", "WanFailover") ?? "/Network/Wan"), ct);
+        var pfTask         = _firewall.GetPortForwardsAsync(ct);
+        var auditTask      = SafeQueryAuditAsync(ct);
 
         await Task.WhenAll(leasesTask, subnetsTask, poolsTask, ifacesTask,
                            filterTask, snapshotTask, wgTask, schedulesTask,
-                           servicesTask, pendingTask, wanCardTask);
+                           servicesTask, pendingTask, wanCardTask, pfTask, auditTask);
 
         var leases    = leasesTask.Result;
         var subnets   = subnetsTask.Result;
@@ -86,6 +88,8 @@ public class HomeController : Controller
         var services  = servicesTask.Result;
         var pending   = pendingTask.Result;
         var wanCard   = wanCardTask.Result;
+        var forwards  = pfTask.Result;
+        var audit     = auditTask.Result;
 
         // Throughput right now = sum of bytes/sec across non-loopback interfaces.
         var totalBytesPerSec = snapshot.Network
@@ -126,6 +130,11 @@ public class HomeController : Controller
             Services = services,
             PendingChanges = pending,
             WanCard = wanCard,
+            ApplyStatus = DashboardPanels.FromPending(pending, Url.Action("Index", "FwApply")),
+            RecentLeases = DashboardPanels.FromLeases(leases, 8, Url.Action("Index", "DhcpLeases")),
+            PortForwards = DashboardPanels.FromForwards(forwards, ifaces, 6, Url.Action("Index", "FwPortForwards")),
+            DropRules = DashboardPanels.FromFilters(filters, 8, Url.Action("Index", "FwFilterRules")),
+            RecentAudit = DashboardPanels.FromAudit(audit, Url.Action("Index", "FwAuditLog")),
         };
 
         return View(vm);
@@ -399,6 +408,19 @@ public class HomeController : Controller
         {
             _logger.LogDebug(ex, "systemd services query failed");
             return Array.Empty<SystemServiceStatus>();
+        }
+    }
+
+    private async Task<IReadOnlyList<FwAuditLog>> SafeQueryAuditAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _firewall.GetAuditLogsAsync(limit: 8, offset: 0, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Audit log query failed");
+            return Array.Empty<FwAuditLog>();
         }
     }
 

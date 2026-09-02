@@ -1547,8 +1547,20 @@ public sealed class FirewallService : IFirewallService
         var nowUtc = DateTimeOffset.UtcNow;
         bool RuleActiveNow(FwFilterRule r)
         {
+            var isTimeLimit = string.Equals(
+                r.LogPrefix, FwFilterRule.TimeLimitLogPrefix, StringComparison.Ordinal);
+
+            // TIME-LIMIT drops are the schedule. After ON DELETE SET NULL they
+            // would become 24/7 blocks — skip orphans (no schedule, or the
+            // row the FK pointed at is gone).
+            if (isTimeLimit &&
+                (r.ScheduleId is null || !scheduleMap.ContainsKey(r.ScheduleId.Value)))
+                return false;
+
             if (!r.ScheduleId.HasValue) return true;
-            var live = scheduleMap.TryGetValue(r.ScheduleId.Value, out var s) && s.IsActiveAt(nowUtc);
+            if (!scheduleMap.TryGetValue(r.ScheduleId.Value, out var s))
+                return false;
+            var live = s.IsActiveAt(nowUtc);
             return r.ScheduleInvert ? !live : live;
         }
 
@@ -1623,6 +1635,11 @@ public sealed class FirewallService : IFirewallService
         // we drop the one bad rule, never the whole apply.
         void EmitFilterChain(string chain)
         {
+            // First-match-wins: a second row that compiles to the same match +
+            // verdict (e.g. three TIME-LIMIT drops for the same host) never
+            // runs. Skip it so the live ruleset doesn't look like the schedule
+            // was applied N times.
+            var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var rule in filterRules
                          .Where(r => r.Enabled && r.Chain == chain && RuleActiveNow(r))
                          .OrderBy(r => r.Priority))
@@ -1635,7 +1652,16 @@ public sealed class FirewallService : IFirewallService
                     continue;
                 }
 
-                sb.AppendLine(GenerateFilterRule(rule, ifaceMap));
+                var line = GenerateFilterRule(rule, ifaceMap);
+                if (!seen.Add(FilterLineDedupeKey(line)))
+                {
+                    _logger.LogInformation(
+                        "Skipped filter rule {Id} ({Description}) — identical match already emitted in {Chain}",
+                        rule.Id, rule.Description ?? rule.Action, chain);
+                    continue;
+                }
+
+                sb.AppendLine(line);
             }
         }
 
@@ -1954,6 +1980,18 @@ public sealed class FirewallService : IFirewallService
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// nft first-match-wins, so comment text is not part of what the packet
+    /// hits. Two TIME-LIMIT drops for the same saddr with different
+    /// descriptions are the same rule.
+    /// </summary>
+    internal static string FilterLineDedupeKey(string line)
+    {
+        var s = line.Trim();
+        var idx = s.LastIndexOf(" comment ", StringComparison.Ordinal);
+        return idx >= 0 ? s[..idx].TrimEnd() : s;
     }
 
     /// <summary>

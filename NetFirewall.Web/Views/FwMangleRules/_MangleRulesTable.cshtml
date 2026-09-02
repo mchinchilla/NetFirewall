@@ -1,78 +1,112 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwMangleRule>
+@using NetFirewall.Web.Models.Shared
 @{
     var markNames = (IDictionary<Guid, string>)(ViewBag.MarkNames ?? new Dictionary<Guid, string>());
+    var enabled = Model.Count(r => r.Enabled);
+    var disabled = Model.Count - enabled;
 }
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center text-surface-fg-muted">No mangle rules in this chain.</div>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No mangle rules in this chain. Click <span class="font-medium text-surface-fg">Add rule</span> to create one.
+    </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Pri</th>
-                    <th class="px-5 py-2 font-medium">Chain</th>
-                    <th class="px-5 py-2 font-medium">Mark</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Match</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var r in Model.OrderBy(x => x.Chain).ThenBy(x => x.Priority))
-                {
-                    var markLabel = r.MarkId is { } id && markNames.TryGetValue(id, out var n) ? n : "(no mark)";
+            @foreach (var group in Model.OrderBy(x => x.Chain).ThenBy(x => x.Priority).GroupBy(x => x.Chain))
+            {
+                var gEnabled = group.Count(x => x.Enabled);
+                var gOff = group.Count() - gEnabled;
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-mono text-xs">@r.Priority</td>
-                        <td class="px-5 py-3 font-mono text-xs">@r.Chain</td>
-                        <td class="px-5 py-3 font-mono text-xs">@markLabel</td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">
-                            @if (!string.IsNullOrEmpty(r.Description)) { <span class="block font-medium text-surface-fg">@r.Description</span> }
-                            @{
-                                var match = new List<string>();
-                                if (!string.IsNullOrEmpty(r.Protocol)) match.Add($"proto {r.Protocol}");
-                                if (r.SourceAddresses is { Length: > 0 }) match.Add($"src {string.Join(",", r.SourceAddresses)}");
-                                if (r.DestinationAddresses is { Length: > 0 }) match.Add($"dst {string.Join(",", r.DestinationAddresses)}");
-                                if (r.DestinationPorts is { Length: > 0 }) match.Add($"dport {string.Join(",", r.DestinationPorts)}");
-                            }
-                            <span class="font-mono">@(match.Count == 0 ? "any" : string.Join(" · ", match))</span>
-                        </td>
-                        <td class="px-5 py-3">
-                            @if (r.Enabled)
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
-                            }
-                            else
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/MangleRules/edit/@r.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit mangle rule')">Edit</button>
-                                @{ var msg = $"Delete mangle rule on {r.Chain} (priority {r.Priority})?"; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/MangleRules/delete/@r.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete rule?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="5" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">
+                                    · @gEnabled active@(gOff > 0 ? $", {gOff} off" : "")
+                                </span>
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium w-12">Pri</th>
+                        <th class="px-2 py-1.5 font-medium">Rule</th>
+                        <th class="px-2 py-1.5 font-medium">Mark</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var r in group)
+                    {
+                        var markLabel = r.MarkId is { } id && markNames.TryGetValue(id, out var n) ? n : "(no mark)";
+                        var src = r.SourceAddresses is { Length: > 0 } ? string.Join(", ", r.SourceAddresses) : null;
+                        var dst = r.DestinationAddresses is { Length: > 0 } ? string.Join(", ", r.DestinationAddresses) : null;
+                        var dport = r.DestinationPorts is { Length: > 0 } ? string.Join(", ", r.DestinationPorts) : null;
+                        <tr data-disabled="@(r.Enabled ? "false" : "true")">
+                            <td class="pl-5 pr-2 py-2.5 font-mono text-xs tabular-nums text-surface-fg-muted">@r.Priority</td>
+                            <td class="px-2 py-2.5">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="text-surface-fg">@(string.IsNullOrWhiteSpace(r.Description) ? "(no description)" : r.Description)</span>
+                                </div>
+                                <div class="flex items-center gap-1 flex-wrap mt-1">
+                                    @if (!string.IsNullOrEmpty(r.Protocol))
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "proto", Value = r.Protocol })
+                                    }
+                                    @if (src is not null)
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "src", Value = src, Title = src })
+                                    }
+                                    @if (dst is not null)
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "dst", Value = dst, Title = dst })
+                                    }
+                                    @if (dport is not null)
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "dport", Value = dport, Title = dport })
+                                    }
+                                    @if (r.Protocol is null && src is null && dst is null && dport is null)
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "match", Value = "any" })
+                                    }
+                                </div>
+                            </td>
+                            <td class="px-2 py-2.5">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "mark", Value = markLabel })
+                            </td>
+                            <td class="px-2 py-2.5 whitespace-nowrap">
+                                @if (r.Enabled)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-muted">Off</span>
+                                }
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Firewall/MangleRules/edit/{r.Id}",
+                                    EditDrawerTitle = "Edit mangle rule",
+                                    DeleteUrl = $"/Firewall/MangleRules/delete/{r.Id}",
+                                    DeleteDialogTitle = "Delete rule?",
+                                    DeleteMessage = $"Delete mangle rule on {r.Chain} (priority {r.Priority})?"
+                                })
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

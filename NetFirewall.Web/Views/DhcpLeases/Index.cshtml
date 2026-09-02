@@ -3,46 +3,53 @@
     Layout = "_Layout";
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);"
-     x-data="{ includeExpired: false, q: '' }">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Active leases</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
-            Live view from the running DHCP server. Auto-refreshes every 30 seconds.
-        </p>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "leases-table", Placeholder = "Filter by IP, MAC, hostname…" })
-        <label class="flex items-center gap-2 text-xs cursor-pointer">
-            <input type="checkbox" x-model="includeExpired" class="h-4 w-4 rounded"
-                   @@change="htmx.trigger(document.getElementById('leases-table'), 'manual-refresh')" />
-            <span>Include expired</span>
-        </label>
-        <button type="button" class="btn btn-ghost"
-                hx-post="/Dhcp/Leases/cleanup-expired"
-                hx-trigger="confirmed-cleanup"
-                @@click.prevent="(async () => {
-                    const ok = await $store.confirm.ask({
-                        title: 'Cleanup expired leases?',
-                        message: 'Removes every lease past its end_time from the database. Active leases are NOT touched.',
-                        confirmLabel: 'Cleanup',
-                        level: 'warning'
-                    });
-                    if (ok) htmx.trigger($el, 'confirmed-cleanup');
-                })()">Cleanup expired</button>
+<div x-data="{ includeExpired: false, q: '' }">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Leases</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+                Live view from the running DHCP server. Auto-refreshes every 30 seconds.
+            </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn btn-ghost"
+                    hx-post="/Dhcp/Leases/cleanup-expired"
+                    hx-trigger="confirmed-cleanup"
+                    @@click.prevent="(async () => {
+                        const ok = await $store.confirm.ask({
+                            title: 'Cleanup expired leases?',
+                            message: 'Removes every lease past its end_time from the database. Active leases are NOT touched.',
+                            confirmLabel: 'Cleanup',
+                            level: 'warning'
+                        });
+                        if (ok) htmx.trigger($el, 'confirmed-cleanup');
+                    })()">Cleanup expired</button>
+        </div>
     </div>
 
-    <div class="w-full">
-        <section class="card mt-3" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-            <div id="leases-table"
-                 hx-get="/Dhcp/Leases/table"
-                 :hx-vals="JSON.stringify({ includeExpired, q })"
-                 hx-trigger="load, refreshLeases from:body, manual-refresh, every 30s"
-                 hx-swap="innerHTML">
-                @(await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder }))
-            </div>
-        </section>
+    <div class="flex flex-wrap items-center gap-2 mb-4"
+         style="animation: var(--animate-slide-up); animation-delay: 40ms;"
+         hx-target="#leases-table"
+         hx-swap="innerHTML"
+         hx-sync="#leases-table:replace">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "leases-table", Placeholder = "Filter by IP, MAC, hostname…" })
+        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+            <input type="checkbox" class="rounded" x-model="includeExpired"
+                   @@change="htmx.trigger(document.getElementById('leases-table'), 'manual-refresh')" />
+            Include expired
+        </label>
     </div>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
+        <div id="leases-table"
+             hx-get="/Dhcp/Leases/table"
+             :hx-vals="JSON.stringify({ includeExpired, q })"
+             hx-trigger="load, refreshLeases from:body, manual-refresh, every 30s"
+             hx-sync="this:replace"
+             hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        </div>
+    </section>
 </div>

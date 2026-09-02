@@ -32,6 +32,7 @@ public sealed class FwPortForwardsController : Controller
         var rows = await _firewall.GetPortForwardsAsync(ct);
         var ifaces = await _firewall.GetInterfacesAsync(ct);
         ViewBag.InterfaceNames = ifaces.ToDictionary(i => i.Id, i => i.Name);
+        ViewBag.InterfaceTypes = ifaces.ToDictionary(i => i.Id, i => i.Type);
         return PartialView("_PortForwardsTable", rows);
     }
 

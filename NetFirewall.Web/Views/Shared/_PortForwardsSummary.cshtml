@@ -1,0 +1,50 @@
+@model NetFirewall.Web.Models.PortForwardsSummaryViewModel
+<section class="card">
+    <header class="flex items-baseline justify-between mb-3">
+        <div>
+            <h2 class="text-base font-semibold">Port forwards</h2>
+            <p class="text-xs text-surface-fg-muted">@Model.TotalEnabled enabled · @Model.Total total</p>
+        </div>
+        @if (!string.IsNullOrEmpty(Model.ManageUrl))
+        {
+            <a href="@Model.ManageUrl" class="text-xs hover:underline text-accent">Manage →</a>
+        }
+    </header>
+    @if (Model.Total == 0)
+    {
+        <p class="text-sm py-6 text-center text-surface-fg-muted">No port forwards configured.</p>
+    }
+    else if (Model.Rows.Count == 0)
+    {
+        <p class="text-sm py-6 text-center text-surface-fg-muted">All forwards are off.</p>
+    }
+    else
+    {
+        <ul class="divide-y border-surface-border">
+            @foreach (var r in Model.Rows)
+            {
+                <li class="flex items-center justify-between gap-3 py-2">
+                    <div class="min-w-0">
+                        <p class="text-sm font-mono">
+                            <span class="font-medium">@r.External</span>
+                            <span class="text-surface-fg-muted"> → </span>
+                            <span>@r.Internal</span>
+                        </p>
+                        <p class="text-[11px] text-surface-fg-muted mt-0.5 truncate">
+                            @r.Iface
+                            @if (!string.IsNullOrEmpty(r.Description))
+                            {
+                                <span> · @r.Description</span>
+                            }
+                        </p>
+                    </div>
+                    <span class="badge badge-success shrink-0">On</span>
+                </li>
+            }
+        </ul>
+        @if (Model.TotalEnabled > Model.Rows.Count)
+        {
+            <p class="text-xs text-surface-fg-muted mt-2">+ @(Model.TotalEnabled - Model.Rows.Count) more</p>
+        }
+    }
+</section>

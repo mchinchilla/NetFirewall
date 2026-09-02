@@ -1,77 +1,85 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpPool>
+@using NetFirewall.Web.Models.Shared
 @{
     var subnetId = (Guid)ViewBag.SubnetId;
+    var enabled = Model.Count(p => p.Enabled);
+    var disabled = Model.Count - enabled;
 }
 
 @if (Model.Count == 0)
 {
     <div class="text-sm py-10 text-center text-surface-fg-muted">
-        No pools yet. Add one to start handing out leases from this subnet.
+        No pools yet. Click <span class="font-medium text-surface-fg">Add pool</span> to start handing out leases from this subnet.
     </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    <th class="px-5 py-2 font-medium">Range</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Priority</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Flags</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium w-12">Pri</th>
+                    <th class="px-2 py-1.5 font-medium">Pool</th>
+                    <th class="px-2 py-1.5 font-medium">Range</th>
+                    <th class="px-2 py-1.5 font-medium hidden lg:table-cell">Flags</th>
+                    <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-40">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
-                @foreach (var p in Model.OrderBy(p => p.Priority))
+                @foreach (var p in Model.OrderBy(x => x.Priority).ThenBy(x => x.Name))
                 {
-                    <tr>
-                        <td class="px-5 py-3 font-medium">@(p.Name ?? "—")</td>
-                        <td class="px-5 py-3 font-mono text-xs">@p.RangeStart  →  @p.RangeEnd</td>
-                        <td class="px-5 py-3 hidden md:table-cell">@p.Priority</td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">
-                            @{
-                                var flags = new List<string>();
-                                if (p.AllowUnknownClients) flags.Add("unknown OK");
-                                if (p.KnownClientsOnly)    flags.Add("known only");
-                                if (p.DenyBootp)           flags.Add("no BOOTP");
-                            }
-                            @(flags.Count == 0 ? "—" : string.Join(" · ", flags))
+                    <tr data-disabled="@(p.Enabled ? "false" : "true")">
+                        <td class="pl-5 pr-2 py-2.5 font-mono text-xs tabular-nums text-surface-fg-muted">@p.Priority</td>
+                        <td class="px-2 py-2.5 font-medium text-surface-fg">@(string.IsNullOrWhiteSpace(p.Name) ? "(unnamed)" : p.Name)</td>
+                        <td class="px-2 py-2.5">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "start", Value = p.RangeStart.ToString() })
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "end", Value = p.RangeEnd.ToString() })
+                            </div>
                         </td>
-                        <td class="px-5 py-3">
+                        <td class="px-2 py-2.5 hidden lg:table-cell">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @if (p.AllowUnknownClients)
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "unk", Value = "ok" })
+                                }
+                                @if (p.KnownClientsOnly)
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "known", Value = "only" })
+                                }
+                                @if (p.DenyBootp)
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "bootp", Value = "deny" })
+                                }
+                            </div>
+                        </td>
+                        <td class="px-2 py-2.5 whitespace-nowrap">
                             @if (p.Enabled)
                             {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
+                                <span class="badge badge-success">Active</span>
                             }
                             else
                             {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
+                                <span class="badge badge-muted">Off</span>
                             }
                         </td>
-                        <td class="px-5 py-3 text-right">
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
                             <div class="inline-flex items-center gap-1">
-                                <a href="/Dhcp/Subnets/@subnetId/Pools/@p.Id/Classes" class="btn btn-ghost text-xs">Classes →</a>
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Dhcp/Subnets/@subnetId/Pools/edit/@p.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit pool')">Edit</button>
-                                @{
-                                    var msg = $"Delete pool {p.RangeStart}–{p.RangeEnd}? Existing leases stay until they expire.";
-                                }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Dhcp/Subnets/@subnetId/Pools/delete/@p.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete pool?',
-                                                message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete',
-                                                level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                                <a href="/Dhcp/Subnets/@subnetId/Pools/@p.Id/Classes" class="btn btn-ghost text-xs">Classes</a>
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Dhcp/Subnets/{subnetId}/Pools/edit/{p.Id}",
+                                    EditDrawerTitle = "Edit pool",
+                                    DeleteUrl = $"/Dhcp/Subnets/{subnetId}/Pools/delete/{p.Id}",
+                                    DeleteDialogTitle = "Delete pool?",
+                                    DeleteMessage = $"Delete pool {p.RangeStart}–{p.RangeEnd}? Existing leases stay until they expire."
+                                })
                             </div>
                         </td>
                     </tr>

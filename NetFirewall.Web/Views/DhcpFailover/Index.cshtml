@@ -4,73 +4,85 @@
     var status = ViewBag.Status as NetFirewall.Services.Dhcp.DhcpFailoverStatus;
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Failover</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
-            Active/passive HA with another NetFirewall (or any RFC-3074-style peer). Define the relationship below — the DHCP daemon picks it up on next start.
-        </p>
+<div x-data="{ hideDisabled: false }">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Failover</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+                Active/passive HA with another NetFirewall (or any RFC-3074-style peer). Define the relationship below — the DHCP daemon picks it up on next start.
+            </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn btn-primary"
+                    hx-get="/Dhcp/Failover/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add failover peer')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add peer
+            </button>
+        </div>
     </div>
-    <button type="button" class="btn btn-primary"
-            hx-get="/Dhcp/Failover/edit"
-            hx-target="#drawer-body" hx-swap="innerHTML"
-            @@click="$store.drawer.openRaw('Add failover peer')">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-        Add peer
-    </button>
-</div>
 
-@* Live runtime status *@
-@if (status != null)
-{
-    <section class="card mb-4" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
-        <h2 class="text-sm font-semibold mb-3">Current state</h2>
-        <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-            <div>
-                <dt class="text-surface-fg-muted">Local state</dt>
-                <dd class="font-mono text-sm font-medium">@status.LocalState</dd>
-            </div>
-            <div>
-                <dt class="text-surface-fg-muted">Peer state</dt>
-                <dd class="font-mono text-sm font-medium">@status.PeerState</dd>
-            </div>
-            <div>
-                <dt class="text-surface-fg-muted">Role</dt>
-                <dd class="font-mono text-sm font-medium">@status.Role</dd>
-            </div>
-            <div>
-                <dt class="text-surface-fg-muted">Health</dt>
-                <dd>
-                    @if (status.IsHealthy)
-                    {
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Healthy</span>
-                    }
-                    else
-                    {
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-warning-bg text-feedback-warning-fg">Degraded</span>
-                    }
-                </dd>
-            </div>
-            <div class="col-span-2">
-                <dt class="text-surface-fg-muted">Peer address</dt>
-                <dd class="font-mono text-sm">@status.PeerAddress</dd>
-            </div>
-            <div class="col-span-2">
-                <dt class="text-surface-fg-muted">Last contact</dt>
-                <dd class="font-mono text-sm">@(status.LastContact?.ToLocalTime().ToString("g") ?? "(never)")</dd>
-            </div>
-        </dl>
+    @if (status != null)
+    {
+        <section class="card mb-4" style="animation: var(--animate-slide-up); animation-delay: 40ms;">
+            <h2 class="text-sm font-semibold mb-3">Current state</h2>
+            <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                <div>
+                    <dt class="text-surface-fg-muted">Local state</dt>
+                    <dd class="font-mono text-sm font-medium">@status.LocalState</dd>
+                </div>
+                <div>
+                    <dt class="text-surface-fg-muted">Peer state</dt>
+                    <dd class="font-mono text-sm font-medium">@status.PeerState</dd>
+                </div>
+                <div>
+                    <dt class="text-surface-fg-muted">Role</dt>
+                    <dd class="font-mono text-sm font-medium">@status.Role</dd>
+                </div>
+                <div>
+                    <dt class="text-surface-fg-muted">Health</dt>
+                    <dd>
+                        @if (status.IsHealthy)
+                        {
+                            <span class="badge badge-success">Healthy</span>
+                        }
+                        else
+                        {
+                            <span class="badge badge-warning">Degraded</span>
+                        }
+                    </dd>
+                </div>
+                <div class="col-span-2">
+                    <dt class="text-surface-fg-muted">Peer address</dt>
+                    <dd class="font-mono text-sm">@status.PeerAddress</dd>
+                </div>
+                <div class="col-span-2">
+                    <dt class="text-surface-fg-muted">Last contact</dt>
+                    <dd class="font-mono text-sm">@(status.LastContact?.ToLocalTime().ToString("g") ?? "(never)")</dd>
+                </div>
+            </dl>
+        </section>
+    }
+
+    <div class="flex flex-wrap items-center gap-2 mb-4"
+         style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "failover-table", Placeholder = "Filter by name, role, peer…", ClientSide = true })
+        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+            <input type="checkbox" class="rounded" x-model="hideDisabled" />
+            Hide disabled
+        </label>
+    </div>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
+        <div id="failover-table"
+             :class="{ 'hide-disabled-rules': hideDisabled }"
+             hx-get="/Dhcp/Failover/table"
+             hx-trigger="load, refreshFailover from:body"
+             hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        </div>
     </section>
-}
-
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-    <h2 class="text-sm font-semibold mb-3">Configured peers</h2>
-    <div id="failover-table"
-         hx-get="/Dhcp/Failover/table"
-         hx-trigger="load, refreshFailover from:body"
-         hx-swap="innerHTML">
-         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-    </div>
-</section>
+</div>

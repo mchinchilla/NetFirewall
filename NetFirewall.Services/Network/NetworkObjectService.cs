@@ -197,6 +197,60 @@ public sealed class NetworkObjectService : INetworkObjectService
         await tx.CommitAsync(ct);
     }
 
+    public async Task<IReadOnlyList<Guid>> EnsureHostsForAddressesAsync(
+        string namePrefix, IEnumerable<string> addresses, CancellationToken ct = default)
+    {
+        var tokens = addresses
+            .SelectMany(a => NetworkObjectValues.Split(a))
+            .Select(NetworkObjectValues.CanonicalHost)
+            .Where(NetworkObjectValues.IsIpv4Host)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (tokens.Count == 0) return Array.Empty<Guid>();
+
+        var catalog = (await GetAllAsync(includeMembers: false, ct)).ToList();
+        var ids = new List<Guid>(tokens.Count);
+        foreach (var ip in tokens)
+        {
+            var existing = catalog.FirstOrDefault(o =>
+                o.Type == NetworkObjectTypes.Host
+                && string.Equals(NetworkObjectValues.CanonicalHost(o.Value), ip, StringComparison.Ordinal));
+            if (existing is not null)
+            {
+                ids.Add(existing.Id);
+                continue;
+            }
+
+            var created = await CreateAsync(new NetworkObject
+            {
+                Name = UniqueHostName(namePrefix, ip, catalog),
+                Type = NetworkObjectTypes.Host,
+                Value = ip,
+                Description = $"Auto-created member of {namePrefix}"
+            }, ct);
+            catalog.Add(created);
+            ids.Add(created.Id);
+        }
+
+        return ids;
+    }
+
+    private static string UniqueHostName(string prefix, string ip, IReadOnlyList<NetworkObject> catalog)
+    {
+        var slug = ip.Replace('.', '_').Replace('/', '_');
+        var stem = $"{prefix}_{slug}";
+        if (stem.Length > 80) stem = stem[..80];
+        var names = new HashSet<string>(catalog.Select(o => o.Name), StringComparer.OrdinalIgnoreCase);
+        if (names.Add(stem)) return stem;
+        for (var n = 2; n < 1000; n++)
+        {
+            var candidate = $"{stem}_{n}";
+            if (candidate.Length > 80) candidate = candidate[..80];
+            if (names.Add(candidate)) return candidate;
+        }
+        return $"{stem}_{Guid.NewGuid():N}"[..80];
+    }
+
     // ----- internals -----
 
     private static void Validate(NetworkObject obj)

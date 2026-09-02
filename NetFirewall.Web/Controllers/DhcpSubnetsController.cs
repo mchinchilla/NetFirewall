@@ -57,6 +57,10 @@ public sealed class DhcpSubnetsController : Controller
             .GroupBy(p => p.SubnetId!.Value)
             .ToDictionary(g => g.Key, g => g.Count());
 
+        var ifaces = await _firewall.GetInterfacesAsync(ct);
+        ViewBag.InterfaceNames = ifaces.ToDictionary(i => i.Id, i => i.Name);
+        ViewBag.InterfaceTypes = ifaces.ToDictionary(i => i.Id, i => i.Type);
+
         return PartialView("_SubnetsTable", subnetsTask.Result);
     }
 

@@ -28,7 +28,17 @@ public sealed class NetworkServicesController : Controller
     }
 
     [HttpGet("")]
-    public IActionResult Index() => View();
+    public async Task<IActionResult> Index(CancellationToken ct)
+    {
+        ViewBag.Categories = (await _services.GetAllAsync(false, ct))
+            .Select(s => s.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return View();
+    }
 
     [HttpGet("table")]
     public async Task<IActionResult> Table(string? category, CancellationToken ct)

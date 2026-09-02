@@ -191,9 +191,34 @@ public sealed class FwFilterRulesController : Controller
         try
         {
             var rule = TimePolicyComposer.Compose(form, sched.Name);
-            var saved = await _firewall.CreateFilterRuleAsync(rule, ct);
-            var envelope = ServiceResponse<FwFilterRule>.Ok(saved,
-                $"Time policy saved as a drop on {saved.Chain}. The daemon installs it now and at each schedule edge.");
+            var twins = (await _firewall.GetFilterRulesAsync(rule.Chain, ct))
+                .Where(r => TimePolicyComposer.SamePolicy(r, rule))
+                .OrderBy(r => r.CreatedAt)
+                .ToList();
+
+            FwFilterRule saved;
+            var removed = 0;
+            if (twins.Count == 0)
+            {
+                saved = await _firewall.CreateFilterRuleAsync(rule, ct);
+            }
+            else
+            {
+                rule.Id = twins[0].Id;
+                saved = await _firewall.UpdateFilterRuleAsync(rule, ct);
+                foreach (var extra in twins.Skip(1))
+                {
+                    if (await _firewall.DeleteFilterRuleAsync(extra.Id, ct))
+                        removed++;
+                }
+            }
+
+            var msg = twins.Count == 0
+                ? $"Time policy saved as a drop on {saved.Chain}. The daemon installs it now and at each schedule edge."
+                : removed > 0
+                    ? $"Time policy updated on {saved.Chain}; removed {removed} duplicate{(removed == 1 ? "" : "s")}."
+                    : $"Time policy already existed on {saved.Chain}; updated in place.";
+            var envelope = ServiceResponse<FwFilterRule>.Ok(saved, msg);
             this.AttachToastTrigger(envelope);
             this.AttachHxEvent("refreshFilterRules", new { });
             this.AttachHxEvent("refreshSchedules", new { });

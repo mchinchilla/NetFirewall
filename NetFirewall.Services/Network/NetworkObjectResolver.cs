@@ -86,10 +86,12 @@ public sealed class NetworkObjectResolver : INetworkObjectResolver
         switch (obj.Type)
         {
             case NetworkObjectTypes.Host:
-                sink.Add(NormalizeLiteral(obj.Value));
+                foreach (var part in NetworkObjectValues.Split(obj.Value))
+                    sink.Add(NormalizeLiteral(part));
                 break;
             case NetworkObjectTypes.Network:
-                sink.Add(obj.Value.Trim());
+                foreach (var part in NetworkObjectValues.Split(obj.Value))
+                    sink.Add(part);
                 break;
             case NetworkObjectTypes.Range:
                 // nft accepts "1.2.3.4-1.2.3.50" as a range literal directly.

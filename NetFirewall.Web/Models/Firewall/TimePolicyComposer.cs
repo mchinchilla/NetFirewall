@@ -12,7 +12,7 @@ namespace NetFirewall.Web.Models.Firewall;
 public static class TimePolicyComposer
 {
     public const int DefaultPriority = 2;
-    public const string LogPrefix = "TIME-LIMIT";
+    public const string LogPrefix = FwFilterRule.TimeLimitLogPrefix;
 
     public static FwFilterRule Compose(TimePolicyFormViewModel form, string scheduleName)
     {
@@ -41,4 +41,30 @@ public static class TimePolicyComposer
             LogPrefix = LogPrefix
         };
     }
+
+    /// <summary>
+    /// Same schedule + chain + invert + sources. Used to update-in-place
+    /// instead of inserting another TIME-LIMIT drop every time Apply is clicked.
+    /// </summary>
+    public static bool SamePolicy(FwFilterRule a, FwFilterRule b)
+    {
+        if (a.ScheduleId != b.ScheduleId) return false;
+        if (!string.Equals(a.Chain, b.Chain, StringComparison.OrdinalIgnoreCase)) return false;
+        if (a.ScheduleInvert != b.ScheduleInvert) return false;
+        if (!string.Equals(a.LogPrefix ?? "", b.LogPrefix ?? "", StringComparison.Ordinal)) return false;
+        return SameSources(a.SourceAddresses, b.SourceAddresses);
+    }
+
+    private static bool SameSources(string[]? a, string[]? b)
+    {
+        var left = Normalize(a);
+        var right = Normalize(b);
+        return left.SetEquals(right);
+    }
+
+    private static HashSet<string> Normalize(string[]? values) =>
+        new((values ?? Array.Empty<string>())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim()),
+            StringComparer.OrdinalIgnoreCase);
 }

@@ -1,63 +1,69 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwQosConfig>
+@using NetFirewall.Web.Models.Firewall
+@using NetFirewall.Web.Models.Shared
 @{
-    var ifaceNames = (Dictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+    var ifaceNames = (IDictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+    var ifaceTypes = (IDictionary<Guid, string>)(ViewBag.InterfaceTypes ?? new Dictionary<Guid, string>());
+    var enabled = Model.Count(c => c.Enabled);
+    var disabled = Model.Count - enabled;
 }
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center text-surface-fg-muted">No QoS configurations yet.</div>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No QoS configurations yet. Click <span class="font-medium text-surface-fg">Add QoS config</span> to create one.
+    </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Interface</th>
-                    <th class="px-5 py-2 font-medium">Total bandwidth</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Created</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Interface</th>
+                    <th class="px-2 py-1.5 font-medium">Bandwidth</th>
+                    <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-40">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
                 @foreach (var c in Model.OrderBy(x => ifaceNames.TryGetValue(x.InterfaceId ?? Guid.Empty, out var n) ? n : ""))
                 {
-                    var ifaceName = c.InterfaceId.HasValue && ifaceNames.TryGetValue(c.InterfaceId.Value, out var nm)
-                        ? nm : "(unbound)";
-                    <tr>
-                        <td class="px-5 py-3 font-medium">@ifaceName</td>
-                        <td class="px-5 py-3 font-mono text-xs">@c.TotalBandwidthMbps Mbps</td>
-                        <td class="px-5 py-3">
+                    var ifaceName = c.InterfaceId is { } iid && ifaceNames.TryGetValue(iid, out var nm) ? nm : "any";
+                    var ifaceType = c.InterfaceId is { } tid && ifaceTypes.TryGetValue(tid, out var t) ? t : null;
+                    <tr data-disabled="@(c.Enabled ? "false" : "true")">
+                        <td class="pl-5 pr-2 py-2.5">
+                            @await Html.PartialAsync("_IfaceChip", new IfaceChipViewModel { Name = ifaceName, Type = ifaceType })
+                        </td>
+                        <td class="px-2 py-2.5">
+                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "total", Value = $"{c.TotalBandwidthMbps} Mbps" })
+                        </td>
+                        <td class="px-2 py-2.5 whitespace-nowrap">
                             @if (c.Enabled)
                             {
-                                <span class="badge badge-success">Enabled</span>
+                                <span class="badge badge-success">Active</span>
                             }
                             else
                             {
-                                <span class="badge badge-muted">Disabled</span>
+                                <span class="badge badge-muted">Off</span>
                             }
                         </td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">@c.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                        <td class="px-5 py-3 text-right">
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
                             <div class="inline-flex items-center gap-1">
                                 <a class="btn btn-ghost text-xs" href="/Firewall/Qos/@c.Id/Classes">Classes</a>
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/Qos/edit/@c.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit QoS config')">Edit</button>
-                                @{ var msg = $"Delete QoS config for '{ifaceName}'? All child classes will also be deleted (cascade)."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/Qos/delete/@c.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete QoS config?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Firewall/Qos/edit/{c.Id}",
+                                    EditDrawerTitle = "Edit QoS config",
+                                    DeleteUrl = $"/Firewall/Qos/delete/{c.Id}",
+                                    DeleteDialogTitle = "Delete QoS config?",
+                                    DeleteMessage = $"Delete QoS config for '{ifaceName}'? All child classes will also be deleted (cascade)."
+                                })
                             </div>
                         </td>
                     </tr>

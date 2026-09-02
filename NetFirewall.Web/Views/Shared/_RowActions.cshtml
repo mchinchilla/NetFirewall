@@ -1,0 +1,20 @@
+@model NetFirewall.Web.Models.Shared.RowActionsViewModel
+<div class="inline-flex items-center gap-1">
+    <button type="button" class="btn btn-ghost text-xs"
+            hx-get="@Model.EditUrl"
+            hx-target="#drawer-body" hx-swap="innerHTML"
+            @@click="$store.drawer.openRaw('@Model.EditDrawerTitle')">Edit</button>
+    <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+            hx-post="@Model.DeleteUrl"
+            hx-trigger="confirmed-del"
+            data-msg="@Model.DeleteMessage"
+            @@click.prevent="(async () => {
+                const ok = await $store.confirm.ask({
+                    title: '@Model.DeleteDialogTitle',
+                    message: $event.currentTarget.dataset.msg,
+                    confirmLabel: '@Model.DeleteConfirmLabel',
+                    level: 'danger'
+                });
+                if (ok) htmx.trigger($el, 'confirmed-del');
+            })()">Delete</button>
+</div>

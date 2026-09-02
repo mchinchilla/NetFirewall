@@ -2,29 +2,41 @@
     ViewData["Title"] = "Firewall — QoS";
     Layout = "_Layout";
 }
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
-        <h1 class="text-2xl font-semibold tracking-tight">QoS configurations</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">One HTB shaper per interface — drill in to define classes that split the bandwidth budget.</p>
+<div x-data="{ hideDisabled: false }">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <h1 class="text-2xl font-semibold tracking-tight">QoS configurations</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">One HTB shaper per interface — drill in to define classes that split the bandwidth budget.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn btn-primary"
+                    hx-get="/Firewall/Qos/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add QoS config')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add QoS config
+            </button>
+        </div>
     </div>
-    <div class="flex flex-wrap items-center gap-2">
+
+    <div class="flex flex-wrap items-center gap-2 mb-4"
+         style="animation: var(--animate-slide-up); animation-delay: 40ms;">
         @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "qos-configs-table", Placeholder = "Filter by interface, bandwidth…", ClientSide = true })
-        <button type="button" class="btn btn-primary"
-                hx-get="/Firewall/Qos/edit"
-                hx-target="#drawer-body" hx-swap="innerHTML"
-                @@click="$store.drawer.openRaw('Add QoS config')">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-            Add QoS config
-        </button>
+        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+            <input type="checkbox" class="rounded" x-model="hideDisabled" />
+            Hide disabled
+        </label>
     </div>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
+        <div id="qos-configs-table"
+             :class="{ 'hide-disabled-rules': hideDisabled }"
+             hx-get="/Firewall/Qos/table"
+             hx-trigger="load, refreshQosConfigs from:body"
+             hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        </div>
+    </section>
 </div>
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-    <div id="qos-configs-table"
-         hx-get="/Firewall/Qos/table"
-         hx-trigger="load, refreshQosConfigs from:body"
-         hx-swap="innerHTML">
-         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-    </div>
-</section>

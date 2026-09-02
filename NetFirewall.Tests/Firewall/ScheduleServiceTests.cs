@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using NetFirewall.Models.Firewall;
 using NetFirewall.Services.Firewall;
+using NetFirewall.Services.Network;
 using NetFirewall.Tests.Infra;
 using Npgsql;
 using Xunit;
@@ -238,6 +240,58 @@ public sealed class ScheduleServiceTests : IAsyncLifetime
     public async Task DeleteAsync_UnknownId_ReturnsFalse()
     {
         Assert.False(await _svc.DeleteAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesTimeLimitRules_AndDisablesOtherAttachedRules()
+    {
+        var sched = await _svc.CreateAsync(MakeBusinessHours("diego"));
+        var fw = NewFirewall();
+
+        var timeLimit = await fw.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward",
+            Action = "drop",
+            SourceAddresses = new[] { "192.168.99.20" },
+            LogPrefix = FwFilterRule.TimeLimitLogPrefix,
+            Description = "Time limit · block DIEGO",
+            ScheduleId = sched.Id,
+            Priority = 2,
+            Enabled = true
+        });
+        var gated = await fw.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward",
+            Action = "accept",
+            Protocol = "tcp",
+            DestinationPorts = new[] { "443" },
+            Description = "HTTPS during hours",
+            ScheduleId = sched.Id,
+            Priority = 50,
+            Enabled = true
+        });
+
+        Assert.True(await _svc.DeleteAsync(sched.Id));
+
+        Assert.Null(await fw.GetFilterRuleByIdAsync(timeLimit.Id));
+        var leftover = await fw.GetFilterRuleByIdAsync(gated.Id);
+        Assert.NotNull(leftover);
+        Assert.False(leftover!.Enabled);
+        Assert.Null(leftover.ScheduleId);
+    }
+
+    private FirewallService NewFirewall()
+    {
+        var objects = new Mock<INetworkObjectResolver>();
+        objects.Setup(r => r.ResolveAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns<IEnumerable<string>, CancellationToken>((inputs, _) =>
+                Task.FromResult<IReadOnlyList<string>>(inputs.ToList()));
+        var services = new Mock<INetworkServiceResolver>();
+        services.Setup(r => r.ResolveAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns<IEnumerable<string>, CancellationToken>((inputs, _) =>
+                Task.FromResult<IReadOnlyList<string>>(inputs.ToList()));
+        return new FirewallService(
+            _pg.DataSource, objects.Object, services.Object, NullLogger<FirewallService>.Instance);
     }
 
     [Fact]

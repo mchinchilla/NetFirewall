@@ -1,4 +1,14 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwAuditLog>
+@using NetFirewall.Web.Models.Shared
+@{
+    var pageNo = ViewBag.Page is int p && p > 0 ? p : 1;
+    var hasNext = ViewBag.HasNext as bool? ?? false;
+    var table = ViewBag.Table as string ?? "";
+    var action = ViewBag.Action as string ?? "";
+    var since = ViewBag.Since as string ?? "";
+    string TableLabel(string name) =>
+        name.StartsWith("fw_", StringComparison.Ordinal) ? name[3..].Replace('_', ' ') : name.Replace('_', ' ');
+}
 
 @if (Model.Count == 0)
 {
@@ -9,35 +19,36 @@ else
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Time (UTC)</th>
-                    <th class="px-5 py-2 font-medium">Table</th>
-                    <th class="px-5 py-2 font-medium">Action</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Record</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">User</th>
-                    <th class="px-5 py-2 font-medium text-right">Diff</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Time (UTC)</th>
+                    <th class="px-2 py-1.5 font-medium">Table</th>
+                    <th class="px-2 py-1.5 font-medium w-24">Action</th>
+                    <th class="px-2 py-1.5 font-medium hidden md:table-cell">Record</th>
+                    <th class="px-2 py-1.5 font-medium hidden lg:table-cell">User</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-20">Diff</th>
                 </tr>
             </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var e in Model)
+            @foreach (var e in Model)
+            {
+                var badgeCls = e.Action switch
                 {
-                    var actionColor = e.Action switch
-                    {
-                        "INSERT" => "var(--feedback-success-fg)",
-                        "UPDATE" => "var(--accent)",
-                        "DELETE" => "var(--feedback-danger-fg)",
-                        _ => "var(--surface-fg-muted)"
-                    };
-                    var rowId = $"audit-row-{e.Id:N}";
-                    <tr x-data="{ open: false }">
-                        <td class="px-5 py-3 font-mono text-xs whitespace-nowrap">@e.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        <td class="px-5 py-3 font-mono text-xs">@e.TableName</td>
-                        <td class="px-5 py-3">
-                            <span class="badge" style="background: color-mix(in srgb, @actionColor 14%, transparent); color: @actionColor;">@e.Action</span>
+                    "INSERT" => "badge-success",
+                    "UPDATE" => "badge-accent",
+                    "DELETE" => "badge-danger",
+                    _ => "badge-muted"
+                };
+                <tbody data-filter-group x-data="{ open: false }">
+                    <tr data-filter-row>
+                        <td class="pl-5 pr-2 py-2.5 font-mono text-xs whitespace-nowrap text-surface-fg-muted">@e.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="px-2 py-2.5">
+                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "table", Value = TableLabel(e.TableName), Title = e.TableName })
                         </td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@e.RecordId.ToString("N").Substring(0, 8)</td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">@(e.UserId ?? "—")</td>
-                        <td class="px-5 py-3 text-right">
+                        <td class="px-2 py-2.5 whitespace-nowrap">
+                            <span class="badge @badgeCls uppercase tracking-wide">@e.Action</span>
+                        </td>
+                        <td class="px-2 py-2.5 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@(e.RecordId.ToString("N")[..8])</td>
+                        <td class="px-2 py-2.5 hidden lg:table-cell text-xs text-surface-fg-muted">@(e.UserId ?? "—")</td>
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
                             <button type="button" class="btn btn-ghost text-xs"
                                     @@click="open = !open"
                                     x-text="open ? 'Hide' : 'Show'"></button>
@@ -48,17 +59,38 @@ else
                             <div class="grid md:grid-cols-2 gap-3">
                                 <div>
                                     <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-feedback-danger-fg">Old</p>
-                                    <pre class="text-xs p-3 rounded overflow-x-auto" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent); color: var(--surface-fg);">@(e.OldValues ?? "—")</pre>
+                                    <pre class="text-xs p-3 rounded overflow-x-auto bg-surface-muted text-surface-fg">@(e.OldValues ?? "—")</pre>
                                 </div>
                                 <div>
                                     <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-feedback-success-fg">New</p>
-                                    <pre class="text-xs p-3 rounded overflow-x-auto" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent); color: var(--surface-fg);">@(e.NewValues ?? "—")</pre>
+                                    <pre class="text-xs p-3 rounded overflow-x-auto bg-surface-muted text-surface-fg">@(e.NewValues ?? "—")</pre>
                                 </div>
                             </div>
                         </td>
                     </tr>
-                }
-            </tbody>
+                </tbody>
+            }
         </table>
+    </div>
+}
+
+@if (pageNo > 1 || hasNext)
+{
+    <div class="px-5 py-3 flex items-center justify-between text-xs text-surface-fg-muted @(Model.Count == 0 ? "" : "border-t border-surface-border")">
+        <span>Page @pageNo</span>
+        <div class="inline-flex items-center gap-1">
+            <button type="button" class="btn btn-ghost text-xs"
+                    @(pageNo <= 1 ? "disabled" : null)
+                    hx-get="/Firewall/AuditLog/table"
+                    hx-target="#audit-log-table"
+                    hx-swap="innerHTML"
+                    hx-vals='{"table":"@table","op":"@action","since":"@since","page":@(pageNo <= 1 ? 1 : pageNo - 1)}'>Previous</button>
+            <button type="button" class="btn btn-ghost text-xs"
+                    @(hasNext ? null : "disabled")
+                    hx-get="/Firewall/AuditLog/table"
+                    hx-target="#audit-log-table"
+                    hx-swap="innerHTML"
+                    hx-vals='{"table":"@table","op":"@action","since":"@since","page":@(pageNo + 1)}'>Next</button>
+        </div>
     </div>
 }

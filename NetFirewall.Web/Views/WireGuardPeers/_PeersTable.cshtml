@@ -1,109 +1,164 @@
 @model NetFirewall.Web.Models.Vpn.WgPeerTableViewModel
+@using NetFirewall.Web.Models.Shared
 @{
     var tunnels = Model.Family == "tunnels";
     var emptyMsg = tunnels
-        ? "No tunnels yet — click Add tunnel to dial an upstream VPN server or link another site."
-        : "No clients yet — click Add client to issue a config for a laptop, phone, etc.";
+        ? "No tunnels yet. Click Add tunnel to dial an upstream VPN server or link another site."
+        : "No clients yet. Click Add client to issue a config for a laptop, phone, etc.";
 }
 
 @if (Model.Peers.Count == 0)
 {
-    <p class="text-sm py-10 text-center text-surface-fg-muted">@emptyMsg</p>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">@emptyMsg</div>
 }
 else
 {
+    var enabled = Model.Peers.Count(p => p.Enabled);
+    var disabled = Model.Peers.Count - enabled;
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Peers.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    @if (tunnels)
-                    {
-                        <th class="px-5 py-2 font-medium">Type</th>
-                        <th class="px-5 py-2 font-medium hidden lg:table-cell">Endpoint</th>
-                        <th class="px-5 py-2 font-medium">Routed via tunnel</th>
-                    }
-                    else
-                    {
-                        <th class="px-5 py-2 font-medium">Allowed IPs</th>
-                        <th class="px-5 py-2 font-medium hidden lg:table-cell">Access</th>
-                    }
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Public key</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var p in Model.Peers.OrderBy(p => p.Name))
-                {
+            @{
+                var groups = tunnels
+                    ? Model.Peers.OrderBy(p => p.Name).GroupBy(p => p.Role == "upstream" ? "Upstream" : "Site-to-site")
+                    : Model.Peers.OrderBy(p => p.Name).GroupBy(_ => "Clients");
+            }
+            @foreach (var group in groups)
+            {
+                var gEnabled = group.Count(x => x.Enabled);
+                var gOff = group.Count() - gEnabled;
+                var cols = tunnels ? 6 : 5;
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-medium">
-                            @p.Name
-                            @if (!string.IsNullOrEmpty(p.Description))
-                            {
-                                <p class="text-xs font-normal text-surface-fg-muted">@p.Description</p>
-                            }
-                        </td>
+                        <th colspan="@cols" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">
+                                    · @gEnabled active@(gOff > 0 ? $", {gOff} off" : "")
+                                </span>
+                            </div>
+                        </th>
+                    </tr>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium">Name</th>
                         @if (tunnels)
                         {
-                            <td class="px-5 py-3 text-xs">
-                                <span class="badge badge-muted">@(p.Role == "upstream" ? "Upstream" : "Site-to-site")</span>
-                            </td>
-                            <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs text-surface-fg-muted">@(p.Endpoint ?? "—")</td>
-                            <td class="px-5 py-3 font-mono text-xs">@string.Join(", ", p.AllowedIps)</td>
+                            <th class="px-2 py-1.5 font-medium">Endpoint</th>
+                            <th class="px-2 py-1.5 font-medium hidden lg:table-cell">Routed</th>
                         }
                         else
                         {
-                            var lanLabel = (p.RouteMode ?? "split") switch
-                            {
-                                "restricted" => "restricted LAN",
-                                "none"       => "no LAN",
-                                _            => "LAN",   // split / legacy full
-                            };
-                            var accessLabel = p.AllowInternet
-                                ? (p.RouteMode == "none" ? "internet only" : $"{lanLabel} + internet")
-                                : lanLabel;
-                            <td class="px-5 py-3 font-mono text-xs">@string.Join(", ", p.AllowedIps)</td>
-                            <td class="px-5 py-3 hidden lg:table-cell text-xs">
-                                <span class="badge badge-muted">@accessLabel</span>
-                            </td>
+                            <th class="px-2 py-1.5 font-medium">Allowed IPs</th>
+                            <th class="px-2 py-1.5 font-medium hidden lg:table-cell">Access</th>
                         }
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted" title="@p.PublicKey">@p.PublicKey[..12]…</td>
-                        <td class="px-5 py-3">
-                            @if (p.Enabled)
+                        <th class="px-2 py-1.5 font-medium hidden md:table-cell">Key</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var p in group)
+                    {
+                        <tr data-disabled="@(p.Enabled ? "false" : "true")">
+                            <td class="pl-5 pr-2 py-2.5">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="font-medium text-surface-fg">@p.Name</span>
+                                    @if (tunnels)
+                                    {
+                                        <span class="badge badge-accent">@(p.Role == "upstream" ? "Upstream" : "Site")</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrEmpty(p.Description))
+                                {
+                                    <p class="text-xs font-normal text-surface-fg-muted">@p.Description</p>
+                                }
+                            </td>
+                            @if (tunnels)
                             {
-                                <span class="badge badge-success">Enabled</span>
+                                <td class="px-2 py-2.5">
+                                    @if (string.IsNullOrEmpty(p.Endpoint))
+                                    {
+                                        <span class="text-xs text-surface-fg-muted">—</span>
+                                    }
+                                    else
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ep", Value = p.Endpoint, Title = p.Endpoint })
+                                    }
+                                </td>
+                                <td class="px-2 py-2.5 hidden lg:table-cell">
+                                    <div class="flex items-center gap-1 flex-wrap">
+                                        @foreach (var ip in p.AllowedIps.Take(3))
+                                        {
+                                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "via", Value = ip, Title = ip })
+                                        }
+                                        @if (p.AllowedIps.Length > 3)
+                                        {
+                                            <span class="text-xs text-surface-fg-muted">+@(p.AllowedIps.Length - 3)</span>
+                                        }
+                                    </div>
+                                </td>
                             }
                             else
                             {
-                                <span class="badge badge-muted">Disabled</span>
+                                var lanLabel = (p.RouteMode ?? "split") switch
+                                {
+                                    "restricted" => "restricted LAN",
+                                    "none"       => "no LAN",
+                                    _            => "LAN",
+                                };
+                                var accessLabel = p.AllowInternet
+                                    ? (p.RouteMode == "none" ? "internet only" : $"{lanLabel} + internet")
+                                    : lanLabel;
+                                <td class="px-2 py-2.5">
+                                    <div class="flex items-center gap-1 flex-wrap">
+                                        @foreach (var ip in p.AllowedIps.Take(4))
+                                        {
+                                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ip", Value = ip, Title = ip })
+                                        }
+                                        @if (p.AllowedIps.Length > 4)
+                                        {
+                                            <span class="text-xs text-surface-fg-muted">+@(p.AllowedIps.Length - 4)</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="px-2 py-2.5 hidden lg:table-cell whitespace-nowrap">
+                                    <span class="badge badge-muted">@accessLabel</span>
+                                </td>
                             }
-                        </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Vpn/WireGuard/Peers/edit/@p.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit @p.Name')">Edit</button>
-                                @{ var msg = tunnels
-                                       ? $"Delete tunnel '{p.Name}'? Traffic routed through it will stop flowing until you set it up again."
-                                       : $"Delete client '{p.Name}'? Their config will stop working — there's no way to recover the private key, you'd have to issue a new client."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Vpn/WireGuard/Peers/delete/@p.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: '@(tunnels ? "Delete tunnel?" : "Delete client?")', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
-                            </div>
-                        </td>
-                    </tr>
-                }
-            </tbody>
+                            <td class="px-2 py-2.5 hidden md:table-cell">
+                                @{ var shortKey = p.PublicKey.Length > 12 ? p.PublicKey[..12] + "…" : p.PublicKey; }
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "key", Value = shortKey, Title = p.PublicKey })
+                            </td>
+                            <td class="px-2 py-2.5 whitespace-nowrap">
+                                @if (p.Enabled)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-muted">Off</span>
+                                }
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Vpn/WireGuard/Peers/edit/{p.Id}",
+                                    EditDrawerTitle = $"Edit {p.Name}",
+                                    DeleteUrl = $"/Vpn/WireGuard/Peers/delete/{p.Id}",
+                                    DeleteDialogTitle = tunnels ? "Delete tunnel?" : "Delete client?",
+                                    DeleteMessage = tunnels
+                                        ? $"Delete tunnel '{p.Name}'? Traffic routed through it will stop flowing until you set it up again."
+                                        : $"Delete client '{p.Name}'? Their config will stop working — there's no way to recover the private key, you'd have to issue a new client."
+                                })
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

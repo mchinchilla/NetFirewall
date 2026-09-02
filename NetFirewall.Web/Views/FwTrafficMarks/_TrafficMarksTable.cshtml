@@ -1,53 +1,83 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwTrafficMark>
+@using NetFirewall.Web.Models.Shared
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center text-surface-fg-muted">No marks defined yet.</div>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No marks defined yet. Click <span class="font-medium text-surface-fg">Add mark</span> to create one.
+    </div>
 }
 else
 {
+    var grouped = Model
+        .OrderBy(x => x.MarkValue)
+        .GroupBy(x => string.IsNullOrWhiteSpace(x.RouteTable) ? "Classification" : "Policy routing")
+        .OrderBy(g => g.Key == "Policy routing" ? 0 : 1);
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.Count</span> mark@(Model.Count == 1 ? "" : "s")
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    <th class="px-5 py-2 font-medium">Mark value</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Route table</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Description</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var m in Model.OrderBy(x => x.MarkValue))
-                {
+            @foreach (var group in grouped)
+            {
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-medium">@m.Name</td>
-                        <td class="px-5 py-3 font-mono text-xs">@m.MarkValue · 0x@(m.MarkValue.ToString("X"))</td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs">@(m.RouteTable ?? "—")</td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">@(m.Description ?? "—")</td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/TrafficMarks/edit/@m.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit mark')">Edit</button>
-                                @{ var msg = $"Delete mark '{m.Name}' (0x{m.MarkValue:X})? Mangle rules and QoS classes referencing it will lose the binding."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/TrafficMarks/delete/@m.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete mark?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="4" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">· @group.Count() mark@(group.Count() == 1 ? "" : "s")</span>
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium">Name</th>
+                        <th class="px-2 py-1.5 font-medium">Mark</th>
+                        <th class="px-2 py-1.5 font-medium hidden md:table-cell">Route table</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var m in group)
+                    {
+                        var hex = $"0x{m.MarkValue:X}";
+                        <tr>
+                            <td class="pl-5 pr-2 py-2.5">
+                                <div class="font-medium text-surface-fg">@m.Name</div>
+                                @if (!string.IsNullOrWhiteSpace(m.Description))
+                                {
+                                    <p class="text-xs font-normal text-surface-fg-muted">@m.Description</p>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5">
+                                <div class="flex items-center gap-1 flex-wrap">
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "dec", Value = m.MarkValue.ToString() })
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "hex", Value = hex })
+                                </div>
+                            </td>
+                            <td class="px-2 py-2.5 hidden md:table-cell">
+                                @if (string.IsNullOrWhiteSpace(m.RouteTable))
+                                {
+                                    <span class="text-xs text-surface-fg-muted">—</span>
+                                }
+                                else
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "table", Value = m.RouteTable })
+                                }
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Firewall/TrafficMarks/edit/{m.Id}",
+                                    EditDrawerTitle = "Edit mark",
+                                    DeleteUrl = $"/Firewall/TrafficMarks/delete/{m.Id}",
+                                    DeleteDialogTitle = "Delete mark?",
+                                    DeleteMessage = $"Delete mark '{m.Name}' ({hex})? Mangle rules and QoS classes referencing it will lose the binding."
+                                })
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

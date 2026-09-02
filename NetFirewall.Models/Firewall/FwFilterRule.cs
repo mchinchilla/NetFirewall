@@ -40,6 +40,13 @@ public class FwFilterRule
     [Map("rate_limit")]
     public string? RateLimit { get; set; }
 
+    /// <summary>
+    /// Log prefix written by the time-policy composer. These drops <em>are</em>
+    /// the schedule; they must not survive as always-on blocks when the
+    /// window is deleted (FK is ON DELETE SET NULL).
+    /// </summary>
+    public const string TimeLimitLogPrefix = "TIME-LIMIT";
+
     [Map("log_prefix")]
     public string? LogPrefix { get; set; }
 

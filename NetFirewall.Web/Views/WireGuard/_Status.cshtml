@@ -1,4 +1,5 @@
 @model NetFirewall.Web.Models.Vpn.WgStatusViewModel
+@using NetFirewall.Web.Models.Shared
 
 @functions {
     static string FmtBytes(long b)
@@ -21,13 +22,10 @@
 
 @if (Model.Server is null)
 {
-    <p class="text-sm py-8 text-center text-surface-fg-muted">No server configured.</p>
+    <div class="text-sm py-8 text-center text-surface-fg-muted">No server configured.</div>
 }
 else if (Model.Status.Count == 0)
 {
-    @* No live peers at all. When an enabled upstream tunnel is configured this is
-       itself an outage (the interface is down or the upstream stopped responding —
-       e.g. its IP changed), so flag it red instead of the neutral grey hint. *@
     var upstreamDown = Model.Server.Enabled
                        && Model.Peers.Any(p => p.Enabled && string.Equals(p.Role, "upstream", StringComparison.OrdinalIgnoreCase));
     if (upstreamDown)
@@ -49,23 +47,26 @@ else if (Model.Status.Count == 0)
     }
     else
     {
-        <p class="text-sm py-6 text-center text-surface-fg-muted">
+        <div class="text-sm py-6 text-center text-surface-fg-muted">
             Interface @Model.Server.Name is not up, or no peers have ever handshook.
-            Click <span class="font-medium text-surface-fg">Apply</span> above to bring it up.
-        </p>
+            Click <span class="font-medium text-surface-fg">Apply VPN</span> above to bring it up.
+        </div>
     }
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.Status.Count</span> peer@(Model.Status.Count == 1 ? "" : "s") live
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Peer</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Endpoint</th>
-                    <th class="px-5 py-2 font-medium">Last handshake</th>
-                    <th class="px-5 py-2 font-medium">RX</th>
-                    <th class="px-5 py-2 font-medium">TX</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Peer</th>
+                    <th class="px-2 py-1.5 font-medium hidden md:table-cell">Endpoint</th>
+                    <th class="px-2 py-1.5 font-medium">Handshake</th>
+                    <th class="px-2 py-1.5 font-medium">Traffic</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium w-24">Status</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
@@ -74,41 +75,43 @@ else
                 {
                     var peer = byPubkey.TryGetValue(s.PublicKey, out var p) ? p : null;
                     var name = peer?.Name ?? "(unknown)";
-                    // Typed verdict (Connected / Pending / Down / Idle) — the SAME
-                    // evaluator the daemon's VpnHealthMonitorService calls, so the
-                    // dot always agrees with the alerting.
                     var health = NetFirewall.Models.Vpn.WgPeerHealthEvaluator.Evaluate(
                         peer, s, DateTime.UtcNow);
-                    var (dotColor, statusLabel) = health switch
+                    var (badgeCls, statusLabel) = health switch
                     {
-                        NetFirewall.Models.Vpn.WgPeerHealth.Connected => ("var(--feedback-success-bd)", "Connected"),
-                        NetFirewall.Models.Vpn.WgPeerHealth.Pending   => ("var(--feedback-warning-bd)", "Waiting for first handshake"),
-                        NetFirewall.Models.Vpn.WgPeerHealth.Down      => ("var(--feedback-danger-bd)",  "Down"),
-                        _                                             => ("var(--surface-fg-muted)",   "Idle"),
+                        NetFirewall.Models.Vpn.WgPeerHealth.Connected => ("badge-success", "Connected"),
+                        NetFirewall.Models.Vpn.WgPeerHealth.Pending   => ("badge-warning", "Pending"),
+                        NetFirewall.Models.Vpn.WgPeerHealth.Down      => ("badge-danger",  "Down"),
+                        _                                             => ("badge-muted",   "Idle"),
                     };
+                    var shortKey = s.PublicKey.Length > 16 ? s.PublicKey[..16] + "…" : s.PublicKey;
                     <tr>
-                        <td class="px-5 py-3">
-                            <div class="flex items-center gap-2">
-                                <span class="inline-block h-2 w-2 rounded-full" title="@statusLabel"
-                                      style="background-color: @dotColor;"></span>
-                                <span class="font-medium">@name</span>
-                                @if (health == NetFirewall.Models.Vpn.WgPeerHealth.Down)
-                                {
-                                    <span class="text-xs font-medium px-1.5 py-0.5 rounded
-                                                 bg-feedback-danger-bg text-feedback-danger-fg">Down</span>
-                                }
-                                else if (health == NetFirewall.Models.Vpn.WgPeerHealth.Pending)
-                                {
-                                    <span class="text-xs font-medium px-1.5 py-0.5 rounded
-                                                 bg-feedback-warning-bg text-feedback-warning-fg">Pending</span>
-                                }
+                        <td class="pl-5 pr-2 py-2.5">
+                            <div class="font-medium text-surface-fg">@name</div>
+                            <div class="mt-1">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "key", Value = shortKey, Title = s.PublicKey })
                             </div>
-                            <p class="text-xs font-mono mt-0.5 text-surface-fg-muted">@s.PublicKey[..16]…</p>
                         </td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@(s.Endpoint ?? "—")</td>
-                        <td class="px-5 py-3 text-xs">@FmtAgo(s.LastHandshakeAt)</td>
-                        <td class="px-5 py-3 font-mono text-xs">@FmtBytes(s.RxBytes)</td>
-                        <td class="px-5 py-3 font-mono text-xs">@FmtBytes(s.TxBytes)</td>
+                        <td class="px-2 py-2.5 hidden md:table-cell">
+                            @if (string.IsNullOrEmpty(s.Endpoint))
+                            {
+                                <span class="text-xs text-surface-fg-muted">—</span>
+                            }
+                            else
+                            {
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ep", Value = s.Endpoint, Title = s.Endpoint })
+                            }
+                        </td>
+                        <td class="px-2 py-2.5 text-xs text-surface-fg-muted">@FmtAgo(s.LastHandshakeAt)</td>
+                        <td class="px-2 py-2.5">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "rx", Value = FmtBytes(s.RxBytes) })
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "tx", Value = FmtBytes(s.TxBytes) })
+                            </div>
+                        </td>
+                        <td class="pl-2 pr-5 py-2.5 whitespace-nowrap">
+                            <span class="badge @badgeCls">@statusLabel</span>
+                        </td>
                     </tr>
                 }
             </tbody>

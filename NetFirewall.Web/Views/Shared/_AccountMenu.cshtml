@@ -27,7 +27,8 @@
 
 <div class="relative" x-data="{ open: false }">
     <button type="button"
-            class="flex items-center gap-2 rounded-full p-0.5 pr-2 transition hover:shadow-sm bg-surface-muted"
+            class="flex items-center gap-2 rounded-full transition
+                   sm:bg-surface-muted sm:p-0.5 sm:pr-2 sm:hover:shadow-sm"
             @@click="open = !open"
             aria-label="Account menu"
             title="@username">

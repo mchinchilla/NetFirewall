@@ -501,7 +501,7 @@ window.NetFw.charts = {
     makeTraffic(canvasEl, data) {
         const ctx = canvasEl.getContext("2d");
         const accent = this.readColor("accent");
-        const secondary = this.readColor("jordy-blue-500");
+        const secondary = this.readColor("chart-out");
         const fgMuted = this.readColor("surface-fg-muted");
         const border = this.readColor("surface-border");
         const elevated = this.readColor("surface-elevated");
@@ -562,7 +562,7 @@ window.NetFw.charts = {
 
         this.register(chart, () => {
             const a = this.readColor("accent");
-            const s = this.readColor("jordy-blue-500");
+            const s = this.readColor("chart-out");
             const fm = this.readColor("surface-fg-muted");
             const bd = this.readColor("surface-border");
             const el = this.readColor("surface-elevated");
@@ -641,7 +641,7 @@ window.NetFw.charts = {
     makeNetworkHistory(canvasEl, data) {
         const ctx = canvasEl.getContext("2d");
         const accent = this.readColor("accent");
-        const secondary = this.readColor("jordy-blue-500");
+        const secondary = this.readColor("chart-out");
         const fgMuted = this.readColor("surface-fg-muted");
         const border = this.readColor("surface-border");
         const elevated = this.readColor("surface-elevated");
@@ -679,7 +679,7 @@ window.NetFw.charts = {
         });
         this.register(chart, () => {
             const a = this.readColor("accent");
-            const s = this.readColor("jordy-blue-500");
+            const s = this.readColor("chart-out");
             const fm = this.readColor("surface-fg-muted");
             const bd = this.readColor("surface-border");
             chart.data.datasets[0].borderColor = a;
@@ -703,7 +703,7 @@ window.NetFw.charts = {
     makeSparkline(canvasEl, data) {
         const ctx = canvasEl.getContext("2d");
         const accent = this.readColor("accent");
-        const secondary = this.readColor("jordy-blue-500");
+        const secondary = this.readColor("chart-out");
         const fgMuted = this.readColor("surface-fg-muted");
         const elevated = this.readColor("surface-elevated");
         const fg = this.readColor("surface-fg");
@@ -750,18 +750,36 @@ window.NetFw.charts = {
             chart.data.datasets[0].borderColor = this.readColor("accent");
             chart.data.datasets[0].backgroundColor =
                 this._verticalGradient(ctx, canvasEl.clientHeight, this.readColor("accent"));
-            chart.data.datasets[1].borderColor = this.readColor("jordy-blue-500");
+            chart.data.datasets[1].borderColor = this.readColor("chart-out");
         });
         return chart;
+    },
+
+    /**
+     * Copy in/out series off Alpine proxies (Chart.js will not draw reactive
+     * arrays). Accepts camelCase or PascalCase from the JSON payload.
+     */
+    plainSeries(data) {
+        if (!data) return { labels: [], inSeries: [], outSeries: [] };
+        const labels = data.labels || data.Labels || [];
+        const inSeries = data.inSeries || data.InSeries || [];
+        const outSeries = data.outSeries || data.OutSeries || [];
+        return {
+            labels: Array.from(labels),
+            inSeries: Array.from(inSeries),
+            outSeries: Array.from(outSeries)
+        };
     },
 
     /** Replace a sparkline's data in place (no re-create). */
     updateSparkline(chart, data) {
         if (!chart) return;
-        chart.data.labels = data.labels;
-        chart.data.datasets[0].data = data.inSeries;
-        chart.data.datasets[1].data = data.outSeries;
+        const s = this.plainSeries(data);
+        chart.data.labels = s.labels;
+        chart.data.datasets[0].data = s.inSeries;
+        chart.data.datasets[1].data = s.outSeries;
         chart.update("none");
+        try { chart.resize(); } catch { /* canvas not laid out yet */ }
     },
 
     /**
@@ -843,19 +861,20 @@ window.NetFw.charts = {
             return "0";
         };
 
+        const series = this.plainSeries(data);
         const chart = new Chart(canvasEl, {
             type: "line",
             data: {
-                labels: data.labels,
+                labels: series.labels,
                 datasets: [
                     {
-                        label: "Down", data: data.inSeries,
+                        label: "Down", data: series.inSeries,
                         borderColor: inbound,
                         backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, inbound),
                         fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2
                     },
                     {
-                        label: "Up", data: data.outSeries,
+                        label: "Up", data: series.outSeries,
                         borderColor: outbound, backgroundColor: "transparent",
                         borderDash: [4, 4], tension: 0.35, pointRadius: 0, borderWidth: 2
                     }
@@ -915,12 +934,12 @@ window.NetFw.charts = {
     /** Semantic palette for per-interface 24h series (one hue per NIC). */
     ifacePalette() {
         return [
+            this.readColor("chart-in"),
+            this.readColor("chart-out"),
+            this.readColor("surface-fg"),
+            this.readColor("surface-fg-muted"),
             this.readColor("accent"),
-            this.readColor("feedback-info-bd"),
-            this.readColor("feedback-success-bd"),
-            this.readColor("feedback-warning-bd"),
-            this.readColor("feedback-danger-bd"),
-            this.readColor("surface-fg-muted")
+            this.readColor("feedback-info-bd")
         ];
     },
 
@@ -1079,7 +1098,11 @@ document.addEventListener("alpine:init", () => {
      *   hx-get="..." hx-swap="none" @htmx:after-request="onHtmx($event)"
      */
     Alpine.data("liveWanCharts", (compact) => {
+        // Chart.js instances must NOT live on Alpine reactive state — the
+        // proxy breaks draw/update. Canvas lookup by [data-iface] also raced
+        // x-for, so each canvas binds itself via x-init.
         const charts = {};
+        const canvases = {};
         return {
         wans: [],
         status: "loading",
@@ -1098,34 +1121,58 @@ document.addEventListener("alpine:init", () => {
             if (n >= 0.001) return `${(n * 1000).toFixed(0)} kbps`;
             return "0";
         },
+        bindCanvas(el, name) {
+            if (!el || !name) return;
+            if (charts[name] && charts[name].canvas !== el) {
+                try { charts[name].destroy(); } catch { /* stale canvas */ }
+                delete charts[name];
+            }
+            canvases[name] = el;
+            this._ensureChart(name);
+        },
         async onHtmx(event) {
             const payload = htmxJson(event);
             if (!payload) {
                 if (this.status === "loading") this.status = "error";
                 return;
             }
-            const next = Array.isArray(payload.wans) ? payload.wans : [];
-            this.wans = next;
-            this.status = next.length === 0 ? "empty" : "ready";
+            const next = Array.isArray(payload.wans) ? payload.wans : (payload.Wans || []);
+            this.wans = next.map(w => ({
+                name: w.name || w.Name,
+                label: w.label || w.Label,
+                role: w.role || w.Role,
+                labels: w.labels || w.Labels || [],
+                inSeries: w.inSeries || w.InSeries || [],
+                outSeries: w.outSeries || w.OutSeries || [],
+                inMbps: w.inMbps ?? w.InMbps ?? 0,
+                outMbps: w.outMbps ?? w.OutMbps ?? 0
+            }));
+            this.status = this.wans.length === 0 ? "empty" : "ready";
             await this.$nextTick();
             this._syncCharts();
         },
-        _syncCharts() {
-            const seen = new Set();
-            for (const wan of this.wans) {
-                seen.add(wan.name);
-                const canvas = this.$el.querySelector(`canvas[data-iface="${cssEscape(wan.name)}"]`);
-                if (!canvas) continue;
-                if (!charts[wan.name]) {
-                    charts[wan.name] = window.NetFw.charts.makeLiveTraffic(canvas, wan, this.compact);
-                } else {
-                    window.NetFw.charts.updateSparkline(charts[wan.name], wan);
-                }
+        _ensureChart(name) {
+            const wan = this.wans.find(w => w.name === name);
+            const canvas = canvases[name];
+            if (!wan || !canvas) return;
+            const series = window.NetFw.charts.plainSeries(wan);
+            if (!charts[name]) {
+                charts[name] = window.NetFw.charts.makeLiveTraffic(canvas, series, this.compact);
+            } else {
+                window.NetFw.charts.updateSparkline(charts[name], series);
             }
+            requestAnimationFrame(() => {
+                try { charts[name]?.resize(); } catch { /* not laid out */ }
+            });
+        },
+        _syncCharts() {
+            const seen = new Set(this.wans.map(w => w.name));
+            for (const wan of this.wans) this._ensureChart(wan.name);
             for (const name of Object.keys(charts)) {
                 if (seen.has(name)) continue;
                 try { charts[name].destroy(); } catch { /* already gone */ }
                 delete charts[name];
+                delete canvases[name];
             }
         }
         };
@@ -1399,6 +1446,30 @@ document.addEventListener("alpine:init", () => {
      * that matches how the kernel walks the chains. The others regroup for
      * answering a question and the table banners say so.
      */
+    /* ---------- wgEgressPicker ---------- LAN devices/subnets that exit via
+     * the tunnel. Extra CIDRs are Alpine-owned (no innerHTML). Search filters
+     * the lease list client-side.
+     */
+    Alpine.data("wgEgressPicker", (initialExtras) => ({
+        q: "",
+        extra: "",
+        extras: Array.isArray(initialExtras) ? initialExtras.slice() : [],
+        match(hay) {
+            const q = (this.q || "").trim().toLowerCase();
+            return !q || String(hay || "").toLowerCase().includes(q);
+        },
+        addExtra() {
+            let v = (this.extra || "").trim();
+            if (!v) return;
+            if (!v.includes("/")) v = `${v}/32`;
+            if (!this.extras.includes(v)) this.extras.push(v);
+            this.extra = "";
+        },
+        removeExtra(v) {
+            this.extras = this.extras.filter(x => x !== v);
+        }
+    }));
+
     Alpine.data("filterRulesPage", () => ({
         chain: "",
         view: "evaluation",

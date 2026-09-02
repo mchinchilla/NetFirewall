@@ -1,85 +1,118 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DdnsConfig>
+@using NetFirewall.Web.Models.Shared
 @{
     var subnetNames = (IDictionary<Guid, string>)(ViewBag.SubnetNames ?? new Dictionary<Guid, string>());
+    string ScopeName(NetFirewall.Models.Dhcp.DdnsConfig d) =>
+        d.SubnetId is null
+            ? "Global"
+            : (subnetNames.TryGetValue(d.SubnetId.Value, out var n) ? n : "(unknown subnet)");
 }
 
 @if (Model.Count == 0)
 {
     <div class="text-sm py-10 text-center text-surface-fg-muted">
-        No DDNS configs yet. Add a global config (no subnet binding) or one per subnet to override.
+        No DDNS configs yet. Click <span class="font-medium text-surface-fg">Add DDNS config</span> for a global config (no subnet binding) or one per subnet to override.
     </div>
 }
 else
 {
+    var enabled = Model.Count(d => d.Enabled);
+    var disabled = Model.Count - enabled;
+    var grouped = Model
+        .OrderBy(d => d.SubnetId is null ? 0 : 1)
+        .ThenBy(d => ScopeName(d))
+        .GroupBy(d => d.SubnetId is null ? "Global" : "Per subnet");
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Scope</th>
-                    <th class="px-5 py-2 font-medium">Forward zone</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">DNS server</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">TSIG</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var d in Model.OrderBy(x => x.SubnetId is null ? "" : (subnetNames.TryGetValue(x.SubnetId.Value, out var n) ? n : "?")))
-                {
-                    var scope = d.SubnetId is null
-                        ? "Global"
-                        : (subnetNames.TryGetValue(d.SubnetId.Value, out var n) ? n : "(unknown subnet)");
+            @foreach (var group in grouped)
+            {
+                var gEnabled = group.Count(x => x.Enabled);
+                var gOff = group.Count() - gEnabled;
+                <thead>
                     <tr>
-                        <td class="px-5 py-3">
-                            @if (d.SubnetId is null)
-                            {
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent">Global</span>
-                            }
-                            else
-                            {
-                                <span class="font-medium">@scope</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 font-mono text-xs">@(d.ForwardZone ?? "—")</td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs">@d.DnsServer:@d.DnsPort</td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">
-                            @(string.IsNullOrEmpty(d.TsigKeyName) ? "(no key)" : $"{d.TsigKeyName} · {d.TsigAlgorithm}")
-                        </td>
-                        <td class="px-5 py-3">
-                            @if (d.Enabled)
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
-                            }
-                            else
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Dhcp/Ddns/edit/@d.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit DDNS config')">Edit</button>
-                                @{ var msg = $"Delete DDNS config for {scope}? Future leases will fall back to the next config in scope (or stop updating DNS)."; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Dhcp/Ddns/delete/@d.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete DDNS config?',
-                                                message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete',
-                                                level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="5" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">
+                                    · @gEnabled active@(gOff > 0 ? $", {gOff} off" : "")
+                                </span>
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium">Scope</th>
+                        <th class="px-2 py-1.5 font-medium">DNS</th>
+                        <th class="px-2 py-1.5 font-medium hidden lg:table-cell">TSIG</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var d in group)
+                    {
+                        var scope = ScopeName(d);
+                        <tr data-disabled="@(d.Enabled ? "false" : "true")">
+                            <td class="pl-5 pr-2 py-2.5">
+                                @if (d.SubnetId is null)
+                                {
+                                    <span class="badge badge-accent">Global</span>
+                                }
+                                else
+                                {
+                                    <span class="font-medium text-surface-fg">@scope</span>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5">
+                                <div class="flex items-center gap-1 flex-wrap">
+                                    @if (!string.IsNullOrEmpty(d.ForwardZone))
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "zone", Value = d.ForwardZone, Title = d.ForwardZone })
+                                    }
+                                    @if (d.DnsServer is not null)
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ns", Value = $"{d.DnsServer}:{d.DnsPort}" })
+                                    }
+                                </div>
+                            </td>
+                            <td class="px-2 py-2.5 hidden lg:table-cell">
+                                @if (string.IsNullOrEmpty(d.TsigKeyName))
+                                {
+                                    <span class="text-xs text-surface-fg-muted">—</span>
+                                }
+                                else
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "tsig", Value = $"{d.TsigKeyName} · {d.TsigAlgorithm}", Title = d.TsigAlgorithm })
+                                }
+                            </td>
+                            <td class="px-2 py-2.5 whitespace-nowrap">
+                                @if (d.Enabled)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-muted">Off</span>
+                                }
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Dhcp/Ddns/edit/{d.Id}",
+                                    EditDrawerTitle = "Edit DDNS config",
+                                    DeleteUrl = $"/Dhcp/Ddns/delete/{d.Id}",
+                                    DeleteDialogTitle = "Delete DDNS config?",
+                                    DeleteMessage = $"Delete DDNS config for {scope}? Future leases will fall back to the next config in scope (or stop updating DNS)."
+                                })
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

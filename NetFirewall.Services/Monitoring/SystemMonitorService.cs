@@ -33,8 +33,9 @@ public sealed class SystemMonitorService : ISystemMonitorService
         var diskTask = GetDiskMetricsAsync(ct);
         var networkTask = GetNetworkMetricsAsync(ct);
         var systemTask = GetSystemInfoAsync(ct);
+        var conntrackTask = GetConntrackMetricsAsync(ct);
 
-        await Task.WhenAll(cpuTask, memoryTask, diskTask, networkTask, systemTask);
+        await Task.WhenAll(cpuTask, memoryTask, diskTask, networkTask, systemTask, conntrackTask);
 
         return new SystemMetricsSnapshot
         {
@@ -43,8 +44,30 @@ public sealed class SystemMonitorService : ISystemMonitorService
             Disks = await diskTask,
             Network = await networkTask,
             System = await systemTask,
+            Conntrack = await conntrackTask,
             Timestamp = DateTime.UtcNow
         };
+    }
+
+    public async Task<ConntrackMetrics> GetConntrackMetricsAsync(CancellationToken ct = default)
+    {
+        if (!_isLinux)
+            return new ConntrackMetrics();
+
+        try
+        {
+            var countTask = File.ReadAllTextAsync("/proc/sys/net/netfilter/nf_conntrack_count", ct);
+            var maxTask = File.ReadAllTextAsync("/proc/sys/net/netfilter/nf_conntrack_max", ct);
+            await Task.WhenAll(countTask, maxTask);
+            if (!long.TryParse((await countTask).Trim(), out var count)) count = 0;
+            if (!long.TryParse((await maxTask).Trim(), out var max)) max = 0;
+            return new ConntrackMetrics { Count = count, Max = max, Available = true };
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or IOException)
+        {
+            _logger.LogDebug(ex, "conntrack sysctls unreadable");
+            return new ConntrackMetrics();
+        }
     }
 
     #region CPU Metrics

@@ -12,27 +12,53 @@
     string FmtUptime(TimeSpan t) =>
         t.TotalDays >= 1 ? $"{(int)t.TotalDays}d {t.Hours:D2}h {t.Minutes:D2}m"
                          : $"{t.Hours:D2}h {t.Minutes:D2}m {t.Seconds:D2}s";
-}
 
-<section class="grid gap-3 grid-cols-2 lg:grid-cols-4 mb-4">
+    KpiSeverity PctSev(double pct) =>
+        pct >= 90 ? KpiSeverity.Critical : pct >= 75 ? KpiSeverity.Warning : KpiSeverity.Normal;
+
+    var loadPerCore = Model.Cpu.CoreCount > 0
+        ? Model.System.LoadAverage1Min / Model.Cpu.CoreCount
+        : 0;
+    var loadSev = loadPerCore >= 1.5 ? KpiSeverity.Critical
+                : loadPerCore >= 1.0 ? KpiSeverity.Warning
+                : KpiSeverity.Normal;
+}
+<section class="grid gap-3 grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 mb-4">
     @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
         Label = "CPU usage", Value = Pct(Model.Cpu.UsagePercent), ValueSuffix = "%",
         DeltaContext = $"{Model.Cpu.CoreCount} cores · idle {Pct(Model.Cpu.IdlePercent)}%",
+        Tint = KpiTint.Coral,
+        Severity = PctSev(Model.Cpu.UsagePercent),
         IconPath = "M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"
     })
     @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
         Label = "Memory", Value = Pct(Model.Memory.UsagePercent), ValueSuffix = "%",
         DeltaContext = $"{Model.Memory.UsedFormatted} / {Model.Memory.TotalFormatted}",
+        Tint = KpiTint.Blue,
+        Severity = PctSev(Model.Memory.UsagePercent),
         IconPath = "M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3v4.5a3 3 0 0 1-3 3m-13.5 0a3 3 0 0 0-3 3v3a3 3 0 0 0 3 3h13.5a3 3 0 0 0 3-3v-3a3 3 0 0 0-3-3"
     })
     @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
         Label = "Load avg", Value = $"{Model.System.LoadAverage1Min:0.00}",
         DeltaContext = $"5m {Model.System.LoadAverage5Min:0.00} · 15m {Model.System.LoadAverage15Min:0.00}",
+        Tint = KpiTint.Gold,
+        Severity = loadSev,
         IconPath = "M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"
+    })
+    @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
+        Label = "Conntrack",
+        Value = Model.Conntrack.Available ? Model.Conntrack.Count.ToString("N0") : "—",
+        DeltaContext = Model.Conntrack.Available
+            ? $"{Pct(Model.Conntrack.UsagePercent)}% of {Model.Conntrack.Max:N0} max"
+            : "sysctls unavailable",
+        Tint = KpiTint.Violet,
+        Severity = Model.Conntrack.Available ? PctSev(Model.Conntrack.UsagePercent) : KpiSeverity.Normal,
+        IconPath = "M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
     })
     @await Html.PartialAsync("_KpiCard", new KpiCardViewModel {
         Label = "Uptime", Value = FmtUptime(Model.System.Uptime),
         DeltaContext = $"{Model.System.ProcessCount} procs · booted {Model.System.BootTime:yyyy-MM-dd HH:mm}",
+        Tint = KpiTint.Mint,
         IconPath = "M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
     })
 </section>
@@ -114,14 +140,21 @@
                     <tbody class="divide-y border-surface-border">
                         @foreach (var n in Model.Network.OrderBy(x => x.InterfaceName, StringComparer.OrdinalIgnoreCase))
                         {
+                            var errs = n.ErrorsReceived + n.ErrorsSent;
+                            var drops = n.DropsReceived + n.DropsSent;
+                            var noisy = errs > 0 || drops > 0;
                             <tr>
                                 <td class="px-5 py-3 font-mono text-xs font-medium">@n.InterfaceName</td>
                                 <td class="px-5 py-3 font-mono text-xs">@FmtBytesPerSec(n.BytesReceivedPerSecond)</td>
                                 <td class="px-5 py-3 font-mono text-xs">@FmtBytesPerSec(n.BytesSentPerSecond)</td>
                                 <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@n.BytesReceivedFormatted</td>
                                 <td class="px-5 py-3 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@n.BytesSentFormatted</td>
-                                <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs text-surface-fg-muted">
-                                    @(n.ErrorsReceived + n.ErrorsSent) / @(n.DropsReceived + n.DropsSent)
+                                <td class="px-5 py-3 hidden lg:table-cell font-mono text-xs @(noisy ? "text-feedback-danger-fg font-semibold" : "text-surface-fg-muted")">
+                                    @errs / @drops
+                                    @if (noisy)
+                                    {
+                                        <span class="badge badge-danger ml-1">noise</span>
+                                    }
                                 </td>
                             </tr>
                         }

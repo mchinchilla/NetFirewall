@@ -68,6 +68,14 @@ public sealed class AlertsController : Controller
         return PartialView("_AlertsBanner", model);
     }
 
+    // GET /Alerts/feed — compact dashboard/monitoring panel (shared _RecentAlerts).
+    [HttpGet("feed")]
+    public async Task<IActionResult> Feed(CancellationToken ct)
+    {
+        var model = await BuildNotificationsAsync(limit: 8, ct);
+        return PartialView("_RecentAlerts", model);
+    }
+
     // GET /Alerts/menu — HTMX fragment for the header notifications dropdown.
     // Recent alerts (active + resolved), newest first, capped for the popover.
     [HttpGet("menu")]

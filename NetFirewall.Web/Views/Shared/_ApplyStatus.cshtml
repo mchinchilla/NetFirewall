@@ -1,0 +1,39 @@
+@model NetFirewall.Web.Models.ApplyStatusViewModel
+@{
+    var pending = Model.Items.Where(p => p.HasPending).ToList();
+    var last = Model.LastAppliedAt;
+}
+<div class="flex items-center gap-2 min-w-0 max-w-full sm:max-w-md">
+    @if (pending.Count > 0)
+    {
+        <span class="badge badge-warning shrink-0">Pending</span>
+        <p class="text-sm text-surface-fg-muted truncate">
+            @foreach (var p in pending)
+            {
+                <span class="mr-1.5"><strong class="text-surface-fg">@p.PendingCount</strong> @p.Kind</span>
+            }
+            @if (last is { } t)
+            {
+                <span>· last apply @DashboardPanels.Ago(t)</span>
+            }
+        </p>
+    }
+    else
+    {
+        <span class="badge badge-success shrink-0">In sync</span>
+        <p class="text-sm text-surface-fg-muted truncate">
+            @if (last is { } t)
+            {
+                <span>Last apply <span class="font-medium text-surface-fg">@DashboardPanels.Ago(t)</span></span>
+            }
+            else
+            {
+                <span>No apply recorded yet</span>
+            }
+            @if (Model.Items.Count > 0)
+            {
+                <span class="hidden md:inline"> · @string.Join(" · ", Model.Items.Select(i => i.Kind))</span>
+            }
+        </p>
+    }
+</div>

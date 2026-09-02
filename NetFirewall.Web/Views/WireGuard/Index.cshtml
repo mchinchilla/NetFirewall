@@ -27,12 +27,12 @@
     </div>
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4"
      style="animation: var(--animate-slide-up);">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">VPN</p>
         <h1 class="text-2xl font-semibold tracking-tight">WireGuard</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
             One interface, two jobs: <span class="font-medium">tunnels</span> this firewall keeps up (upstream egress, site-to-site) and <span class="font-medium">clients</span> that connect in (laptops, phones). Client keys are generated on-device by the daemon and the private half is shown <span class="font-medium">once</span> — we never persist it.
         </p>
     </div>
@@ -50,58 +50,73 @@
                         });
                         if (ok) htmx.trigger($el, 'confirmed-stop');
                     })()">Stop</button>
-            <button type="button" class="btn btn-ghost"
-                    hx-post="/Vpn/WireGuard/apply" hx-trigger="confirmed-apply"
-                    title="Only writes the wg config + brings the interface up (no firewall/routing)."
-                    @@click.prevent="(async () => {
-                        const ok = await $store.confirm.ask({
-                            title: 'Apply WireGuard config only?',
-                            message: 'Writes /etc/wireguard/@(server.Name).conf and brings the interface up (or hot-reloads peers via wg syncconf). Does NOT re-apply firewall rules or policy routing.',
-                            confirmLabel: 'Apply tunnel',
-                            level: 'default'
-                        });
-                        if (ok) htmx.trigger($el, 'confirmed-apply');
-                    })()">Apply tunnel only</button>
-            <button type="button" class="btn btn-primary"
-                    hx-post="/Vpn/WireGuard/apply-all" hx-trigger="confirmed-apply-all"
-                    title="Applies firewall rules → tunnel → policy routing, in the right order."
-                    @@click.prevent="(async () => {
-                        const ok = await $store.confirm.ask({
-                            title: 'Apply full VPN config?',
-                            message: 'Applies in order: firewall rules (nft) → WireGuard tunnel → policy routing (ip rule/route). This is what you want after changing egress devices or peers.',
-                            confirmLabel: 'Apply VPN',
-                            level: 'default'
-                        });
-                        if (ok) htmx.trigger($el, 'confirmed-apply-all');
-                    })()">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
-                Apply VPN
-            </button>
+            <div class="relative" x-data="{ more: false }">
+                <div class="inline-flex items-stretch">
+                    <button type="button" class="btn btn-primary rounded-r-none"
+                            hx-post="/Vpn/WireGuard/apply-all" hx-trigger="confirmed-apply-all"
+                            title="Firewall rules → tunnel → policy routing."
+                            @@click.prevent="(async () => {
+                                const ok = await $store.confirm.ask({
+                                    title: 'Apply full VPN config?',
+                                    message: 'Applies in order: firewall rules (nft) → WireGuard tunnel → policy routing (ip rule/route). This is what you want after changing egress devices or peers.',
+                                    confirmLabel: 'Apply VPN',
+                                    level: 'default'
+                                });
+                                if (ok) htmx.trigger($el, 'confirmed-apply-all');
+                            })()">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                        Apply VPN
+                    </button>
+                    <button type="button"
+                            class="btn btn-primary rounded-l-none px-2"
+                            style="border-left: 1px solid color-mix(in srgb, var(--accent-fg) 25%, transparent);"
+                            @@click="more = !more"
+                            :aria-expanded="more.toString()"
+                            aria-haspopup="menu"
+                            aria-label="More apply options">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                        </svg>
+                    </button>
+                </div>
+                <div x-cloak x-show="more" @@click.outside="more = false"
+                     x-transition.opacity.duration.150ms
+                     role="menu"
+                     class="absolute right-0 mt-2 w-72 origin-top-right rounded-xl border shadow-lg overflow-hidden z-20 bg-surface-elevated border-surface-border">
+                    <button type="button"
+                            class="w-full text-left px-4 py-3 text-sm hover:bg-surface-muted"
+                            role="menuitem"
+                            hx-post="/Vpn/WireGuard/apply" hx-trigger="confirmed-apply"
+                            @@click.prevent="more = false; (async () => {
+                                const ok = await $store.confirm.ask({
+                                    title: 'Apply tunnel only?',
+                                    message: 'Writes /etc/wireguard/@(server.Name).conf and brings the interface up (or hot-reloads peers via wg syncconf). Does NOT re-apply firewall rules or policy routing.',
+                                    confirmLabel: 'Apply tunnel',
+                                    level: 'default'
+                                });
+                                if (ok) htmx.trigger($el, 'confirmed-apply');
+                            })()">
+                        <span class="font-medium">Apply tunnel only</span>
+                        <span class="block text-xs mt-0.5 text-surface-fg-muted">wg config + interface — skip nft and routing</span>
+                    </button>
+                </div>
+            </div>
         </div>
     }
 </div>
 
-@* ----- Import from disk ----- *@
-<section class="card mb-4" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
-    <header class="flex items-baseline justify-between mb-3">
-        <h2 class="text-base font-semibold">Import from <code>/etc/wireguard</code></h2>
-        <button type="button" class="btn btn-ghost text-xs"
-                hx-get="/Vpn/WireGuard/importables"
-                hx-target="#wg-import-picker"
-                hx-swap="innerHTML">
-            Scan
-        </button>
-    </header>
-    <div id="wg-import-picker" class="text-sm text-surface-fg-muted">
-        Click <strong>Scan</strong> to list <code>.conf</code> files visible to the daemon.
-    </div>
-</section>
-
 <div class="grid gap-4 grid-cols-1 xl:grid-cols-2">
     @* ----- Interface config ----- *@
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;"
+             x-data="{ advanced: @(form.TableOff || !string.IsNullOrEmpty(form.PostUp) || !string.IsNullOrEmpty(form.PostDown) ? "true" : "false") }">
         <header class="flex items-baseline justify-between mb-4">
-            <h2 class="text-base font-semibold">Interface</h2>
+            <div>
+                <h2 class="text-base font-semibold">Interface</h2>
+                @if (server is not null)
+                {
+                    <p class="text-xs mt-0.5 font-mono text-surface-fg-muted">@form.Name · @form.AddressCidr · UDP @form.ListenPort</p>
+                }
+            </div>
             @if (server is not null)
             {
                 <div class="flex items-center gap-1">
@@ -177,31 +192,41 @@
                 </div>
 
                 @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                    Name = nameof(form.TableOff), Label = "Table = off (let policy routing own the route)",
-                    Kind = NetFirewall.Web.Models.FormFieldKind.Checkbox, Value = form.TableOff ? "true" : "false",
-                    Help = "Keeps wg-quick from installing the tunnel's routes itself. Forced ON automatically while an enabled upstream tunnel exists — otherwise its 0.0.0.0/0 route would hijack the firewall's own outbound."
-                })
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.PostUp), Label = "PostUp (optional)", Value = form.PostUp,
-                        Placeholder = "sysctl -w net.ipv4.ip_forward=1"
-                    })
-                    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
-                        Name = nameof(form.PostDown), Label = "PostDown (optional)", Value = form.PostDown
-                    })
-                </div>
-
-                @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
                     Name = nameof(form.Enabled), Label = "Enabled", Kind = NetFirewall.Web.Models.FormFieldKind.Checkbox,
                     Value = form.Enabled ? "true" : "false"
                 })
+
+                <div class="pt-1">
+                    <button type="button"
+                            class="text-xs font-medium text-surface-fg-muted hover:text-surface-fg"
+                            @@click="advanced = !advanced"
+                            :aria-expanded="advanced.toString()">
+                        <span x-text="advanced ? 'Hide advanced' : 'Show advanced'">Show advanced</span>
+                        <span class="text-surface-fg-muted"> — Table=off, PostUp, PostDown</span>
+                    </button>
+                    <div x-show="advanced" x-cloak class="mt-3 space-y-3">
+                        @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                            Name = nameof(form.TableOff), Label = "Table = off (let policy routing own the route)",
+                            Kind = NetFirewall.Web.Models.FormFieldKind.Checkbox, Value = form.TableOff ? "true" : "false",
+                            Help = "Keeps wg-quick from installing the tunnel's routes itself. Forced ON automatically while an enabled upstream tunnel exists — otherwise its 0.0.0.0/0 route would hijack the firewall's own outbound."
+                        })
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                                Name = nameof(form.PostUp), Label = "PostUp (optional)", Value = form.PostUp,
+                                Placeholder = "sysctl -w net.ipv4.ip_forward=1"
+                            })
+                            @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+                                Name = nameof(form.PostDown), Label = "PostDown (optional)", Value = form.PostDown
+                            })
+                        </div>
+                    </div>
+                </div>
 
                 @if (server is not null)
                 {
                     <div class="pt-3 border-t border-surface-border">
                         <p class="text-xs uppercase tracking-wider font-semibold mb-1 text-surface-fg-muted">Interface public key</p>
-                        <p class="text-xs font-mono break-all p-2 rounded" style="background: color-mix(in srgb, var(--surface-fg-muted) 8%, transparent);">@server.PublicKey</p>
+                        <p class="text-xs font-mono break-all p-2 rounded bg-surface-muted">@server.PublicKey</p>
                         <p class="text-xs mt-1 text-surface-fg-muted">This firewall's identity — give it to the remote side of any tunnel and to inbound clients. The private key never leaves the daemon.</p>
                     </div>
                 }
@@ -226,13 +251,14 @@
              hx-get="/Vpn/WireGuard/status"
              :hx-trigger="paused ? 'load, refreshWireGuard from:body' : 'load, every 10s, refreshWireGuard from:body'"
              hx-swap="innerHTML">
-             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     </section>
 </div>
 
 @* ----- Tunnels (upstream / site-to-site — links this firewall keeps up) ----- *@
-<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;"
+         x-data="{ hideDisabled: false }">
     <header class="flex items-baseline justify-between mb-4">
         <div>
             <h2 class="text-base font-semibold">Tunnels</h2>
@@ -252,21 +278,30 @@
 
     @if (server is null)
     {
-        <p class="text-sm py-8 text-center text-surface-fg-muted">Save the interface config first — tunnels need an interface to attach to.</p>
+        <div class="text-sm py-8 text-center text-surface-fg-muted">Save the interface config first — tunnels need an interface to attach to.</div>
     }
     else
     {
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "wg-tunnels-table", Placeholder = "Filter by name, endpoint…", ClientSide = true })
+            <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+                <input type="checkbox" class="rounded" x-model="hideDisabled" />
+                Hide disabled
+            </label>
+        </div>
         <div id="wg-tunnels-table"
+             :class="{ 'hide-disabled-rules': hideDisabled }"
              hx-get="/Vpn/WireGuard/Peers/table?family=tunnels"
              hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
              hx-swap="innerHTML">
-             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     }
 </section>
 
 @* ----- VPN clients (road-warriors that connect in) ----- *@
-<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 200ms;">
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 200ms;"
+         x-data="{ hideDisabled: false }">
     <header class="flex items-baseline justify-between mb-4">
         <div>
             <h2 class="text-base font-semibold">VPN clients</h2>
@@ -286,15 +321,23 @@
 
     @if (server is null)
     {
-        <p class="text-sm py-8 text-center text-surface-fg-muted">Save the interface config first — clients need an interface to attach to.</p>
+        <div class="text-sm py-8 text-center text-surface-fg-muted">Save the interface config first — clients need an interface to attach to.</div>
     }
     else
     {
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "wg-clients-table", Placeholder = "Filter by name, IP, access…", ClientSide = true })
+            <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+                <input type="checkbox" class="rounded" x-model="hideDisabled" />
+                Hide disabled
+            </label>
+        </div>
         <div id="wg-clients-table"
+             :class="{ 'hide-disabled-rules': hideDisabled }"
              hx-get="/Vpn/WireGuard/Peers/table?family=clients"
              hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
              hx-swap="innerHTML">
-             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     }
 </section>
@@ -311,7 +354,26 @@
              hx-get="/Vpn/WireGuard/Egress/panel"
              hx-trigger="load, refreshWireGuard from:body"
              hx-swap="innerHTML">
-             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     </section>
 }
+
+@* Import is an infrequent recovery path — keep it below the live tables. *@
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 240ms;">
+    <header class="flex items-baseline justify-between mb-3">
+        <div>
+            <h2 class="text-base font-semibold">Import from disk</h2>
+            <p class="text-xs text-surface-fg-muted">Scan <code>/etc/wireguard</code> for <code>.conf</code> files the daemon can see.</p>
+        </div>
+        <button type="button" class="btn btn-ghost text-xs"
+                hx-get="/Vpn/WireGuard/importables"
+                hx-target="#wg-import-picker"
+                hx-swap="innerHTML">
+            Scan
+        </button>
+    </header>
+    <div id="wg-import-picker" class="text-sm text-surface-fg-muted">
+        Click <span class="font-medium text-surface-fg">Scan</span> to list configs on disk.
+    </div>
+</section>

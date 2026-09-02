@@ -1,71 +1,99 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwNatRule>
+@using NetFirewall.Web.Models.Firewall
+@using NetFirewall.Web.Models.Shared
 @{
     var ifaceNames = (IDictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+    var ifaceTypes = (IDictionary<Guid, string>)(ViewBag.InterfaceTypes ?? new Dictionary<Guid, string>());
+    var enabled = Model.Count(n => n.Enabled);
+    var disabled = Model.Count - enabled;
 }
+
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center text-surface-fg-muted">No NAT rules configured.</div>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No NAT rules configured. Click <span class="font-medium text-surface-fg">Add NAT rule</span> to create one.
+    </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Pri</th>
-                    <th class="px-5 py-2 font-medium">Type</th>
-                    <th class="px-5 py-2 font-medium">Source</th>
-                    <th class="px-5 py-2 font-medium">Out interface</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">SNAT addr</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var n in Model.OrderBy(x => x.Priority))
-                {
-                    var ifname = n.OutputInterfaceId is { } id && ifaceNames.TryGetValue(id, out var x) ? x : "any";
+            @foreach (var group in Model.OrderBy(x => x.Type).ThenBy(x => x.Priority).GroupBy(x => x.Type))
+            {
+                var gEnabled = group.Count(x => x.Enabled);
+                var gOff = group.Count() - gEnabled;
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-mono text-xs">@n.Priority</td>
-                        <td class="px-5 py-3">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium uppercase bg-accent-soft text-accent">@n.Type</span>
-                        </td>
-                        <td class="px-5 py-3 font-mono text-xs">@n.SourceNetwork</td>
-                        <td class="px-5 py-3 font-mono text-xs">@ifname</td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs">@(n.SnatAddress?.ToString() ?? "—")</td>
-                        <td class="px-5 py-3">
-                            @if (n.Enabled)
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
-                            }
-                            else
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/NatRules/edit/@n.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit NAT rule')">Edit</button>
-                                @{ var msg = $"Delete {n.Type} rule for {n.SourceNetwork}?"; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/NatRules/delete/@n.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete NAT rule?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="6" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                <span class="text-sm font-semibold uppercase tracking-wide text-surface-fg">@group.Key</span>
+                                <span class="text-xs font-normal text-surface-fg-muted">
+                                    · @gEnabled active@(gOff > 0 ? $", {gOff} off" : "")
+                                </span>
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium w-12">Pri</th>
+                        <th class="px-2 py-1.5 font-medium">Rule</th>
+                        <th class="px-2 py-1.5 font-medium w-48">Out interface</th>
+                        <th class="px-2 py-1.5 font-medium hidden md:table-cell">SNAT</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var n in group)
+                    {
+                        var ifname = n.OutputInterfaceId is { } id && ifaceNames.TryGetValue(id, out var x) ? x : "any";
+                        var iftype = n.OutputInterfaceId is { } tid && ifaceTypes.TryGetValue(tid, out var t) ? t : null;
+                        <tr data-disabled="@(n.Enabled ? "false" : "true")">
+                            <td class="pl-5 pr-2 py-2.5 font-mono text-xs tabular-nums text-surface-fg-muted">@n.Priority</td>
+                            <td class="px-2 py-2.5">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="badge badge-accent uppercase tracking-wide">@n.Type</span>
+                                    @if (!string.IsNullOrWhiteSpace(n.Description))
+                                    {
+                                        <span class="text-surface-fg">@n.Description</span>
+                                    }
+                                </div>
+                                <div class="flex items-center gap-1 flex-wrap mt-1">
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "src", Value = n.SourceNetwork, Title = n.SourceNetwork })
+                                </div>
+                            </td>
+                            <td class="px-2 py-2.5">
+                                @await Html.PartialAsync("_IfaceChip", new IfaceChipViewModel { Name = ifname, Type = iftype, Dir = "out" })
+                            </td>
+                            <td class="px-2 py-2.5 hidden md:table-cell font-mono text-xs text-surface-fg-muted">@(n.SnatAddress?.ToString() ?? "—")</td>
+                            <td class="px-2 py-2.5 whitespace-nowrap">
+                                @if (n.Enabled)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-muted">Off</span>
+                                }
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Firewall/NatRules/edit/{n.Id}",
+                                    EditDrawerTitle = "Edit NAT rule",
+                                    DeleteUrl = $"/Firewall/NatRules/delete/{n.Id}",
+                                    DeleteDialogTitle = "Delete NAT rule?",
+                                    DeleteMessage = $"Delete {n.Type} rule for {n.SourceNetwork}?"
+                                })
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

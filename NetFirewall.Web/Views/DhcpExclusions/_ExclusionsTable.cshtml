@@ -1,4 +1,5 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpExclusion>
+@using NetFirewall.Web.Models.Shared
 @{
     var subnetId = (Guid)ViewBag.SubnetId;
 }
@@ -6,51 +7,47 @@
 @if (Model.Count == 0)
 {
     <div class="text-sm py-10 text-center text-surface-fg-muted">
-        No exclusions yet. Add one to keep an IP (or a small range) out of the auto-assignment pool.
+        No exclusions yet. Click <span class="font-medium text-surface-fg">Add exclusion</span> to keep an IP (or a small range) out of the auto-assignment pool.
     </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.Count</span> exclusion@(Model.Count == 1 ? "" : "s")
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Range</th>
-                    <th class="px-5 py-2 font-medium">Reason</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Range</th>
+                    <th class="px-2 py-1.5 font-medium">Reason</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
                 @foreach (var e in Model.OrderBy(x => x.IpStart?.ToString()))
                 {
+                    var range = e.IpEnd is null ? e.IpStart.ToString() : $"{e.IpStart}–{e.IpEnd}";
                     <tr>
-                        <td class="px-5 py-3 font-mono text-xs">
-                            @e.IpStart@(e.IpEnd != null ? $"  →  {e.IpEnd}" : "")
-                        </td>
-                        <td class="px-5 py-3 text-xs text-surface-fg-muted">@(e.Reason ?? "—")</td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Dhcp/Subnets/@subnetId/Exclusions/edit/@e.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit exclusion')">Edit</button>
-                                @{
-                                    var msg = $"Delete exclusion {e.IpStart}{(e.IpEnd != null ? $" → {e.IpEnd}" : "")}? The IPs will rejoin the pool.";
+                        <td class="pl-5 pr-2 py-2.5">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "start", Value = e.IpStart.ToString() })
+                                @if (e.IpEnd is not null)
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "end", Value = e.IpEnd.ToString() })
                                 }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Dhcp/Subnets/@subnetId/Exclusions/delete/@e.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete exclusion?',
-                                                message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete',
-                                                level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
                             </div>
+                        </td>
+                        <td class="px-2 py-2.5 text-xs text-surface-fg-muted">@(e.Reason ?? "—")</td>
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                            @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                            {
+                                EditUrl = $"/Dhcp/Subnets/{subnetId}/Exclusions/edit/{e.Id}",
+                                EditDrawerTitle = "Edit exclusion",
+                                DeleteUrl = $"/Dhcp/Subnets/{subnetId}/Exclusions/delete/{e.Id}",
+                                DeleteDialogTitle = "Delete exclusion?",
+                                DeleteMessage = $"Delete exclusion {range}? The IPs will rejoin the pool."
+                            })
                         </td>
                     </tr>
                 }

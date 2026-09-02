@@ -25,7 +25,8 @@ else
         <p>
             <span class="font-semibold text-feedback-warning-fg">@Model.TotalCount</span>
             reference@(Model.TotalCount == 1 ? "" : "s") to <span class="font-mono font-medium">@name</span>.
-            Edits propagate at next apply; delete will silently break these.
+            You can add or change IPs — rules keep the name and pick up the new addresses at next apply.
+            Deleting this object leaves those rules pointing at a missing name.
         </p>
 
         @foreach (var (title, entries, listUrl) in sections.Where(s => s.Entries.Count > 0))

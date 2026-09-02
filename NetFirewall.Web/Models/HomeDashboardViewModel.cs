@@ -42,6 +42,12 @@ public sealed class HomeDashboardViewModel
 
     /// <summary>Shared WAN-health card model (Summary mode), rendered by _WanHealthCard.</summary>
     public NetFirewall.Web.Models.Network.WanHealthCardViewModel WanCard { get; init; } = new();
+
+    public ApplyStatusViewModel ApplyStatus { get; init; } = new();
+    public RecentLeasesViewModel RecentLeases { get; init; } = new();
+    public PortForwardsSummaryViewModel PortForwards { get; init; } = new();
+    public DropRulesViewModel DropRules { get; init; } = new();
+    public RecentAuditViewModel RecentAudit { get; init; } = new();
 }
 
 public sealed class TopTalkerRow

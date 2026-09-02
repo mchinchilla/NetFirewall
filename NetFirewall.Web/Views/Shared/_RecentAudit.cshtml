@@ -1,0 +1,44 @@
+@model NetFirewall.Web.Models.RecentAuditViewModel
+<section class="card">
+    <header class="flex items-baseline justify-between mb-3">
+        <div>
+            <h2 class="text-base font-semibold">Audit log</h2>
+            <p class="text-xs text-surface-fg-muted">Latest configuration changes</p>
+        </div>
+        @if (!string.IsNullOrEmpty(Model.ManageUrl))
+        {
+            <a href="@Model.ManageUrl" class="text-xs hover:underline text-accent">Full log →</a>
+        }
+    </header>
+    @if (Model.Entries.Count == 0)
+    {
+        <p class="text-sm py-6 text-center text-surface-fg-muted">No audit entries yet.</p>
+    }
+    else
+    {
+        <ul class="divide-y border-surface-border">
+            @foreach (var e in Model.Entries)
+            {
+                var badgeCls = e.Action switch
+                {
+                    "INSERT" => "badge-success",
+                    "UPDATE" => "badge-accent",
+                    "DELETE" => "badge-danger",
+                    _ => "badge-muted"
+                };
+                <li class="flex items-center justify-between gap-3 py-2">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="badge @badgeCls">@e.Action</span>
+                            <span class="text-sm truncate">@DashboardPanels.TableLabel(e.TableName)</span>
+                        </div>
+                        <p class="text-[11px] text-surface-fg-muted mt-0.5 truncate">
+                            @(e.UserId ?? "system")
+                        </p>
+                    </div>
+                    <span class="text-xs text-surface-fg-muted shrink-0">@DashboardPanels.Ago(e.CreatedAt)</span>
+                </li>
+            }
+        </ul>
+    }
+</section>

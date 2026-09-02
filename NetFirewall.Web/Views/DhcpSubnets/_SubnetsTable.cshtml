@@ -1,7 +1,13 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpSubnet>
+@using NetFirewall.Web.Models.Firewall
+@using NetFirewall.Web.Models.Shared
 @{
     var exclusions = (Dictionary<Guid, int>)(ViewBag.ExclusionCounts ?? new Dictionary<Guid, int>());
     var pools      = (Dictionary<Guid, int>)(ViewBag.PoolCounts      ?? new Dictionary<Guid, int>());
+    var ifaceNames = (IDictionary<Guid, string>)(ViewBag.InterfaceNames ?? new Dictionary<Guid, string>());
+    var ifaceTypes = (IDictionary<Guid, string>)(ViewBag.InterfaceTypes ?? new Dictionary<Guid, string>());
+    var enabled = Model.Count(s => s.Enabled);
+    var disabled = Model.Count - enabled;
 }
 
 @if (Model.Count == 0)
@@ -13,84 +19,102 @@
 }
 else
 {
+    var grouped = Model
+        .OrderBy(s => s.Name)
+        .GroupBy(s =>
+        {
+            if (s.InterfaceId is { } iid && ifaceNames.TryGetValue(iid, out var n)) return n;
+            return "unbound";
+        });
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@enabled</span> active
+        @if (disabled > 0) { <span>· @disabled off</span> }
+        <span>· @Model.Count total</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
-            <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    <th class="px-5 py-2 font-medium">Network</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Router</th>
-                    <th class="px-5 py-2 font-medium hidden lg:table-cell">Lease</th>
-                    <th class="px-5 py-2 font-medium">Status</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y border-surface-border">
-                @foreach (var s in Model)
-                {
+            @foreach (var group in grouped)
+            {
+                var gEnabled = group.Count(x => x.Enabled);
+                var gOff = group.Count() - gEnabled;
+                var sample = group.First();
+                var gType = sample.InterfaceId is { } tid && ifaceTypes.TryGetValue(tid, out var t) ? t : null;
+                <thead>
                     <tr>
-                        <td class="px-5 py-3 font-medium">@s.Name</td>
-                        <td class="px-5 py-3 font-mono text-xs">@s.Network</td>
-                        <td class="px-5 py-3 hidden md:table-cell font-mono text-xs">@(s.Router?.ToString() ?? "—")</td>
-                        <td class="px-5 py-3 hidden lg:table-cell text-xs text-surface-fg-muted">
-                            @(s.DefaultLeaseTime / 3600)h / @(s.MaxLeaseTime / 3600)h
-                        </td>
-                        <td class="px-5 py-3">
-                            @if (s.Enabled)
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Enabled</span>
-                            }
-                            else
-                            {
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-muted text-surface-fg-muted">Disabled</span>
-                            }
-                        </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                @{ var poolCount = pools.GetValueOrDefault(s.Id, 0); var exclCount = exclusions.GetValueOrDefault(s.Id, 0); }
-                                <a href="/Dhcp/Subnets/@s.Id/Pools" class="btn btn-ghost text-xs inline-flex items-center gap-1.5">
-                                    Pools
-                                    @if (poolCount > 0)
-                                    {
-                                        <span class="px-1.5 rounded text-[10px]"
-                                              style="background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);">@poolCount</span>
-                                    }
-                                    →
-                                </a>
-                                <a href="/Dhcp/Subnets/@s.Id/Exclusions" class="btn btn-ghost text-xs inline-flex items-center gap-1.5">
-                                    Exclusions
-                                    @if (exclCount > 0)
-                                    {
-                                        <span class="px-1.5 rounded text-[10px]"
-                                              style="background: color-mix(in srgb, var(--feedback-warning-fg) 14%, transparent); color: var(--feedback-warning-fg);">@exclCount</span>
-                                    }
-                                    →
-                                </a>
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Dhcp/Subnets/edit/@s.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit @s.Name')">Edit</button>
-                                @{
-                                    var delMsg = $"Delete subnet '{s.Name}' ({s.Network})? Pools, exclusions and reservations bound to it will be cascaded.";
-                                }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Dhcp/Subnets/delete/@s.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@delMsg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete subnet?',
-                                                message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete',
-                                                level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <th colspan="5" class="px-5 pt-5 pb-2 text-left">
+                            <div class="flex items-baseline gap-2 flex-wrap">
+                                @await Html.PartialAsync("_IfaceChip", new IfaceChipViewModel { Name = group.Key, Type = gType })
+                                <span class="text-xs font-normal text-surface-fg-muted">
+                                    · @gEnabled active@(gOff > 0 ? $", {gOff} off" : "")
+                                </span>
                             </div>
-                        </td>
+                        </th>
                     </tr>
-                }
-            </tbody>
+                    <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                        <th class="pl-5 pr-2 py-1.5 font-medium">Subnet</th>
+                        <th class="px-2 py-1.5 font-medium">Scope</th>
+                        <th class="px-2 py-1.5 font-medium hidden lg:table-cell">Lease</th>
+                        <th class="px-2 py-1.5 font-medium w-20">Status</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-52">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y border-surface-border">
+                    @foreach (var s in group)
+                    {
+                        var poolCount = pools.GetValueOrDefault(s.Id, 0);
+                        var exclCount = exclusions.GetValueOrDefault(s.Id, 0);
+                        <tr data-disabled="@(s.Enabled ? "false" : "true")">
+                            <td class="pl-5 pr-2 py-2.5">
+                                <div class="font-medium text-surface-fg">@s.Name</div>
+                                @if (!string.IsNullOrWhiteSpace(s.DomainName))
+                                {
+                                    <p class="text-xs font-normal text-surface-fg-muted">@s.DomainName</p>
+                                }
+                            </td>
+                            <td class="px-2 py-2.5">
+                                <div class="flex items-center gap-1 flex-wrap">
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "net", Value = s.Network, Title = s.Network })
+                                    @if (s.Router is not null)
+                                    {
+                                        @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "gw", Value = s.Router.ToString() })
+                                    }
+                                </div>
+                            </td>
+                            <td class="px-2 py-2.5 hidden lg:table-cell">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "lease", Value = $"{s.DefaultLeaseTime / 3600}h/{s.MaxLeaseTime / 3600}h" })
+                            </td>
+                            <td class="px-2 py-2.5 whitespace-nowrap">
+                                @if (s.Enabled)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-muted">Off</span>
+                                }
+                            </td>
+                            <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                <div class="inline-flex items-center gap-1">
+                                    <a href="/Dhcp/Subnets/@s.Id/Pools" class="btn btn-ghost text-xs">
+                                        Pools@(poolCount > 0 ? $" ({poolCount})" : "")
+                                    </a>
+                                    <a href="/Dhcp/Subnets/@s.Id/Exclusions" class="btn btn-ghost text-xs">
+                                        Exclusions@(exclCount > 0 ? $" ({exclCount})" : "")
+                                    </a>
+                                    @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                    {
+                                        EditUrl = $"/Dhcp/Subnets/edit/{s.Id}",
+                                        EditDrawerTitle = $"Edit {s.Name}",
+                                        DeleteUrl = $"/Dhcp/Subnets/delete/{s.Id}",
+                                        DeleteDialogTitle = "Delete subnet?",
+                                        DeleteMessage = $"Delete subnet '{s.Name}' ({s.Network})? Pools, exclusions and reservations bound to it will be cascaded."
+                                    })
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            }
         </table>
     </div>
 }

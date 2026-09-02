@@ -73,12 +73,48 @@ public sealed class ScheduleService : IScheduleService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand("DELETE FROM fw_schedules WHERE id = @id", conn);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Time-limit drops are the schedule's effect. The FK is SET NULL, which
+        // would leave them as 24/7 blocks — delete them first.
+        await using (var dropTime = new NpgsqlCommand(
+                         """
+                         DELETE FROM fw_filter_rules
+                          WHERE schedule_id = @id
+                            AND log_prefix = @prefix
+                         """, conn, tx))
+        {
+            dropTime.Parameters.AddWithValue("id", id);
+            dropTime.Parameters.AddWithValue("prefix", FwFilterRule.TimeLimitLogPrefix);
+            var n = await dropTime.ExecuteNonQueryAsync(ct);
+            if (n > 0)
+                _logger.LogInformation("Deleted {Count} time-limit rule(s) with schedule {Id}", n, id);
+        }
+
+        // Remaining attached rules (SSH-only-during-hours, etc.) must not
+        // become always-on. Disable them; SET NULL on the schedule delete
+        // then leaves them as ordinary disabled rows.
+        await using (var disable = new NpgsqlCommand(
+                         "UPDATE fw_filter_rules SET enabled = false WHERE schedule_id = @id",
+                         conn, tx))
+        {
+            disable.Parameters.AddWithValue("id", id);
+            await disable.ExecuteNonQueryAsync(ct);
+        }
+
+        await using var cmd = new NpgsqlCommand(
+            "DELETE FROM fw_schedules WHERE id = @id", conn, tx);
         cmd.Parameters.AddWithValue("id", id);
         var deleted = await cmd.ExecuteNonQueryAsync(ct) > 0;
-        if (deleted)
-            await ScheduleApplyNotify.TrySendAsync(conn, $"schedule.delete:{id:N}", _logger, ct);
-        return deleted;
+        if (!deleted)
+        {
+            await tx.RollbackAsync(ct);
+            return false;
+        }
+
+        await tx.CommitAsync(ct);
+        await ScheduleApplyNotify.TrySendAsync(conn, $"schedule.delete:{id:N}", _logger, ct);
+        return true;
     }
 
     private static void Validate(FwSchedule s)

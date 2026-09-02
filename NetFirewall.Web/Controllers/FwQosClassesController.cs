@@ -28,8 +28,10 @@ public sealed class FwQosClassesController : Controller
         var config = await _firewall.GetQosConfigByIdAsync(configId, ct);
         if (config is null) return NotFound();
         var ifaces = await _firewall.GetInterfacesAsync(ct);
+        var iface = ifaces.FirstOrDefault(i => i.Id == config.InterfaceId);
         ViewBag.Config = config;
-        ViewBag.InterfaceName = ifaces.FirstOrDefault(i => i.Id == config.InterfaceId)?.Name ?? "(unknown)";
+        ViewBag.InterfaceName = iface?.Name ?? "(unknown)";
+        ViewBag.InterfaceType = iface?.Type;
         return View();
     }
 

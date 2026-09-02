@@ -23,13 +23,16 @@ public sealed class FwAuditLogController : Controller
     }
 
     [HttpGet("table")]
-    public async Task<IActionResult> Table(string? table, string? action, string? since, int page, CancellationToken ct)
+    public async Task<IActionResult> Table(string? table, string? op, string? since, int page, CancellationToken ct)
     {
+        // `op` is INSERT/UPDATE/DELETE. Do not name this parameter `action`:
+        // MVC already binds `action` to the method name ("Table"), which made
+        // every search `WHERE action = 'Table'` and the log always looked empty.
         var p = page < 1 ? 1 : page;
         var sinceDt = ParseSince(since);
         var rows = await _firewall.SearchAuditLogsAsync(
             tableName: string.IsNullOrWhiteSpace(table) ? null : table,
-            action: string.IsNullOrWhiteSpace(action) ? null : action,
+            action: string.IsNullOrWhiteSpace(op) ? null : op,
             since: sinceDt,
             limit: PageSize,
             offset: (p - 1) * PageSize,
@@ -38,7 +41,7 @@ public sealed class FwAuditLogController : Controller
         ViewBag.Page = p;
         ViewBag.HasNext = rows.Count == PageSize;
         ViewBag.Table = table;
-        ViewBag.Action = action;
+        ViewBag.Action = op;
         ViewBag.Since = since;
         return PartialView("_AuditLogTable", rows);
     }

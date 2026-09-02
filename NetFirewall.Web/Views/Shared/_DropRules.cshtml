@@ -1,0 +1,39 @@
+@model NetFirewall.Web.Models.DropRulesViewModel
+<section class="card">
+    <header class="flex items-baseline justify-between mb-3">
+        <div>
+            <h2 class="text-base font-semibold">Live drops</h2>
+            <p class="text-xs text-surface-fg-muted">@Model.TotalLive enabled drop/reject rules</p>
+        </div>
+        @if (!string.IsNullOrEmpty(Model.ManageUrl))
+        {
+            <a href="@Model.ManageUrl" class="text-xs hover:underline text-accent">Filter rules →</a>
+        }
+    </header>
+    @if (Model.TotalLive == 0)
+    {
+        <p class="text-sm py-6 text-center text-surface-fg-muted">No enabled drop or reject rules.</p>
+    }
+    else
+    {
+        <ul class="divide-y border-surface-border">
+            @foreach (var r in Model.Rows)
+            {
+                var badge = r.Action == "reject" ? "badge-warning" : "badge-danger";
+                <li class="flex items-start justify-between gap-3 py-2">
+                    <div class="min-w-0">
+                        <p class="text-sm font-medium truncate">@(r.Description ?? r.Match)</p>
+                        <p class="text-[11px] font-mono text-surface-fg-muted mt-0.5 truncate">
+                            @r.Chain · @r.Match
+                        </p>
+                    </div>
+                    <span class="badge @badge shrink-0">@r.Action</span>
+                </li>
+            }
+        </ul>
+        @if (Model.TotalLive > Model.Rows.Count)
+        {
+            <p class="text-xs text-surface-fg-muted mt-2">+ @(Model.TotalLive - Model.Rows.Count) more</p>
+        }
+    }
+</section>

@@ -20,6 +20,13 @@ public interface INetworkObjectService
     Task SetGroupMembersAsync(Guid parentId, IEnumerable<Guid> childIds, CancellationToken ct = default);
 
     /// <summary>
+    /// Find or create a host object for each IPv4 address. Used when growing
+    /// a group by pasting IPs instead of pre-creating members.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> EnsureHostsForAddressesAsync(
+        string namePrefix, IEnumerable<string> addresses, CancellationToken ct = default);
+
+    /// <summary>
     /// Find every firewall rule that references this object by name. Useful
     /// before delete (so the operator sees what will silently break at next
     /// apply) and as a "where used" panel in the Edit drawer.

@@ -35,6 +35,14 @@ public interface ISystemMonitorService
     /// Get all metrics in a single call (more efficient).
     /// </summary>
     Task<SystemMetricsSnapshot> GetSnapshotAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Kernel conntrack table occupancy from
+    /// <c>/proc/sys/net/netfilter/nf_conntrack_{count,max}</c>.
+    /// <see cref="ConntrackMetrics.Available"/> is false off Linux or when
+    /// the sysctls are unreadable (no conntrack module).
+    /// </summary>
+    Task<ConntrackMetrics> GetConntrackMetricsAsync(CancellationToken ct = default);
 }
 
 /// <summary>
@@ -175,6 +183,15 @@ public record SystemInfo
     public DateTime BootTime { get; init; }
 }
 
+/// <summary>Kernel conntrack table occupancy.</summary>
+public record ConntrackMetrics
+{
+    public long Count { get; init; }
+    public long Max { get; init; }
+    public bool Available { get; init; }
+    public double UsagePercent => Max > 0 ? 100.0 * Count / Max : 0;
+}
+
 /// <summary>
 /// Complete system metrics snapshot
 /// </summary>
@@ -185,5 +202,6 @@ public record SystemMetricsSnapshot
     public IReadOnlyList<DiskMetrics> Disks { get; init; } = [];
     public IReadOnlyList<NetworkMetrics> Network { get; init; } = [];
     public SystemInfo System { get; init; } = new();
+    public ConntrackMetrics Conntrack { get; init; } = new();
     public DateTime Timestamp { get; init; } = DateTime.UtcNow;
 }

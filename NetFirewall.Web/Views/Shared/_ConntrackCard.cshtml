@@ -1,0 +1,35 @@
+@model NetFirewall.Web.Models.ConntrackCardViewModel
+@{
+    var m = Model.Metrics;
+    var pct = m.UsagePercent;
+    var barColor = !m.Available ? "var(--surface-fg-muted)"
+                 : pct >= 90 ? "var(--feedback-danger-fg)"
+                 : pct >= 75 ? "var(--feedback-warning-fg)"
+                 : "var(--accent)";
+}
+<section class="card">
+    <header class="flex items-baseline justify-between mb-3">
+        <div>
+            <h2 class="text-base font-semibold">Conntrack</h2>
+            <p class="text-xs text-surface-fg-muted">Kernel connection table</p>
+        </div>
+        @if (m.Available)
+        {
+            <span class="text-xs font-mono text-surface-fg-muted">@m.Count.ToString("N0") / @m.Max.ToString("N0")</span>
+        }
+    </header>
+    @if (!m.Available)
+    {
+        <p class="text-sm py-4 text-center text-surface-fg-muted">
+            Conntrack sysctls not readable on this host.
+        </p>
+    }
+    else
+    {
+        <p class="kpi-value">@pct.ToString("0.0")<span class="text-base font-normal text-surface-fg-muted">%</span></p>
+        <div class="h-1.5 mt-3 rounded-full overflow-hidden bg-surface-muted">
+            <div class="h-full rounded-full" style="width: @(Math.Min(pct, 100).ToString("0.#"))%; background-color: @barColor;"></div>
+        </div>
+        <p class="text-[11px] text-surface-fg-muted mt-2">nf_conntrack_count / nf_conntrack_max</p>
+    }
+</section>

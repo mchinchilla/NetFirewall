@@ -1,0 +1,40 @@
+@model NetFirewall.Web.Models.RecentLeasesViewModel
+<section class="card">
+    <header class="flex items-baseline justify-between mb-3">
+        <div>
+            <h2 class="text-base font-semibold">Recent leases</h2>
+            <p class="text-xs text-surface-fg-muted">@Model.TotalActive active · newest first</p>
+        </div>
+        @if (!string.IsNullOrEmpty(Model.ManageUrl))
+        {
+            <a href="@Model.ManageUrl" class="text-xs hover:underline text-accent">All leases →</a>
+        }
+    </header>
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="text-sm py-6 text-center text-surface-fg-muted">No active leases.</p>
+    }
+    else
+    {
+        <ul class="divide-y border-surface-border">
+            @foreach (var l in Model.Rows)
+            {
+                <li class="flex items-center justify-between gap-3 py-2">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            @await Html.PartialAsync("_RuleChip", new NetFirewall.Web.Models.Shared.RuleChipViewModel { Label = "ip", Value = l.Ip })
+                            @if (!string.IsNullOrEmpty(l.Hostname))
+                            {
+                                <span class="text-sm font-medium truncate">@l.Hostname</span>
+                            }
+                        </div>
+                        <p class="text-[11px] font-mono text-surface-fg-muted mt-0.5">@l.Mac</p>
+                    </div>
+                    <span class="text-xs text-surface-fg-muted shrink-0" title="Started @l.StartUtc.ToLocalTime().ToString("g")">
+                        @DashboardPanels.Ago(l.StartUtc)
+                    </span>
+                </li>
+            }
+        </ul>
+    }
+</section>

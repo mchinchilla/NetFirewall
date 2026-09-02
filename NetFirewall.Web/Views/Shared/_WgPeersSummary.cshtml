@@ -1,0 +1,48 @@
+@model NetFirewall.Web.Models.Vpn.WgStatusViewModel
+@functions {
+    static string FmtAgo(DateTime? t)
+    {
+        if (t is null) return "never";
+        var d = DateTime.UtcNow - t.Value;
+        if (d.TotalSeconds < 60) return $"{(int)d.TotalSeconds}s ago";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+}
+@if (Model.Server is null)
+{
+    <p class="text-sm py-6 text-center text-surface-fg-muted">No VPN server configured.</p>
+}
+else if (Model.Status.Count == 0)
+{
+    <p class="text-sm py-6 text-center text-surface-fg-muted">
+        Interface <span class="font-mono">@Model.Server.Name</span> is not up, or no peer has handshook.
+    </p>
+}
+else
+{
+    var byPubkey = Model.Peers.ToDictionary(p => p.PublicKey, p => p);
+    <ul class="divide-y border-surface-border">
+        @foreach (var s in Model.Status.OrderByDescending(s => s.LastHandshakeAt ?? DateTime.MinValue).Take(8))
+        {
+            var peer = byPubkey.TryGetValue(s.PublicKey, out var p) ? p : null;
+            var name = peer?.Name ?? "(unknown)";
+            var health = NetFirewall.Models.Vpn.WgPeerHealthEvaluator.Evaluate(peer, s, DateTime.UtcNow);
+            var (badgeCls, statusLabel) = health switch
+            {
+                NetFirewall.Models.Vpn.WgPeerHealth.Connected => ("badge-success", "Connected"),
+                NetFirewall.Models.Vpn.WgPeerHealth.Pending   => ("badge-warning", "Pending"),
+                NetFirewall.Models.Vpn.WgPeerHealth.Down      => ("badge-danger",  "Down"),
+                _                                             => ("badge-muted",   "Idle"),
+            };
+            <li class="flex items-center justify-between gap-3 py-2">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium truncate">@name</p>
+                    <p class="text-[11px] text-surface-fg-muted mt-0.5">handshake @FmtAgo(s.LastHandshakeAt)</p>
+                </div>
+                <span class="badge @badgeCls shrink-0">@statusLabel</span>
+            </li>
+        }
+    </ul>
+}

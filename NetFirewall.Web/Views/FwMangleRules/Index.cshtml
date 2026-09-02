@@ -2,42 +2,68 @@
     ViewData["Title"] = "Firewall — Mangle rules";
     Layout = "_Layout";
 }
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
-     style="animation: var(--animate-slide-up);"
-     x-data="{ chain: '' }">
-    <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
-        <h1 class="text-2xl font-semibold tracking-tight">Mangle rules</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">Mark traffic for QoS classes and policy routing tables. Marks are managed under <a href="/Firewall/TrafficMarks" class="hover:underline text-accent">Traffic marks</a>.</p>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "mangle-rules-table", Placeholder = "Filter by mark, address, port…", ClientSide = true })
-        <label class="text-xs flex items-center gap-2">
-            Chain
-            <select x-model="chain"
-                    @@change="htmx.trigger(document.getElementById('mangle-rules-table'), 'manual-refresh')"
-                    class="input py-1 text-xs">
-                <option value="">All</option>
-                <option value="prerouting">Prerouting</option>
-                <option value="postrouting">Postrouting</option>
-            </select>
-        </label>
-        <button type="button" class="btn btn-primary"
-                hx-get="/Firewall/MangleRules/edit"
-                hx-target="#drawer-body" hx-swap="innerHTML"
-                @@click="$store.drawer.openRaw('Add mangle rule')">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-            Add rule
-        </button>
+<div x-data="{ chain: '', hideDisabled: false }">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Mangle rules</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+                Mark traffic for QoS classes and policy routing tables. Marks are managed under
+                <a href="/Firewall/TrafficMarks" class="hover:underline text-accent">Traffic marks</a>.
+            </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn btn-primary"
+                    hx-get="/Firewall/MangleRules/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add mangle rule')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add rule
+            </button>
+        </div>
     </div>
 
-    <section class="card mt-3 w-full" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <div class="flex flex-wrap items-center gap-2 mb-4"
+         style="animation: var(--animate-slide-up); animation-delay: 40ms;"
+         hx-target="#mangle-rules-table"
+         hx-swap="innerHTML"
+         hx-sync="#mangle-rules-table:replace">
+        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "mangle-rules-table", Placeholder = "Filter by mark, address, port…", ClientSide = true })
+
+        <div class="seg" role="group" aria-label="Chain">
+            <button type="button" class="seg-btn" :class="chain === '' ? 'is-on' : ''"
+                    :aria-pressed="(chain === '').toString()"
+                    hx-get="/Firewall/MangleRules/table"
+                    :hx-vals="JSON.stringify({ chain: '' })"
+                    @@click="chain = ''">All</button>
+            <button type="button" class="seg-btn" :class="chain === 'prerouting' ? 'is-on' : ''"
+                    :aria-pressed="(chain === 'prerouting').toString()"
+                    hx-get="/Firewall/MangleRules/table"
+                    :hx-vals="JSON.stringify({ chain: 'prerouting' })"
+                    @@click="chain = 'prerouting'">Prerouting</button>
+            <button type="button" class="seg-btn" :class="chain === 'postrouting' ? 'is-on' : ''"
+                    :aria-pressed="(chain === 'postrouting').toString()"
+                    hx-get="/Firewall/MangleRules/table"
+                    :hx-vals="JSON.stringify({ chain: 'postrouting' })"
+                    @@click="chain = 'postrouting'">Postrouting</button>
+        </div>
+
+        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
+            <input type="checkbox" class="rounded" x-model="hideDisabled" />
+            Hide disabled
+        </label>
+    </div>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
         <div id="mangle-rules-table"
+             :class="{ 'hide-disabled-rules': hideDisabled }"
              hx-get="/Firewall/MangleRules/table"
-             :hx-vals="JSON.stringify({ chain })"
-             hx-trigger="load, refreshMangleRules from:body, manual-refresh"
-             hx-swap="innerHTML">
-             Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+             hx-trigger="load, refreshMangleRules from:body"
+             hx-sync="this:replace"
+             hx-swap="innerHTML"
+             :hx-vals="JSON.stringify({ chain })">
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
         </div>
     </section>
 </div>

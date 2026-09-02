@@ -70,4 +70,30 @@ public class TimePolicyComposerTests
         form.ScheduleId = null;
         Assert.Throws<ArgumentException>(() => TimePolicyComposer.Compose(form, "KIDS_ONLINE"));
     }
+
+    [Fact]
+    public void SamePolicy_IgnoresSourceOrderAndCase()
+    {
+        var a = TimePolicyComposer.Compose(Form(), "KIDS_ONLINE");
+        var b = TimePolicyComposer.Compose(Form(), "KIDS_ONLINE");
+        b.SourceAddresses = new[] { "kids_laptop", "KIDS_PHONE" };
+        Assert.True(TimePolicyComposer.SamePolicy(a, b));
+    }
+
+    [Fact]
+    public void SamePolicy_DifferentSchedule_IsNotADuplicate()
+    {
+        var a = TimePolicyComposer.Compose(Form(), "KIDS_ONLINE");
+        var b = TimePolicyComposer.Compose(Form(), "KIDS_ONLINE");
+        b.ScheduleId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        Assert.False(TimePolicyComposer.SamePolicy(a, b));
+    }
+
+    [Fact]
+    public void SamePolicy_AllowVsBlock_IsNotADuplicate()
+    {
+        var allow = TimePolicyComposer.Compose(Form("allow-during"), "KIDS_ONLINE");
+        var block = TimePolicyComposer.Compose(Form("block-during"), "KIDS_ONLINE");
+        Assert.False(TimePolicyComposer.SamePolicy(allow, block));
+    }
 }

@@ -17,12 +17,15 @@
     @Html.AntiForgeryToken()
     @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
 
-    @* Where-used panel — surfaces what depends on this object before edits/deletes. *@
+    @* Where-used panel. hx-target must be explicit: the form's hx-target="this"
+       is inherited, so without this the usages response replaces the whole form
+       (name, addresses, Save) and the operator cannot add IPs. *@
     @if (Model.Id.HasValue)
     {
-        <div class="mb-4"
+        <div id="object-usages" class="mb-4"
              hx-get="/Network/Objects/usages/@Model.Id"
              hx-trigger="load"
+             hx-target="#object-usages"
              hx-swap="innerHTML">
             <div class="text-xs py-2 text-center text-surface-fg-muted">Checking usages…</div>
         </div>
@@ -49,12 +52,15 @@
         @* ----- value (host/network/range) ----- *@
         <div x-show="type !== 'group'">
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
-                Name = nameof(Model.Value), Label = "Value", Value = Model.Value,
-                Placeholder = "depends on type — see help below"
+                Name = nameof(Model.Value),
+                Label = "Addresses",
+                Kind = FormFieldKind.Textarea,
+                Value = Model.Value,
+                Placeholder = "192.168.99.20"
             })
             <div class="text-xs mt-1 space-y-0.5 text-surface-fg-muted">
-                <p x-show="type === 'host'">Single IPv4 address: <span class="font-mono">10.0.0.5</span> (we add /32 automatically).</p>
-                <p x-show="type === 'network'">CIDR: <span class="font-mono">10.0.0.0/24</span>, <span class="font-mono">192.168.1.0/27</span>, etc.</p>
+                <p x-show="type === 'host'">One or more IPv4 addresses, comma or newline separated. Example: <span class="font-mono">192.168.99.20</span> and <span class="font-mono">192.168.99.21</span>. We add /32 automatically. The time policy that references this name picks up new IPs at next apply.</p>
+                <p x-show="type === 'network'">One or more CIDRs: <span class="font-mono">10.0.0.0/24</span>, <span class="font-mono">192.168.1.0/27</span>.</p>
                 <p x-show="type === 'range'">Inclusive range: <span class="font-mono">10.0.0.10-10.0.0.50</span>.</p>
                 <p x-show="type === 'fqdn'">Hostname: <span class="font-mono">slack.com</span>, <span class="font-mono">api.example.org</span>. Resolved via DNS at every nft apply, cached per <code>network_objects.fqdn_ttl_seconds</code> (default 5 min).</p>
             </div>
@@ -68,8 +74,8 @@
             </label>
             @if (availableMembers.Count == 0)
             {
-                <p class="text-sm py-4 text-center text-surface-fg-muted">
-                    No other objects exist. Create some host/network/range objects first.
+                <p class="text-sm py-3 text-center text-surface-fg-muted">
+                    No other objects yet. Paste IPs below — we will create host members for them.
                 </p>
             }
             else
@@ -95,6 +101,16 @@
                     Selected: <span x-text="selected.size"></span> · groups can include other groups (the resolver flattens recursively with cycle detection).
                 </p>
             }
+            <div class="mt-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.ExtraAddresses),
+                    Label = "Add IPs",
+                    Kind = FormFieldKind.Textarea,
+                    Value = Model.ExtraAddresses,
+                    Placeholder = "192.168.99.21\n192.168.99.22",
+                    Help = "Paste extra IPv4 addresses (one per line or comma-separated). We create host objects and add them as members — no need to pre-create each one."
+                })
+            </div>
         </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {

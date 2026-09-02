@@ -3,17 +3,16 @@
     Layout = "_Layout";
 }
 
-<div class="flex flex-wrap items-end justify-between gap-3 mb-6"
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4"
      style="animation: var(--animate-slide-up);">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
         <h1 class="text-2xl font-semibold tracking-tight">Objects</h1>
-        <p class="text-sm mt-1 text-surface-fg-muted">
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
             Named, reusable address aliases. Reference them in firewall rule source/destination instead of literal CIDRs — change the value once, every rule picks it up at next apply.
         </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "network-objects-table", Placeholder = "Filter by name, type, value…", ClientSide = true })
         <button type="button" class="btn btn-primary"
                 hx-get="/Network/Objects/edit"
                 hx-target="#drawer-body" hx-swap="innerHTML"
@@ -24,11 +23,16 @@
     </div>
 </div>
 
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+<div class="flex flex-wrap items-center gap-2 mb-4"
+     style="animation: var(--animate-slide-up); animation-delay: 40ms;">
+    @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "network-objects-table", Placeholder = "Filter by name, type, value…", ClientSide = true })
+</div>
+
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
     <div id="network-objects-table"
          hx-get="/Network/Objects/table"
          hx-trigger="load, refreshNetworkObjects from:body"
          hx-swap="innerHTML">
-         Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
     </div>
 </section>

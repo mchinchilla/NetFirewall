@@ -294,6 +294,112 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         Assert.Contains("9902", cfg);
     }
 
+    [Fact]
+    public async Task Generate_DuplicateTimeLimitDrops_EmitsOnce()
+    {
+        var schedSvc = new ScheduleService(_pg.DataSource, NullLogger<ScheduleService>.Instance);
+        var sched = await schedSvc.CreateAsync(new FwSchedule
+        {
+            Name = "DIEGO_HOURS_NOT_ALLOWED",
+            DaysOfWeek = new[] { 0, 1, 2, 3, 4, 5, 6 },
+            StartTime = TimeSpan.Zero,
+            EndTime = new TimeSpan(23, 59, 0),
+            Timezone = "UTC",
+            Enabled = true
+        });
+
+        for (var i = 0; i < 3; i++)
+        {
+            await _svc.CreateFilterRuleAsync(new FwFilterRule
+            {
+                Chain = "forward",
+                Action = "drop",
+                SourceAddresses = new[] { "192.168.99.20" },
+                Description = $"Time limit · block DIEGO_DEVICES during DIEGO_HOURS_NOT_ALLOWED ({i})",
+                LogPrefix = "TIME-LIMIT",
+                ScheduleId = sched.Id,
+                ScheduleInvert = false,
+                Priority = 2,
+                Enabled = true
+            });
+        }
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var forward = ExtractChain(cfg, "forward");
+        Assert.Equal(1, CountOccurrences(forward, "ip saddr 192.168.99.20"));
+        Assert.Equal(1, CountOccurrences(forward, "log prefix \"TIME-LIMIT\""));
+    }
+
+    [Fact]
+    public async Task Generate_AllowDuringAndBlockDuringSameHost_EmitsOneDropWhenBothLive()
+    {
+        var schedSvc = new ScheduleService(_pg.DataSource, NullLogger<ScheduleService>.Instance);
+        var allowed = await schedSvc.CreateAsync(new FwSchedule
+        {
+            Name = "DIEGO_HOURS_ALLOWED",
+            DaysOfWeek = new[] { 0, 1, 2, 3, 4, 5, 6 },
+            StartTime = TimeSpan.Zero,
+            EndTime = new TimeSpan(23, 59, 0),
+            Timezone = "UTC",
+            Enabled = false
+        });
+        var blocked = await schedSvc.CreateAsync(new FwSchedule
+        {
+            Name = "DIEGO_HOURS_NOT_ALLOWED",
+            DaysOfWeek = new[] { 0, 1, 2, 3, 4, 5, 6 },
+            StartTime = TimeSpan.Zero,
+            EndTime = new TimeSpan(23, 59, 0),
+            Timezone = "UTC",
+            Enabled = true
+        });
+
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward", Action = "drop",
+            SourceAddresses = new[] { "192.168.99.20" },
+            Description = "Time limit · allow DIEGO_DEVICES during DIEGO_HOURS_ALLOWED",
+            LogPrefix = "TIME-LIMIT",
+            ScheduleId = allowed.Id,
+            ScheduleInvert = true,
+            Priority = 2, Enabled = true
+        });
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward", Action = "drop",
+            SourceAddresses = new[] { "192.168.99.20" },
+            Description = "Time limit · block DIEGO_DEVICES during DIEGO_HOURS_NOT_ALLOWED",
+            LogPrefix = "TIME-LIMIT",
+            ScheduleId = blocked.Id,
+            ScheduleInvert = false,
+            Priority = 2, Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var forward = ExtractChain(cfg, "forward");
+        Assert.Equal(1, CountOccurrences(forward, "ip saddr 192.168.99.20"));
+    }
+
+    [Fact]
+    public async Task Generate_OrphanTimeLimit_IsNotEmitted()
+    {
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward",
+            Action = "drop",
+            SourceAddresses = new[] { "192.168.99.20" },
+            LogPrefix = FwFilterRule.TimeLimitLogPrefix,
+            Description = "Time limit · block DIEGO_DEVICES during DIEGO_HOURS_NOT_ALLOWED",
+            ScheduleId = null,
+            Priority = 2,
+            Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var forward = ExtractChain(cfg, "forward");
+        Assert.DoesNotContain("192.168.99.20", forward);
+        Assert.DoesNotContain("TIME-LIMIT", forward);
+    }
+
     // ── port forwards (DNAT) ───────────────────────────────────────────
 
     [Fact]
@@ -585,6 +691,18 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
     /// Pulls the body of a named chain from the rendered config. Lets tests
     /// assert against rule placement without false positives from siblings.
     /// </summary>
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        var n = 0;
+        var i = 0;
+        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0)
+        {
+            n++;
+            i += needle.Length;
+        }
+        return n;
+    }
+
     private static string ExtractChain(string cfg, string chainName) =>
         ExtractBlock(cfg, $"chain {chainName} {{");
 

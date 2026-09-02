@@ -77,6 +77,14 @@ public class NetworkObjectResolverTests
     }
 
     [Fact]
+    public async Task Resolve_ExpandsHostObject_WithMultipleIps()
+    {
+        StubCatalog(Host("DIEGO_DEVICES", "192.168.99.20, 192.168.99.21\n192.168.99.22"));
+        var result = await CreateResolver().ResolveAsync(new[] { "DIEGO_DEVICES" });
+        Assert.Equal(new[] { "192.168.99.20/32", "192.168.99.21/32", "192.168.99.22/32" }, result);
+    }
+
+    [Fact]
     public async Task Resolve_ExpandsNetworkObject_PreservingCidr()
     {
         StubCatalog(Network("LAN", "192.168.1.0/24"));

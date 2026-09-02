@@ -175,6 +175,24 @@ public sealed class NetworkObjectServiceTests : IAsyncLifetime
         Assert.Equal("L3", loaded.Members![0].Name);
     }
 
+    [Fact]
+    public async Task EnsureHostsForAddressesAsync_CreatesMissingAndReusesExisting()
+    {
+        var existing = await _svc.CreateAsync(Host("Phone", "192.168.99.20"));
+
+        var ids = await _svc.EnsureHostsForAddressesAsync(
+            "DIEGO_DEVICES",
+            new[] { "192.168.99.20", "192.168.99.21\n192.168.99.22" });
+
+        Assert.Equal(3, ids.Count);
+        Assert.Contains(existing.Id, ids);
+
+        var created = await _svc.GetByNameAsync("DIEGO_DEVICES_192_168_99_21");
+        Assert.NotNull(created);
+        Assert.Equal("192.168.99.21", created!.Value);
+        Assert.Equal(NetworkObjectTypes.Host, created.Type);
+    }
+
     // ── FindUsages ─────────────────────────────────────────────────────
 
     [Fact]

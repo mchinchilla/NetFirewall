@@ -53,31 +53,35 @@ public sealed class WireGuardController : Controller
     }
 
     [HttpGet("status")]
-    public async Task<IActionResult> Status(CancellationToken ct)
+    public async Task<IActionResult> Status(bool compact = false, CancellationToken ct = default)
     {
         var server = await _wg.GetServerAsync(ct);
+        WgStatusViewModel vm;
         if (server is null)
         {
-            return PartialView("_Status", new WgStatusViewModel
+            vm = new WgStatusViewModel
             {
                 Server = null,
                 Status = Array.Empty<WgPeerLiveStatus>(),
                 Peers = Array.Empty<WgPeer>()
-            });
+            };
+        }
+        else
+        {
+            var peers = await _wg.GetPeersAsync(server.Id, ct);
+            var statusEnvelope = await _daemon.GetWireGuardStatusAsync(ct);
+            var status = statusEnvelope.Success && statusEnvelope.Data is not null
+                ? statusEnvelope.Data
+                : Array.Empty<WgPeerLiveStatus>();
+            vm = new WgStatusViewModel
+            {
+                Server = server,
+                Status = status,
+                Peers = peers
+            };
         }
 
-        var peers = await _wg.GetPeersAsync(server.Id, ct);
-        var statusEnvelope = await _daemon.GetWireGuardStatusAsync(ct);
-        var status = statusEnvelope.Success && statusEnvelope.Data is not null
-            ? statusEnvelope.Data
-            : Array.Empty<WgPeerLiveStatus>();
-
-        return PartialView("_Status", new WgStatusViewModel
-        {
-            Server = server,
-            Status = status,
-            Peers = peers
-        });
+        return PartialView(compact ? "_WgPeersSummary" : "_Status", vm);
     }
 
     [HttpPost("save"), ValidateAntiForgeryToken]

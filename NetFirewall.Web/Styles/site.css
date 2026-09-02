@@ -65,6 +65,17 @@
     --woodsmoke-900: #1b1818;  --woodsmoke-1000: #1a1717; --woodsmoke-1100: #191616;
     --woodsmoke-1200: #181515; --woodsmoke-1300: #161414; --woodsmoke-1400: #151212;
     --woodsmoke-1500: #131010;
+
+    /* Coral — warm accent used by Light surfaces / KPI tints. Views must
+     * never reference these; they only feed semantic tokens (--accent,
+     * --tint-coral-*, --feedback-danger-*). */
+    --coral-50:  #fdf4f1;  --coral-100: #fce7e0;  --coral-200: #f7c4b6;
+    --coral-300: #f09a84;  --coral-400: #e8755c;  --coral-500: #dc5a3e;
+    --coral-600: #c44832;  --coral-700: #a33a28;  --coral-800: #822e21;
+    --coral-900: #612318;
+
+    /* Warm paper used to cream-tint Light canvases. */
+    --cream-canvas: #fff8f4;
 }
 
 /* =====================================================================
@@ -76,10 +87,9 @@
  *   --accent-*    = brand / primary actions
  *   --feedback-*  = toast/alert hues
  * ===================================================================== */
-/* Light themes — backgrounds are blended ~22% palette into white so the
- * page reads as "almost white with a hint of palette". Foreground stays
- * at the darkest palette step (--xxx-1500 ≈ near-black). Borders use a
- * mid-light step softened with white so dividers don't shout. */
+/* Light themes — warm paper canvas, white cards, muted accents.
+ * Foreground stays at the darkest palette step (--xxx-1500 ≈ near-black).
+ * Dark mode is unchanged: deep surfaces. */
 
 /* =====================================================================
  * FEEDBACK TOKENS — semantic hues for success / danger / warning / info.
@@ -92,9 +102,9 @@
     --feedback-success-fg:  var(--magic-mint-900);
     --feedback-success-bd:  var(--magic-mint-600);
 
-    --feedback-danger-bg:   #fde2e2;
-    --feedback-danger-fg:   #8b1f1f;
-    --feedback-danger-bd:   #b94545;
+    --feedback-danger-bg:   var(--coral-100);
+    --feedback-danger-fg:   var(--coral-800);
+    --feedback-danger-bd:   var(--coral-500);
 
     --feedback-warning-bg:  var(--taupe-gray-100);
     --feedback-warning-fg:  var(--taupe-gray-900);
@@ -112,157 +122,218 @@
 
     /* Solid button colors for destructive / warning actions. Foreground is
      * always near-white because the bd color is dark enough for AA contrast. */
-    --feedback-danger-btn-bg:  #b94545;
+    --feedback-danger-btn-bg:  var(--coral-600);
     --feedback-danger-btn-fg:  #ffffff;
     --feedback-warning-btn-bg: var(--taupe-gray-700);
     --feedback-warning-btn-fg: #ffffff;
+
+    /* KPI / list tints — washed discs so a 4-up row is distinct without shouting. */
+    --tint-coral-bg:  color-mix(in srgb, var(--coral-100) 42%, #ffffff);
+    --tint-coral-fg:  var(--coral-700);
+    --tint-mint-bg:   color-mix(in srgb, var(--magic-mint-100) 42%, #ffffff);
+    --tint-mint-fg:   var(--magic-mint-800);
+    --tint-blue-bg:   color-mix(in srgb, var(--jordy-blue-100) 42%, #ffffff);
+    --tint-blue-fg:   var(--jordy-blue-800);
+    --tint-violet-bg: color-mix(in srgb, var(--twilight-100) 42%, #ffffff);
+    --tint-violet-fg: var(--twilight-800);
+    --tint-gold-bg:   color-mix(in srgb, var(--taupe-gray-100) 42%, #ffffff);
+    --tint-gold-fg:   var(--taupe-gray-800);
+
+    --card-radius: 1.25rem;
+    --control-radius: 0.75rem;
+    --card-shadow: 0 1px 2px color-mix(in srgb, var(--surface-fg) 4%, transparent),
+                   0 10px 28px color-mix(in srgb, var(--surface-fg) 5%, transparent);
 }
 
 /* Dark-mode overrides — keep the mood consistent with the surface. */
 [data-mode="dark"] {
     --feedback-success-bg:  color-mix(in srgb, var(--magic-mint-1500) 65%, var(--magic-mint-900));
     --feedback-success-fg:  var(--magic-mint-100);
-    --feedback-danger-bg:   #3b1414;
-    --feedback-danger-fg:   #f5b5b5;
+    --feedback-danger-bg:   color-mix(in srgb, var(--coral-900) 70%, #1a0a08);
+    --feedback-danger-fg:   var(--coral-200);
     --feedback-warning-bg:  color-mix(in srgb, var(--taupe-gray-1500) 65%, var(--taupe-gray-900));
     --feedback-warning-fg:  var(--taupe-gray-100);
     --feedback-info-bg:     color-mix(in srgb, var(--jordy-blue-1500) 65%, var(--jordy-blue-900));
     --feedback-info-fg:     var(--jordy-blue-100);
+
+    /* Dark KPIs share the theme accent — no rainbow discs. */
+    --tint-coral-bg:  var(--accent-soft);
+    --tint-coral-fg:  var(--accent);
+    --tint-mint-bg:   var(--accent-soft);
+    --tint-mint-fg:   var(--accent);
+    --tint-blue-bg:   var(--accent-soft);
+    --tint-blue-fg:   var(--accent);
+    --tint-violet-bg: var(--accent-soft);
+    --tint-violet-fg: var(--accent);
+    --tint-gold-bg:   var(--accent-soft);
+    --tint-gold-fg:   var(--accent);
+
+    --chart-in:  var(--surface-fg);
+    --chart-out: color-mix(in srgb, var(--feedback-info-bd) 38%, var(--surface-fg-muted));
+
+    --card-radius: 0.75rem;
+    --control-radius: 0.5rem;
+    --card-shadow: 0 1px 0 color-mix(in srgb, #ffffff 4%, transparent);
 }
 
 :root,
 [data-theme="boulder"][data-mode="light"] {
-    --surface-bg:        color-mix(in srgb, var(--boulder-50) 22%, #ffffff);
+    /* Cool neutral grey — distinct from Woodsmoke (warm charcoal). */
+    --surface-bg:        color-mix(in srgb, var(--boulder-50) 28%, #ffffff);
     --surface-elevated:  #ffffff;
-    --surface-muted:     color-mix(in srgb, var(--boulder-100) 55%, #ffffff);
+    --surface-muted:     color-mix(in srgb, var(--boulder-100) 48%, #ffffff);
     --surface-fg:        var(--boulder-1500);
     --surface-fg-muted:  var(--boulder-900);
-    --surface-border:    color-mix(in srgb, var(--boulder-200) 70%, #ffffff);
+    --surface-border:    color-mix(in srgb, var(--boulder-200) 55%, #ffffff);
 
-    --sidebar-bg:        color-mix(in srgb, var(--boulder-50) 30%, #ffffff);
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--boulder-1400);
     --sidebar-fg-muted:  var(--boulder-800);
-    --sidebar-border:    color-mix(in srgb, var(--boulder-200) 70%, #ffffff);
-    --sidebar-active-bg: color-mix(in srgb, var(--boulder-200) 70%, #ffffff);
+    --sidebar-border:    color-mix(in srgb, var(--boulder-200) 55%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--boulder-200) 50%, #ffffff);
     --sidebar-active-fg: var(--boulder-1500);
 
     --accent:            var(--boulder-800);
     --accent-fg:         #ffffff;
-    --accent-soft:       color-mix(in srgb, var(--boulder-200) 55%, #ffffff);
+    --accent-soft:       color-mix(in srgb, var(--boulder-200) 45%, #ffffff);
 
     --blob-a: var(--boulder-300);
     --blob-b: var(--boulder-400);
 }
 
 [data-theme="jordy-blue"][data-mode="light"] {
-    --surface-bg:        color-mix(in srgb, var(--jordy-blue-50) 22%, #ffffff);
+    --surface-bg:        color-mix(in srgb, var(--jordy-blue-50) 28%, var(--cream-canvas));
     --surface-elevated:  #ffffff;
-    --surface-muted:     color-mix(in srgb, var(--jordy-blue-100) 55%, #ffffff);
+    --surface-muted:     color-mix(in srgb, var(--jordy-blue-100) 40%, #ffffff);
     --surface-fg:        var(--jordy-blue-1500);
     --surface-fg-muted:  var(--jordy-blue-1000);
-    --surface-border:    color-mix(in srgb, var(--jordy-blue-200) 65%, #ffffff);
-    --sidebar-bg:        color-mix(in srgb, var(--jordy-blue-50) 30%, #ffffff);
+    --surface-border:    color-mix(in srgb, var(--jordy-blue-200) 42%, #ffffff);
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--jordy-blue-1400);
     --sidebar-fg-muted:  var(--jordy-blue-900);
-    --sidebar-border:    color-mix(in srgb, var(--jordy-blue-200) 65%, #ffffff);
-    --sidebar-active-bg: color-mix(in srgb, var(--jordy-blue-200) 70%, #ffffff);
-    --sidebar-active-fg: var(--jordy-blue-1500);
+    --sidebar-border:    color-mix(in srgb, var(--jordy-blue-200) 42%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--jordy-blue-100) 40%, #ffffff);
+    --sidebar-active-fg: var(--jordy-blue-900);
     --accent:            var(--jordy-blue-600);
     --accent-fg:         #ffffff;
-    --accent-soft:       color-mix(in srgb, var(--jordy-blue-100) 55%, #ffffff);
-    --blob-a: var(--jordy-blue-300);
-    --blob-b: var(--jordy-blue-500);
+    --accent-soft:       color-mix(in srgb, var(--jordy-blue-100) 45%, #ffffff);
+    --blob-a: color-mix(in srgb, var(--jordy-blue-200) 40%, var(--cream-canvas));
+    --blob-b: color-mix(in srgb, var(--jordy-blue-300) 30%, var(--cream-canvas));
 }
 
 [data-theme="magic-mint"][data-mode="light"] {
-    --surface-bg:        color-mix(in srgb, var(--magic-mint-50) 22%, #ffffff);
+    --surface-bg:        color-mix(in srgb, var(--magic-mint-50) 28%, var(--cream-canvas));
     --surface-elevated:  #ffffff;
-    --surface-muted:     color-mix(in srgb, var(--magic-mint-100) 55%, #ffffff);
+    --surface-muted:     color-mix(in srgb, var(--magic-mint-100) 40%, #ffffff);
     --surface-fg:        var(--magic-mint-1500);
     --surface-fg-muted:  var(--magic-mint-1000);
-    --surface-border:    color-mix(in srgb, var(--magic-mint-200) 65%, #ffffff);
-    --sidebar-bg:        color-mix(in srgb, var(--magic-mint-50) 30%, #ffffff);
+    --surface-border:    color-mix(in srgb, var(--magic-mint-200) 42%, #ffffff);
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--magic-mint-1400);
     --sidebar-fg-muted:  var(--magic-mint-900);
-    --sidebar-border:    color-mix(in srgb, var(--magic-mint-200) 65%, #ffffff);
-    --sidebar-active-bg: color-mix(in srgb, var(--magic-mint-200) 70%, #ffffff);
-    --sidebar-active-fg: var(--magic-mint-1500);
+    --sidebar-border:    color-mix(in srgb, var(--magic-mint-200) 42%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--magic-mint-100) 40%, #ffffff);
+    --sidebar-active-fg: var(--magic-mint-900);
     --accent:            var(--magic-mint-700);
     --accent-fg:         #ffffff;
-    --accent-soft:       color-mix(in srgb, var(--magic-mint-100) 55%, #ffffff);
-    --blob-a: var(--magic-mint-300);
-    --blob-b: var(--magic-mint-500);
+    --accent-soft:       color-mix(in srgb, var(--magic-mint-100) 45%, #ffffff);
+    --blob-a: color-mix(in srgb, var(--magic-mint-200) 40%, var(--cream-canvas));
+    --blob-b: color-mix(in srgb, var(--magic-mint-300) 30%, var(--cream-canvas));
 }
 
 [data-theme="taupe-gray"][data-mode="light"] {
-    --surface-bg:        color-mix(in srgb, var(--taupe-gray-50) 22%, #ffffff);
+    --surface-bg:        color-mix(in srgb, var(--taupe-gray-50) 28%, var(--cream-canvas));
     --surface-elevated:  #ffffff;
-    --surface-muted:     color-mix(in srgb, var(--taupe-gray-100) 55%, #ffffff);
+    --surface-muted:     color-mix(in srgb, var(--taupe-gray-100) 40%, #ffffff);
     --surface-fg:        var(--taupe-gray-1500);
     --surface-fg-muted:  var(--taupe-gray-1000);
-    --surface-border:    color-mix(in srgb, var(--taupe-gray-200) 65%, #ffffff);
-    --sidebar-bg:        color-mix(in srgb, var(--taupe-gray-50) 30%, #ffffff);
+    --surface-border:    color-mix(in srgb, var(--taupe-gray-200) 42%, #ffffff);
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--taupe-gray-1400);
     --sidebar-fg-muted:  var(--taupe-gray-900);
-    --sidebar-border:    color-mix(in srgb, var(--taupe-gray-200) 65%, #ffffff);
-    --sidebar-active-bg: color-mix(in srgb, var(--taupe-gray-200) 70%, #ffffff);
-    --sidebar-active-fg: var(--taupe-gray-1500);
+    --sidebar-border:    color-mix(in srgb, var(--taupe-gray-200) 42%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--taupe-gray-100) 40%, #ffffff);
+    --sidebar-active-fg: var(--taupe-gray-900);
     --accent:            var(--taupe-gray-800);
     --accent-fg:         #ffffff;
-    --accent-soft:       color-mix(in srgb, var(--taupe-gray-100) 55%, #ffffff);
-    --blob-a: var(--taupe-gray-300);
-    --blob-b: var(--taupe-gray-500);
+    --accent-soft:       color-mix(in srgb, var(--taupe-gray-100) 45%, #ffffff);
+    --blob-a: color-mix(in srgb, var(--taupe-gray-200) 40%, var(--cream-canvas));
+    --blob-b: color-mix(in srgb, var(--taupe-gray-300) 30%, var(--cream-canvas));
 }
 
 [data-theme="twilight"][data-mode="light"] {
-    --surface-bg:        color-mix(in srgb, var(--twilight-50) 22%, #ffffff);
+    --surface-bg:        color-mix(in srgb, var(--twilight-50) 28%, var(--cream-canvas));
     --surface-elevated:  #ffffff;
-    --surface-muted:     color-mix(in srgb, var(--twilight-100) 55%, #ffffff);
+    --surface-muted:     color-mix(in srgb, var(--twilight-100) 40%, #ffffff);
     --surface-fg:        var(--twilight-1500);
     --surface-fg-muted:  var(--twilight-1000);
-    --surface-border:    color-mix(in srgb, var(--twilight-200) 65%, #ffffff);
-    --sidebar-bg:        color-mix(in srgb, var(--twilight-50) 30%, #ffffff);
+    --surface-border:    color-mix(in srgb, var(--twilight-200) 42%, #ffffff);
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--twilight-1400);
     --sidebar-fg-muted:  var(--twilight-900);
-    --sidebar-border:    color-mix(in srgb, var(--twilight-200) 65%, #ffffff);
-    --sidebar-active-bg: color-mix(in srgb, var(--twilight-200) 70%, #ffffff);
-    --sidebar-active-fg: var(--twilight-1500);
+    --sidebar-border:    color-mix(in srgb, var(--twilight-200) 42%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--twilight-100) 40%, #ffffff);
+    --sidebar-active-fg: var(--twilight-900);
     --accent:            var(--twilight-700);
     --accent-fg:         #ffffff;
-    --accent-soft:       color-mix(in srgb, var(--twilight-100) 55%, #ffffff);
-    --blob-a: var(--twilight-300);
-    --blob-b: var(--twilight-500);
+    --accent-soft:       color-mix(in srgb, var(--twilight-100) 45%, #ffffff);
+    --blob-a: color-mix(in srgb, var(--twilight-200) 40%, var(--cream-canvas));
+    --blob-b: color-mix(in srgb, var(--twilight-300) 30%, var(--cream-canvas));
 }
 
 [data-theme="pearl-bush"][data-mode="light"] {
-    --surface-bg:        color-mix(in srgb, var(--pearl-bush-50) 22%, #ffffff);
+    --surface-bg:        color-mix(in srgb, var(--pearl-bush-50) 36%, #ffffff);
     --surface-elevated:  #ffffff;
-    --surface-muted:     color-mix(in srgb, var(--pearl-bush-100) 55%, #ffffff);
+    --surface-muted:     color-mix(in srgb, var(--pearl-bush-100) 40%, #ffffff);
     --surface-fg:        var(--pearl-bush-1500);
     --surface-fg-muted:  var(--pearl-bush-1000);
-    --surface-border:    color-mix(in srgb, var(--pearl-bush-200) 65%, #ffffff);
-    --sidebar-bg:        color-mix(in srgb, var(--pearl-bush-50) 30%, #ffffff);
+    --surface-border:    color-mix(in srgb, var(--pearl-bush-200) 42%, #ffffff);
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--pearl-bush-1400);
-    --sidebar-fg-muted:  var(--pearl-bush-900);
-    --sidebar-border:    color-mix(in srgb, var(--pearl-bush-200) 65%, #ffffff);
-    --sidebar-active-bg: color-mix(in srgb, var(--pearl-bush-200) 70%, #ffffff);
-    --sidebar-active-fg: var(--pearl-bush-1500);
+    --sidebar-fg-muted:  var(--pearl-bush-800);
+    --sidebar-border:    color-mix(in srgb, var(--pearl-bush-200) 42%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--pearl-bush-100) 45%, #ffffff);
+    --sidebar-active-fg: var(--pearl-bush-900);
     --accent:            var(--pearl-bush-800);
     --accent-fg:         #ffffff;
-    --accent-soft:       color-mix(in srgb, var(--pearl-bush-100) 55%, #ffffff);
-    --blob-a: var(--pearl-bush-300);
-    --blob-b: var(--pearl-bush-500);
+    --accent-soft:       color-mix(in srgb, var(--pearl-bush-100) 45%, #ffffff);
+    --blob-a: color-mix(in srgb, var(--pearl-bush-200) 45%, #ffffff);
+    --blob-b: color-mix(in srgb, var(--pearl-bush-300) 30%, var(--cream-canvas));
 }
 
-/* ---------- DARK MODE — every palette in its dark variant ---------- */
+[data-theme="woodsmoke"][data-mode="light"] {
+    /* Warm charcoal paper — distinct from Boulder (cool grey). */
+    --surface-bg:        color-mix(in srgb, var(--woodsmoke-100) 32%, #ffffff);
+    --surface-elevated:  #ffffff;
+    --surface-muted:     color-mix(in srgb, var(--woodsmoke-100) 55%, #ffffff);
+    --surface-fg:        var(--woodsmoke-1500);
+    --surface-fg-muted:  var(--woodsmoke-600);
+    --surface-border:    color-mix(in srgb, var(--woodsmoke-200) 50%, #ffffff);
+
+    --sidebar-bg:        color-mix(in srgb, var(--woodsmoke-50) 45%, #ffffff);
+    --sidebar-elevated:  #ffffff;
+    --sidebar-fg:        var(--woodsmoke-800);
+    --sidebar-fg-muted:  var(--woodsmoke-500);
+    --sidebar-border:    color-mix(in srgb, var(--woodsmoke-200) 50%, #ffffff);
+    --sidebar-active-bg: color-mix(in srgb, var(--woodsmoke-200) 55%, #ffffff);
+    --sidebar-active-fg: var(--woodsmoke-1500);
+
+    --accent:            var(--woodsmoke-700);
+    --accent-fg:         #ffffff;
+    --accent-soft:       color-mix(in srgb, var(--woodsmoke-200) 40%, #ffffff);
+
+    --blob-a: var(--woodsmoke-300);
+    --blob-b: var(--woodsmoke-400);
+}
+
+/* ---------- DARK MODE — near-black surfaces, pale steel accents ---------- */
 [data-mode="dark"] {
-    /* Defaults to Woodsmoke when palette doesn't specify a dark variant */
     --surface-bg:        var(--woodsmoke-1500);
     --surface-elevated:  var(--woodsmoke-1300);
     --surface-muted:     var(--woodsmoke-1200);
@@ -279,117 +350,138 @@
     --accent:            var(--woodsmoke-200);
     --accent-fg:         var(--woodsmoke-1500);
     --accent-soft:       var(--woodsmoke-1100);
-    --blob-a: var(--woodsmoke-700);
-    --blob-b: var(--woodsmoke-500);
+    --blob-a: var(--woodsmoke-800);
+    --blob-b: var(--woodsmoke-700);
+}
+
+[data-theme="boulder"][data-mode="dark"] {
+    --surface-bg:        var(--boulder-1500);
+    --surface-elevated:  var(--boulder-1300);
+    --surface-muted:     var(--boulder-1200);
+    --surface-fg:        var(--boulder-50);
+    --surface-fg-muted:  var(--boulder-300);
+    --surface-border:    var(--boulder-900);
+    --sidebar-bg:        var(--boulder-1500);
+    --sidebar-elevated:  var(--boulder-1300);
+    --sidebar-fg:        var(--boulder-100);
+    --sidebar-fg-muted:  var(--boulder-400);
+    --sidebar-border:    var(--boulder-900);
+    --sidebar-active-bg: var(--boulder-800);
+    --sidebar-active-fg: var(--boulder-50);
+    --accent:            var(--boulder-200);
+    --accent-fg:         var(--boulder-1500);
+    --accent-soft:       var(--boulder-1100);
+    --blob-a: var(--boulder-800);
+    --blob-b: var(--boulder-700);
 }
 
 [data-theme="jordy-blue"][data-mode="dark"] {
-    --surface-bg:        var(--jordy-blue-1500);
-    --surface-elevated:  var(--jordy-blue-1300);
-    --surface-muted:     var(--jordy-blue-1200);
-    --surface-fg:        var(--jordy-blue-50);
-    --surface-fg-muted:  var(--jordy-blue-300);
-    --surface-border:    var(--jordy-blue-900);
-    --sidebar-bg:        var(--jordy-blue-1500);
-    --sidebar-elevated:  var(--jordy-blue-1300);
-    --sidebar-fg:        var(--jordy-blue-100);
-    --sidebar-fg-muted:  var(--jordy-blue-400);
-    --sidebar-border:    var(--jordy-blue-900);
-    --sidebar-active-bg: var(--jordy-blue-800);
-    --sidebar-active-fg: var(--jordy-blue-50);
-    --accent:            var(--jordy-blue-400);
-    --accent-fg:         var(--jordy-blue-1500);
-    --accent-soft:       var(--jordy-blue-1100);
-    --blob-a: var(--jordy-blue-700);
-    --blob-b: var(--jordy-blue-500);
+    --surface-bg:        color-mix(in srgb, var(--jordy-blue-1500) 40%, #07090c);
+    --surface-elevated:  color-mix(in srgb, var(--jordy-blue-1300) 32%, #10151c);
+    --surface-muted:     color-mix(in srgb, var(--jordy-blue-1200) 28%, #171e26);
+    --surface-fg:        color-mix(in srgb, var(--jordy-blue-50) 40%, #f2f4f6);
+    --surface-fg-muted:  color-mix(in srgb, var(--jordy-blue-300) 35%, var(--woodsmoke-300));
+    --surface-border:    color-mix(in srgb, var(--jordy-blue-900) 35%, var(--woodsmoke-900));
+    --sidebar-bg:        color-mix(in srgb, var(--jordy-blue-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--jordy-blue-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--jordy-blue-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--jordy-blue-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--jordy-blue-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--jordy-blue-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+    --accent:            color-mix(in srgb, var(--jordy-blue-300) 28%, #d8dde3);
+    --accent-fg:         #0a0e12;
+    --accent-soft:       color-mix(in srgb, var(--jordy-blue-900) 28%, var(--woodsmoke-1100));
+    --blob-a: var(--jordy-blue-900);
+    --blob-b: var(--jordy-blue-800);
 }
 
 [data-theme="magic-mint"][data-mode="dark"] {
-    --surface-bg:        var(--magic-mint-1500);
-    --surface-elevated:  var(--magic-mint-1300);
-    --surface-muted:     var(--magic-mint-1200);
-    --surface-fg:        var(--magic-mint-50);
-    --surface-fg-muted:  var(--magic-mint-300);
-    --surface-border:    var(--magic-mint-900);
-    --sidebar-bg:        var(--magic-mint-1500);
-    --sidebar-elevated:  var(--magic-mint-1300);
-    --sidebar-fg:        var(--magic-mint-100);
-    --sidebar-fg-muted:  var(--magic-mint-400);
-    --sidebar-border:    var(--magic-mint-900);
-    --sidebar-active-bg: var(--magic-mint-800);
-    --sidebar-active-fg: var(--magic-mint-50);
-    --accent:            var(--magic-mint-400);
-    --accent-fg:         var(--magic-mint-1500);
-    --accent-soft:       var(--magic-mint-1100);
-    --blob-a: var(--magic-mint-700);
-    --blob-b: var(--magic-mint-500);
+    --surface-bg:        color-mix(in srgb, var(--magic-mint-1500) 40%, #07090c);
+    --surface-elevated:  color-mix(in srgb, var(--magic-mint-1300) 32%, #10151c);
+    --surface-muted:     color-mix(in srgb, var(--magic-mint-1200) 28%, #171e26);
+    --surface-fg:        color-mix(in srgb, var(--magic-mint-50) 40%, #f2f4f6);
+    --surface-fg-muted:  color-mix(in srgb, var(--magic-mint-300) 35%, var(--woodsmoke-300));
+    --surface-border:    color-mix(in srgb, var(--magic-mint-900) 35%, var(--woodsmoke-900));
+    --sidebar-bg:        color-mix(in srgb, var(--magic-mint-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--magic-mint-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--magic-mint-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--magic-mint-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--magic-mint-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--magic-mint-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+    --accent:            color-mix(in srgb, var(--magic-mint-300) 28%, #d8dde3);
+    --accent-fg:         #0a0e12;
+    --accent-soft:       color-mix(in srgb, var(--magic-mint-900) 28%, var(--woodsmoke-1100));
+    --blob-a: var(--magic-mint-900);
+    --blob-b: var(--magic-mint-800);
 }
 
 [data-theme="taupe-gray"][data-mode="dark"] {
-    --surface-bg:        var(--taupe-gray-1500);
-    --surface-elevated:  var(--taupe-gray-1300);
-    --surface-muted:     var(--taupe-gray-1200);
-    --surface-fg:        var(--taupe-gray-50);
-    --surface-fg-muted:  var(--taupe-gray-300);
-    --surface-border:    var(--taupe-gray-900);
-    --sidebar-bg:        var(--taupe-gray-1500);
-    --sidebar-elevated:  var(--taupe-gray-1300);
-    --sidebar-fg:        var(--taupe-gray-100);
-    --sidebar-fg-muted:  var(--taupe-gray-400);
-    --sidebar-border:    var(--taupe-gray-900);
-    --sidebar-active-bg: var(--taupe-gray-800);
-    --sidebar-active-fg: var(--taupe-gray-50);
-    --accent:            var(--taupe-gray-300);
-    --accent-fg:         var(--taupe-gray-1500);
-    --accent-soft:       var(--taupe-gray-1100);
-    --blob-a: var(--taupe-gray-700);
-    --blob-b: var(--taupe-gray-500);
+    --surface-bg:        color-mix(in srgb, var(--taupe-gray-1500) 40%, #07090c);
+    --surface-elevated:  color-mix(in srgb, var(--taupe-gray-1300) 32%, #10151c);
+    --surface-muted:     color-mix(in srgb, var(--taupe-gray-1200) 28%, #171e26);
+    --surface-fg:        color-mix(in srgb, var(--taupe-gray-50) 40%, #f2f4f6);
+    --surface-fg-muted:  color-mix(in srgb, var(--taupe-gray-300) 35%, var(--woodsmoke-300));
+    --surface-border:    color-mix(in srgb, var(--taupe-gray-900) 35%, var(--woodsmoke-900));
+    --sidebar-bg:        color-mix(in srgb, var(--taupe-gray-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--taupe-gray-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--taupe-gray-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--taupe-gray-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--taupe-gray-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--taupe-gray-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+    --accent:            color-mix(in srgb, var(--taupe-gray-300) 28%, #d8dde3);
+    --accent-fg:         #0a0e12;
+    --accent-soft:       color-mix(in srgb, var(--taupe-gray-900) 28%, var(--woodsmoke-1100));
+    --blob-a: var(--taupe-gray-900);
+    --blob-b: var(--taupe-gray-800);
 }
 
 [data-theme="twilight"][data-mode="dark"] {
-    --surface-bg:        var(--twilight-1500);
-    --surface-elevated:  var(--twilight-1300);
-    --surface-muted:     var(--twilight-1200);
-    --surface-fg:        var(--twilight-50);
-    --surface-fg-muted:  var(--twilight-300);
-    --surface-border:    var(--twilight-900);
-    --sidebar-bg:        var(--twilight-1500);
-    --sidebar-elevated:  var(--twilight-1300);
-    --sidebar-fg:        var(--twilight-100);
-    --sidebar-fg-muted:  var(--twilight-400);
-    --sidebar-border:    var(--twilight-900);
-    --sidebar-active-bg: var(--twilight-800);
-    --sidebar-active-fg: var(--twilight-50);
-    --accent:            var(--twilight-400);
-    --accent-fg:         var(--twilight-1500);
-    --accent-soft:       var(--twilight-1100);
-    --blob-a: var(--twilight-700);
-    --blob-b: var(--twilight-500);
+    --surface-bg:        color-mix(in srgb, var(--twilight-1500) 40%, #07090c);
+    --surface-elevated:  color-mix(in srgb, var(--twilight-1300) 32%, #10151c);
+    --surface-muted:     color-mix(in srgb, var(--twilight-1200) 28%, #171e26);
+    --surface-fg:        color-mix(in srgb, var(--twilight-50) 40%, #f2f4f6);
+    --surface-fg-muted:  color-mix(in srgb, var(--twilight-300) 35%, var(--woodsmoke-300));
+    --surface-border:    color-mix(in srgb, var(--twilight-900) 35%, var(--woodsmoke-900));
+    --sidebar-bg:        color-mix(in srgb, var(--twilight-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--twilight-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--twilight-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--twilight-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--twilight-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--twilight-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+    --accent:            color-mix(in srgb, var(--twilight-300) 28%, #d8dde3);
+    --accent-fg:         #0a0e12;
+    --accent-soft:       color-mix(in srgb, var(--twilight-900) 28%, var(--woodsmoke-1100));
+    --blob-a: var(--twilight-900);
+    --blob-b: var(--twilight-800);
 }
 
 [data-theme="pearl-bush"][data-mode="dark"] {
-    --surface-bg:        var(--pearl-bush-1500);
-    --surface-elevated:  var(--pearl-bush-1300);
-    --surface-muted:     var(--pearl-bush-1200);
-    --surface-fg:        var(--pearl-bush-50);
-    --surface-fg-muted:  var(--pearl-bush-300);
-    --surface-border:    var(--pearl-bush-900);
-    --sidebar-bg:        var(--pearl-bush-1500);
-    --sidebar-elevated:  var(--pearl-bush-1300);
-    --sidebar-fg:        var(--pearl-bush-100);
-    --sidebar-fg-muted:  var(--pearl-bush-400);
-    --sidebar-border:    var(--pearl-bush-900);
-    --sidebar-active-bg: var(--pearl-bush-800);
-    --sidebar-active-fg: var(--pearl-bush-50);
-    --accent:            var(--pearl-bush-300);
-    --accent-fg:         var(--pearl-bush-1500);
-    --accent-soft:       var(--pearl-bush-1100);
-    --blob-a: var(--pearl-bush-700);
-    --blob-b: var(--pearl-bush-500);
+    --surface-bg:        color-mix(in srgb, var(--pearl-bush-1500) 40%, #07090c);
+    --surface-elevated:  color-mix(in srgb, var(--pearl-bush-1300) 32%, #10151c);
+    --surface-muted:     color-mix(in srgb, var(--pearl-bush-1200) 28%, #171e26);
+    --surface-fg:        color-mix(in srgb, var(--pearl-bush-50) 40%, #f2f4f6);
+    --surface-fg-muted:  color-mix(in srgb, var(--pearl-bush-300) 35%, var(--woodsmoke-300));
+    --surface-border:    color-mix(in srgb, var(--pearl-bush-900) 35%, var(--woodsmoke-900));
+    --sidebar-bg:        color-mix(in srgb, var(--pearl-bush-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--pearl-bush-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--pearl-bush-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--pearl-bush-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--pearl-bush-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--pearl-bush-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+    --accent:            color-mix(in srgb, var(--pearl-bush-300) 28%, #d8dde3);
+    --accent-fg:         #0a0e12;
+    --accent-soft:       color-mix(in srgb, var(--pearl-bush-900) 28%, var(--woodsmoke-1100));
+    --blob-a: var(--pearl-bush-900);
+    --blob-b: var(--pearl-bush-800);
 }
 
-/* ---------- MIXED MODE: dark sidebar over a light surface ---------- */
-[data-sidebar="dark"] {
+/* Mixed: dark sidebar. Specificity must beat [data-theme][data-mode=light]. */
+html[data-theme][data-sidebar="dark"] {
     --sidebar-bg:        var(--woodsmoke-1500);
     --sidebar-elevated:  var(--woodsmoke-1300);
     --sidebar-fg:        var(--woodsmoke-100);
@@ -398,10 +490,63 @@
     --sidebar-active-bg: var(--woodsmoke-800);
     --sidebar-active-fg: var(--woodsmoke-50);
 }
+html[data-theme="boulder"][data-sidebar="dark"] {
+    --sidebar-bg:        var(--boulder-1500);
+    --sidebar-elevated:  var(--boulder-1300);
+    --sidebar-fg:        var(--boulder-100);
+    --sidebar-fg-muted:  var(--boulder-400);
+    --sidebar-border:    var(--boulder-1100);
+    --sidebar-active-bg: var(--boulder-800);
+    --sidebar-active-fg: var(--boulder-50);
+}
+html[data-theme="jordy-blue"][data-sidebar="dark"] {
+    --sidebar-bg:        color-mix(in srgb, var(--jordy-blue-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--jordy-blue-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--jordy-blue-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--jordy-blue-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--jordy-blue-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--jordy-blue-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+}
+html[data-theme="magic-mint"][data-sidebar="dark"] {
+    --sidebar-bg:        color-mix(in srgb, var(--magic-mint-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--magic-mint-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--magic-mint-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--magic-mint-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--magic-mint-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--magic-mint-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+}
+html[data-theme="taupe-gray"][data-sidebar="dark"] {
+    --sidebar-bg:        color-mix(in srgb, var(--taupe-gray-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--taupe-gray-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--taupe-gray-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--taupe-gray-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--taupe-gray-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--taupe-gray-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+}
+html[data-theme="twilight"][data-sidebar="dark"] {
+    --sidebar-bg:        color-mix(in srgb, var(--twilight-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--twilight-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--twilight-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--twilight-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--twilight-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--twilight-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+}
+html[data-theme="pearl-bush"][data-sidebar="dark"] {
+    --sidebar-bg:        color-mix(in srgb, var(--pearl-bush-1500) 45%, #07090c);
+    --sidebar-elevated:  color-mix(in srgb, var(--pearl-bush-1300) 32%, #10151c);
+    --sidebar-fg:        color-mix(in srgb, var(--pearl-bush-100) 40%, var(--woodsmoke-100));
+    --sidebar-fg-muted:  color-mix(in srgb, var(--pearl-bush-400) 30%, var(--woodsmoke-400));
+    --sidebar-border:    color-mix(in srgb, var(--pearl-bush-900) 35%, var(--woodsmoke-900));
+    --sidebar-active-bg: color-mix(in srgb, var(--pearl-bush-800) 28%, var(--woodsmoke-800));
+    --sidebar-active-fg: var(--woodsmoke-50);
+}
 
-/* ---------- MIXED MODE (inverse): light sidebar in a dark theme ---------- */
-[data-sidebar="light"] {
-    --sidebar-bg:        var(--boulder-50);
+html[data-theme][data-sidebar="light"] {
+    --sidebar-bg:        #ffffff;
     --sidebar-elevated:  #ffffff;
     --sidebar-fg:        var(--boulder-1400);
     --sidebar-fg-muted:  var(--boulder-700);
@@ -434,6 +579,17 @@
     --color-accent:            var(--accent);
     --color-accent-fg:         var(--accent-fg);
     --color-accent-soft:       var(--accent-soft);
+
+    --color-tint-coral-bg:  var(--tint-coral-bg);
+    --color-tint-coral-fg:  var(--tint-coral-fg);
+    --color-tint-mint-bg:   var(--tint-mint-bg);
+    --color-tint-mint-fg:   var(--tint-mint-fg);
+    --color-tint-blue-bg:   var(--tint-blue-bg);
+    --color-tint-blue-fg:   var(--tint-blue-fg);
+    --color-tint-violet-bg: var(--tint-violet-bg);
+    --color-tint-violet-fg: var(--tint-violet-fg);
+    --color-tint-gold-bg:   var(--tint-gold-bg);
+    --color-tint-gold-fg:   var(--tint-gold-fg);
 
     --color-feedback-success-bg: var(--feedback-success-bg);
     --color-feedback-success-fg: var(--feedback-success-fg);
@@ -520,16 +676,19 @@
  * ===================================================================== */
 @layer components {
     .card {
-        @apply rounded-xl border p-5 shadow-sm;
+        @apply border p-5;
+        border-radius: var(--card-radius);
         background-color: var(--surface-elevated);
         border-color: var(--surface-border);
+        box-shadow: var(--card-shadow);
     }
     .card-hover {
         @apply transition duration-300 hover:-translate-y-0.5 hover:shadow-md;
     }
     .btn {
-        @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium
+        @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium
                transition duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+        border-radius: var(--control-radius);
         --tw-ring-color: var(--accent);
         --tw-ring-offset-color: var(--surface-bg);
     }
@@ -576,8 +735,9 @@
     }
 
     .input {
-        @apply w-full rounded-md border px-3 py-2 text-sm
+        @apply w-full border px-3 py-2 text-sm
                transition focus:outline-none focus-visible:ring-2;
+        border-radius: var(--control-radius);
         background-color: var(--surface-elevated);
         border-color: var(--surface-border);
         color: var(--surface-fg);
@@ -618,13 +778,13 @@
      * one of .badge-{accent,success,warning,danger,info,muted} for color.
      */
     .badge {
-        @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+        @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
     }
-    .badge-accent  { background: color-mix(in srgb, var(--accent) 14%, transparent);              color: var(--accent); }
-    .badge-success { background: color-mix(in srgb, var(--feedback-success-fg) 14%, transparent); color: var(--feedback-success-fg); }
-    .badge-warning { background: color-mix(in srgb, var(--feedback-warning-fg) 14%, transparent); color: var(--feedback-warning-fg); }
-    .badge-danger  { background: color-mix(in srgb, var(--feedback-danger-fg) 14%, transparent);  color: var(--feedback-danger-fg); }
-    .badge-info    { background: color-mix(in srgb, var(--feedback-info-fg) 14%, transparent);    color: var(--feedback-info-fg); }
+    .badge-accent  { background: color-mix(in srgb, var(--accent) 12%, transparent);              color: var(--accent); }
+    .badge-success { background: color-mix(in srgb, var(--feedback-success-fg) 12%, transparent); color: var(--feedback-success-fg); }
+    .badge-warning { background: color-mix(in srgb, var(--feedback-warning-fg) 12%, transparent); color: var(--feedback-warning-fg); }
+    .badge-danger  { background: color-mix(in srgb, var(--feedback-danger-fg) 12%, transparent);  color: var(--feedback-danger-fg); }
+    .badge-info    { background: color-mix(in srgb, var(--feedback-info-fg) 12%, transparent);    color: var(--feedback-info-fg); }
     .badge-muted   { background: color-mix(in srgb, var(--surface-fg-muted) 14%, transparent);    color: var(--surface-fg-muted); }
 
     /* ----- Filter-rule evaluation cards -----
@@ -632,9 +792,11 @@
      * left rail so "first match wins" is spatial, not a number in a column.
      */
     .rule-chain {
-        @apply rounded-xl border shadow-sm overflow-hidden;
+        @apply border overflow-hidden;
+        border-radius: var(--card-radius);
         background-color: var(--surface-elevated);
         border-color: var(--surface-border);
+        box-shadow: var(--card-shadow);
         scroll-margin-top: 5.5rem;
     }
     .rule-chain-closed { transform: rotate(-90deg); }
@@ -752,7 +914,8 @@
     }
 
     .seg {
-        @apply inline-flex items-center rounded-md border p-0.5;
+        @apply inline-flex items-center border p-0.5;
+        border-radius: var(--control-radius);
         border-color: var(--surface-border);
         background: var(--surface-muted);
     }
@@ -779,22 +942,57 @@
     }
 
     .kpi {
-        @apply rounded-xl border p-5 shadow-sm relative overflow-hidden
-               transition duration-300 hover:-translate-y-0.5 hover:shadow-md;
+        @apply border p-5 relative overflow-hidden
+               transition duration-300 hover:-translate-y-0.5;
+        border-radius: var(--card-radius);
         background-color: var(--surface-elevated);
         border-color: var(--surface-border);
+        box-shadow: var(--card-shadow);
     }
-    .kpi-value { @apply text-3xl font-semibold tracking-tight; color: var(--surface-fg); }
-    .kpi-label { @apply text-xs uppercase tracking-wider font-medium; color: var(--surface-fg-muted); }
-    .kpi-delta-up   { color: var(--magic-mint-700); }
-    .kpi-delta-down { color: #b94545; }
+    .kpi-value { @apply text-3xl font-semibold tracking-tight tabular-nums; color: var(--surface-fg); }
+    .kpi-label { @apply text-xs uppercase tracking-wider font-semibold; color: var(--surface-fg-muted); }
+    .kpi-delta-up   { color: var(--feedback-success-fg); }
+    .kpi-delta-down { color: var(--feedback-danger-fg); }
+
+    .kpi-icon {
+        @apply inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full;
+        background: var(--accent-soft);
+        color: var(--accent);
+    }
+    .kpi-icon-sm { width: 2rem; height: 2rem; }
+    .kpi-tint-accent { background: var(--accent-soft); color: var(--accent); }
+    .kpi-tint-coral  { background: var(--tint-coral-bg);  color: var(--tint-coral-fg); }
+    .kpi-tint-mint   { background: var(--tint-mint-bg);   color: var(--tint-mint-fg); }
+    .kpi-tint-blue   { background: var(--tint-blue-bg);   color: var(--tint-blue-fg); }
+    .kpi-tint-violet { background: var(--tint-violet-bg); color: var(--tint-violet-fg); }
+    .kpi-tint-gold   { background: var(--tint-gold-bg);   color: var(--tint-gold-fg); }
+
+    .row-selected {
+        background: color-mix(in srgb, var(--surface-muted) 65%, transparent);
+        border-radius: 0.75rem;
+    }
+
+    .quick-action {
+        @apply flex items-center gap-3 p-3 text-sm font-medium text-left
+               transition duration-200 hover:-translate-y-0.5;
+        border-radius: var(--control-radius);
+        border: 1px solid var(--surface-border);
+        background: var(--surface-elevated);
+        color: var(--surface-fg);
+        box-shadow: var(--card-shadow);
+    }
+    .quick-action:hover {
+        border-color: color-mix(in srgb, var(--accent) 22%, var(--surface-border));
+        background: color-mix(in srgb, var(--accent-soft) 28%, var(--surface-elevated));
+    }
 
     /* Decorative blob — soft, blurred, parallax-y geometric shapes. */
     .blob {
-        @apply pointer-events-none absolute rounded-full opacity-40;
+        @apply pointer-events-none absolute rounded-full opacity-30;
         filter: blur(80px);
         will-change: transform;
     }
+    html[data-mode="dark"] .blob { opacity: 0.22; }
 
     /* Toast bubble */
     .toast {
@@ -803,10 +1001,10 @@
         border-color: var(--surface-border);
         animation: var(--animate-toast-in);
     }
-    .toast-success { border-left: 3px solid var(--magic-mint-600); }
-    .toast-error   { border-left: 3px solid #b94545; }
-    .toast-info    { border-left: 3px solid var(--jordy-blue-500); }
-    .toast-warning { border-left: 3px solid var(--taupe-gray-600); }
+    .toast-success { border-left: 3px solid var(--feedback-success-bd); }
+    .toast-error   { border-left: 3px solid var(--feedback-danger-bd); }
+    .toast-info    { border-left: 3px solid var(--feedback-info-bd); }
+    .toast-warning { border-left: 3px solid var(--feedback-warning-bd); }
 
     /* ───────── Loading overlay ─────────
        Single shared component. Wrap any swappable region in .loading-host;

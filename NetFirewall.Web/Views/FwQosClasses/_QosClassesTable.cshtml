@@ -1,57 +1,65 @@
 @model IReadOnlyList<NetFirewall.Models.Firewall.FwQosClass>
+@using NetFirewall.Web.Models.Shared
 @{
-    var markNames = (Dictionary<Guid, string>)(ViewBag.MarkNames ?? new Dictionary<Guid, string>());
+    var markNames = (IDictionary<Guid, string>)(ViewBag.MarkNames ?? new Dictionary<Guid, string>());
     var configId = (Guid)ViewBag.ConfigId;
 }
 
 @if (Model.Count == 0)
 {
-    <div class="text-sm py-10 text-center text-surface-fg-muted">No classes yet — add one to begin shaping.</div>
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No classes yet. Click <span class="font-medium text-surface-fg">Add class</span> to begin shaping.
+    </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.Count</span> class@(Model.Count == 1 ? "" : "es")
+        <span>· @Model.Sum(c => c.GuaranteedMbps) Mbps guaranteed</span>
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">Name</th>
-                    <th class="px-5 py-2 font-medium">Mark</th>
-                    <th class="px-5 py-2 font-medium">Guaranteed</th>
-                    <th class="px-5 py-2 font-medium">Ceiling</th>
-                    <th class="px-5 py-2 font-medium">Priority</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium w-12">Pri</th>
+                    <th class="px-2 py-1.5 font-medium">Class</th>
+                    <th class="px-2 py-1.5 font-medium">Mark</th>
+                    <th class="px-2 py-1.5 font-medium">Rates</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
                 @foreach (var c in Model.OrderBy(x => x.Priority).ThenBy(x => x.Name))
                 {
+                    var markLabel = c.MarkId is { } id && markNames.TryGetValue(id, out var n) ? n : null;
                     <tr>
-                        <td class="px-5 py-3 font-medium">@c.Name</td>
-                        <td class="px-5 py-3 font-mono text-xs">@(c.MarkId.HasValue && markNames.TryGetValue(c.MarkId.Value, out var n) ? n : "—")</td>
-                        <td class="px-5 py-3 font-mono text-xs">@c.GuaranteedMbps Mbps</td>
-                        <td class="px-5 py-3 font-mono text-xs">@c.CeilingMbps Mbps</td>
-                        <td class="px-5 py-3">
-                            <span class="badge badge-accent">@c.Priority</span>
+                        <td class="pl-5 pr-2 py-2.5 font-mono text-xs tabular-nums text-surface-fg-muted">@c.Priority</td>
+                        <td class="px-2 py-2.5 font-medium text-surface-fg">@c.Name</td>
+                        <td class="px-2 py-2.5">
+                            @if (markLabel is null)
+                            {
+                                <span class="text-xs text-surface-fg-muted">—</span>
+                            }
+                            else
+                            {
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "mark", Value = markLabel })
+                            }
                         </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Firewall/Qos/@configId/Classes/edit/@c.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit class')">Edit</button>
-                                @{ var msg = $"Delete class '{c.Name}' ({c.GuaranteedMbps}/{c.CeilingMbps} Mbps)?"; }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Firewall/Qos/@configId/Classes/delete/@c.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete class?', message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete', level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
+                        <td class="px-2 py-2.5">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "rate", Value = $"{c.GuaranteedMbps} Mbps" })
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ceil", Value = $"{c.CeilingMbps} Mbps" })
                             </div>
+                        </td>
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                            @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                            {
+                                EditUrl = $"/Firewall/Qos/{configId}/Classes/edit/{c.Id}",
+                                EditDrawerTitle = "Edit class",
+                                DeleteUrl = $"/Firewall/Qos/{configId}/Classes/delete/{c.Id}",
+                                DeleteDialogTitle = "Delete class?",
+                                DeleteMessage = $"Delete class '{c.Name}' ({c.GuaranteedMbps}/{c.CeilingMbps} Mbps)?"
+                            })
                         </td>
                     </tr>
                 }

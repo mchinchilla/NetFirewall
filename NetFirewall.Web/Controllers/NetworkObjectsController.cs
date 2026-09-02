@@ -101,11 +101,15 @@ public sealed class NetworkObjectsController : Controller
 
         try
         {
+            var previous = form.Id.HasValue
+                ? await _objects.GetByIdAsync(form.Id.Value, includeMembers: false, ct)
+                : null;
+
             var entity = ToEntity(form);
             NetworkObject saved;
-            if (form.Id.HasValue && await _objects.GetByIdAsync(form.Id.Value, false, ct) is not null)
+            if (previous is not null)
             {
-                entity.Id = form.Id.Value;
+                entity.Id = previous.Id;
                 saved = await _objects.UpdateAsync(entity, ct);
             }
             else
@@ -114,7 +118,21 @@ public sealed class NetworkObjectsController : Controller
             }
 
             if (saved.Type == NetworkObjectTypes.Group)
-                await _objects.SetGroupMembersAsync(saved.Id, form.MemberIds, ct);
+            {
+                var memberIds = form.MemberIds.ToList();
+                var extras = form.ExtraAddresses;
+                // Host → group: keep the original IP as a member.
+                if (previous is { Type: not NetworkObjectTypes.Group }
+                    && !string.IsNullOrWhiteSpace(previous.Value))
+                {
+                    extras = string.IsNullOrWhiteSpace(extras)
+                        ? previous.Value
+                        : previous.Value + "\n" + extras;
+                }
+                var auto = await _objects.EnsureHostsForAddressesAsync(saved.Name, new[] { extras ?? "" }, ct);
+                memberIds.AddRange(auto);
+                await _objects.SetGroupMembersAsync(saved.Id, memberIds, ct);
+            }
 
             var envelope = ServiceResponse<NetworkObject>.Ok(saved, $"Object '{saved.Name}' saved.");
             this.AttachToastTrigger(envelope);

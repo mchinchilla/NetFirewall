@@ -27,6 +27,7 @@
             Value = Model.ActiveLeaseCount.ToString("N0"),
             DeltaContext = Model.Subnets.Count > 0 ? $"across {Model.Subnets.Count} subnets" : "no subnets configured",
             Trend = DeltaTrend.Neutral,
+            Tint = KpiTint.Mint,
             IconPath = "M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3v4.5a3 3 0 0 1-3 3"
         },
         new KpiCardViewModel
@@ -35,6 +36,7 @@
             Value = Model.InterfaceCount.ToString(),
             DeltaContext = $"{Model.WanInterfaceCount} WAN · {Model.InterfaceCount - Model.WanInterfaceCount} LAN/other",
             Trend = DeltaTrend.Neutral,
+            Tint = KpiTint.Blue,
             IconPath = "M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z"
         },
         new KpiCardViewModel
@@ -43,6 +45,7 @@
             Value = Model.EnabledFilterRuleCount.ToString("N0"),
             DeltaContext = $"of {Model.TotalFilterRuleCount:N0} total enabled",
             Trend = DeltaTrend.Neutral,
+            Tint = KpiTint.Violet,
             IconPath = "M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z"
         },
         new KpiCardViewModel
@@ -52,6 +55,7 @@
             ValueSuffix = "Mbps",
             DeltaContext = "live · all NICs combined",
             Trend = DeltaTrend.Neutral,
+            Tint = KpiTint.Coral,
             IconPath = "M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"
         }
     };
@@ -65,6 +69,7 @@
             ValueSuffix = $" / {Model.WireGuardPeerCount}",
             DeltaContext = Model.WireGuardActivePeerCount > 0 ? "active · last 3 min" : "no active peers",
             Trend = DeltaTrend.Neutral,
+            Tint = KpiTint.Gold,
             IconPath = "M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z"
         });
     }
@@ -78,6 +83,7 @@
             ValueSuffix = $" / {Model.ScheduleCount}",
             DeltaContext = Model.ActiveScheduleCount > 0 ? "in window now" : "all idle",
             Trend = DeltaTrend.Neutral,
+            Tint = KpiTint.Blue,
             IconPath = "M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
         });
     }
@@ -90,7 +96,8 @@
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Overview</p>
         <h1 class="text-2xl font-semibold tracking-tight">Network at a glance</h1>
     </div>
-    <div class="flex items-center gap-2 flex-wrap">
+    <div class="flex items-center gap-3 flex-wrap justify-end">
+        @await Html.PartialAsync("_ApplyStatus", Model.ApplyStatus)
         <a href="@Url.Action("Index", "Monitoring")" class="btn btn-ghost" title="Live system metrics">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"/></svg>
             Monitoring
@@ -124,248 +131,231 @@
     }
 </div>
 
-@* System-health row: CPU | Memory — last 60 min. Per-WAN traffic lives in
-   the reusable charts below (the old combined "Network" sparkline duplicated them). *@
-<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 mb-6" style="animation: var(--animate-slide-up); animation-delay: 30ms;">
-    <section class="card" x-data="liveStat('cpu')">
-        <div class="hidden" aria-hidden="true"
-             hx-get="/Home/SystemSeries"
-             hx-trigger="load, every 10s"
-             hx-swap="none"
-             @@htmx:after-request="onHtmx($event)"></div>
-        <div class="flex items-baseline justify-between mb-2">
-            <h2 class="text-sm font-semibold">CPU</h2>
-            <span class="text-2xl font-semibold tabular-nums" x-text="current + '%'">—</span>
+@* Main column (vitals + traffic) + right rail (health, services, destinations). *@
+<div class="grid gap-4 grid-cols-1 xl:grid-cols-3 mb-6"
+     style="animation: var(--animate-slide-up); animation-delay: 30ms;">
+    <div class="xl:col-span-2 space-y-4 min-w-0">
+        <div class="grid gap-4 grid-cols-1 sm:grid-cols-2">
+            @await Html.PartialAsync("_VitalCard", new VitalCardViewModel
+            {
+                Field = "cpu",
+                Label = "CPU",
+                Tint = KpiTint.Coral,
+                IconPath = "M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"
+            })
+            @await Html.PartialAsync("_VitalCard", new VitalCardViewModel
+            {
+                Field = "mem",
+                Label = "Memory",
+                Tint = KpiTint.Blue,
+                IconPath = "M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3v4.5a3 3 0 0 1-3 3m-13.5 0a3 3 0 0 0-3 3v3a3 3 0 0 0 3 3h13.5a3 3 0 0 0 3-3v-3a3 3 0 0 0-3-3"
+            })
         </div>
-        <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
-        <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · % used</p>
-    </section>
 
-    <section class="card" x-data="liveStat('mem')">
-        <div class="hidden" aria-hidden="true"
-             hx-get="/Home/SystemSeries"
-             hx-trigger="load, every 10s"
-             hx-swap="none"
-             @@htmx:after-request="onHtmx($event)"></div>
-        <div class="flex items-baseline justify-between mb-2">
-            <h2 class="text-sm font-semibold">Memory</h2>
-            <span class="text-2xl font-semibold tabular-nums" x-text="current + '%'">—</span>
-        </div>
-        <div class="relative h-16"><canvas x-ref="spark"></canvas></div>
-        <p class="text-[10px] text-surface-fg-muted mt-1">Last 60 min · % used</p>
-    </section>
-</div>
+        @await Html.PartialAsync("_WanTrafficCharts",
+            WanTrafficChartsViewModel.Dashboard(Url.Action("Interfaces", "Network")))
 
-@* Per-WAN live up/down — same reusable charts Monitoring renders. *@
-<div style="animation: var(--animate-slide-up); animation-delay: 35ms;">
-    @await Html.PartialAsync("_WanTrafficCharts",
-        WanTrafficChartsViewModel.Dashboard(Url.Action("Interfaces", "Network")))
-</div>
+        @await Html.PartialAsync("_InterfaceTrafficChart", InterfaceTrafficChartViewModel.Last24h())
 
-@* Per-interface 24h — same reusable chart; chips show/hide each NIC. *@
-<div class="mb-6" style="animation: var(--animate-slide-up); animation-delay: 45ms;">
-    @await Html.PartialAsync("_InterfaceTrafficChart", InterfaceTrafficChartViewModel.Last24h())
-</div>
-
-@* Pending-changes banner: only renders when there's drift from kernel state. *@
-@{
-    var pendingWithChanges = Model.PendingChanges.Where(p => p.HasPending).ToList();
-}
-@if (pendingWithChanges.Count > 0)
-{
-    <div class="card mb-4 border-l-4" style="border-left-color: var(--feedback-warning-bd); animation: var(--animate-slide-up); animation-delay: 40ms;">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <p class="text-sm font-semibold">Pending changes — DB ahead of kernel</p>
-                <p class="text-xs mt-0.5 text-surface-fg-muted">
-                    @foreach (var p in pendingWithChanges)
-                    {
-                        <span class="inline-block mr-3"><strong>@p.PendingCount</strong> @p.Kind change@(p.PendingCount == 1 ? "" : "s")</span>
-                    }
-                    Apply to push the new config to the kernel.
+        <div class="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <section class="card min-w-0 lg:col-span-2">
+            <header class="flex items-center justify-between mb-3">
+                <div>
+                    <h2 class="text-base font-semibold">Subnets &amp; pools</h2>
+                    <p class="text-xs text-surface-fg-muted">Lease utilisation per subnet</p>
+                </div>
+                <a href="@Url.Action("Index", "DhcpSubnets")" class="btn btn-ghost text-xs">Manage subnets</a>
+            </header>
+            @if (Model.Subnets.Count == 0)
+            {
+                <p class="text-sm py-8 text-center text-surface-fg-muted">
+                    No subnets configured. <a class="hover:underline text-accent" href="@Url.Action("Index", "SetupWizard")">Run the setup wizard</a> to get started.
                 </p>
+            }
+            else
+            {
+                <table class="w-full text-sm table-fixed">
+                    <thead>
+                        <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted">
+                            <th class="pr-3 py-2 font-medium w-[36%]">Subnet</th>
+                            <th class="px-2 py-2 font-medium w-[16%]">Used</th>
+                            <th class="px-2 py-2 font-medium w-[28%]">Utilisation</th>
+                            <th class="pl-2 py-2 font-medium w-[20%]">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y border-surface-border">
+                        @foreach (var s in Model.Subnets)
+                        {
+                            var barColor = s.Status switch
+                            {
+                                "danger" => "var(--feedback-danger-fg)",
+                                "warn"   => "var(--feedback-warning-bd)",
+                                _        => "var(--accent)"
+                            };
+                            <tr>
+                                <td class="pr-3 py-3">
+                                    <p class="font-medium truncate">@s.Name</p>
+                                    <p class="text-xs font-mono text-surface-fg-muted truncate">@s.Cidr</p>
+                                    @if (!string.IsNullOrEmpty(s.PoolRange))
+                                    {
+                                        <p class="text-[11px] font-mono text-surface-fg-muted truncate" title="@s.PoolRange">@s.PoolRange</p>
+                                    }
+                                </td>
+                                <td class="px-2 py-3 tabular-nums whitespace-nowrap">@s.UsedLeases / @s.Capacity</td>
+                                <td class="px-2 py-3">
+                                    <div class="flex items-center gap-2 min-w-0">
+                                        <div class="h-1.5 flex-1 min-w-0 rounded-full overflow-hidden bg-surface-muted">
+                                            <div class="h-full rounded-full" style="width: @(s.UsagePercent.ToString("0.#"))%; background-color: @barColor;"></div>
+                                        </div>
+                                        <span class="text-xs text-surface-fg-muted tabular-nums shrink-0">@s.UsagePercent.ToString("0.#")%</span>
+                                    </div>
+                                </td>
+                                <td class="pl-2 py-3">
+                                    @switch (s.Status)
+                                    {
+                                        case "danger":
+                                            <span class="badge badge-danger">Saturated</span>
+                                            break;
+                                        case "warn":
+                                            <span class="badge badge-warning">Near full</span>
+                                            break;
+                                        default:
+                                            <span class="badge badge-success">Healthy</span>
+                                            break;
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="card min-w-0">
+            <header class="flex items-baseline justify-between mb-3">
+                <h2 class="text-base font-semibold">WireGuard</h2>
+                <a href="@Url.Action("Index", "WireGuard")" class="text-xs hover:underline text-accent">Manage →</a>
+            </header>
+            <div class="loading-host"
+                 hx-get="/Vpn/WireGuard/status?compact=true"
+                 hx-trigger="load, every 15s"
+                 hx-swap="innerHTML">
+                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
             </div>
-            <a href="@Url.Action("Index", "FwApply")" class="btn btn-primary text-xs">Apply firewall</a>
+        </section>
         </div>
     </div>
-}
 
-@* Operational row: systemd services + WAN reachability + where traffic goes. *@
-<div class="grid gap-4 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 mb-6"
-     style="animation: var(--animate-slide-up); animation-delay: 40ms;">
-    @* Services *@
-    <section class="card">
-        <header class="flex items-baseline justify-between mb-3">
-            <h2 class="text-base font-semibold">Services</h2>
-            @{
-                var failed = Model.Services.Count(s => s.ActiveState == "failed");
-                var inactive = Model.Services.Count(s => s.ActiveState == "inactive");
-            }
-            <span class="text-xs text-surface-fg-muted">
+    <div class="space-y-4 min-w-0">
+        <section class="card">
+            <header class="flex items-baseline justify-between mb-3">
+                <h2 class="text-base font-semibold">WAN health</h2>
+                <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
+            </header>
+            @await Html.PartialAsync("_WanHealthCard", Model.WanCard)
+        </section>
+
+        <section class="card">
+            <header class="flex items-baseline justify-between mb-3">
+                <h2 class="text-base font-semibold">Services</h2>
+                @{
+                    var failed = Model.Services.Count(s => s.ActiveState == "failed");
+                    var inactive = Model.Services.Count(s => s.ActiveState == "inactive");
+                }
                 @if (failed > 0)
                 {
-                    <span class="text-feedback-danger-fg font-semibold">@failed failed</span>
-                    @(inactive > 0 ? " · " : "")
+                    <span class="badge badge-danger">@failed failed</span>
                 }
-                @if (inactive > 0)
+                else if (inactive > 0)
                 {
-                    <span>@inactive inactive</span>
+                    <span class="badge badge-muted">@inactive inactive</span>
                 }
-                @if (failed == 0 && inactive == 0 && Model.Services.Count > 0)
+                else if (Model.Services.Count > 0)
                 {
-                    <span class="text-feedback-success-fg">all healthy</span>
+                    <span class="badge badge-success">all healthy</span>
                 }
-            </span>
-        </header>
-        @if (Model.Services.Count == 0)
-        {
-            <p class="text-sm text-surface-fg-muted">Service status unavailable (daemon down?).</p>
-        }
-        else
-        {
-            <ul class="divide-y border-surface-border">
-                @foreach (var svc in Model.Services)
-                {
-                    <li class="flex items-center justify-between py-2">
-                        <div class="flex items-center gap-2 min-w-0">
-                            @{
-                                var dotCls = svc.ActiveState switch
-                                {
-                                    "active"     => "bg-feedback-success-bd",
-                                    "failed"     => "bg-feedback-danger-bd",
-                                    "activating" => "bg-feedback-warning-bd",
-                                    _            => "bg-surface-fg-muted"
-                                };
-                            }
-                            <span class="inline-flex h-2 w-2 rounded-full @dotCls"></span>
-                            <span class="font-medium text-sm truncate">@svc.DisplayName</span>
-                            <code class="text-xs text-surface-fg-muted truncate">@svc.UnitName</code>
-                        </div>
-                        <span class="text-xs text-surface-fg-muted shrink-0">
-                            @svc.ActiveState@(svc.SubState is { Length: > 0 } ? $" · {svc.SubState}" : "")
-                        </span>
-                    </li>
-                }
-            </ul>
-        }
-    </section>
+            </header>
+            @if (Model.Services.Count == 0)
+            {
+                <p class="text-sm text-surface-fg-muted">Service status unavailable (daemon down?).</p>
+            }
+            else
+            {
+                <ul class="space-y-1">
+                    @foreach (var svc in Model.Services)
+                    {
+                        var discCls = svc.ActiveState switch
+                        {
+                            "active"     => "kpi-tint-mint",
+                            "failed"     => "kpi-tint-coral",
+                            "activating" => "kpi-tint-gold",
+                            _            => "kpi-tint-accent"
+                        };
+                        <li class="flex items-center justify-between gap-2 px-2 py-2">
+                            <div class="flex items-center gap-2.5 min-w-0">
+                                <span class="kpi-icon kpi-icon-sm @discCls">
+                                    <span class="h-2 w-2 rounded-full"
+                                          style="background: currentColor;"></span>
+                                </span>
+                                <div class="min-w-0">
+                                    <p class="font-medium text-sm truncate">@svc.DisplayName</p>
+                                    <p class="text-[11px] font-mono text-surface-fg-muted truncate">@svc.UnitName</p>
+                                </div>
+                            </div>
+                            <span class="text-xs shrink-0 @(svc.ActiveState == "failed" ? "text-feedback-danger-fg font-semibold" : "text-surface-fg-muted")">
+                                @svc.ActiveState@(svc.SubState is { Length: > 0 } ? $" · {svc.SubState}" : "")
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
 
-    @* WAN health — the shared _WanHealthCard in Summary mode (compact list,
-       hysteresis counters, instant-ping fallback when state isn't populated).
-       Same component the failover page and the Monitoring pod render. *@
-    <section class="card">
-        <header class="flex items-baseline justify-between mb-3">
-            <h2 class="text-base font-semibold">WAN health</h2>
-            <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
-        </header>
-        @await Html.PartialAsync("_WanHealthCard", Model.WanCard)
-    </section>
-
-    @* Where traffic is going — LAN-wide top destinations, ASN-enriched, polled
-       every 30s. Pauses when the tab is hidden. *@
-    <section class="card"
-             x-data="{ paused: false }"
-             x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
-        <header class="flex items-center justify-between mb-3">
-            <div>
-                <h2 class="text-base font-semibold">Where traffic is going</h2>
-                <p class="text-xs text-surface-fg-muted">Top destinations (24h) — all hosts, by ASN</p>
+        <section class="card"
+                 x-data="{ paused: false }"
+                 x-init="document.addEventListener('visibilitychange', () => paused = document.hidden)">
+            <header class="flex items-center justify-between mb-3">
+                <div>
+                    <h2 class="text-base font-semibold">Where traffic is going</h2>
+                    <p class="text-xs text-surface-fg-muted">Top destinations (24h) · by ASN</p>
+                </div>
+                <a href="@Url.Action("Index", "Monitoring")" class="text-xs hover:underline text-accent">Monitoring →</a>
+            </header>
+            <div hx-get="/Home/TopDestinations"
+                 :hx-trigger="paused ? 'load' : 'load, every 30s'"
+                 hx-swap="innerHTML">
+                <p class="text-sm py-6 text-center text-surface-fg-muted">Loading destinations…</p>
             </div>
-            <a href="@Url.Action("Index", "Monitoring")" class="text-xs hover:underline text-accent">Monitoring →</a>
-        </header>
-        <div hx-get="/Home/TopDestinations"
-             :hx-trigger="paused ? 'load' : 'load, every 30s'"
-             hx-swap="innerHTML">
-            <p class="text-sm py-6 text-center text-surface-fg-muted">Loading destinations…</p>
-        </div>
-    </section>
+        </section>
+    </div>
 </div>
 
-@* Subnets table *@
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 240ms;">
-    <header class="flex items-center justify-between mb-3">
-        <div>
-            <h2 class="text-base font-semibold">Subnets &amp; pools</h2>
-            <p class="text-xs text-surface-fg-muted">Lease utilisation per subnet</p>
-        </div>
-        <a href="@Url.Action("Index", "DhcpSubnets")" class="btn btn-ghost text-xs">Manage subnets</a>
-    </header>
-    @if (Model.Subnets.Count == 0)
-    {
-        <p class="text-sm py-8 text-center text-surface-fg-muted">
-            No subnets configured. <a class="hover:underline text-accent" href="@Url.Action("Index", "SetupWizard")">Run the setup wizard</a> to get started.
-        </p>
-    }
-    else
-    {
-        <div class="overflow-x-auto -mx-5">
-            <table class="min-w-full text-sm">
-                <thead>
-                    <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                        <th class="px-5 py-2 font-medium">Subnet</th>
-                        <th class="px-5 py-2 font-medium">Pool range</th>
-                        <th class="px-5 py-2 font-medium">Used</th>
-                        <th class="px-5 py-2 font-medium hidden md:table-cell">Utilisation</th>
-                        <th class="px-5 py-2 font-medium">Status</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y border-surface-border">
-                    @foreach (var s in Model.Subnets)
-                    {
-                        var barColor = s.Status switch
-                        {
-                            "danger" => "var(--feedback-danger-fg)",
-                            "warn"   => "var(--feedback-warning-bd)",
-                            _        => "var(--accent)"
-                        };
-                        <tr>
-                            <td class="px-5 py-3">
-                                <p class="font-medium">@s.Name</p>
-                                <p class="text-xs font-mono text-surface-fg-muted">@s.Cidr</p>
-                            </td>
-                            <td class="px-5 py-3 font-mono text-xs text-surface-fg-muted">@(s.PoolRange ?? "—")</td>
-                            <td class="px-5 py-3">@s.UsedLeases / @s.Capacity</td>
-                            <td class="px-5 py-3 hidden md:table-cell">
-                                <div class="flex items-center gap-2">
-                                    <div class="h-1.5 w-32 rounded-full overflow-hidden bg-surface-muted">
-                                        <div class="h-full rounded-full" style="width: @(s.UsagePercent.ToString("0.#"))%; background-color: @barColor;"></div>
-                                    </div>
-                                    <span class="text-xs text-surface-fg-muted">@s.UsagePercent.ToString("0.#")%</span>
-                                </div>
-                            </td>
-                            <td class="px-5 py-3">
-                                @switch (s.Status)
-                                {
-                                    case "danger":
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-danger-bg text-feedback-danger-fg">Saturated</span>
-                                        break;
-                                    case "warn":
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-warning-bg text-feedback-warning-fg">Near full</span>
-                                        break;
-                                    default:
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-feedback-success-bg text-feedback-success-fg">Healthy</span>
-                                        break;
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    }
-</section>
-
-@* Top talkers — hosts and services side by side. Data comes from
-   ConntrackSamplerService running in the daemon every 30s. Empty when the
-   sampler hasn't been running long enough or conntrack-tools aren't installed.
-   Loaded via HTMX (same _TopTalkersLive partial as the Monitoring page) so the
-   window selector (1h/6h/24h/7d) works without duplicating the panel markup. *@
-<div x-data="{ talkersRange: '24h' }" class="mt-6"
-     style="animation: var(--animate-slide-up); animation-delay: 300ms;">
+@* Top hosts / top services sit above the policy row so the 24h chart
+   can stay aligned with destinations in the rail. *@
+<div x-data="{ talkersRange: '24h' }" class="mb-6"
+     style="animation: var(--animate-slide-up); animation-delay: 50ms;">
     <div id="home-toptalkers" class="loading-host"
          hx-get="/Monitoring/toptalkers"
          :hx-vals="JSON.stringify({ range: talkersRange })"
          hx-trigger="load"
+         hx-swap="innerHTML">
+        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+    </div>
+</div>
+
+<div class="grid gap-4 grid-cols-1 lg:grid-cols-3 mb-6"
+     style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    @await Html.PartialAsync("_RecentLeases", Model.RecentLeases)
+    @await Html.PartialAsync("_PortForwardsSummary", Model.PortForwards)
+    @await Html.PartialAsync("_DropRules", Model.DropRules)
+</div>
+
+<div class="grid gap-4 grid-cols-1 lg:grid-cols-2 mb-6"
+     style="animation: var(--animate-slide-up); animation-delay: 70ms;">
+    @await Html.PartialAsync("_RecentAudit", Model.RecentAudit)
+    <div class="loading-host"
+         hx-get="/Alerts/feed"
+         hx-trigger="load, every 30s"
          hx-swap="innerHTML">
         @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
     </div>
@@ -378,8 +368,8 @@
         <h2 class="text-base font-semibold">Quick actions</h2>
         <span class="text-xs text-surface-fg-muted">Operational shortcuts</span>
     </header>
-    <div class="grid gap-2 grid-cols-2 md:grid-cols-4">
-        <button type="button" class="btn btn-ghost text-sm justify-start"
+    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+        <button type="button" class="quick-action"
                 hx-post="/Firewall/Apply/execute"
                 hx-swap="none"
                 hx-trigger="confirmed-reload"
@@ -392,10 +382,12 @@
                     });
                     if (ok) htmx.trigger($el, 'confirmed-reload');
                 })()">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+            <span class="kpi-icon kpi-tint-coral">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+            </span>
             Reload firewall
         </button>
-        <button type="button" class="btn btn-ghost text-sm justify-start"
+        <button type="button" class="quick-action"
                 hx-post="/Vpn/WireGuard/apply"
                 hx-swap="none"
                 hx-trigger="confirmed-wg"
@@ -408,10 +400,12 @@
                     });
                     if (ok) htmx.trigger($el, 'confirmed-wg');
                 })()">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+            <span class="kpi-icon kpi-tint-violet">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+            </span>
             Restart wg0
         </button>
-        <button type="button" class="btn btn-ghost text-sm justify-start"
+        <button type="button" class="quick-action"
                 hx-post="/Firewall/Apply/routing-execute"
                 hx-swap="none"
                 hx-trigger="confirmed-routing"
@@ -424,12 +418,15 @@
                     });
                     if (ok) htmx.trigger($el, 'confirmed-routing');
                 })()">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+            <span class="kpi-icon kpi-tint-gold">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+            </span>
             Re-apply routing
         </button>
-        <a href="@Url.Action("Index", "Monitoring")"
-           class="btn btn-ghost text-sm justify-start">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5m.75-9 3-3 2.148 2.148A12.061 12.061 0 0 1 16.5 7.605"/></svg>
+        <a href="@Url.Action("Index", "Monitoring")" class="quick-action">
+            <span class="kpi-icon kpi-tint-blue">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5m.75-9 3-3 2.148 2.148A12.061 12.061 0 0 1 16.5 7.605"/></svg>
+            </span>
             Open logs
         </a>
     </div>

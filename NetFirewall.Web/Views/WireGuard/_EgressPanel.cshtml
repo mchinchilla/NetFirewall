@@ -1,38 +1,55 @@
 @model NetFirewall.Web.Models.Vpn.VpnEgressViewModel
 @{
     var current = new HashSet<string>(Model.CurrentSources, StringComparer.OrdinalIgnoreCase);
-    // Hosts/subnets not already represented by a lease/subnet row → show as free-text chips.
     var knownValues = new HashSet<string>(
         Model.Leases.Select(l => $"{l.Ip}/32").Concat(Model.LanSubnets),
         StringComparer.OrdinalIgnoreCase);
     var extras = Model.CurrentSources.Where(s => !knownValues.Contains(s)).ToList();
+    var extrasJson = System.Text.Json.JsonSerializer.Serialize(extras);
+    var pickCls = "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer border border-transparent hover:bg-surface-muted has-[:checked]:bg-accent-soft";
 }
 
-<form hx-post="/Vpn/WireGuard/Egress/save" hx-swap="none" x-data="{ extra: '' }">
+<form hx-post="/Vpn/WireGuard/Egress/save" hx-swap="none"
+      x-data="wgEgressPicker(@Html.Raw(extrasJson))">
     @Html.AntiForgeryToken()
 
     <p class="text-sm mb-3 text-surface-fg-muted">
-        Pick the LAN devices/subnets that should egress through <code>@Model.TunnelName</code>.
-        Everything else uses the normal WAN(s). Generates the fwmark routing under the hood.
+        Pick the LAN devices and subnets that should egress through
+        <span class="font-mono">@Model.TunnelName</span>.
+        Everything else uses the normal WAN(s).
+    </p>
+    <p class="text-xs mb-4 text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.CurrentSources.Count</span> source@(Model.CurrentSources.Count == 1 ? "" : "s") currently routed via the tunnel.
     </p>
 
     @if (!Model.ScaffoldReady && Model.CurrentSources.Count == 0)
     {
         <div class="rounded-md border-l-2 px-3 py-2 text-xs mb-3 bg-feedback-info-bg text-feedback-info-fg border-feedback-info-bd">
-            Save the tunnel first (with a client/server mode) so the routing scaffold exists, then assign devices here.
+            Save the tunnel first so the routing scaffold exists, then assign devices here.
         </div>
     }
 
-    @* ── DHCP leases (host picker) ── *@
     @if (Model.Leases.Count > 0)
     {
-        <p class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Devices (DHCP leases)</p>
+        <div class="flex flex-wrap items-end justify-between gap-2 mb-2">
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Devices (DHCP leases)</p>
+            <label class="relative block w-full sm:w-56">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-surface-fg-muted">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.3-4.3m1.8-5.2a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
+                    </svg>
+                </span>
+                <input type="search" class="input pl-8 py-1 text-xs" placeholder="Filter by hostname or IP…"
+                       x-model.trim="q" autocomplete="off" />
+            </label>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-4 max-h-64 overflow-y-auto">
             @foreach (var l in Model.Leases)
             {
                 var val = $"{l.Ip}/32";
-                <label class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-surface-muted cursor-pointer">
-                    <input type="checkbox" name="sources" value="@val" checked="@current.Contains(val)" class="accent-[var(--accent)]" />
+                var hay = $"{l.Hostname} {l.Ip} {l.Mac}";
+                <label class="@pickCls" x-show="match(@System.Text.Json.JsonSerializer.Serialize(hay))">
+                    <input type="checkbox" name="sources" value="@val" checked="@current.Contains(val)" class="rounded" />
                     <span class="min-w-0">
                         <span class="font-medium truncate">@(string.IsNullOrEmpty(l.Hostname) ? "(no hostname)" : l.Hostname)</span>
                         <span class="font-mono text-xs text-surface-fg-muted"> @l.Ip</span>
@@ -42,42 +59,37 @@
         </div>
     }
 
-    @* ── LAN subnets (whole-subnet routing) ── *@
     @if (Model.LanSubnets.Count > 0)
     {
         <p class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Whole LAN subnets</p>
-        <div class="space-y-1.5 mb-4">
+        <div class="flex flex-wrap gap-1.5 mb-4">
             @foreach (var s in Model.LanSubnets)
             {
-                <label class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-surface-muted cursor-pointer">
-                    <input type="checkbox" name="sources" value="@s" checked="@current.Contains(s)" class="accent-[var(--accent)]" />
-                    <span class="font-mono">@s</span>
+                <label class="@pickCls">
+                    <input type="checkbox" name="sources" value="@s" checked="@current.Contains(s)" class="rounded" />
+                    <span class="font-mono text-xs">@s</span>
                 </label>
             }
         </div>
     }
 
-    @* ── Free-text extras (IPs/CIDRs not in the lists, incl. existing hand-authored ones) ── *@
     <p class="text-xs uppercase tracking-wider font-semibold mb-2 text-surface-fg-muted">Other (IP or CIDR)</p>
-    <div class="space-y-1.5 mb-2" id="egress-extras">
-        @foreach (var e in extras)
-        {
-            <label class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm bg-surface-muted">
-                <input type="checkbox" name="sources" value="@e" checked class="accent-[var(--accent)]" />
-                <span class="font-mono">@e</span>
+    <div class="flex flex-wrap gap-1.5 mb-2">
+        <template x-for="v in extras" :key="v">
+            <label class="@pickCls">
+                <input type="checkbox" name="sources" :value="v" checked class="rounded" />
+                <span class="font-mono text-xs" x-text="v"></span>
+                <button type="button" class="text-xs text-surface-fg-muted hover:text-feedback-danger-fg"
+                        @@click.prevent="removeExtra(v)" aria-label="Remove">×</button>
             </label>
-        }
+        </template>
+        <p class="text-xs text-surface-fg-muted" x-show="extras.length === 0">None yet — add a host or CIDR below.</p>
     </div>
     <div class="flex items-center gap-2 mb-4">
         <input type="text" x-model="extra" placeholder="192.168.99.66 or 192.168.50.0/24"
-               class="input text-sm flex-1" />
-        <button type="button" class="btn btn-ghost text-xs"
-                @@click="if (extra.trim()) { const v = extra.trim().includes('/') ? extra.trim() : extra.trim()+'/32';
-                    const w = document.createElement('label'); w.className='flex items-center gap-2 px-2 py-1.5 rounded-md text-sm bg-surface-muted';
-                    w.innerHTML = `<input type=checkbox name=sources value='${v}' checked class='accent-[var(--accent)]'><span class='font-mono'>${v}</span>`;
-                    document.getElementById('egress-extras').appendChild(w); extra=''; }">
-            Add
-        </button>
+               class="input text-sm flex-1"
+               @@keydown.enter.prevent="addExtra()" />
+        <button type="button" class="btn btn-ghost text-xs" @@click="addExtra()">Add</button>
     </div>
 
     <div class="flex items-center justify-end pt-3 border-t border-surface-border">

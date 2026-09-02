@@ -26,6 +26,7 @@ public sealed class MonitoringController : Controller
     private readonly IInterfaceTrafficService _ifaceTraffic;
     private readonly IScheduleService _schedules;
     private readonly IWanHealthCardBuilder _cardBuilder;
+    private readonly IFirewallService _firewall;
     private readonly IDaemonClient _daemon;
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<MonitoringController> _logger;
@@ -37,6 +38,7 @@ public sealed class MonitoringController : Controller
         IInterfaceTrafficService ifaceTraffic,
         IScheduleService schedules,
         IWanHealthCardBuilder cardBuilder,
+        IFirewallService firewall,
         IDaemonClient daemon,
         NpgsqlDataSource ds,
         ILogger<MonitoringController> logger)
@@ -47,6 +49,7 @@ public sealed class MonitoringController : Controller
         _ifaceTraffic = ifaceTraffic;
         _schedules = schedules;
         _cardBuilder = cardBuilder;
+        _firewall = firewall;
         _daemon = daemon;
         _ds = ds;
         _logger = logger;
@@ -227,6 +230,14 @@ public sealed class MonitoringController : Controller
         }
 
         return PartialView("_HostDestinations", vm);
+    }
+
+    [HttpGet("drop-rules")]
+    public async Task<IActionResult> DropRules(CancellationToken ct)
+    {
+        var rules = await _firewall.GetFilterRulesAsync(null, ct);
+        var vm = DashboardPanels.FromFilters(rules, 10, Url.Action("Index", "FwFilterRules"));
+        return PartialView("_DropRules", vm);
     }
 
     [HttpGet("schedules")]

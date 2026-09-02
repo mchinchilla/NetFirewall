@@ -14,8 +14,29 @@ public sealed class KpiCardViewModel
     public string? DeltaContext { get; init; }
     public DeltaTrend Trend { get; init; } = DeltaTrend.Neutral;
 
-    /// <summary>Inline SVG path data for the icon shown in the top-right badge.</summary>
+    /// <summary>Inline SVG path data for the circular tint disc.</summary>
     public required string IconPath { get; init; }
+
+    /// <summary>Hue of the icon disc so a KPI row reads as distinct vitals.</summary>
+    public KpiTint Tint { get; init; } = KpiTint.Accent;
+
+    /// <summary>Left-rail severity (CPU/mem thresholds, saturated pools, …).</summary>
+    public KpiSeverity Severity { get; init; } = KpiSeverity.Normal;
 }
 
 public enum DeltaTrend { Up, Down, Neutral }
+
+public enum KpiTint { Accent, Coral, Mint, Blue, Violet, Gold }
+
+public enum KpiSeverity { Normal, Warning, Critical }
+
+/// <summary>Live sparkline vital (CPU / Memory) on the dashboard.</summary>
+public sealed class VitalCardViewModel
+{
+    public required string Field { get; init; }
+    public required string Label { get; init; }
+    public required string IconPath { get; init; }
+    public KpiTint Tint { get; init; } = KpiTint.Coral;
+    public string Unit { get; init; } = "%";
+    public string Caption { get; init; } = "Last 60 min · % used";
+}

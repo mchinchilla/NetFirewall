@@ -1,4 +1,5 @@
 @model IReadOnlyList<NetFirewall.Models.Dhcp.DhcpMacReservation>
+@using NetFirewall.Web.Models.Shared
 @{
     var query = ViewBag.Query as string;
     var hasFilter = !string.IsNullOrWhiteSpace(query);
@@ -13,54 +14,46 @@
         }
         else
         {
-            <text>No reservations yet. Add one to permanently bind a MAC address to an IP.</text>
+            <text>No reservations yet. Click <span class="font-medium text-surface-fg">Add reservation</span> to permanently bind a MAC address to an IP.</text>
         }
     </div>
 }
 else
 {
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted">
+        <span class="font-medium text-surface-fg">@Model.Count</span> reservation@(Model.Count == 1 ? "" : "s")
+    </div>
     <div class="overflow-x-auto -mx-5">
         <table class="min-w-full text-sm">
             <thead>
-                <tr class="text-left text-xs uppercase tracking-wider text-surface-fg-muted">
-                    <th class="px-5 py-2 font-medium">MAC</th>
-                    <th class="px-5 py-2 font-medium">Reserved IP</th>
-                    <th class="px-5 py-2 font-medium hidden md:table-cell">Description</th>
-                    <th class="px-5 py-2 font-medium text-right">Actions</th>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Reservation</th>
+                    <th class="px-2 py-1.5 font-medium hidden md:table-cell">Description</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
                 @foreach (var r in Model.OrderBy(x => x.ReservedIp?.ToString()))
                 {
                     <tr>
-                        <td class="px-5 py-3 font-mono text-xs">@r.MacAddress</td>
-                        <td class="px-5 py-3 font-mono text-xs font-medium">@r.ReservedIp</td>
-                        <td class="px-5 py-3 hidden md:table-cell text-xs text-surface-fg-muted">
+                        <td class="pl-5 pr-2 py-2.5">
+                            <div class="flex items-center gap-1 flex-wrap">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "mac", Value = r.MacAddress.ToString(), Title = r.MacAddress.ToString() })
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ip", Value = r.ReservedIp.ToString() })
+                            </div>
+                        </td>
+                        <td class="px-2 py-2.5 hidden md:table-cell text-xs text-surface-fg-muted">
                             @(r.Description ?? "—")
                         </td>
-                        <td class="px-5 py-3 text-right">
-                            <div class="inline-flex items-center gap-1">
-                                <button type="button" class="btn btn-ghost text-xs"
-                                        hx-get="/Dhcp/Reservations/edit/@r.Id"
-                                        hx-target="#drawer-body" hx-swap="innerHTML"
-                                        @@click="$store.drawer.openRaw('Edit reservation')">Edit</button>
-                                @{
-                                    var msg = $"Delete reservation for {r.MacAddress} → {r.ReservedIp}? The IP will rejoin the general pool.";
-                                }
-                                <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
-                                        hx-post="/Dhcp/Reservations/delete/@r.Id"
-                                        hx-trigger="confirmed-del"
-                                        data-msg="@msg"
-                                        @@click.prevent="(async () => {
-                                            const ok = await $store.confirm.ask({
-                                                title: 'Delete reservation?',
-                                                message: $event.currentTarget.dataset.msg,
-                                                confirmLabel: 'Delete',
-                                                level: 'danger'
-                                            });
-                                            if (ok) htmx.trigger($el, 'confirmed-del');
-                                        })()">Delete</button>
-                            </div>
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                            @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                            {
+                                EditUrl = $"/Dhcp/Reservations/edit/{r.Id}",
+                                EditDrawerTitle = "Edit reservation",
+                                DeleteUrl = $"/Dhcp/Reservations/delete/{r.Id}",
+                                DeleteDialogTitle = "Delete reservation?",
+                                DeleteMessage = $"Delete reservation for {r.MacAddress} → {r.ReservedIp}? The IP will rejoin the general pool."
+                            })
                         </td>
                     </tr>
                 }
