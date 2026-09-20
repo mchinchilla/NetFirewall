@@ -8,6 +8,13 @@ using Spectre.Console;
 //   --service <name>        filter checks by category/service (web|daemon|dhcp|tui|all)
 //   --prefix <path>         override install prefix (default /opt/netfirewall)
 //   --etc <path>            override config dir (default /etc/netfirewall)
+//   --help / -h             usage
+if (args.Contains("--help") || args.Contains("-h"))
+{
+    PrintHelp();
+    return 0;
+}
+
 var asJson = args.Contains("--json");
 string? serviceFilter = ArgValue(args, "--service");
 if (string.Equals(serviceFilter, "all", StringComparison.OrdinalIgnoreCase)) serviceFilter = null;
@@ -120,3 +127,41 @@ static string? ArgValue(string[] args, string flag)
     var i = Array.IndexOf(args, flag);
     return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
 }
+
+static void PrintHelp() => Console.WriteLine("""
+    netfirewall-doctor — validate a NetFirewall deployment
+
+    USAGE
+      netfirewall-doctor [options]
+
+    Runs every requirements check against this host and prints a table of
+    pass / warn / fail / skip with a remedy for anything that is not passing.
+    Read-only: it inspects files, units, sockets and the database, and changes
+    nothing. install.sh runs it as the post-install verification step.
+
+    OPTIONS
+      --service <name>   Only checks for one service: web | daemon | dhcp | tui | all.
+                         Checks that belong to no service always run. Default: all.
+      --json             Emit the results as JSON instead of a table (for CI).
+      --prefix <path>    Installation prefix to inspect.   Default: /opt/netfirewall
+      --etc <path>       Configuration directory.          Default: /etc/netfirewall
+      --help, -h         Show this help.
+
+    EXIT STATUS
+      0   No check failed (warnings and skips do not fail the run).
+      1   At least one check failed.
+
+    NOTES
+      Linux-only checks report "skipped" on other platforms rather than failing.
+      The production prefix on some deployments is /opt/tekium — pass --prefix
+      when it differs from the default.
+
+    EXAMPLES
+      netfirewall-doctor
+      netfirewall-doctor --service dhcp
+      netfirewall-doctor --prefix /opt/tekium --etc /etc/netfirewall
+      netfirewall-doctor --json | jq '.[] | select(.status == "fail")'
+
+    SEE ALSO
+      docs/doctor.md, netfirewall-tui(1), netfirewall-migrate --help
+    """);

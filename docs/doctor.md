@@ -12,6 +12,7 @@ netfirewall-doctor                     # validate everything (installed symlink)
 netfirewall-doctor --service daemon    # only daemon-relevant checks
 netfirewall-doctor --json              # machine-readable (CI / scripts)
 netfirewall-doctor --prefix /opt/tekium --etc /etc/netfirewall   # non-default layout
+netfirewall-doctor --help              # usage, flags, exit codes, examples
 ```
 
 From the repo: `dotnet run --project NetFirewall.Doctor -- --service all`.
@@ -25,6 +26,7 @@ and runs it as the final post-install verification step.
 - `--json` — emit a JSON array of `{category, name, status, message, remedy, detail}`.
 - `--prefix <path>` — install prefix (default `/opt/netfirewall`; tekium uses `/opt/tekium`).
 - `--etc <path>` — config dir holding the env files (default `/etc/netfirewall`).
+- `--help`, `-h` — print usage and exit 0, without running any check.
 
 ## Exit code
 

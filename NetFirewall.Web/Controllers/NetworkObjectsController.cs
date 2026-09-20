@@ -93,11 +93,19 @@ public sealed class NetworkObjectsController : Controller
     }
 
     [HttpPost("save"), ValidateAntiForgeryToken]
+    [Filters.HandlesOwnValidation]
     public async Task<IActionResult> Save(NetworkObjectFormViewModel form, CancellationToken ct)
     {
         if (!ModelState.IsValid)
-            return this.ToHtmxResponse(ServiceResponse<NetworkObject>.Fail(
+        {
+            // Hand the form back so the operator sees WHICH token we rejected,
+            // marked on the field itself. 200 on purpose: the response is a
+            // successful render of the form, and HTMX only swaps 2xx.
+            this.AttachToastTrigger(ServiceResponse<NetworkObject>.Fail(
                 string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
+            ViewBag.Catalog = await _objects.GetAllAsync(includeMembers: false, ct);
+            return PartialView("_ObjectForm", form);
+        }
 
         try
         {

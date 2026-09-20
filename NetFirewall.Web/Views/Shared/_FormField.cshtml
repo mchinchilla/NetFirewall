@@ -2,7 +2,15 @@
 @using NetFirewall.Web.Models
 @{
     var fieldId = $"f-{Model.Name}";
-    var hasError = !string.IsNullOrEmpty(Model.Error);
+
+    // An explicit Error always wins; otherwise take the first ModelState error for
+    // this field. That makes a re-rendered form show its errors inline without the
+    // controller having to copy them into every FormFieldViewModel by hand.
+    var stateError = ViewData.ModelState.TryGetValue(Model.Name, out var entry)
+        ? entry.Errors.FirstOrDefault()?.ErrorMessage
+        : null;
+    var error = !string.IsNullOrEmpty(Model.Error) ? Model.Error : stateError;
+    var hasError = !string.IsNullOrEmpty(error);
     var hasIcon = !string.IsNullOrEmpty(Model.IconPath);
     var canToggle = Model.WithPasswordToggle && Model.Kind == FormFieldKind.Password;
     var alpineId = $"fld_{Model.Name.Replace(".", "_").Replace("-", "_")}";
@@ -136,7 +144,7 @@ else
 
         @if (hasError)
         {
-            <p class="text-xs text-feedback-danger-fg">@Model.Error</p>
+            <p class="text-xs text-feedback-danger-fg">@error</p>
         }
         else if (!string.IsNullOrEmpty(Model.Help))
         {

@@ -62,12 +62,18 @@ public sealed class NetworkObjectFormViewModel : IValidatableObject
             switch (Type)
             {
                 case NetworkObjectTypes.Host:
+                    // A list object: individual addresses and inclusive ranges may be
+                    // mixed freely, which is what a rule like "PBX + a few hosts"
+                    // needs. Both forms are literals nft accepts and the resolver
+                    // passes straight through.
                     if (tokens.Length == 0)
-                        yield return new ValidationResult("Host must list at least one IPv4 address.", new[] { nameof(Value) });
+                        yield return new ValidationResult("List at least one IPv4 address or range.", new[] { nameof(Value) });
                     foreach (var token in tokens)
                     {
-                        if (!NetworkObjectValues.IsIpv4Host(token))
-                            yield return new ValidationResult($"'{token}' is not a valid IPv4 address.", new[] { nameof(Value) });
+                        if (!NetworkObjectValues.IsIpv4Host(token) && !NetworkObjectValues.IsIpv4Range(token))
+                            yield return new ValidationResult(
+                                $"'{token}' is not an IPv4 address (192.168.99.8, 192.168.99.8/32) or range (192.168.99.60-192.168.99.79).",
+                                new[] { nameof(Value) });
                     }
                     break;
                 case NetworkObjectTypes.Network:

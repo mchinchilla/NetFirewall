@@ -43,7 +43,7 @@
                 <select name="Type" class="input" x-model="type">
                     @foreach (var t in NetworkObjectTypes.All)
                     {
-                        <option value="@t" selected="@(t == Model.Type)">@t</option>
+                        <option value="@t" selected="@(t == Model.Type)">@NetworkObjectTypes.DisplayName(t)</option>
                     }
                 </select>
             </div>
@@ -56,10 +56,10 @@
                 Label = "Addresses",
                 Kind = FormFieldKind.Textarea,
                 Value = Model.Value,
-                Placeholder = "192.168.99.20"
+                Placeholder = "192.168.99.8, 192.168.99.101"
             })
             <div class="text-xs mt-1 space-y-0.5 text-surface-fg-muted">
-                <p x-show="type === 'host'">One or more IPv4 addresses, comma or newline separated. Example: <span class="font-mono">192.168.99.20</span> and <span class="font-mono">192.168.99.21</span>. We add /32 automatically. The time policy that references this name picks up new IPs at next apply.</p>
+                <p x-show="type === 'host'">A list, comma or newline separated. Addresses (<span class="font-mono">192.168.99.20</span>) and inclusive ranges (<span class="font-mono">192.168.99.60-192.168.99.79</span>) can be mixed in the same object. We add /32 to bare addresses automatically. Rules that reference this name pick up changes at the next apply.</p>
                 <p x-show="type === 'network'">One or more CIDRs: <span class="font-mono">10.0.0.0/24</span>, <span class="font-mono">192.168.1.0/27</span>.</p>
                 <p x-show="type === 'range'">Inclusive range: <span class="font-mono">10.0.0.10-10.0.0.50</span>.</p>
                 <p x-show="type === 'fqdn'">Hostname: <span class="font-mono">slack.com</span>, <span class="font-mono">api.example.org</span>. Resolved via DNS at every nft apply, cached per <code>network_objects.fqdn_ttl_seconds</code> (default 5 min).</p>

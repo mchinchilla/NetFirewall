@@ -38,4 +38,18 @@ public static class NetworkObjectTypes
     public static readonly string[] All = [Host, Network, Range, Group, Fqdn];
 
     public static bool IsValid(string t) => Array.IndexOf(All, t) >= 0;
+
+    /// <summary>
+    /// Label for the type picker. "host" reads as a single machine, which is why
+    /// operators did not realise it takes a whole list — including ranges.
+    /// </summary>
+    public static string DisplayName(string t) => t switch
+    {
+        Host    => "Addresses — hosts and ranges",
+        Network => "Networks — CIDR",
+        Range   => "Range — a single start-end",
+        Group   => "Group — other objects",
+        Fqdn    => "Hostname — resolved via DNS",
+        _       => t,
+    };
 }

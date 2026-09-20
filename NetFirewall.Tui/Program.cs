@@ -6,6 +6,60 @@ using NetFirewall.Tui;
 using NetFirewall.Tui.Screens;
 using Spectre.Console;
 
+// ── Help ──────────────────────────────────────────────────────────────
+//
+// Handled before anything else: no config, no DI, no socket. The bash
+// completion shipped in deploy/completion/ already advertises these flags.
+if (args.Contains("--help") || args.Contains("-h"))
+{
+    Console.WriteLine("""
+        netfirewall-tui — console UI for the NetFirewall daemon
+
+        USAGE
+          sudo netfirewall-tui
+
+        An interactive text UI that talks to the local daemon over its Unix
+        socket. It takes no subcommands: everything is driven from the menu.
+        Intended for the two cases where the Web UI cannot help you:
+
+          • Configuring the first network interface on a fresh host, before
+            the Web is reachable.
+          • Recovering a locked-out admin or a lost TOTP device, when the Web
+            login flow is blocked.
+
+        MENU
+          Network interfaces   List, edit (IP / mask / gateway / MAC / MTU) and
+                               add interfaces from physically-detected NICs,
+                               then apply them through the daemon.
+          Recovery             Reset a password, disable TOTP and clear lockout.
+                               Needs no login — the daemon authorises it by the
+                               connecting peer being root.
+          Daemon status        Read-only health ping and the live nft ruleset.
+
+        OPTIONS
+          --help, -h           Show this help.
+
+        AUTHENTICATION
+          The daemon gates its socket by peer credentials, so run this as root
+          (sudo) or as a member of the netfirewall group. Logging in asks for
+          username, password and TOTP in one screen; a TUI session is elevated
+          from the start, because you already proved TOTP at a physical console.
+
+        ENVIRONMENT
+          Daemon__SocketPath   Override the daemon socket path.
+                               Default: /run/netfirewall/control.sock
+
+        EXIT STATUS
+          0   Clean exit (Quit from the menu).
+          1   The TUI could not start — usually an unreadable appsettings.json
+              or a daemon socket it cannot open.
+
+        SEE ALSO
+          netfirewall-tui(1), netfirewall-doctor --help
+        """);
+    return;
+}
+
 // ── Configuration ─────────────────────────────────────────────────────
 //
 // Resolve appsettings.json relative to the binary directory so the TUI
