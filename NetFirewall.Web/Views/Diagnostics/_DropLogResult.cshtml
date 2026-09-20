@@ -1,0 +1,56 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DropLogResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+    var summary = r is null ? null : r.Error ?? $"{r.Entries.Count} entries ({r.Scanned} lines scanned{(r.Truncated ? ", capped" : "")})";
+}
+@await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.DropLog, summary))
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No result captured.</p>
+}
+else if (r.Error is not null)
+{
+    <p class="text-sm text-feedback-danger-fg">@r.Error</p>
+}
+else if (r.Entries.Count == 0)
+{
+    <p class="text-sm text-surface-fg-muted">Nothing matched in that window.</p>
+}
+else
+{
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 text-xs">
+        @foreach (var (title, tops) in new[] { ("Top prefixes", r.TopPrefixes), ("Top sources", r.TopSources), ("Top ports", r.TopPorts) })
+        {
+            <div class="rounded-lg border border-surface-border p-3">
+                <p class="uppercase tracking-wider font-semibold text-surface-fg-muted mb-1.5">@title</p>
+                @if (tops.Count == 0) { <p class="text-surface-fg-muted">—</p> }
+                <ul class="space-y-0.5 font-mono">
+                    @foreach (var t in tops) { <li class="flex justify-between"><span class="truncate">@t.Key</span><span class="text-surface-fg-muted">@t.Count</span></li> }
+                </ul>
+            </div>
+        }
+    </div>
+    <div class="overflow-auto max-h-[28rem]">
+        <table class="w-full text-xs font-mono">
+            <thead class="text-surface-fg-muted sticky top-0 bg-surface-elevated">
+                <tr><th class="text-left py-1">time</th><th class="text-left">prefix</th><th class="text-left">in → out</th><th class="text-left">src → dst</th><th class="text-left">proto/dpt</th><th class="text-left">mark</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var e in r.Entries)
+            {
+                <tr class="border-t border-surface-border" title="@e.Raw">
+                    <td class="py-1 whitespace-nowrap">@(e.At?.ToLocalTime().ToString("HH:mm:ss") ?? "—")</td>
+                    <td><span class="badge @(e.Prefix.Contains("DROP") ? "badge-danger" : e.Prefix == "martian" ? "badge-warning" : "badge-muted")">@e.Prefix</span></td>
+                    <td>@(e.In ?? "—") → @(e.Out ?? "—")</td>
+                    <td>@(e.Src ?? "—") → @(e.Dst ?? "—")</td>
+                    <td>@(e.Proto ?? "—")@(e.Dpt is null ? "" : $"/{e.Dpt}")</td>
+                    <td>@(e.Mark ?? "—")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    @if (r.Truncated) { <p class="text-xs mt-2 text-feedback-warning-fg">Scan cap reached — older lines in the window were not read. Narrow the window or raise the cap.</p> }
+}

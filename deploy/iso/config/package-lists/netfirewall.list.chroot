@@ -28,6 +28,7 @@ ethtool
 iputils-ping
 tcpdump
 conntrack
+traceroute
 curl
 
 # ── VPN + DNS (Recommends of the .deb) ──

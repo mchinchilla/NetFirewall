@@ -32,6 +32,7 @@ var checks = new ICheck[]
     new DhcpConfigCheck(),
     new DhcpInterfaceCheck(),
     new DhcpListeningCheck(),
+    new DiagnosticToolsCheck(),
     new DatabaseCheck(),
     new MigrationsPendingCheck(),
     new DhcpDatabaseCheck(),

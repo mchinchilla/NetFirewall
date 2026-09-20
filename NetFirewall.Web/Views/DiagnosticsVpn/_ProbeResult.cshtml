@@ -1,0 +1,51 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnProbeResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+    var badge = r?.Verdict switch
+    {
+        "ok" => "badge-success",
+        "inconclusive" => "badge-muted",
+        _ => "badge-danger",
+    };
+}
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No probe result.</p>
+}
+else
+{
+    <div class="rounded-lg border border-surface-border p-3 space-y-2">
+        <div class="flex items-center gap-2">
+            <span class="badge @badge">@r.Verdict</span>
+            <span class="text-xs font-mono text-surface-fg-muted ml-auto">@Model.DurationMs ms</span>
+        </div>
+        <p class="text-sm">@r.Explanation</p>
+        <dl class="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div><dt class="text-surface-fg-muted">tx</dt><dd>@DiagUi.Bytes(r.TxBefore) → @DiagUi.Bytes(r.TxAfter) <span class="@(r.TxAfter > r.TxBefore ? "text-feedback-success-fg" : "text-feedback-warning-fg")">(+@(r.TxAfter - r.TxBefore) B)</span></dd></div>
+            <div><dt class="text-surface-fg-muted">rx</dt><dd>@DiagUi.Bytes(r.RxBefore) → @DiagUi.Bytes(r.RxAfter) <span class="@(r.RxAfter > r.RxBefore ? "text-feedback-success-fg" : "text-feedback-warning-fg")">(+@(r.RxAfter - r.RxBefore) B)</span></dd></div>
+        </dl>
+        @foreach (var (label, ping) in new[] { ("by mark", r.PingByMark), ("bound", r.PingByBind) })
+        {
+            @if (ping is not null)
+            {
+                <p class="text-xs font-mono text-surface-fg-muted">
+                    @label · @ping.Via · @ping.Received/@ping.Sent replies@(ping.RttAvgMs is { } a ? $" · avg {a:0.#} ms" : "")@(ping.Error is null ? "" : $" · {ping.Error}")
+                </p>
+            }
+        }
+        @if (r.Verdict == "remote-drops")
+        {
+            <a href="#compare" class="btn btn-ghost text-xs">Compare with the issued config →</a>
+        }
+        else if (r.Verdict == "local-routing")
+        {
+            <a href="/Firewall/Apply" class="btn btn-ghost text-xs">Re-apply policy routing →</a>
+        }
+        else if (r.Verdict == "replies-dropped")
+        {
+            <a href="/Diagnostics/sysctl" class="btn btn-ghost text-xs">Check kernel tunables →</a>
+        }
+    </div>
+}

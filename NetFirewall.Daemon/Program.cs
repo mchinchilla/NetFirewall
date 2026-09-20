@@ -82,6 +82,124 @@ builder.Services.AddSingleton(dataSourceBuilder.Build());
 
 // ----- Domain services (mirror of Web's registrations) -----
 builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
+// Interface presence without spawning a process — lets wg status polls stay quiet while a tunnel is stopped.
+builder.Services.AddSingleton<NetFirewall.Services.Network.INetworkLinkProbe, NetFirewall.Services.Network.SysfsNetworkLinkProbe>();
+
+// ── Diagnostics section (docs/diagnostics.md). Tools spawn processes ONLY through the
+// ArgumentList overload of IProcessRunner; the gate caps concurrency per tool family;
+// every operator-triggered run is persisted to diag_runs and pruned by retention. ──
+builder.Services.Configure<NetFirewall.Services.Diagnostics.DiagnosticsOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Diagnostics.DiagnosticsOptions.SectionName));
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IDiagnosticInputValidator, NetFirewall.Services.Diagnostics.DiagnosticInputValidator>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IDiagnosticGate, NetFirewall.Services.Diagnostics.DiagnosticGate>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.IDiagnosticRunStore, NetFirewall.Services.Diagnostics.DiagnosticRunStore>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.IDiagnosticRunner, NetFirewall.Services.Diagnostics.DiagnosticRunner>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IPingProbeService, NetFirewall.Services.Diagnostics.PingProbeService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IRouteOracleService, NetFirewall.Services.Diagnostics.RouteOracleService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IConntrackLookupService, NetFirewall.Services.Diagnostics.ConntrackLookupService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IDropLogService, NetFirewall.Services.Diagnostics.DropLogService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IInterfaceHealthService, NetFirewall.Services.Diagnostics.InterfaceHealthService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.ISysctlReader, NetFirewall.Services.Diagnostics.ProcSysctlReader>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.ISysctlSanityService, NetFirewall.Services.Diagnostics.SysctlSanityService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IWgLiveReader, NetFirewall.Services.Diagnostics.WgLiveReader>();
+builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.DiagRunPrunerService>();
+
+// Phase-2 invasive tools. The job registry is a singleton with ONE slot: a trace
+// installs a temporary nftables table and a capture opens an AF_PACKET socket, so
+// two at once would collide. The sweeper removes a leftover trace table at startup.
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Jobs.IDiagnosticJobRegistry, NetFirewall.Services.Diagnostics.Jobs.DiagnosticJobRegistry>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.ICaptureStore, NetFirewall.Services.Diagnostics.Capture.CaptureStore>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Trace.IFlowInspectorService, NetFirewall.Services.Diagnostics.Trace.FlowInspectorService>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.IPacketCaptureService, NetFirewall.Services.Diagnostics.Capture.PacketCaptureService>();
+builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.Trace.DiagnosticsSweeperService>();
+
+// VPN doctor: checks run concurrently against one memoised context, in this order.
+// Shared doctor plumbing: one fan-out (bounded concurrency + per-check timeout)
+// for the VPN, WAN, DHCP and DNS doctors.
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Doctors.IDoctorRunner, NetFirewall.Services.Diagnostics.Doctors.DoctorRunner>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Vpn.IVpnDoctorContextFactory, NetFirewall.Services.Diagnostics.Vpn.VpnDoctorContextFactory>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Vpn.IVpnDoctorService, NetFirewall.Services.Diagnostics.Vpn.VpnDoctorService>();
+foreach (var checkType in new[]
+{
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.ServerConfigCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.AddressConfigCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.TableOffCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.PeerRolesCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.MtuConfigCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.InterfaceExistsCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.InterfaceUpCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.InterfaceAddressCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.InterfaceMtuCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.ListenPortCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.FwmarkOffCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.HandshakeCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.EndpointPathCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.PolicyRuleCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.TunnelTableCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.MarkLookupCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.MasqueradeCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.ForwardCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.InputPortCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.StaleIndexMatchCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.MangleCatchAllCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.VpnAutoRowsCheck),
+    typeof(NetFirewall.Services.Diagnostics.Vpn.Checks.JournalCheck),
+})
+{
+    builder.Services.AddScoped(typeof(NetFirewall.Services.Diagnostics.Vpn.IVpnDoctorCheck), checkType);
+}
+
+// The DHCP doctor reads the DHCP tables directly; the daemon did not need this
+// service before, so register it here alongside its cache notifier.
+builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpCacheNotifier, NetFirewall.Services.Dhcp.DhcpCacheNotifier>();
+builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpAdminService, NetFirewall.Services.Dhcp.DhcpAdminService>();
+
+// WAN / DHCP / DNS doctors.
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Doctors.Wan.IWanDoctorContextFactory, NetFirewall.Services.Diagnostics.Doctors.Wan.WanDoctorContextFactory>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Doctors.IWanDoctorService, NetFirewall.Services.Diagnostics.Doctors.WanDoctorService>();
+foreach (var t in new[]
+{
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanInventoryCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanLinkCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanHealthConfigCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanHealthStateCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanPolicyRoutingCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanDefaultRouteCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.WanReachabilityCheck),
+})
+{
+    builder.Services.AddScoped(typeof(NetFirewall.Services.Diagnostics.Doctors.Wan.IWanDoctorCheck), t);
+}
+
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Doctors.Dhcp.IDhcpDoctorContextFactory, NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpDoctorContextFactory>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Doctors.IDhcpDoctorService, NetFirewall.Services.Diagnostics.Doctors.DhcpDoctorService>();
+foreach (var t in new[]
+{
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpUnitCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpListenerCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpSubnetSanityCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpPoolCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpActivityCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.DhcpFirewallCheck),
+})
+{
+    builder.Services.AddScoped(typeof(NetFirewall.Services.Diagnostics.Doctors.Dhcp.IDhcpDoctorCheck), t);
+}
+
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Doctors.Dns.IDnsDoctorContextFactory, NetFirewall.Services.Diagnostics.Doctors.Dns.DnsDoctorContextFactory>();
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.Doctors.IDnsDoctorService, NetFirewall.Services.Diagnostics.Doctors.DnsDoctorService>();
+foreach (var t in new[]
+{
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.DnsResolverUnitCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.DnsListenerCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.DnsLocalResolutionCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.DnsLanResolutionCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.DnsFirewallCheck),
+    typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.DnsUpstreamCheck),
+})
+{
+    builder.Services.AddScoped(typeof(NetFirewall.Services.Diagnostics.Doctors.Dns.IDnsDoctorCheck), t);
+}
 builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
 builder.Services.AddScoped<INftApplyService, NftApplyService>();
@@ -211,6 +329,9 @@ builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardConfigService,
                               NetFirewall.Services.Vpn.WireGuardConfigService>();
 builder.Services.AddSingleton<NetFirewall.Services.Vpn.IWireGuardApplyService,
                               NetFirewall.Services.Vpn.WireGuardApplyService>();
+// Start = wg apply + re-install the tunnel's policy routes (the kernel drops them with the link on Stop).
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardBringUpService,
+                           NetFirewall.Services.Vpn.WireGuardBringUpService>();
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardImporter,
                            NetFirewall.Services.Vpn.WireGuardImporter>();
 builder.Services.Configure<NetFirewall.Services.Vpn.WireGuardApplyOptions>(
@@ -296,6 +417,7 @@ app.MapSystemEndpoints();
 app.MapWireGuardEndpoints();
 app.MapDnsEndpoints();
 app.MapTerminalEndpoints();
+app.MapDiagnosticsEndpoints();
 
 // Fail-fast visibility: in non-Development, the daemon owns the TOTP cipher key.
 // If it's missing, login-via-Web may still work (the Web can hold its own key) but

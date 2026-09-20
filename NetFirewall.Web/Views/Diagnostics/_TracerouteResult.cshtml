@@ -1,0 +1,34 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.TracerouteResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+    var summary = r is null ? null : r.Error ?? (r.Reached ? $"reached in {r.Hops.Count} hop(s) via {r.Via}" : $"not reached within {r.Hops.Count} hop(s) via {r.Via}");
+}
+@await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.Traceroute, summary))
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No result captured.</p>
+}
+else
+{
+    @if (r.Error is not null) { <p class="text-sm mb-3 text-feedback-danger-fg">@r.Error</p> }
+    <table class="w-full text-xs font-mono mb-3">
+        <thead class="text-surface-fg-muted"><tr><th class="text-left py-1 w-10">#</th><th class="text-left">hop</th><th class="text-left">rtt</th></tr></thead>
+        <tbody>
+        @foreach (var h in r.Hops)
+        {
+            <tr class="border-t border-surface-border">
+                <td class="py-1">@h.Hop</td>
+                <td>@(h.Ip ?? "*")@(h.Host is null ? "" : $" ({h.Host})")</td>
+                <td>@(h.RttMs.Count == 0 ? "—" : string.Join(" / ", h.RttMs.Select(m => $"{m:0.###} ms")))</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    @if (!r.Reached && r.Error is null)
+    {
+        <p class="text-xs text-feedback-warning-fg mb-3">Target not reached — the path is cut at the last answering hop, or ICMP TTL-exceeded replies are filtered upstream.</p>
+    }
+    @await Html.PartialAsync("_DiagEvidence", (IReadOnlyList<DiagEvidence>)new[] { new DiagEvidence($"traceroute → {r.Target} ({r.Via})", r.Raw) })
+}

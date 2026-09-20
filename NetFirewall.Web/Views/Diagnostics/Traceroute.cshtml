@@ -1,0 +1,38 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Traceroute";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Traceroute",
+    "Hop by hop from the firewall. With a mark set the trace is built from ping -t per hop, which is the only way to follow a policy-routed path."))
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/traceroute/run" hx-target="#result" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+              class="space-y-4">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Target", Label = "Target", Required = true, Value = Model.DefaultTarget,
+                Placeholder = "1.1.1.1 or host.example", Pattern = DiagPatterns.Host.Trim('^', '$'), MaxLength = 253
+            })
+            @await Html.PartialAsync("_SteeringFields", new SteeringFieldsViewModel(Model, null, null))
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "MaxHops", Label = "Max hops", Kind = FormFieldKind.Number, Value = "20", Min = "1", Max = "30" })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "TimeoutSec", Label = "Timeout per hop (s)", Kind = FormFieldKind.Number, Value = "2", Min = "1", Max = "5" })
+            </div>
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Run traceroute</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="result">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">Hops appear here. A marked trace can take up to 25 s.</p>
+        </div>
+    </section>
+</div>

@@ -89,7 +89,8 @@ public sealed class WireGuardPeersController : Controller
     public async Task<IActionResult> Save(WgPeerFormViewModel form, CancellationToken ct)
     {
         if (!ModelState.IsValid)
-            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Form validation failed."));
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Form validation failed: " +
+                string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
 
         try
         {

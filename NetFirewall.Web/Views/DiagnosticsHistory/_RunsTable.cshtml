@@ -1,0 +1,49 @@
+@model NetFirewall.Web.Models.Diagnostics.RunsTableViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    string PageUrl(int p) => $"/Diagnostics/History/table?Tool={Model.Filter.Tool}&Status={Model.Filter.Status}&From={Model.Filter.From:yyyy-MM-ddTHH:mm}&To={Model.Filter.To:yyyy-MM-ddTHH:mm}&Mine={(Model.Filter.Mine ? "true" : "false")}&Page={p}";
+}
+@if (Model.Error is not null)
+{
+    <p class="text-sm py-6 text-center text-feedback-warning-fg">@Model.Error</p>
+}
+else if (Model.Rows.Count == 0)
+{
+    <p class="text-sm py-6 text-center text-surface-fg-muted">No runs match these filters.</p>
+}
+else
+{
+    <p class="text-xs text-surface-fg-muted mb-2">@Model.Total run@(Model.Total == 1 ? "" : "s") · page @Model.Page of @Model.Pages</p>
+    <div class="overflow-auto">
+        <table class="w-full text-sm">
+            <thead class="text-xs text-surface-fg-muted">
+                <tr><th class="text-left py-1">when</th><th class="text-left">tool</th><th class="text-left">target</th><th class="text-left">status</th><th class="text-left">summary</th><th class="text-left">by</th><th class="text-right">ms</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var r in Model.Rows)
+            {
+                <tr class="border-t border-surface-border hover:bg-surface-muted cursor-pointer"
+                    @@click="$store.drawer.openUrl({ title: '@DiagUi.ToolLabel(r.Tool) · #@r.Id.ToString("N")[..8]', url: '/Diagnostics/History/@r.Id' })">
+                    <td class="py-1.5 whitespace-nowrap text-xs" title="@r.StartedAt.ToString("u")">@r.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td class="font-medium whitespace-nowrap">@DiagUi.ToolLabel(r.Tool)</td>
+                    <td class="font-mono text-xs">@(r.Target ?? "—")</td>
+                    <td><span class="badge @DiagUi.BadgeClass(r.Status)">@r.Status</span></td>
+                    <td class="text-xs text-surface-fg-muted max-w-md truncate">@r.Summary</td>
+                    <td class="text-xs">@(r.RequestedBy ?? "—")</td>
+                    <td class="text-right font-mono text-xs">@(r.DurationMs?.ToString() ?? "—")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    @if (Model.Pages > 1)
+    {
+        <div class="flex items-center justify-end gap-2 mt-3 text-xs">
+            <button type="button" class="btn btn-ghost text-xs" @(Model.Page <= 1 ? "disabled" : "")
+                    hx-get="@PageUrl(Model.Page - 1)" hx-target="#hist-table" hx-swap="innerHTML">← Newer</button>
+            <span class="font-mono text-surface-fg-muted">@Model.Page / @Model.Pages</span>
+            <button type="button" class="btn btn-ghost text-xs" @(Model.Page >= Model.Pages ? "disabled" : "")
+                    hx-get="@PageUrl(Model.Page + 1)" hx-target="#hist-table" hx-swap="innerHTML">Older →</button>
+        </div>
+    }
+}

@@ -32,6 +32,7 @@
         <div class="rounded-lg border p-4 border-surface-border">
             <label class="flex items-start gap-2.5 cursor-pointer">
                 <input type="checkbox" name="EnableDnsForwarder" value="true" x-model="dns" class="mt-0.5 h-4 w-4 rounded" />
+                <input type="hidden" name="EnableDnsForwarder" value="false" />
                 <div>
                     <p class="text-sm font-medium">DNS forwarder</p>
                     <p class="text-xs mt-0.5 text-surface-fg-muted">Resolve LAN queries via configured upstreams.</p>
@@ -58,6 +59,7 @@
         <div class="rounded-lg border p-4 border-surface-border">
             <label class="flex items-start gap-2.5 cursor-pointer">
                 <input type="checkbox" name="EnableWireGuard" value="true" x-model="wg" class="mt-0.5 h-4 w-4 rounded" />
+                <input type="hidden" name="EnableWireGuard" value="false" />
                 <div>
                     <p class="text-sm font-medium">WireGuard VPN</p>
                     <p class="text-xs mt-0.5 text-surface-fg-muted">Set up a wg0 interface — keys generated next.</p>
@@ -86,6 +88,7 @@
         <div class="rounded-lg border p-4 border-surface-border">
             <label class="flex items-start gap-2.5 cursor-pointer">
                 <input type="checkbox" name="EnableQos" value="true" x-model="qos" class="mt-0.5 h-4 w-4 rounded" />
+                <input type="hidden" name="EnableQos" value="false" />
                 <div>
                     <p class="text-sm font-medium">QoS / bandwidth shaping</p>
                     <p class="text-xs mt-0.5 text-surface-fg-muted">Cap total throughput per direction (HTB).</p>

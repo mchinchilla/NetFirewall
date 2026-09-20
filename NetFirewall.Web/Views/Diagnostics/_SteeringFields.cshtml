@@ -1,0 +1,34 @@
+@model NetFirewall.Web.Models.Diagnostics.SteeringFieldsViewModel
+@using NetFirewall.Web.Models
+@{
+    var markIsCustom = !string.IsNullOrEmpty(Model.Fwmark)
+        && !Model.Page.Marks.Any(m => string.Equals($"0x{m.MarkValue:x}", Model.Fwmark, StringComparison.OrdinalIgnoreCase));
+    var markSelect = markIsCustom ? "custom" : (Model.Fwmark ?? "");
+}
+@*
+    How the probe is steered. Marks win over interfaces: `-I iface` is ignored by
+    policy routing (memory: always test a WAN with the fwmark, not -I).
+*@
+<div class="grid grid-cols-1 md:grid-cols-@(Model.ShowInterface ? "3" : "2") gap-3" x-data="{ mark: '@markSelect' }">
+    @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+        Name = "Fwmark", Label = "Route via mark (fwmark)", Kind = FormFieldKind.Select,
+        Value = markSelect, Options = Model.Page.MarkOptions(), AlpineModel = "mark",
+        Help = "Uses the policy-routing table for that mark (ping -m). Wins over the interface."
+    })
+    <div x-show="mark === 'custom'" x-cloak>
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = "FwmarkCustom", Label = "Custom mark", Value = markIsCustom ? Model.Fwmark : null,
+            Placeholder = "0x500 or 1280", Pattern = NetFirewall.Web.Models.Diagnostics.DiagPatterns.Fwmark.Trim('^', '$')
+        })
+    </div>
+    @if (Model.ShowInterface)
+    {
+        <div x-show="mark === ''" x-cloak>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Interface", Label = Model.InterfaceLabel, Kind = FormFieldKind.Select,
+                Value = Model.Interface, Options = Model.Page.InterfaceOptions(Model.InterfaceAnyLabel),
+                Help = "Binds the probe to a link (-I). Ignored when a mark is set."
+            })
+        </div>
+    }
+</div>

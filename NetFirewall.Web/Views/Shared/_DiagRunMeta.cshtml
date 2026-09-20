@@ -1,0 +1,26 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagRunMetaViewModel
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var shortId = Model.RunId == Guid.Empty ? "—" : Model.RunId.ToString("N")[..8];
+    var historyHref = Model.RunId == Guid.Empty ? null : $"/Diagnostics/History?run={Model.RunId}";
+}
+<div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-surface-border">
+    <div class="flex items-center gap-2 min-w-0">
+        <span class="badge @DiagUi.BadgeClass(Model.Status)">@Model.Status.ToUpperInvariant()</span>
+        <span class="text-sm font-medium">@DiagUi.ToolLabel(Model.Tool)</span>
+        @if (!string.IsNullOrEmpty(Model.Summary))
+        {
+            <span class="text-sm text-surface-fg-muted truncate">· @Model.Summary</span>
+        }
+    </div>
+    <div class="flex items-center gap-3 text-xs text-surface-fg-muted font-mono">
+        <span title="@Model.StartedAtUtc.ToString("u")">@DiagUi.Ago(Model.StartedAtUtc)</span>
+        <span>@Model.DurationMs ms</span>
+        <span title="Run id">#@shortId</span>
+        @if (historyHref is not null)
+        {
+            <a href="@historyHref" class="text-accent hover:underline">History</a>
+        }
+    </div>
+</div>

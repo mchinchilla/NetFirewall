@@ -1,0 +1,36 @@
+@model NetFirewall.Web.Models.Diagnostics.PanelViewModel<IReadOnlyList<NetFirewall.Models.Diagnostics.InterfaceHealth>>
+@using NetFirewall.Web.Models.Diagnostics
+@if (Model.Error is not null)
+{
+    <p class="text-sm py-4 text-center text-feedback-warning-fg">@Model.Error</p>
+}
+else if (Model.Data is null || Model.Data.Count == 0)
+{
+    <p class="text-sm py-4 text-center text-surface-fg-muted">No interfaces reported (Linux only).</p>
+}
+else
+{
+    <div class="overflow-auto">
+        <table class="w-full text-xs">
+            <thead class="text-surface-fg-muted">
+                <tr><th class="text-left py-1">iface</th><th class="text-left">state</th><th class="text-left">addresses</th><th class="text-left">mtu</th><th class="text-left">link</th><th class="text-right">rx / tx</th><th class="text-right">errors</th><th class="text-right">drops</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var i in Model.Data)
+            {
+                var up = i.OperState == "up" || (i.OperState == "unknown" && i.Carrier != false);
+                <tr class="border-t border-surface-border">
+                    <td class="py-1 font-mono font-semibold">@i.Name</td>
+                    <td><span class="badge @(up ? "badge-success" : i.OperState == "down" ? "badge-danger" : "badge-muted")">@(i.OperState ?? "?")</span></td>
+                    <td class="font-mono">@(i.Addresses.Count == 0 ? "—" : string.Join(", ", i.Addresses))</td>
+                    <td class="font-mono">@(i.Mtu?.ToString() ?? "—")</td>
+                    <td class="font-mono">@(i.Speed ?? "—")@(i.Duplex is null or "unknown" ? "" : $" {i.Duplex}")</td>
+                    <td class="text-right font-mono">@DiagUi.Bytes(i.RxBytes) / @DiagUi.Bytes(i.TxBytes)</td>
+                    <td class="text-right font-mono @(i.RxErrors + i.TxErrors > 0 ? "text-feedback-danger-fg" : "")">@(i.RxErrors + i.TxErrors)</td>
+                    <td class="text-right font-mono @(i.RxDropped + i.TxDropped > 0 ? "text-feedback-warning-fg" : "")">@(i.RxDropped + i.TxDropped)</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}

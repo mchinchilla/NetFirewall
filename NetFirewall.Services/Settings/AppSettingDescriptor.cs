@@ -83,6 +83,32 @@ public static class AppSettingDescriptors
             "DNS pushed into client configs. Leave empty to skip the DNS line. Useful when split-tunneling so clients still resolve internal names.",
             AppSettingType.String, ""),
 
+        // ===== Diagnostics — read by the daemon's tools and the history pruner =====
+        new("diagnostics.history_retention_days", "Diagnostics",
+            "Diagnostics history retention (days)",
+            "How long diag_runs rows (ping, route oracle, conntrack lookup, VPN doctor…) are kept. 0 = keep forever.",
+            AppSettingType.Int, "30"),
+
+        new("diagnostics.doctor_budget_seconds", "Diagnostics",
+            "Doctor time budget (seconds)",
+            "Wall-clock budget for a doctor run; checks still running at the deadline are reported as skipped. Must stay under the daemon client timeout (30 s).",
+            AppSettingType.Int, "25"),
+
+        new("diagnostics.probe_default_target", "Diagnostics",
+            "Default probe target",
+            "IP or hostname the data-plane probes ping when none is given.",
+            AppSettingType.String, "1.1.1.1"),
+
+        new("diagnostics.capture_retention_hours", "Diagnostics",
+            "Packet-capture retention (hours)",
+            "How long downloadable .pcap files are kept on disk. 0 = keep forever (they are raw traffic — keep this short).",
+            AppSettingType.Int, "24"),
+
+        new("diagnostics.journal_max_lines", "Diagnostics",
+            "Drop-log scan cap (lines)",
+            "Maximum kernel-journal lines one drop-log query may scan.",
+            AppSettingType.Int, "2000"),
+
         // ===== Network objects =====
         new("network_objects.fqdn_ttl_seconds", "Network objects",
             "FQDN DNS cache TTL (seconds)",

@@ -27,6 +27,13 @@
     string ActiveCls(string href) => IsActive(href) ? " active" : string.Empty;
 
     // Pre-compute group open states — avoids re-evaluating per link.
+    var diagHrefs = new[] {
+        Url.Action("Index", "Diagnostics"), Url.Action("Ping", "Diagnostics"), Url.Action("Traceroute", "Diagnostics"),
+        Url.Action("Route", "Diagnostics"), Url.Action("Conntrack", "Diagnostics"), Url.Action("DropLog", "Diagnostics"),
+        Url.Action("Interfaces", "Diagnostics"), Url.Action("Sysctl", "Diagnostics"), Url.Action("Index", "DiagnosticsHistory"),
+        "/Diagnostics/Vpn", "/Diagnostics/Wan", "/Diagnostics/Dhcp", "/Diagnostics/Dns", "/Diagnostics/trace", "/Diagnostics/capture",
+    };
+    var diagOpen = AnyActive(diagHrefs!) ? "true" : "false";
     var dhcpHrefs = new[] {
         Url.Action("Index", "DhcpSubnets")!, Url.Action("Index", "DhcpReservations")!,
         Url.Action("Index", "DhcpLeases")!, Url.Action("Index", "DhcpClasses")!,
@@ -137,6 +144,40 @@
     </svg>
     <span class="whitespace-nowrap" @Html.Raw(ShowLabel())>Monitoring</span>
 </a>
+
+@* Diagnostics — daemon-executed, read-only tools + VPN doctor + run history *@
+<div x-data="{ open: @diagOpen }">
+    <button type="button" class="w-full nav-link" @@click="open = !open">
+        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+        </svg>
+        <span class="flex-1 text-left whitespace-nowrap" @Html.Raw(ShowLabel())>Diagnostics</span>
+        <svg class="h-4 w-4 transition-transform shrink-0" :class="open && 'rotate-90'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" @Html.Raw(ShowLabel())>
+            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+        </svg>
+    </button>
+    <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
+        <a href="@Url.Action("Index", "Diagnostics")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "Diagnostics")!))">All tools</a>
+        <a href="/Diagnostics/Vpn"                             class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Vpn"))">VPN doctor</a>
+        <a href="/Diagnostics/Wan"                             class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Wan"))">WAN doctor</a>
+        <a href="/Diagnostics/Dhcp"                            class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Dhcp"))">DHCP doctor</a>
+        <a href="/Diagnostics/Dns"                             class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Dns"))">DNS doctor</a>
+        <a href="@Url.Action("Ping", "Diagnostics")"         class="nav-link py-1.5@(ActiveCls(Url.Action("Ping", "Diagnostics")!))">Ping</a>
+        <a href="@Url.Action("Traceroute", "Diagnostics")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Traceroute", "Diagnostics")!))">Traceroute</a>
+        <a href="@Url.Action("Route", "Diagnostics")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Route", "Diagnostics")!))">Route oracle</a>
+        <a href="@Url.Action("Conntrack", "Diagnostics")"    class="nav-link py-1.5@(ActiveCls(Url.Action("Conntrack", "Diagnostics")!))">Conntrack</a>
+        <a href="@Url.Action("DropLog", "Diagnostics")"      class="nav-link py-1.5@(ActiveCls(Url.Action("DropLog", "Diagnostics")!))">Drop log</a>
+        <a href="@Url.Action("Interfaces", "Diagnostics")"   class="nav-link py-1.5@(ActiveCls(Url.Action("Interfaces", "Diagnostics")!))">Interfaces</a>
+        <a href="@Url.Action("Sysctl", "Diagnostics")"       class="nav-link py-1.5@(ActiveCls(Url.Action("Sysctl", "Diagnostics")!))">Kernel tunables</a>
+        @if (User.IsInRole(NetFirewall.Models.Auth.UserRoles.Admin))
+        {
+            @* Invasive tools: they add kernel state / write raw traffic, so Admin only. *@
+            <a href="/Diagnostics/trace"   class="nav-link py-1.5@(ActiveCls("/Diagnostics/trace"))">Flow inspector</a>
+            <a href="/Diagnostics/capture" class="nav-link py-1.5@(ActiveCls("/Diagnostics/capture"))">Packet capture</a>
+        }
+        <a href="@Url.Action("Index", "DiagnosticsHistory")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DiagnosticsHistory")!))">History</a>
+    </div>
+</div>
 
 @* Setup — force=true so the link works even after the wizard has been
    completed (otherwise the controller redirects to /). The Index controller

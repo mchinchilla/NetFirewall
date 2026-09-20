@@ -1,0 +1,15 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var report = Model.Result;
+}
+@await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.VpnDoctor, report?.Summary))
+@if (report is null)
+{
+    <p class="text-sm text-surface-fg-muted">No report captured.</p>
+}
+else
+{
+    @await Html.PartialAsync("_DiagCheckList", report)
+}

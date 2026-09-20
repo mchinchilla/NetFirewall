@@ -1,0 +1,57 @@
+@model NetFirewall.Web.Models.Diagnostics.HistoryFilterViewModel
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Diagnostics history";
+    Layout = "_Layout";
+    var isAdmin = User.IsInRole(NetFirewall.Models.Auth.UserRoles.Admin);
+    var toolOptions = new List<FormFieldViewModel.SelectOption> { new("", "All tools") };
+    toolOptions.AddRange(DiagTools.All.Select(t => new FormFieldViewModel.SelectOption(t, DiagUi.ToolLabel(t))));
+    var statusOptions = new List<FormFieldViewModel.SelectOption> { new("", "Any status") };
+    statusOptions.AddRange(DiagRunStatus.Persisted.Select(s => new FormFieldViewModel.SelectOption(s, s)));
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("History",
+    "Every diagnostic run: who, when, with what, and what came back. Rows are pruned after the retention period set in Settings → Diagnostics."))
+
+<div class="space-y-4"
+     x-init="@(Model.Run is { } run ? $"$store.drawer.openUrl({{ title: 'Diagnostic run', url: '/Diagnostics/History/{run}' }})" : "")">
+    <section class="card" style="animation: var(--animate-slide-up);">
+        <form id="hist-filter" hx-get="/Diagnostics/History/table" hx-target="#hist-table" hx-swap="innerHTML"
+              hx-trigger="change, submit, refreshDiagHistory from:body"
+              class="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Tool", Label = "Tool", Kind = FormFieldKind.Select, Value = Model.Tool, Options = toolOptions })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Status", Label = "Status", Kind = FormFieldKind.Select, Value = Model.Status, Options = statusOptions })
+            <div class="space-y-1.5">
+                <label for="f-From" class="block text-xs font-medium text-surface-fg">From</label>
+                <input id="f-From" name="From" type="datetime-local" class="input" value="@Model.From?.ToString("yyyy-MM-ddTHH:mm")" />
+            </div>
+            <div class="space-y-1.5">
+                <label for="f-To" class="block text-xs font-medium text-surface-fg">To</label>
+                <input id="f-To" name="To" type="datetime-local" class="input" value="@Model.To?.ToString("yyyy-MM-ddTHH:mm")" />
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Mine", Label = "Only my runs", Kind = FormFieldKind.Checkbox, Value = Model.Mine ? "true" : "false" })
+            <input type="hidden" name="Page" value="1" />
+            <div class="flex justify-end gap-2">
+                @if (isAdmin)
+                {
+                    <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+                            hx-post="/Diagnostics/History/purge" hx-vals='{"olderThanDays": 0}' hx-trigger="confirmed-purge"
+                            @@click.prevent="(async () => {
+                                const ok = await $store.confirm.ask({
+                                    title: 'Purge all diagnostics history?',
+                                    message: 'Deletes every recorded run. Audit log keeps a diag.purge entry.',
+                                    confirmLabel: 'Purge everything', level: 'danger' });
+                                if (ok) htmx.trigger($el, 'confirmed-purge');
+                            })()">Purge all</button>
+                }
+            </div>
+        </form>
+    </section>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="hist-table" class="loading-host" hx-get="/Diagnostics/History/table?@(Context.Request.QueryString.Value?.TrimStart('?'))" hx-trigger="load" hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+        </div>
+    </section>
+</div>

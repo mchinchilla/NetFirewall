@@ -77,6 +77,50 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
         }
     }
 
+    public async Task<PolicyRoutingApplyResult> ReapplyRoutesForDeviceAsync(string device, CancellationToken ct = default)
+    {
+        var steps = new List<RoutingStep>();
+        try
+        {
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            var routes = (await LoadTaggedRoutesAsync(conn, ct))
+                .Where(r => RouteRidesOnDevice(r.DeviceName, r.TableName, device))
+                .ToList();
+
+            if (routes.Count == 0)
+            {
+                steps.Add(new RoutingStep("ip-route-noop", $"# no per-table routes ride on {device}", true, true, null));
+                return new PolicyRoutingApplyResult(true, false, steps, null);
+            }
+
+            // Phase 3 only. `ip route replace` is idempotent, so calling this on a
+            // hot reload (routes still present) costs nothing and changes nothing.
+            await ReconcileRoutesAsync(routes, false, steps, ct);
+
+            var failures = steps.Count(s => s.Executed && !s.Success);
+            return new PolicyRoutingApplyResult(
+                Success: failures == 0,
+                DryRun: false,
+                Steps: steps,
+                Error: failures == 0 ? null : $"{failures} route(s) failed");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Re-applying policy routes for {Device} blew up before completion", device);
+            return new PolicyRoutingApplyResult(false, false, steps, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Pure: does a per-table route belong to <paramref name="device"/>? Either
+    /// its interface IS the device (`dev wg0` routes), or it lives in the table
+    /// named after the device (`via` routes whose next hop is only reachable
+    /// through the tunnel).
+    /// </summary>
+    internal static bool RouteRidesOnDevice(string? deviceName, string tableName, string device) =>
+        string.Equals(deviceName, device, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(tableName, device, StringComparison.OrdinalIgnoreCase);
+
     // ─────────────────────────── DB loaders ───────────────────────────
 
     private sealed record TableRow(int TableId, string Name);

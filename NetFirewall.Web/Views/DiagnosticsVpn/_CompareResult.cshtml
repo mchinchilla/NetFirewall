@@ -1,0 +1,43 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnCompareResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+}
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No comparison result.</p>
+}
+else
+{
+    <div class="rounded-lg border border-surface-border p-3 space-y-2">
+        <div class="flex items-center gap-2">
+            <span class="badge @DiagUi.BadgeClass(r.Overall)">@r.Overall.ToString().ToUpperInvariant()</span>
+            <span class="text-xs text-surface-fg-muted">@r.Differences.Count field(s) compared</span>
+            <span class="text-xs font-mono text-surface-fg-muted ml-auto">@Model.DurationMs ms</span>
+        </div>
+        <table class="w-full text-xs">
+            <thead class="text-surface-fg-muted"><tr><th class="text-left py-1">field</th><th class="text-left">issued</th><th class="text-left">ours</th></tr></thead>
+            <tbody>
+            @foreach (var d in r.Differences)
+            {
+                <tr class="border-t border-surface-border align-top">
+                    <td class="py-1.5 whitespace-nowrap">
+                        <span class="badge @DiagUi.BadgeClass(d.Severity) mr-1">@d.Severity.ToString().ToUpperInvariant()</span>@d.Field
+                    </td>
+                    <td class="font-mono break-all">@(d.Issued ?? "—")</td>
+                    <td class="font-mono break-all">@(d.Ours ?? "—")</td>
+                </tr>
+                @if (d.Severity is DiagCheckStatus.Fail or DiagCheckStatus.Warn)
+                {
+                    <tr><td colspan="3" class="pb-1.5 text-xs @(d.Severity == DiagCheckStatus.Fail ? "text-feedback-danger-fg" : "text-feedback-warning-fg")">@d.Note</td></tr>
+                }
+            }
+            </tbody>
+        </table>
+        @if (r.Differences.Any(d => d.Field == "Address" && d.Severity == DiagCheckStatus.Fail))
+        {
+            <a href="/Vpn/WireGuard" class="btn btn-ghost text-xs">Fix the interface address and Apply VPN →</a>
+        }
+    </div>
+}

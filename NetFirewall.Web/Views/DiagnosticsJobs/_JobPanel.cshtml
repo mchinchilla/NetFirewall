@@ -1,0 +1,70 @@
+@model NetFirewall.Web.Models.Diagnostics.PanelViewModel<NetFirewall.Models.Diagnostics.DiagJobSnapshot>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var job = Model.Data;
+    // The panel polls itself while the job runs and simply stops emitting the
+    // trigger once it does not — no timer to clean up, no Alpine state.
+    var poll = job is { IsRunning: true };
+    var badge = job?.State switch
+    {
+        DiagJobState.Completed => "badge-success",
+        DiagJobState.Running   => "badge-info",
+        DiagJobState.Cancelled => "badge-warning",
+        DiagJobState.Failed    => "badge-danger",
+        _                      => "badge-muted",
+    };
+}
+@if (Model.Error is not null)
+{
+    <p class="text-sm py-4 text-center text-feedback-warning-fg">@Model.Error</p>
+}
+else if (job is null)
+{
+    <p class="text-sm py-4 text-center text-surface-fg-muted">No job.</p>
+}
+else
+{
+    <div id="job-panel"
+         @(poll ? "hx-get=/Diagnostics/Jobs/" + job.Id : "")
+         @(poll ? "hx-trigger=every 2s" : "")
+         @(poll ? "hx-swap=outerHTML" : "")>
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+            <span class="badge @badge">@job.State.ToString().ToUpperInvariant()</span>
+            <span class="text-sm font-medium">@(job.Kind == DiagJobKind.Trace ? "Flow inspector" : "Packet capture")</span>
+            <span class="text-xs font-mono text-surface-fg-muted truncate">@job.Subject</span>
+            <span class="ml-auto text-xs font-mono text-surface-fg-muted">
+                @(job.Kind == DiagJobKind.Trace ? $"{job.ItemCount} events" : $"{job.ItemCount} packets") · @(job.ElapsedMs / 1000)s
+            </span>
+            @if (job.IsRunning)
+            {
+                <form hx-post="/Diagnostics/Jobs/@job.Id/cancel" hx-target="#job-panel" hx-swap="outerHTML">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn btn-ghost text-xs">Stop now</button>
+                </form>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(job.Message))
+        {
+            <p class="text-sm mb-3 @(job.State == DiagJobState.Failed ? "text-feedback-danger-fg" : "text-surface-fg-muted")">@job.Message</p>
+        }
+
+        @if (job.Trace is { } trace)
+        {
+            @await Html.PartialAsync("_TraceResult", trace)
+        }
+        else if (job.Capture is { } capture)
+        {
+            @await Html.PartialAsync("_CaptureResult", (job.Id, capture))
+        }
+        else if (job.IsRunning)
+        {
+            <p class="text-sm text-surface-fg-muted">
+                @(job.Kind == DiagJobKind.Trace
+                    ? "Generate the traffic you want to see now — matching packets are being traced."
+                    : "Capturing…")
+            </p>
+        }
+    </div>
+}

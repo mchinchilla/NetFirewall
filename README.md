@@ -454,6 +454,7 @@ These artifacts are kept in the repo for reference but no longer active in produ
 - [`docs/DEPLOY_HANDOFF.md`](docs/DEPLOY_HANDOFF.md) — current deployment state + handoff notes
 - [`docs/PerformanceAnalysis.md`](docs/PerformanceAnalysis.md) — DHCP hot path budget + zero-allocation rules
 - [`docs/DHCP_FEATURE_COMPARISON.md`](docs/DHCP_FEATURE_COMPARISON.md) — feature parity vs isc-dhcp / kea
+- [`docs/diagnostics.md`](docs/diagnostics.md) — Diagnostics section: tools, VPN doctor, history, safety rules
 - [`CLAUDE.md`](CLAUDE.md) — project rules (non-negotiable)
 
 ## 📜 License

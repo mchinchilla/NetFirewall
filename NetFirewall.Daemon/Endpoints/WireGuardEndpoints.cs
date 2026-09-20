@@ -42,9 +42,12 @@ public static class WireGuardEndpoints
             }
         });
 
+        // Apply = write wg0.conf + bring the link up (or hot-reload) + re-install
+        // the tunnel's policy routes. The last step is what makes Stop → Start
+        // usable again: the kernel purged every `dev wg0` route with the link.
         grp.MapPost("/apply", async (
                 IWireGuardService data,
-                IWireGuardApplyService apply,
+                IWireGuardBringUpService bringUp,
                 NetFirewall.Services.Firewall.IApplyHistoryService history,
                 System.Security.Claims.ClaimsPrincipal user,
                 CancellationToken ct) =>
@@ -54,14 +57,14 @@ public static class WireGuardEndpoints
                 return Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Fail("No WireGuard server configured."), statusCode: 400);
 
             var peers = await data.GetPeersAsync(server.Id, ct);
-            var result = await apply.ApplyAsync(server, peers, ct);
+            var result = await bringUp.ApplyAsync(server, peers, ct);
 
-            var msg = result.Success
-                ? $"WireGuard {server.Name} applied (exit {result.ExitCode})."
-                : result.Error ?? "wg apply failed";
-            await history.RecordAsync("wireguard", result.Success, result.ExitCode, msg, user.Identity?.Name, ct);
+            var msg = result.Describe(server.Name);
+            await history.RecordAsync("wireguard", result.Success, result.Apply.ExitCode, msg, user.Identity?.Name, ct);
 
-            var dto = new FirewallEndpoints.NftApplyDto(result.ExitCode, result.BackupPath, result.Output, result.Error);
+            var dto = new FirewallEndpoints.NftApplyDto(
+                result.Apply.ExitCode, result.Apply.BackupPath, result.CombinedOutput,
+                result.Apply.Error ?? result.Routing?.Error);
             return result.Success
                 ? Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Ok(dto, msg))
                 : Results.Json(ServiceResponse<FirewallEndpoints.NftApplyDto>.Fail(msg), statusCode: 500);

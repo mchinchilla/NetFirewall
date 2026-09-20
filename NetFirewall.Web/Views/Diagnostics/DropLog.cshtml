@@ -1,0 +1,46 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Drop log";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Drop log",
+    "The kernel journal, decoded: every nftables log prefix (INPUT_DROP, FORWARD_DROP, SPOOFED_SRC, BLOCKED_SCAN…), martian-source reports and WireGuard messages, with top prefixes, sources and ports."))
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/drop-log/run" hx-target="#result" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+              class="space-y-4">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Filter", Label = "Show", Kind = FormFieldKind.Select, Value = "drops",
+                Options = new[] {
+                    new FormFieldViewModel.SelectOption("drops", "Firewall drops (nftables log prefixes)"),
+                    new("martians", "Martian sources (rp_filter)"),
+                    new("wg", "WireGuard kernel messages"),
+                    new("all", "Everything the kernel logged")
+                }
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Interface", Label = "Interface (IN or OUT)", Kind = FormFieldKind.Select,
+                Options = Model.InterfaceOptions("(any)")
+            })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "SinceMinutes", Label = "Last N minutes", Kind = FormFieldKind.Number, Value = "60", Min = "5", Max = "1440" })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Lines", Label = "Scan up to (lines)", Kind = FormFieldKind.Number, Value = "500", Min = "50", Max = "2000" })
+            </div>
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Query journal</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="result">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">Entries and top talkers appear here.</p>
+        </div>
+    </section>
+</div>

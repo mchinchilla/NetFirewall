@@ -1,0 +1,41 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Interfaces & neighbours";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Interfaces & neighbours",
+    "Live link state from sysfs and the ARP/ND table. Read-only panels, refreshed every 10 s, not written to History."))
+
+<div x-data="{ paused: false, iface: '' }" class="space-y-4">
+    <div class="flex items-center justify-end gap-2">
+        <button type="button" class="btn text-xs" :class="paused ? 'btn-primary' : 'btn-ghost'" @@click="paused = !paused"
+                x-text="paused ? 'Resume polling' : 'Live · 10s'"></button>
+    </div>
+
+    <section class="card" style="animation: var(--animate-slide-up);">
+        <h2 class="text-base font-semibold mb-3">Interfaces</h2>
+        <div id="iface-table" class="loading-host" hx-get="/Diagnostics/interfaces/table"
+             :hx-trigger="paused ? 'load' : 'load, every 10s'" hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+        </div>
+    </section>
+
+    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <header class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-base font-semibold">Neighbours (ARP / ND)</h2>
+            <select class="input text-xs w-48" x-model="iface"
+                    @@change="htmx.ajax('GET', '/Diagnostics/neighbors/table?iface=' + encodeURIComponent(iface), { target: '#neigh-table', swap: 'innerHTML' })">
+                <option value="">all interfaces</option>
+                @foreach (var i in Model.Interfaces.OrderBy(i => i.Name))
+                {
+                    <option value="@i.Name">@i.Name · @i.Type</option>
+                }
+            </select>
+        </header>
+        <div id="neigh-table" class="loading-host" hx-get="/Diagnostics/neighbors/table"
+             :hx-trigger="paused ? 'load' : 'load, every 10s'" hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+        </div>
+    </section>
+</div>

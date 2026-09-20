@@ -38,6 +38,14 @@ public sealed class WgPeerAccessTests
         AllowedSubnets = subnets ?? Array.Empty<string>(),
     };
 
+    private static WgPeer Site(string[] allowedIps, string[]? remoteSubnets = null) => new()
+    {
+        Id = Guid.NewGuid(), ServerId = Guid.NewGuid(), Name = "branch",
+        PublicKey = "BRANCH_KEY", Role = "site", Enabled = true,
+        AllowedIps = allowedIps, RouteMode = "site", AllowInternet = false,
+        AllowedSubnets = remoteSubnets ?? Array.Empty<string>(),
+    };
+
     private static (VpnRoutingService svc, Mock<IFirewallService> fw) Make(
         IReadOnlyList<FwFilterRule>? existingForward = null)
     {
@@ -137,6 +145,28 @@ public sealed class WgPeerAccessTests
     }
 
     [Fact]
+    public async Task PeerReSavedAsUpstream_LosesItsStaleVpnAutoRows()
+    {
+        // tekium: the USA exit node was stored as a *site* peer and got a
+        // wg→LAN accept; flipping it to upstream must remove that row, not
+        // leave it behind because upstream "needs nothing".
+        var peer = Client("full", internet: false);
+        peer.Role = "upstream";
+        var stale = new FwFilterRule
+        {
+            Id = Guid.NewGuid(), Chain = "forward", Action = "accept",
+            InterfaceInId = WgIfaceId, InterfaceOutId = LanIfaceId,
+            Description = $"[vpn-auto] peer {peer.Id} wg→ens256", Enabled = true,
+        };
+        var (svc, fw) = Make(existingForward: new[] { stale });
+
+        await svc.EnsurePeerForwardingAsync(Server(), peer);
+
+        fw.Verify(x => x.DeleteFilterRuleAsync(stale.Id, It.IsAny<CancellationToken>()), Times.Once);
+        fw.Verify(x => x.CreateFilterRuleAsync(It.IsAny<FwFilterRule>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task UpstreamPeer_GetsNoForwardingAtAll()
     {
         var peer = Client("full", internet: true);
@@ -178,5 +208,87 @@ public sealed class WgPeerAccessTests
         // Rejected before any key generation or persistence.
         daemon.Verify(x => x.GenerateWireGuardKeyPairAsync(It.IsAny<CancellationToken>()), Times.Never);
         wg.Verify(x => x.CreatePeerAsync(It.IsAny<WgPeer>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ───────────── site-to-site peers ─────────────
+
+    [Fact]
+    public async Task SitePeer_ForwardRules_RunBothWays_ScopedToTheRemoteSubnets()
+    {
+        // A tunnel we also egress through carries AllowedIps 0.0.0.0/0, so the
+        // remote LAN can only come from AllowedSubnets. Before the fix that
+        // subnet was the DESTINATION of a wg0→LAN rule — nothing entering from
+        // the tunnel and bound for the remote site ever exits via the LAN, so
+        // the rule matched nothing and inbound site traffic hit FORWARD_DROP.
+        var peer = Site(new[] { "0.0.0.0/0" }, remoteSubnets: new[] { "192.168.1.0/24" });
+        var (svc, fw) = Make();
+
+        await svc.EnsurePeerForwardingAsync(Server(), peer);
+
+        // remote LAN → our LAN
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => f.InterfaceInId == WgIfaceId && f.InterfaceOutId == LanIfaceId
+                                     && f.SourceAddresses!.Single() == "192.168.1.0/24"
+                                     && f.DestinationAddresses == null),
+            It.IsAny<CancellationToken>()), Times.Once);
+        // our LAN → remote LAN
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => f.InterfaceInId == LanIfaceId && f.InterfaceOutId == WgIfaceId
+                                     && f.SourceAddresses == null
+                                     && f.DestinationAddresses!.Single() == "192.168.1.0/24"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        // never the no-op catch-all token
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => (f.SourceAddresses ?? Array.Empty<string>()).Contains("0.0.0.0/0")
+                                  || (f.DestinationAddresses ?? Array.Empty<string>()).Contains("0.0.0.0/0")),
+            It.IsAny<CancellationToken>()), Times.Never);
+        // both rows carry the peer tag so a later reconcile removes them together
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => f.Description!.StartsWith($"[vpn-auto] peer {peer.Id}")),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task SitePeer_WithoutRemoteSubnets_FallsBackToItsSpecificAllowedIps()
+    {
+        var peer = Site(new[] { "10.10.0.2/32", "192.168.1.0/24" });
+        var (svc, fw) = Make();
+
+        await svc.EnsurePeerForwardingAsync(Server(), peer);
+
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => f.InterfaceInId == WgIfaceId && f.InterfaceOutId == LanIfaceId
+                                     && f.SourceAddresses!.Length == 2 && f.DestinationAddresses == null),
+            It.IsAny<CancellationToken>()), Times.Once);
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => f.InterfaceInId == LanIfaceId && f.InterfaceOutId == WgIfaceId
+                                     && f.SourceAddresses == null && f.DestinationAddresses!.Length == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SitePeer_WithNothingSpecificToScopeTo_GetsNoLanForward_InsteadOfOpeningTheLan()
+    {
+        var peer = Site(new[] { "0.0.0.0/0" });
+        var (svc, fw) = Make();
+
+        await svc.EnsurePeerForwardingAsync(Server(), peer);
+
+        fw.Verify(x => x.CreateFilterRuleAsync(It.IsAny<FwFilterRule>(), It.IsAny<CancellationToken>()), Times.Never);
+        fw.Verify(x => x.CreateNatRuleAsync(It.IsAny<FwNatRule>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Client_WithCatchAllAllowedIps_IsNotPinnedToANoOpSource()
+    {
+        var peer = Client("split", internet: false);
+        peer.AllowedIps = new[] { "0.0.0.0/0" };
+        var (svc, fw) = Make();
+
+        await svc.EnsurePeerForwardingAsync(Server(), peer);
+
+        fw.Verify(x => x.CreateFilterRuleAsync(
+            It.Is<FwFilterRule>(f => f.InterfaceOutId == LanIfaceId && f.SourceAddresses == null),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

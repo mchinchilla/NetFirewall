@@ -1,0 +1,17 @@
+@model IReadOnlyList<NetFirewall.Models.Diagnostics.DiagEvidence>
+@if (Model is { Count: > 0 })
+{
+    <div class="space-y-1.5">
+        @foreach (var ev in Model)
+        {
+            <details class="rounded-md border border-surface-border">
+                <summary class="cursor-pointer select-none px-3 py-1.5 text-xs font-mono text-surface-fg-muted hover:bg-surface-muted">
+                    $ @ev.Command
+                    @if (ev.Truncated) { <span class="ml-2 badge badge-muted">truncated</span> }
+                </summary>
+                <pre class="text-xs p-3 overflow-auto max-h-64 font-mono border-t border-surface-border"
+                     style="background-color: var(--surface-muted); color: var(--surface-fg);"><code>@ev.Output</code></pre>
+            </details>
+        }
+    </div>
+}

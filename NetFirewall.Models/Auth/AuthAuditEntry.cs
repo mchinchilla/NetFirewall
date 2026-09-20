@@ -46,4 +46,15 @@ public static class AuthAuditEvents
     public const string TerminalDenied   = "terminal.denied";   // TOTP failed / not admin / busy
     public const string TerminalAttached = "terminal.attached"; // WS connected, PTY spawned
     public const string TerminalClosed   = "terminal.closed";   // PTY ended (user/idle/shell-exit)
+
+    // Diagnostics section. Every tool run is recorded (tool, run id, target,
+    // status); denied = the concurrency gate refused it; purge = history wiped.
+    public const string DiagRun          = "diag.run";
+    public const string DiagDenied       = "diag.denied";
+    public const string DiagPurge        = "diag.purge";
+    // Phase-2 invasive tools: they add kernel state or write raw traffic to disk.
+    public const string DiagTraceStarted     = "diag.trace.started";
+    public const string DiagCaptureStarted   = "diag.capture.started";
+    public const string DiagCaptureDownloaded = "diag.capture.downloaded";
+    public const string DiagJobCancelled     = "diag.job.cancelled";
 }

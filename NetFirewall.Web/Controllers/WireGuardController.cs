@@ -88,12 +88,15 @@ public sealed class WireGuardController : Controller
     public async Task<IActionResult> Save(WgServerFormViewModel form, CancellationToken ct)
     {
         if (!ModelState.IsValid)
-            return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Form validation failed."));
+            return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Form validation failed: " +
+                string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
 
         try
         {
             var existing = await _wg.GetServerAsync(ct);
             var entity = existing ?? new WgServer();
+            // `entity` IS `existing` on edit — capture before the form overwrites it.
+            var previousAddress = existing?.AddressCidr;
 
             // First save (no existing keys): generate via daemon.
             if (string.IsNullOrEmpty(entity.PrivateKey))
@@ -149,7 +152,15 @@ public sealed class WireGuardController : Controller
                 catch (Exception ex) { _logger.LogWarning(ex, "VPN routing scaffold ensure failed (non-fatal)"); }
             }
 
-            var envelope = ServiceResponse<WgServer>.Ok(saved, "WireGuard configuration saved.");
+            // An address change is invisible until the interface is restarted
+            // (syncconf can't move it) — say so, and remind that the far end must
+            // allow the new source or it will silently drop everything.
+            var addressChanged = previousAddress is not null
+                && !string.Equals(previousAddress, saved.AddressCidr, StringComparison.OrdinalIgnoreCase);
+            var envelope = ServiceResponse<WgServer>.Ok(saved, addressChanged
+                ? $"WireGuard configuration saved. Address changed {previousAddress} → {saved.AddressCidr}: " +
+                  $"Apply VPN will restart {saved.Name} to move it, and the remote side must allow the new address."
+                : "WireGuard configuration saved.");
             this.AttachToastTrigger(envelope);
             this.AttachHxEvent("refreshWireGuard", new { });
             return Json(envelope);

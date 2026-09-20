@@ -154,6 +154,75 @@ public interface IDaemonClient
     /// <summary><c>POST /v1/firewall/apply-policy-routing</c> — reconcile iproute2 with DB. Set <paramref name="dryRun"/> to preview without changes.</summary>
     Task<ServiceResponse<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>> ApplyPolicyRoutingAsync(bool dryRun, CancellationToken ct = default);
 
+    // ───────────── Diagnostics (daemon-executed tools — docs/diagnostics.md) ─────────────
+    // Runs come back as DiagRunEnvelope<T>: the diag_runs row id, timing, the verdict
+    // status (ok/warn/fail = the tool ran; error/timeout/busy = it did not) and the result.
+
+    /// <summary><c>POST /v1/diagnostics/ping</c> — ICMP probe steered by fwmark or interface.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>> RunPingAsync(NetFirewall.Models.Diagnostics.PingRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/traceroute</c>.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.TracerouteResult>>> RunTracerouteAsync(NetFirewall.Models.Diagnostics.TracerouteRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/route-get</c> — <c>ip route get</c> with mark/from/iif.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.RouteGetResult>>> RunRouteGetAsync(NetFirewall.Models.Diagnostics.RouteGetRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/conntrack</c> — filtered <c>conntrack -L</c>.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.ConntrackLookupResult>>> RunConntrackLookupAsync(NetFirewall.Models.Diagnostics.ConntrackLookupRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/drop-log</c> — kernel-journal nflog/martian explorer.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DropLogResult>>> RunDropLogAsync(NetFirewall.Models.Diagnostics.DropLogRequest request, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/diagnostics/interfaces/health</c> — live link health, not persisted.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.InterfaceHealth>>> GetInterfaceHealthAsync(CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/diagnostics/neighbors?iface=</c>.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.NeighborEntry>>> GetNeighborsAsync(string? iface = null, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/diagnostics/sysctl?iface=</c> — forwarding / rp_filter / martians / conntrack headroom.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagCheck>>> GetSysctlSanityAsync(string? iface = null, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/vpn/doctor</c> — the full tunnel checklist.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunVpnDoctorAsync(NetFirewall.Models.Diagnostics.VpnDoctorRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/vpn/probe</c> — ping through the tunnel and read the transfer counters.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnProbeResult>>> RunVpnProbeAsync(NetFirewall.Models.Diagnostics.VpnProbeRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/vpn/compare</c> — diff a pasted wg-quick config against what we run.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnCompareResult>>> RunVpnCompareAsync(NetFirewall.Models.Diagnostics.VpnCompareRequest request, CancellationToken ct = default);
+
+    // ── Invasive diagnostics (Admin + elevated): start returns a job id to poll. ──
+
+    /// <summary><c>POST /v1/diagnostics/trace/start</c> — temporary nftrace table + <c>nft monitor trace</c>.</summary>
+    Task<ServiceResponse<Guid>> StartTraceAsync(NetFirewall.Models.Diagnostics.TraceRequest request, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/capture/start</c> — bounded tcpdump to a pcap file.</summary>
+    Task<ServiceResponse<Guid>> StartCaptureAsync(NetFirewall.Models.Diagnostics.CaptureRequest request, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/diagnostics/jobs/{id}</c> — poll a running or finished job.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagJobSnapshot>> GetDiagJobAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/jobs/{id}/cancel</c> — stop early, keeping the partial result.</summary>
+    Task<ServiceResponse<object>> CancelDiagJobAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>GET /v1/diagnostics/capture/{id}/download</c> — the pcap as a stream the Web
+    /// can pipe straight to the browser. Null when the file is gone. The caller owns the stream.
+    /// </summary>
+    Task<Stream?> DownloadCaptureAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary><c>DELETE /v1/diagnostics/capture/{id}</c>.</summary>
+    Task<ServiceResponse<object>> DeleteCaptureAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/wan/doctor</c> — uplinks, failover config/state, per-WAN routing and reachability.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunWanDoctorAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/dhcp/doctor</c> — unit, listener, scopes, pool pressure, recent leases, firewall.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDhcpDoctorAsync(CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/diagnostics/dns/doctor</c> — resolver unit, listeners, local and LAN-facing resolution, upstreams.</summary>
+    Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDnsDoctorAsync(CancellationToken ct = default);
+
     /// <summary><c>GET /v1/system/top-talkers</c> — top N LAN hosts + services by bytes in the last N hours.</summary>
     Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default);
 

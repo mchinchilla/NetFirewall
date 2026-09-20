@@ -47,6 +47,10 @@ public sealed class FwQosConfigsController : Controller
     [HttpPost("save"), ValidateAntiForgeryToken]
     public async Task<IActionResult> Save(QosConfigFormViewModel form, CancellationToken ct)
     {
+        if (!ModelState.IsValid)
+            return this.ToHtmxResponse(ServiceResponse<FwQosConfig>.Fail(
+                string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
+
         try
         {
             var entity = ToEntity(form);

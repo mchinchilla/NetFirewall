@@ -18,6 +18,29 @@ public interface IProcessRunner
         string arguments,
         TimeSpan? timeout = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Run a command with an explicit argument vector — no shell, no quoting.
+    /// Every element reaches the child verbatim through
+    /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/>, so a value
+    /// that came from a user can never be re-split into extra arguments or read
+    /// as shell syntax. This is the ONLY overload the Diagnostics tools may use
+    /// (a source-lint test in NetFirewall.Tests enforces it).
+    /// </summary>
+    Task<ProcessResult> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        TimeSpan? timeout = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Start a long-running command and read its stdout as it arrives, instead of
+    /// buffering everything until exit. For tools that never stop on their own and
+    /// are terminated by the caller (<c>nft monitor trace</c>). Same argument-vector
+    /// safety as the overload above. The caller MUST dispose the returned handle,
+    /// which terminates the process.
+    /// </summary>
+    IRunningProcess Start(string fileName, IReadOnlyList<string> arguments, CancellationToken ct = default);
 }
 
 public readonly record struct ProcessResult(int ExitCode, string Output, string Error)

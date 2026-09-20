@@ -1,0 +1,49 @@
+@model NetFirewall.Web.Models.Diagnostics.RunDetailViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Run;
+}
+<div class="space-y-4">
+    <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <dt class="text-surface-fg-muted">Tool</dt><dd class="font-medium">@DiagUi.ToolLabel(r.Tool)</dd>
+        <dt class="text-surface-fg-muted">Status</dt><dd><span class="badge @DiagUi.BadgeClass(r.Status)">@r.Status</span></dd>
+        <dt class="text-surface-fg-muted">Started</dt><dd class="font-mono">@r.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</dd>
+        <dt class="text-surface-fg-muted">Duration</dt><dd class="font-mono">@(r.DurationMs?.ToString() ?? "—") ms</dd>
+        <dt class="text-surface-fg-muted">Requested by</dt><dd>@(r.RequestedBy ?? "—")</dd>
+        <dt class="text-surface-fg-muted">Target</dt><dd class="font-mono">@(r.Target ?? "—")</dd>
+        <dt class="text-surface-fg-muted">Run id</dt><dd class="font-mono">@r.Id</dd>
+    </dl>
+    @if (!string.IsNullOrEmpty(r.Summary))
+    {
+        <p class="text-sm">@r.Summary</p>
+    }
+
+    @if (Model.Partial is not null && Model.Model is not null)
+    {
+        <div class="rounded-lg border border-surface-border p-4">
+            @await Html.PartialAsync(Model.Partial, Model.Model)
+        </div>
+    }
+    else if (r.ResultTruncated)
+    {
+        <p class="text-sm text-feedback-warning-fg">The stored result exceeded the size cap and was not kept — only the summary survives.</p>
+    }
+
+    <details>
+        <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wider text-surface-fg-muted">Parameters</summary>
+        <div class="flex justify-end mt-1">@await Html.PartialAsync("_CopyButton", new CopyButtonModel("#run-params", "Copy JSON"))</div>
+        <pre id="run-params" class="text-xs p-3 rounded-lg overflow-auto max-h-64 font-mono" style="background-color: var(--surface-muted); color: var(--surface-fg); border: 1px solid var(--surface-border);"><code>@Model.PrettyParams</code></pre>
+    </details>
+    @if (!string.IsNullOrEmpty(Model.PrettyResult))
+    {
+        <details>
+            <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wider text-surface-fg-muted">Raw result</summary>
+            <div class="flex justify-end mt-1">@await Html.PartialAsync("_CopyButton", new CopyButtonModel("#run-result", "Copy JSON"))</div>
+            <pre id="run-result" class="text-xs p-3 rounded-lg overflow-auto max-h-96 font-mono" style="background-color: var(--surface-muted); color: var(--surface-fg); border: 1px solid var(--surface-border);"><code>@Model.PrettyResult</code></pre>
+        </details>
+    }
+
+    <div class="pt-3 border-t flex items-center justify-end border-surface-border">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Close</button>
+    </div>
+</div>

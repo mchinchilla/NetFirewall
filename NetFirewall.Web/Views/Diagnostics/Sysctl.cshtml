@@ -1,0 +1,27 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Kernel tunables";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Kernel tunables",
+    "Forwarding, reverse-path filter, martian logging and conntrack headroom — the four sysctls a policy-routed firewall lives or dies by. Pick an interface to see its effective rp_filter."))
+
+<div x-data="{ iface: '' }" class="space-y-4">
+    <section class="card" style="animation: var(--animate-slide-up);">
+        <header class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-base font-semibold">Checks</h2>
+            <select class="input text-xs w-56" x-model="iface"
+                    @@change="htmx.ajax('GET', '/Diagnostics/sysctl/table?iface=' + encodeURIComponent(iface), { target: '#sysctl-checks', swap: 'innerHTML' })">
+                <option value="">rp_filter: all only</option>
+                @foreach (var i in Model.Interfaces.OrderBy(i => i.Name))
+                {
+                    <option value="@i.Name">@i.Name · @i.Type</option>
+                }
+            </select>
+        </header>
+        <div id="sysctl-checks" class="loading-host" hx-get="/Diagnostics/sysctl/table" hx-trigger="load" hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+        </div>
+    </section>
+</div>

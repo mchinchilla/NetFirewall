@@ -1038,6 +1038,50 @@ document.addEventListener("alpine:init", () => {
         get uptime() { return window.NetFw.formatUptime(this.nowMs - this.startedAtMs); }
     }));
 
+    /* ---------- diagTool ---------- Busy state + elapsed seconds for a diagnostics
+     * form. Wire on the <form>:
+     *   x-data="diagTool()" @htmx:before-request="start()" @htmx:after-request="stop()"
+     * The timer is cleared on stop() and in destroy() (navigate-away). */
+    Alpine.data("diagTool", () => ({
+        busy: false,
+        elapsed: 0,
+        _timer: null,
+        start() {
+            this.busy = true;
+            this.elapsed = 0;
+            this._clear();
+            this._timer = window.setInterval(() => { this.elapsed += 1; }, 1000);
+        },
+        stop() { this.busy = false; this._clear(); },
+        _clear() { if (this._timer) { window.clearInterval(this._timer); this._timer = null; } },
+        destroy() { this._clear(); }
+    }));
+
+    /* ---------- copyButton ---------- Copies the textContent of a selector.
+     *   x-data="copyButton('#run-params')" @click="copy()" x-text="copied ? 'Copied!' : 'Copy'" */
+    Alpine.data("copyButton", (selector) => ({
+        copied: false,
+        async copy() {
+            const el = document.querySelector(selector);
+            if (!el) return;
+            try {
+                await navigator.clipboard.writeText(el.textContent ?? "");
+                this.copied = true;
+                window.setTimeout(() => { this.copied = false; }, 1500);
+            } catch {
+                window.Alpine?.store("toasts")?.error("Clipboard is not available in this context.");
+            }
+        }
+    }));
+
+    /* ---------- diagCheckList ---------- Status filter for a doctor report
+     * (_DiagCheckList). `filter` is 'all' or a DiagCheckStatus name. */
+    Alpine.data("diagCheckList", () => ({
+        filter: "all",
+        show(status) { return this.filter === "all" || this.filter === status; },
+        visibleIn(statuses) { return this.filter === "all" || statuses.includes(this.filter); }
+    }));
+
     function htmxJson(event) {
         if (!event?.detail?.successful) return null;
         try { return JSON.parse(event.detail.xhr.response); }

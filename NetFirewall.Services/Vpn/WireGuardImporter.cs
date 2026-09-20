@@ -180,6 +180,22 @@ public sealed class WireGuardImporter : IWireGuardImporter
         public List<PeerSection> Peers { get; } = new();
     }
 
+    public WgQuickConfig Parse(string text)
+    {
+        var cfg = ParseWgQuick(text ?? string.Empty);
+        return new WgQuickConfig(
+            cfg.Interface.Address,
+            cfg.Interface.Dns,
+            cfg.Interface.Mtu,
+            cfg.Interface.ListenPort,
+            cfg.Interface.TableOff ? "off" : null,
+            cfg.Peers.Select(p => new WgQuickPeer(
+                string.IsNullOrWhiteSpace(p.PublicKey) ? null : p.PublicKey,
+                p.Endpoint,
+                p.AllowedIPs,
+                p.PersistentKeepalive)).ToList());
+    }
+
     private static ParsedConfig ParseWgQuick(string text)
     {
         var cfg = new ParsedConfig();

@@ -26,10 +26,15 @@ Depends:
  adduser,
  systemd (>= 250),
  libicu76 | libicu,
- postgresql-client
+ postgresql-client,
+ iputils-ping,
+ conntrack
 Recommends:
+ traceroute,
+ tcpdump,
  postgresql-18 | postgresql,
  wireguard-tools,
+ ethtool,
  unbound,
  nginx | apache2
 Suggests:

@@ -69,7 +69,10 @@ LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# AF_PACKET is here for ONE reason: the Diagnostics packet capture (tcpdump opens
+# a raw packet socket). It is bounded, Admin-only and step-up gated; remove this
+# family if you do not want captures to be possible at all.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
 SystemCallArchitectures=native
 # @system-service is a curated allow-list; we additionally deny @mount, @swap,
 # @reboot, @raw-io which the daemon never needs.

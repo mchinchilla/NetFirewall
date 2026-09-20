@@ -134,7 +134,7 @@ WEB_UID=$(id -u "$WEB_USER")
 log "Creating directories"
 install -d -m 0755 -o root -g root              "$PREFIX"
 install -d -m 0750 -o root -g "$GROUP_NAME"     "$ETC_DIR"
-install -d -m 0750 -o root -g root              "$STATE_DIR" "$STATE_DIR/daemon"
+install -d -m 0750 -o root -g root              "$STATE_DIR" "$STATE_DIR/daemon" "$STATE_DIR/daemon/captures"
 install -d -m 0750 -o "$WEB_USER" -g "$GROUP_NAME" "$STATE_DIR/web"
 install -d -m 0750 -o root -g root              "$LOG_DIR" "$LOG_DIR/daemon"
 install -d -m 0750 -o "$WEB_USER" -g "$GROUP_NAME" "$LOG_DIR/web"

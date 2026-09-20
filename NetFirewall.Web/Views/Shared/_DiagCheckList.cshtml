@@ -1,0 +1,71 @@
+@model NetFirewall.Models.Diagnostics.DiagReport
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@*
+    Reusable doctor report: summary pills (clickable filters), checks grouped by
+    category, expandable evidence, remedy deep-links. Used by the VPN doctor, the
+    Sysctl panel and, later, the WAN/DHCP/DNS doctors. Alpine `diagCheckList` in site.js.
+*@
+<div x-data="diagCheckList()" class="space-y-4">
+    <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="badge @DiagUi.BadgeClass(Model.Overall) text-sm px-3 py-1" @@click="filter = 'all'" :class="filter === 'all' && 'ring-2 ring-offset-1'">
+            @Model.Overall.ToString().ToUpperInvariant() · @Model.Checks.Count checks
+        </button>
+        <button type="button" class="badge badge-success" @@click="filter = 'Pass'" :class="filter === 'Pass' && 'ring-2 ring-offset-1'">@Model.PassCount pass</button>
+        <button type="button" class="badge badge-warning" @@click="filter = 'Warn'" :class="filter === 'Warn' && 'ring-2 ring-offset-1'">@Model.WarnCount warn</button>
+        <button type="button" class="badge badge-danger"  @@click="filter = 'Fail'" :class="filter === 'Fail' && 'ring-2 ring-offset-1'">@Model.FailCount fail</button>
+        <button type="button" class="badge badge-muted"   @@click="filter = 'Skip'" :class="filter === 'Skip' && 'ring-2 ring-offset-1'">@Model.SkipCount skipped</button>
+        <span class="ml-auto text-xs text-surface-fg-muted font-mono">@Model.Subject · @Model.DurationMs ms</span>
+    </div>
+
+    @foreach (var group in Model.Checks.GroupBy(c => c.Category))
+    {
+        <section x-show="visibleIn(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(group.Select(c => c.Status.ToString()))))">
+            <h3 class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted mb-1.5">@group.Key</h3>
+            <ul class="divide-y divide-surface-border rounded-lg border border-surface-border">
+                @foreach (var c in group)
+                {
+                    <li class="px-3 py-2.5" x-show="show('@c.Status')">
+                        <div class="flex items-start gap-3">
+                            <span class="badge @DiagUi.BadgeClass(c.Status) mt-0.5 w-14 justify-center shrink-0">@c.Status.ToString().ToUpperInvariant()</span>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-baseline gap-x-2">
+                                    <span class="text-sm font-medium">@c.Title</span>
+                                    <span class="text-xs font-mono text-surface-fg-muted">@c.Id</span>
+                                </div>
+                                <p class="text-sm mt-0.5 @(c.Status == DiagCheckStatus.Fail ? "text-feedback-danger-fg" : c.Status == DiagCheckStatus.Warn ? "text-feedback-warning-fg" : "text-surface-fg")">@c.Summary</p>
+                                @if (!string.IsNullOrEmpty(c.Detail))
+                                {
+                                    <pre class="text-xs mt-1 whitespace-pre-wrap font-mono text-surface-fg-muted">@c.Detail</pre>
+                                }
+                                @if (c.Remedy is not null)
+                                {
+                                    <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                                        @if (!string.IsNullOrEmpty(c.Remedy.Href))
+                                        {
+                                            <a href="@c.Remedy.Href" class="btn btn-ghost text-xs py-1 px-2">@c.Remedy.Label →</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="font-medium">@c.Remedy.Label</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(c.Remedy.Hint))
+                                        {
+                                            <code class="font-mono text-surface-fg-muted">@c.Remedy.Hint</code>
+                                        }
+                                    </div>
+                                }
+                                @if (c.Evidence is { Count: > 0 })
+                                {
+                                    <div class="mt-2">
+                                        @await Html.PartialAsync("_DiagEvidence", c.Evidence)
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+</div>

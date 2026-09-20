@@ -1,0 +1,33 @@
+@model NetFirewall.Web.Models.Diagnostics.DoctorPageViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = Model.Title;
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel(Model.Title, Model.Subtitle))
+
+@if (!Model.DaemonEnabled)
+{
+    <div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+        The daemon is disabled in this environment — the doctor needs it to inspect the kernel.
+    </div>
+}
+
+<section class="card" style="animation: var(--animate-slide-up);">
+    <header class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="max-w-2xl">
+            <h2 class="text-base font-semibold">Checklist</h2>
+            <p class="text-xs mt-0.5 text-surface-fg-muted">@Model.Blurb</p>
+        </div>
+        <form hx-post="@Model.RunUrl" hx-target="#doctor-report" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+              class="flex items-center gap-3">
+            @Html.AntiForgeryToken()
+            <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+            <button type="submit" class="btn btn-primary" :disabled="busy">Run doctor</button>
+        </form>
+    </header>
+    <div id="doctor-report">
+        <p class="text-sm text-surface-fg-muted py-8 text-center">Run the doctor to see every check with its evidence and a link to whatever fixes it.</p>
+    </div>
+</section>

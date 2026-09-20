@@ -32,11 +32,26 @@
 
 @if (Model.Kind == FormFieldKind.Checkbox)
 {
+    var isChecked = string.Equals(Model.Value, "true", StringComparison.OrdinalIgnoreCase);
     <label for="@fieldId" class="flex items-start gap-2.5 cursor-pointer">
         <input type="checkbox" @Html.Raw(attrs)
                value="true"
-               @(Model.Value == "true" ? "checked" : "")
+               @(isChecked ? "checked" : "")
                class="mt-0.5 h-4 w-4 rounded" />
+        @* Browsers (and HTMX's FormData) omit UNCHECKED checkboxes from the post
+           entirely, so the model binder keeps the view model's default — which is
+           `= true` for every Enabled flag — and "disable" never persists. Mirror
+           Html.CheckBoxFor: a hidden "false" right AFTER the box guarantees the
+           name is always posted; MVC binds the FIRST value, so checked →
+           "true,false" → true, unchecked → "false" → false. It lives inside the
+           label (hidden inputs are not labelable, so `for` still targets the box)
+           to stay out of the parent's space-y/grid flow. Skipped when Disabled: a
+           disabled control is never submitted, and posting "false" for it would
+           silently flip state. *@
+        @if (!Model.Disabled)
+        {
+            <input type="hidden" name="@Model.Name" value="false" />
+        }
         <span class="text-sm">
             @Model.Label
             @if (!string.IsNullOrEmpty(Model.Help))

@@ -1,0 +1,99 @@
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "VPN doctor";
+    Layout = "_Layout";
+    var iface = ViewBag.ServerName as string;
+    var daemonEnabled = ViewBag.DaemonEnabled as bool? ?? true;
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("VPN doctor",
+    iface is null
+        ? "No WireGuard interface is configured yet."
+        : $"Everything that has to be true for {iface} to carry traffic: configuration, the live interface, handshakes, the path to the endpoint, policy routing, the live firewall ruleset, kernel tunables and the recent journal."))
+
+@if (!daemonEnabled)
+{
+    <div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+        The daemon is disabled in this environment — the doctor needs it to inspect the kernel.
+    </div>
+}
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <div class="xl:col-span-2 space-y-4">
+        <section class="card" style="animation: var(--animate-slide-up);">
+            <header class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 class="text-base font-semibold">Checklist</h2>
+                <form hx-post="/Diagnostics/Vpn/run" hx-target="#doctor-report" hx-swap="innerHTML"
+                      x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+                      class="flex items-center gap-3">
+                    @Html.AntiForgeryToken()
+                    <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+                    <button type="submit" class="btn btn-primary" :disabled="busy">Run doctor</button>
+                </form>
+            </header>
+            <div id="doctor-report">
+                <p class="text-sm text-surface-fg-muted py-8 text-center">Run the doctor to see every check with its evidence and a link to whatever fixes it.</p>
+            </div>
+        </section>
+
+        <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+            <h2 class="text-base font-semibold mb-3">Live status</h2>
+            <div id="vpn-status" class="loading-host" hx-get="/Diagnostics/Vpn/status" hx-trigger="load, every 15s" hx-swap="innerHTML">
+                @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+            </div>
+        </section>
+    </div>
+
+    <div class="space-y-4">
+        <section class="card" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
+            <h2 class="text-base font-semibold mb-1">Data-plane probe</h2>
+            <p class="text-xs mb-3 text-surface-fg-muted">
+                Pings through the tunnel and reads the transfer counters before and after. Tells apart "the far end drops us",
+                "nothing entered the tunnel" and "the replies were dropped here".
+            </p>
+            <form hx-post="/Diagnostics/Vpn/probe" hx-target="#probe-result" hx-swap="innerHTML"
+                  x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()" class="space-y-3">
+                @Html.AntiForgeryToken()
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Target", Label = "Target (optional)", Placeholder = "defaults to the configured probe target",
+                    Pattern = DiagPatterns.Host.Trim('^', '$'), MaxLength = 253
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Mode", Label = "Send", Kind = FormFieldKind.Select, Value = "both",
+                    Options = new[] {
+                        new FormFieldViewModel.SelectOption("both", "By mark and bound to the interface"),
+                        new("mark", "By fwmark only (policy routing)"),
+                        new("bind", "Bound to the interface only")
+                    }
+                })
+                <div class="flex items-center justify-end gap-3">
+                    <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`probing… ${elapsed}s`"></span>
+                    <button type="submit" class="btn btn-ghost" :disabled="busy">Run probe</button>
+                </div>
+            </form>
+            <div id="probe-result" class="mt-3"></div>
+        </section>
+
+        <section class="card" id="compare" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
+            <h2 class="text-base font-semibold mb-1">Compare with issued config</h2>
+            <p class="text-xs mb-3 text-surface-fg-muted">
+                Paste the wg-quick config the remote admin sent you. Private and preshared keys are stripped before the text
+                leaves this page, and are never stored.
+            </p>
+            <form hx-post="/Diagnostics/Vpn/compare" hx-target="#compare-result" hx-swap="innerHTML"
+                  x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()" class="space-y-3">
+                @Html.AntiForgeryToken()
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "ConfigText", Label = "Issued wg-quick config", Kind = FormFieldKind.Textarea, Required = true,
+                    Placeholder = "[Interface]\nAddress = 192.168.3.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = host:51820",
+                    MaxLength = 16384
+                })
+                <div class="flex items-center justify-end gap-3">
+                    <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`comparing… ${elapsed}s`"></span>
+                    <button type="submit" class="btn btn-ghost" :disabled="busy">Compare</button>
+                </div>
+            </form>
+            <div id="compare-result" class="mt-3"></div>
+        </section>
+    </div>
+</div>

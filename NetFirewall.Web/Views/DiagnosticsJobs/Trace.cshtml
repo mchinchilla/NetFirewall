@@ -1,0 +1,53 @@
+@model NetFirewall.Web.Models.Diagnostics.JobPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Flow inspector";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Flow inspector",
+    "Follow a packet through every table and chain and see which rule decided its fate. A temporary nftables table of our own marks the packets you describe; it is removed the moment the trace ends."))
+
+<div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+    This one touches the kernel: it installs a temporary table (<span class="font-mono">ip netfw_diag</span>) at the raw hook while it runs.
+    Admin only, confirmed with your authenticator, and every start is audited. Only one trace or capture may run at a time.
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/Jobs/trace/start" hx-target="#job-host" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()" class="space-y-4">
+            @Html.AntiForgeryToken()
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Src", Label = "Source", Placeholder = "192.168.99.60", Pattern = "[0-9A-Fa-f.:/]{0,49}", MaxLength = 49 })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Dst", Label = "Destination", Placeholder = "1.1.1.1", Pattern = "[0-9A-Fa-f.:/]{0,49}", MaxLength = 49 })
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Protocol", Label = "Protocol", Kind = FormFieldKind.Select,
+                    Options = new[] { new FormFieldViewModel.SelectOption("", "any"), new("tcp", "TCP"), new("udp", "UDP"), new("icmp", "ICMP") }
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Port", Label = "Dest. port", Kind = FormFieldKind.Number, Min = "1", Max = "65535", Placeholder = "443", Help = "tcp/udp only" })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Interface", Label = "Ingress interface", Kind = FormFieldKind.Select,
+                Options = Model.Page.InterfaceOptions("(any)"), Help = "Applies to the prerouting hook only."
+            })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "DurationSec", Label = "Run for (s)", Kind = FormFieldKind.Number, Value = "20", Min = "5", Max = "60" })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "MaxEvents", Label = "Stop after (events)", Kind = FormFieldKind.Number, Value = "500", Min = "10", Max = "5000" })
+            </div>
+            <p class="text-xs text-surface-fg-muted">At least one matcher is required — tracing everything would mark every packet the firewall handles.</p>
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`starting… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Start trace</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="job-host">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">Start a trace, then generate the traffic you want to watch.</p>
+        </div>
+    </section>
+</div>

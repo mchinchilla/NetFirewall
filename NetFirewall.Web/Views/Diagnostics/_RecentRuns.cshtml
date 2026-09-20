@@ -1,0 +1,25 @@
+@model NetFirewall.Web.Models.Diagnostics.PanelViewModel<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagRun>>
+@using NetFirewall.Web.Models.Diagnostics
+@if (Model.Error is not null)
+{
+    <p class="text-sm py-4 text-center text-feedback-warning-fg">@Model.Error</p>
+}
+else if (Model.Data is null || Model.Data.Count == 0)
+{
+    <p class="text-sm py-4 text-center text-surface-fg-muted">No runs yet — pick a tool above.</p>
+}
+else
+{
+    <ul class="divide-y divide-surface-border">
+        @foreach (var r in Model.Data)
+        {
+            <li class="flex items-center gap-3 py-2 text-sm">
+                <span class="badge @DiagUi.BadgeClass(r.Status) w-16 justify-center shrink-0">@r.Status</span>
+                <a href="/Diagnostics/History?run=@r.Id" class="font-medium hover:underline shrink-0">@DiagUi.ToolLabel(r.Tool)</a>
+                <span class="font-mono text-xs text-surface-fg-muted shrink-0">@r.Target</span>
+                <span class="truncate text-surface-fg-muted">@r.Summary</span>
+                <span class="ml-auto text-xs text-surface-fg-muted shrink-0" title="@r.StartedAt.ToString("u")">@(r.RequestedBy ?? "—") · @DiagUi.Ago(r.StartedAt)</span>
+            </li>
+        }
+    </ul>
+}

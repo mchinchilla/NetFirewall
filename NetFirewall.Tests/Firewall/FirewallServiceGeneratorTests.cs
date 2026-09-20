@@ -110,7 +110,7 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
 
         // Rule should land in the input chain.
         var inputChain = ExtractChain(cfg, "input");
-        Assert.Contains("iif eth0", inputChain);
+        Assert.Contains("iifname \"eth0\"", inputChain);
         Assert.Contains("tcp", inputChain);
         Assert.Contains("dport", inputChain);
         Assert.Contains("22", inputChain);
@@ -420,7 +420,7 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         var cfg = await _svc.GenerateNftablesConfigAsync();
         var prerouting = ExtractChain(cfg, "prerouting");
 
-        Assert.Contains("iif eth0", prerouting);
+        Assert.Contains("iifname \"eth0\"", prerouting);
         Assert.Contains("tcp", prerouting);
         Assert.Contains("8080", prerouting);
         Assert.Contains("dnat to 10.0.0.10:80", prerouting);
@@ -491,7 +491,7 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         var cfg = await _svc.GenerateNftablesConfigAsync();
         var post = ExtractChain(cfg, "postrouting");
 
-        Assert.Contains("oif eth0", post);
+        Assert.Contains("oifname \"eth0\"", post);
         Assert.Contains("192.168.1.0/24", post);
         Assert.Contains("masquerade", post);
     }
@@ -571,8 +571,8 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
         // NOT ExtractChain(cfg, "prerouting") — that finds the nat one first.
         var prerouting = ExtractChain(ExtractTable(cfg, "ip mangle"), "prerouting");
 
-        Assert.Contains("iif eth0 ct state new ct mark set 0x00000100", prerouting);
-        Assert.Contains("iif eth1 ct state new ct mark set 0x00000200", prerouting);
+        Assert.Contains("iifname \"eth0\" ct state new ct mark set 0x00000100", prerouting);
+        Assert.Contains("iifname \"eth1\" ct state new ct mark set 0x00000200", prerouting);
         // `return` is what stops the broad LAN-default rule below from
         // overwriting the mark we just restored.
         Assert.Contains("ct direction reply ct mark != 0x00000000 meta mark set ct mark return", prerouting);
@@ -728,5 +728,124 @@ public sealed class FirewallServiceGeneratorTests : IAsyncLifetime
             else if (cfg[end] == '}') { depth--; if (depth == 0) break; }
         }
         return cfg.Substring(start, end - start + 1);
+    }
+
+    // ───────────── interface matches: by name, never by index ─────────────
+
+    [Fact]
+    public async Task Generate_InterfaceMatches_UseNamesNotIndexes()
+    {
+        // `iif`/`oif` resolve to an ifindex at load time: nft refuses the whole
+        // ruleset while the interface is absent (stopped wg0) and a re-created
+        // tunnel gets a new index the old rule no longer matches. Names load
+        // regardless and lie dormant until the interface exists.
+        var wan = await CreateInterfaceAsync("eth0", "WAN");
+        var lan = await CreateInterfaceAsync("eth1", "LAN");
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "forward", Action = "accept", InterfaceInId = lan.Id, InterfaceOutId = wan.Id,
+            Enabled = true, Description = "lan → wan"
+        });
+        await _svc.CreatePortForwardAsync(new FwPortForward
+        {
+            Description = "web", Protocol = "tcp", InterfaceId = wan.Id, ExternalPortStart = 8080,
+            InternalIp = IPAddress.Parse("10.0.0.10"), InternalPort = 80, Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+
+        Assert.Contains("iifname \"eth1\" oifname \"eth0\"", ExtractChain(cfg, "forward"));
+        Assert.Contains("iifname \"eth0\" tcp dport 8080", ExtractChain(cfg, "prerouting"));
+        // Only the loopback bypass may use an index match (lo always exists).
+        Assert.DoesNotMatch(@"(^|\s)[io]if\s+(?!lo\b)\S", cfg);
+    }
+
+    // ───────────── lost constraints: SKIP, never widen ─────────────
+
+    private void ResolverDropsName(string name) =>
+        _objectResolver.Setup(r => r.ResolveAsync(
+                It.Is<IEnumerable<string>>(i => i.Contains(name)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
+
+    [Fact]
+    public async Task Generate_MangleRule_WhoseSourcesResolveToNothing_IsSkipped_NotWidened()
+    {
+        // Seen live on tekium: "Specific hosts → wg0" rendered as a bare
+        // `meta mark set 0x500 return` and stamped EVERY packet, so the
+        // PBX → WAN2 and LAN → WAN1 marks below it never ran.
+        ResolverDropsName("ghost-group");
+        var mark = await _svc.CreateTrafficMarkAsync(new FwTrafficMark { Name = "VPN_WG0", MarkValue = 0x500, RouteTable = "wg0" });
+        await _svc.CreateMangleRuleAsync(new FwMangleRule
+        {
+            Chain = "prerouting", Priority = 80, Enabled = true, MarkId = mark.Id,
+            SourceAddresses = new[] { "ghost-group" }, Description = "Specific hosts → wg0 (VPN)"
+        });
+        await _svc.CreateMangleRuleAsync(new FwMangleRule
+        {
+            Chain = "prerouting", Priority = 100, Enabled = true, MarkId = mark.Id,
+            SourceAddresses = new[] { "192.168.99.0/24" }, Description = "LAN default"
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var prerouting = ExtractChain(ExtractTable(cfg, "ip mangle"), "prerouting");
+
+        Assert.Contains("# SKIP mangle rule", prerouting);
+        Assert.Contains("resolved to nothing", prerouting);
+        Assert.DoesNotMatch(@"(?m)^\s*meta mark set", prerouting);           // no unconstrained catch-all
+        Assert.Contains("ip saddr 192.168.99.0/24 meta mark set 0x500 return", prerouting);
+    }
+
+    [Fact]
+    public async Task Generate_MangleRule_WithNoCriteriaByDesign_IsEmittedWithNote()
+    {
+        var mark = await _svc.CreateTrafficMarkAsync(new FwTrafficMark { Name = "DEFAULT", MarkValue = 0x100, RouteTable = "main" });
+        await _svc.CreateMangleRuleAsync(new FwMangleRule
+        {
+            Chain = "postrouting", Priority = 900, Enabled = true, MarkId = mark.Id, Description = "default mark"
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var post = ExtractChain(ExtractTable(cfg, "ip mangle"), "postrouting");
+
+        Assert.Contains("# NOTE mangle rule", post);
+        Assert.Contains("meta mark set 0x100 return", post);
+    }
+
+    [Fact]
+    public async Task Generate_PortForward_WhoseSourcesResolveToNothing_IsSkipped_NotOpenedToTheWorld()
+    {
+        ResolverDropsName("ghost-group");
+        var wan = await CreateInterfaceAsync("eth0", "WAN");
+        await _svc.CreatePortForwardAsync(new FwPortForward
+        {
+            Description = "pg", Protocol = "tcp", InterfaceId = wan.Id, ExternalPortStart = 5432,
+            InternalIp = IPAddress.Parse("10.0.0.90"), InternalPort = 5432,
+            SourceAddresses = new[] { "ghost-group" }, Enabled = true
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var pre = ExtractChain(cfg, "prerouting");
+
+        Assert.Contains("# SKIP port-forward", pre);
+        Assert.DoesNotContain("dnat to 10.0.0.90:5432", pre);
+    }
+
+    [Fact]
+    public async Task Generate_FilterRule_WhoseSourcesResolveToNothing_IsSkipped_NotWidened()
+    {
+        ResolverDropsName("ghost-group");
+        var wan = await CreateInterfaceAsync("eth0", "WAN");
+        await _svc.CreateFilterRuleAsync(new FwFilterRule
+        {
+            Chain = "input", Action = "accept", Protocol = "tcp", InterfaceInId = wan.Id,
+            SourceAddresses = new[] { "ghost-group" }, DestinationPorts = new[] { "22" },
+            Enabled = true, Description = "ssh from admins"
+        });
+
+        var cfg = await _svc.GenerateNftablesConfigAsync();
+        var input = ExtractChain(cfg, "input");
+
+        Assert.Contains("# SKIP filter rule", input);
+        Assert.DoesNotContain("tcp dport 22 accept", input);
     }
 }

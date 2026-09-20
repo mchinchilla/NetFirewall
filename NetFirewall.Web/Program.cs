@@ -105,6 +105,9 @@ builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 // ----- Domain services -----
 builder.Services.AddSingleton<ILinuxDistroService, LinuxDistroService>();
 builder.Services.AddScoped<IFirewallService, FirewallService>();
+// Diagnostics: the Web reads diag_runs directly for History; tools themselves run in the daemon.
+builder.Services.AddScoped<NetFirewall.Services.Diagnostics.IDiagnosticRunStore, NetFirewall.Services.Diagnostics.DiagnosticRunStore>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IDiagnosticInputValidator, NetFirewall.Services.Diagnostics.DiagnosticInputValidator>();
 // WAN health: the Web reads health state + does config CRUD straight from the
 // DB (same rows the daemon's monitor writes). The destructive route SWAP goes
 // through IDaemonClient (needs CAP_NET_ADMIN) — not this service.
@@ -288,6 +291,7 @@ var app = builder.Build();
         typeof(NetFirewall.Services.Monitoring.IWanTrafficService),
         typeof(NetFirewall.Services.Monitoring.IInterfaceTrafficService),
         typeof(NetFirewall.Web.Services.ITerminalProxyService),
+        typeof(NetFirewall.Services.Diagnostics.IDiagnosticRunStore),
     };
     var missing = new List<string>();
     foreach (var t in mustResolve)

@@ -1,0 +1,39 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Ping";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Ping",
+    "ICMP echo from the firewall itself. Pick a mark to send it through a policy-routing table (WAN1, WAN2, the tunnel) — that is how the box actually routes; -I alone proves nothing."))
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/ping/run" hx-target="#result" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+              class="space-y-4">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Target", Label = "Target", Required = true, Value = Model.DefaultTarget,
+                Placeholder = "1.1.1.1 or host.example", Pattern = DiagPatterns.Host.Trim('^', '$'), MaxLength = 253,
+                Help = "IPv4/IPv6 address or hostname (resolved on the firewall)."
+            })
+            @await Html.PartialAsync("_SteeringFields", new SteeringFieldsViewModel(Model, null, null))
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Count", Label = "Packets", Kind = FormFieldKind.Number, Value = "3", Min = "1", Max = "10" })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "TimeoutSec", Label = "Timeout per reply (s)", Kind = FormFieldKind.Number, Value = "2", Min = "1", Max = "10" })
+            </div>
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Run ping</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="result">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">Results appear here. Every run is saved to History.</p>
+        </div>
+    </section>
+</div>

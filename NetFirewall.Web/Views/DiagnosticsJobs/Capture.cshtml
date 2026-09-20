@@ -1,0 +1,50 @@
+@model NetFirewall.Web.Models.Diagnostics.JobPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Packet capture";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Packet capture",
+    "A bounded tcpdump: it stops at whichever comes first, the packet count or the duration, and leaves one .pcap you can download and open in Wireshark."))
+
+<div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+    A capture records real traffic, payloads included. Files live on the firewall until retention removes them
+    (Settings → Diagnostics), and every start and download is audited. Admin only, confirmed with your authenticator.
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/Jobs/capture/start" hx-target="#job-host" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()" class="space-y-4">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Interface", Label = "Interface", Kind = FormFieldKind.Select, Required = true,
+                Options = Model.Page.InterfaceOptions("(pick one)")
+            })
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Filter", Label = "Capture filter (pcap syntax)", MaxLength = 200,
+                Placeholder = "host 192.168.99.60 and port 443",
+                Help = "Compiled with tcpdump before the capture starts. Leave empty to capture everything on the interface."
+            })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "DurationSec", Label = "Run for (s)", Kind = FormFieldKind.Number, Value = "20", Min = "5", Max = "60" })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "MaxPackets", Label = "Stop after (packets)", Kind = FormFieldKind.Number, Value = "500", Min = "10", Max = "2000" })
+            </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Snaplen", Label = "Bytes per packet", Kind = FormFieldKind.Number, Value = "262144", Min = "64", Max = "262144",
+                Help = "64 keeps headers only — smaller files and no payloads recorded."
+            })
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`starting… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Start capture</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="job-host">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">The capture appears here, with a preview and a download link.</p>
+        </div>
+    </section>
+</div>

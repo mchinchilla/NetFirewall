@@ -1,0 +1,44 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.ConntrackLookupResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+    var summary = r is null ? null : r.Error ?? $"{r.Total} matching flow(s)" + (r.Truncated ? $", showing {r.Flows.Count}" : "");
+}
+@await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.Conntrack, summary))
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No result captured.</p>
+}
+else if (r.Error is not null)
+{
+    <p class="text-sm text-feedback-danger-fg">@r.Error</p>
+}
+else if (r.Flows.Count == 0)
+{
+    <p class="text-sm text-surface-fg-muted">No flows match. Either nothing is talking right now or the traffic never reached the firewall.</p>
+}
+else
+{
+    <div class="overflow-auto">
+        <table class="w-full text-xs font-mono">
+            <thead class="text-surface-fg-muted">
+                <tr><th class="text-left py-1">proto</th><th class="text-left">original</th><th class="text-left">state</th><th class="text-left">reply dst (NAT)</th><th class="text-left">mark</th><th class="text-right">bytes →/←</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var f in r.Flows)
+            {
+                <tr class="border-t border-surface-border">
+                    <td class="py-1">@f.Proto</td>
+                    <td>@f.Src@(f.Sport is null ? "" : $":{f.Sport}") → @f.Dst@(f.Dport is null ? "" : $":{f.Dport}")</td>
+                    <td>@(f.State ?? "—")</td>
+                    <td class="@(f.ReplyDst is not null && f.ReplyDst != f.Src ? "text-accent" : "")">@(f.ReplyDst ?? "—")</td>
+                    <td>@(f.Mark ?? "—")</td>
+                    <td class="text-right">@(f.BytesOrig is { } bo ? DiagUi.Bytes(bo) : "—") / @(f.BytesReply is { } br ? DiagUi.Bytes(br) : "—")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    <p class="text-xs mt-2 text-surface-fg-muted">A reply destination different from the original source means the flow was NATed: that address is the interface it left through.@(r.Truncated ? " Output capped — narrow the filter to see the rest." : "")</p>
+}

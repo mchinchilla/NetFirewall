@@ -231,6 +231,13 @@ public sealed class VpnRoutingService : IVpnRoutingService
 
     public async Task EnsurePeerForwardingAsync(WgServer server, WgPeer peer, CancellationToken ct = default)
     {
+        // Reconcile, not just add: access may have been NARROWED (full → restricted,
+        // internet revoked, LAN dropped, role flipped to upstream) — the peer's
+        // previous [vpn-auto] rows must go or the old, wider rule keeps granting
+        // the old access. This runs BEFORE the upstream early-return on purpose:
+        // a site peer re-saved as upstream used to keep its stale wg→LAN accept.
+        await RemovePeerForwardingAsync(server, peer, ct);
+
         // Upstream tunnels are peers WE dial — they get no inbound NAT/forward.
         // Clients and site links need it regardless of the legacy server mode
         // (a dual-role interface dials an upstream AND hosts inbound peers).
@@ -238,11 +245,6 @@ public sealed class VpnRoutingService : IVpnRoutingService
 
         var wg = await _fw.GetInterfaceByNameAsync(server.Name, ct);
         if (wg is null) return; // scaffold not built yet
-
-        // Reconcile, not just add: access may have been NARROWED (full → restricted,
-        // internet revoked, LAN dropped) — the peer's previous [vpn-auto] rows must
-        // go or the old, wider rule keeps granting the old access.
-        await RemovePeerForwardingAsync(server, peer, ct);
 
         var lanIfaces = (await _fw.GetInterfacesAsync(ct)).Where(i => i.Type == "LAN" && i.Enabled).ToList();
         var wanIfaces = (await _fw.GetInterfacesAsync(ct)).Where(i => i.Type == "WAN" && i.Enabled).ToList();
@@ -253,19 +255,56 @@ public sealed class VpnRoutingService : IVpnRoutingService
         // crypto-key routing guarantees a peer can't source-spoof outside its
         // AllowedIps, so this is real per-peer enforcement — without it, one
         // permissive client's wg→LAN rule covers every other client's traffic.
-        var src = peer.AllowedIps is { Length: > 0 } ? peer.AllowedIps : null;
+        // `0.0.0.0/0` is dropped: as a saddr it matches everything, so it is a
+        // no-op that only clutters the ruleset (`ip saddr 0.0.0.0/0`).
+        var src = ScopeCidrs(peer.AllowedIps);
 
         var existingNat = await _fw.GetNatRulesAsync(ct);
         var existingFilter = await _fw.GetFilterRulesAsync("forward", ct);
 
-        // LAN axis: FORWARD wg0 → LAN (return path rides conntrack), scoped by intent.
-        if (mode != "none")
+        var isSite = mode == "site" || string.Equals(peer.Role, "site", StringComparison.OrdinalIgnoreCase);
+
+        if (isSite)
         {
+            // Site-to-site: AllowedSubnets are the REMOTE LANs behind the other
+            // end (the form calls them "Remote LAN subnets"). Two directions,
+            // both scoped to those networks:
+            //   remote LAN → our LAN   iif wg0, saddr remote   (the other site initiates)
+            //   our LAN → remote LAN   oif wg0, daddr remote   (we initiate)
+            // Before this fix the remote subnets were the DESTINATION of the
+            // wg0→LAN rule. Traffic entering from the tunnel bound for the remote
+            // site never exits via the LAN, so that rule matched nothing and
+            // inbound site traffic fell through to FORWARD_DROP.
+            //
+            // No remote subnet configured → fall back to the peer's specific
+            // AllowedIps (cryptokey routing guarantees it can't source outside
+            // them). Nothing specific at all (a tunnel we also egress through
+            // has AllowedIps 0.0.0.0/0) → SKIP rather than open the LAN to the
+            // whole tunnel.
+            var remote = ScopeCidrs(peer.AllowedSubnets) ?? src;
+            if (remote is null)
+            {
+                _logger.LogWarning(
+                    "Site peer {Peer} has no remote LAN subnets and no specific AllowedIPs — skipping its [vpn-auto] LAN forward rules",
+                    peer.Name);
+            }
+            else
+            {
+                foreach (var lan in lanIfaces)
+                {
+                    await EnsureForwardRuleAsync(existingFilter, wg.Id, lan.Id, remote, null, tag + $" wg→{lan.Name}", ct);
+                    await EnsureForwardRuleAsync(existingFilter, lan.Id, wg.Id, null, remote, tag + $" {lan.Name}→wg", ct);
+                }
+            }
+        }
+        else if (mode != "none")
+        {
+            // Clients: FORWARD wg0 → LAN (return path rides conntrack), scoped by intent.
             foreach (var lan in lanIfaces)
             {
                 var dest = mode switch
                 {
-                    "restricted" or "site" when peer.AllowedSubnets is { Length: > 0 } => peer.AllowedSubnets,
+                    "restricted" when peer.AllowedSubnets is { Length: > 0 } => peer.AllowedSubnets,
                     _ => null, // split / legacy full → whole LAN
                 };
                 await EnsureForwardRuleAsync(existingFilter, wg.Id, lan.Id, src, dest, tag + $" wg→{lan.Name}", ct);
@@ -336,6 +375,25 @@ public sealed class VpnRoutingService : IVpnRoutingService
             Priority = 90,
             Description = desc,
         }, ct);
+    }
+
+    /// <summary>
+    /// Drop the catch-alls (<c>0.0.0.0/0</c>, <c>default</c>) from a CIDR list
+    /// and return <c>null</c> when nothing specific is left. A null address set
+    /// renders as "no address match" — exactly what a catch-all means, minus
+    /// the no-op <c>ip saddr 0.0.0.0/0</c> token in the ruleset.
+    /// </summary>
+    internal static string[]? ScopeCidrs(string[]? cidrs)
+    {
+        if (cidrs is null) return null;
+        var specific = cidrs
+            .Select(c => c.Trim())
+            .Where(c => c.Length > 0
+                        && c != "0.0.0.0/0"
+                        && !c.Equals("default", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return specific.Length == 0 ? null : specific;
     }
 
     private static bool SameSet(string[]? a, string[]? b)

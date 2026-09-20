@@ -516,7 +516,9 @@ public sealed class FirewallService : IFirewallService
 
         // Same resolution the generator does: network-object and service names
         // become literal CIDRs and ports. Mutates the throwaway rule only.
-        await ResolveAddressesAsync(new[] { rule }, ct);
+        var unresolved = await ResolveAddressesAsync(new[] { rule }, ct);
+        if (unresolved.TryGetValue(rule.Id, out var why))
+            return $"# SKIP — {why}";
 
         return GenerateFilterRule(rule, ifaceMap).Trim();
     }
@@ -1567,9 +1569,9 @@ public sealed class FirewallService : IFirewallService
         // Resolve named network objects in source/destination of every rule
         // BEFORE generators stringify them. We mutate the in-memory copies
         // (these are throwaway DTOs from this read, never persisted back).
-        await ResolveAddressesAsync(filterRules,  ct);
-        await ResolveAddressesAsync(portForwards, ct);
-        await ResolveAddressesAsync(mangleRules,  ct);
+        var unresolvedFilters = await ResolveAddressesAsync(filterRules,  ct);
+        var unresolvedPf      = await ResolveAddressesAsync(portForwards, ct);
+        var unresolvedMangle  = await ResolveAddressesAsync(mangleRules,  ct);
 
         // NAT resolution returns a per-rule list because a single SourceNetwork
         // referencing a group can expand to N CIDRs, and SNAT/MASQUERADE in
@@ -1584,6 +1586,13 @@ public sealed class FirewallService : IFirewallService
         // Port forwards (DNAT)
         foreach (var pf in portForwards.Where(p => p.Enabled))
         {
+            if (unresolvedPf.TryGetValue(pf.Id, out var lostPf))
+            {
+                _logger.LogWarning("Skipped port-forward {Id} ({Description}) while generating the ruleset: {Reason}",
+                    pf.Id, pf.Description ?? pf.Protocol, lostPf);
+                sb.AppendLine($"        # SKIP port-forward {pf.Id} — {lostPf}");
+                continue;
+            }
             var line = GeneratePortForwardRule(pf, ifaceMap);
             if (line is null)
             {
@@ -1644,6 +1653,14 @@ public sealed class FirewallService : IFirewallService
                          .Where(r => r.Enabled && r.Chain == chain && RuleActiveNow(r))
                          .OrderBy(r => r.Priority))
             {
+                if (unresolvedFilters.TryGetValue(rule.Id, out var lostFilter))
+                {
+                    _logger.LogWarning("Skipped filter rule {Id} ({Description}) while generating the ruleset: {Reason}",
+                        rule.Id, rule.Description ?? rule.Action, lostFilter);
+                    sb.AppendLine($"        # SKIP filter rule {rule.Id} — {lostFilter}");
+                    continue;
+                }
+
                 if (FwFilterRuleGuard.DescribeBypass(rule) is { } bypass)
                 {
                     _logger.LogWarning("Skipped filter rule {Id} ({Description}) while generating the ruleset: {Reason}",
@@ -1707,6 +1724,28 @@ public sealed class FirewallService : IFirewallService
             .Distinct()
             .Count() >= 2;
 
+        void EmitMangleRules(string chain)
+        {
+            foreach (var rule in mangleRules.Where(m => m.Enabled && m.Chain == chain).OrderBy(m => m.Priority))
+            {
+                if (unresolvedMangle.TryGetValue(rule.Id, out var lostMangle))
+                {
+                    _logger.LogWarning("Skipped mangle rule {Id} ({Description}) while generating the ruleset: {Reason}",
+                        rule.Id, rule.Description ?? chain, lostMangle);
+                    sb.AppendLine($"        # SKIP mangle rule {rule.Id} — {lostMangle}");
+                    continue;
+                }
+                if (IsUnconstrained(rule))
+                {
+                    // Legitimate for a deliberate default mark, but worth
+                    // flagging in the preview: with `return` it ends evaluation
+                    // for every packet, so no mark rule below it ever runs.
+                    sb.AppendLine($"        # NOTE mangle rule {rule.Id} has no match criteria — marks ALL traffic in {chain} and shadows every rule below it");
+                }
+                sb.AppendLine(GenerateMangleRule(rule, markMap));
+            }
+        }
+
         if (mangleRules.Any(m => m.Enabled) || steerInboundReplies)
         {
             sb.AppendLine("table ip mangle {");
@@ -1728,7 +1767,8 @@ public sealed class FirewallService : IFirewallService
 
                 foreach (var (iface, mark) in wanIngressMarks)
                 {
-                    sb.AppendLine($"        iif {iface} ct state new ct mark set 0x{mark:x8}");
+                    // Name match, not index — see GenerateFilterRule.
+                    sb.AppendLine($"        iifname \"{iface}\" ct state new ct mark set 0x{mark:x8}");
                 }
 
                 // `return` is mandatory: `meta mark set` is non-terminal, so
@@ -1737,20 +1777,14 @@ public sealed class FirewallService : IFirewallService
                 sb.AppendLine("        ct direction reply ct mark != 0x00000000 meta mark set ct mark return");
             }
 
-            foreach (var rule in mangleRules.Where(m => m.Enabled && m.Chain == "prerouting").OrderBy(m => m.Priority))
-            {
-                sb.AppendLine(GenerateMangleRule(rule, markMap));
-            }
+            EmitMangleRules("prerouting");
 
             sb.AppendLine("    }");
             sb.AppendLine();
             sb.AppendLine("    chain postrouting {");
             sb.AppendLine("        type filter hook postrouting priority mangle; policy accept;");
 
-            foreach (var rule in mangleRules.Where(m => m.Enabled && m.Chain == "postrouting").OrderBy(m => m.Priority))
-            {
-                sb.AppendLine(GenerateMangleRule(rule, markMap));
-            }
+            EmitMangleRules("postrouting");
 
             sb.AppendLine("    }");
             sb.AppendLine("}");
@@ -1838,45 +1872,104 @@ public sealed class FirewallService : IFirewallService
     /// unchanged. Mutating is safe here because these rule objects are throwaway
     /// (loaded from DB just for this generation pass).
     /// </summary>
-    private async Task ResolveAddressesAsync(IReadOnlyList<FwFilterRule> rules, CancellationToken ct)
+    // ── Name → literal resolution ──────────────────────────────────────────
+    //
+    // The overloads below resolve network-object / service NAMES to literal
+    // CIDRs and ports IN PLACE, and report every rule whose configured
+    // constraint vanished in resolution (object name not found, group with no
+    // members, FQDN with no A records). The generator SKIPS those rules —
+    // emitting one would silently WIDEN it:
+    //   • a source-restricted DNAT becomes world-open,
+    //   • an accept scoped to a host group accepts from anywhere,
+    //   • a host-scoped mangle mark becomes a bare `meta mark set … return`
+    //     that stamps EVERY packet and shadows all mark rules below it (seen
+    //     live: "Specific hosts → wg0" marked all traffic 0x500, so the
+    //     PBX → WAN2 and LAN → WAN1 marks never ran).
+    // Returned map: rule id → human reason, rendered as a `# SKIP` comment so
+    // the preview and the apply diff stay honest.
+
+    private static void NoteLost(Dictionary<Guid, string> lost, Guid id, string field, string[] configured)
     {
-        foreach (var r in rules)
-        {
-            if (r.SourceAddresses is { Length: > 0 } src)
-                r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
-            if (r.DestinationAddresses is { Length: > 0 } dst)
-                r.DestinationAddresses = (await _objectResolver.ResolveAsync(dst, ct)).ToArray();
-            // L4: expand service names (SSH, HTTP, RTP, …) to numeric ports.
-            if (r.DestinationPorts is { Length: > 0 } dp)
-                r.DestinationPorts = (await _serviceResolver.ResolveAsync(dp, ct)).ToArray();
-        }
+        var why = $"{field} '{string.Join(", ", configured)}' resolved to nothing (unknown object, empty group, or FQDN without A records)";
+        lost[id] = lost.TryGetValue(id, out var prev) ? $"{prev}; {why}" : why;
     }
 
-    private async Task ResolveAddressesAsync(IReadOnlyList<FwPortForward> rules, CancellationToken ct)
+    private async Task<Dictionary<Guid, string>> ResolveAddressesAsync(IReadOnlyList<FwFilterRule> rules, CancellationToken ct)
     {
+        var lost = new Dictionary<Guid, string>();
         foreach (var r in rules)
         {
             if (r.SourceAddresses is { Length: > 0 } src)
+            {
                 r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+                if (r.SourceAddresses.Length == 0) NoteLost(lost, r.Id, "source addresses", src);
+            }
+            if (r.DestinationAddresses is { Length: > 0 } dst)
+            {
+                r.DestinationAddresses = (await _objectResolver.ResolveAsync(dst, ct)).ToArray();
+                if (r.DestinationAddresses.Length == 0) NoteLost(lost, r.Id, "destination addresses", dst);
+            }
+            // L4: expand service names (SSH, HTTP, RTP, …) to numeric ports.
+            if (r.DestinationPorts is { Length: > 0 } dp)
+            {
+                r.DestinationPorts = (await _serviceResolver.ResolveAsync(dp, ct)).ToArray();
+                if (r.DestinationPorts.Length == 0) NoteLost(lost, r.Id, "destination ports", dp);
+            }
         }
+        return lost;
+    }
+
+    private async Task<Dictionary<Guid, string>> ResolveAddressesAsync(IReadOnlyList<FwPortForward> rules, CancellationToken ct)
+    {
+        var lost = new Dictionary<Guid, string>();
+        foreach (var r in rules)
+        {
+            if (r.SourceAddresses is { Length: > 0 } src)
+            {
+                r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+                if (r.SourceAddresses.Length == 0) NoteLost(lost, r.Id, "source addresses", src);
+            }
+        }
+        return lost;
     }
 
     /// <summary>
     /// Mangle rules: resolve named source/destination addresses + named ports
-    /// in destination_ports. Same in-place mutation pattern as filter rules.
+    /// in destination_ports. Same in-place mutation + lost-constraint report.
     /// </summary>
-    private async Task ResolveAddressesAsync(IReadOnlyList<FwMangleRule> rules, CancellationToken ct)
+    private async Task<Dictionary<Guid, string>> ResolveAddressesAsync(IReadOnlyList<FwMangleRule> rules, CancellationToken ct)
     {
+        var lost = new Dictionary<Guid, string>();
         foreach (var r in rules)
         {
             if (r.SourceAddresses is { Length: > 0 } src)
+            {
                 r.SourceAddresses = (await _objectResolver.ResolveAsync(src, ct)).ToArray();
+                if (r.SourceAddresses.Length == 0) NoteLost(lost, r.Id, "source addresses", src);
+            }
             if (r.DestinationAddresses is { Length: > 0 } dst)
+            {
                 r.DestinationAddresses = (await _objectResolver.ResolveAsync(dst, ct)).ToArray();
+                if (r.DestinationAddresses.Length == 0) NoteLost(lost, r.Id, "destination addresses", dst);
+            }
             if (r.DestinationPorts is { Length: > 0 } dp)
+            {
                 r.DestinationPorts = (await _serviceResolver.ResolveAsync(dp, ct)).ToArray();
+                if (r.DestinationPorts.Length == 0) NoteLost(lost, r.Id, "destination ports", dp);
+            }
         }
+        return lost;
     }
+
+    /// <summary>
+    /// True when a mangle rule has no L3/L4 match at all, so its mark applies
+    /// to EVERY packet reaching the chain. (Destination ports only render when
+    /// a protocol is set, so ports alone don't constrain anything.)
+    /// </summary>
+    private static bool IsUnconstrained(FwMangleRule r) =>
+        string.IsNullOrEmpty(r.Protocol)
+        && r.SourceAddresses is not { Length: > 0 }
+        && r.DestinationAddresses is not { Length: > 0 };
 
     /// <summary>
     /// NAT rules use a single <c>SourceNetwork</c> string. When that value
@@ -1909,14 +2002,21 @@ public sealed class FirewallService : IFirewallService
     {
         var sb = new StringBuilder("        ");
 
-        // Interface conditions
+        // Interface conditions — match by NAME (`iifname`/`oifname`), never by
+        // index (`iif`/`oif`). An index match is resolved when the ruleset is
+        // loaded, so `nft -f` rejects the WHOLE ruleset while the interface is
+        // absent ("Error: Interface does not exist" — every Apply failed as
+        // soon as the operator stopped wg0), and a tunnel that comes back gets
+        // a NEW ifindex the already-loaded rule no longer matches (LAN→VPN
+        // masquerade silently stopped after each VPN restart). A name match
+        // loads regardless and simply lies dormant until the interface exists.
         if (rule.InterfaceInId.HasValue && ifaceMap.TryGetValue(rule.InterfaceInId.Value, out var ifIn))
         {
-            sb.Append($"iif {ifIn} ");
+            sb.Append($"iifname \"{ifIn}\" ");
         }
         if (rule.InterfaceOutId.HasValue && ifaceMap.TryGetValue(rule.InterfaceOutId.Value, out var ifOut))
         {
-            sb.Append($"oif {ifOut} ");
+            sb.Append($"oifname \"{ifOut}\" ");
         }
 
         // Protocol
@@ -2011,10 +2111,10 @@ public sealed class FirewallService : IFirewallService
 
         var sb = new StringBuilder("        ");
 
-        // Interface
+        // Interface — name match, not index (see GenerateFilterRule).
         if (pf.InterfaceId.HasValue && ifaceMap.TryGetValue(pf.InterfaceId.Value, out var iface))
         {
-            sb.Append($"iif {iface} ");
+            sb.Append($"iifname \"{iface}\" ");
         }
 
         // Source address restrictions go BEFORE the L4 protocol token. nft
@@ -2104,10 +2204,10 @@ public sealed class FirewallService : IFirewallService
         // Source network (resolved — could be a literal CIDR or one of N from a group)
         sb.Append($"ip saddr {sourceCidr} ");
 
-        // Output interface
+        // Output interface — name match, not index (see GenerateFilterRule).
         if (nat.OutputInterfaceId.HasValue && ifaceMap.TryGetValue(nat.OutputInterfaceId.Value, out var iface))
         {
-            sb.Append($"oif {iface} ");
+            sb.Append($"oifname \"{iface}\" ");
         }
 
         sb.Append(action);

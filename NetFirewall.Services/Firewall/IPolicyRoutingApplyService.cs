@@ -14,4 +14,16 @@ public interface IPolicyRoutingApplyService
     /// steps for the UI to show.
     /// </summary>
     Task<PolicyRoutingApplyResult> ApplyAsync(bool dryRun, CancellationToken ct = default);
+
+    /// <summary>
+    /// Re-install only the per-table routes that ride on <paramref name="device"/>:
+    /// rows whose interface is that device, or that live in the table named after
+    /// it (the VPN scaffold names a tunnel's table after its interface). Deleting a
+    /// netdevice purges its routes from EVERY table, and wg-quick with
+    /// <c>Table=off</c> puts nothing back — so after a Stop/Start the fwmark lookup
+    /// hits an empty table and traffic falls through to main: "connected", no
+    /// traffic. Skips rt_tables and ip rule on purpose: those survive a link flap,
+    /// and bringing a VPN up must not apply unrelated pending routing changes.
+    /// </summary>
+    Task<PolicyRoutingApplyResult> ReapplyRoutesForDeviceAsync(string device, CancellationToken ct = default);
 }

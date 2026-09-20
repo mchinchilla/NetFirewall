@@ -1,0 +1,78 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Diagnostics";
+    Layout = "_Layout";
+
+    // Heroicons 24 outline paths.
+    const string IconSignal = "M9.348 14.652a3.75 3.75 0 0 1 0-5.304m5.304 0a3.75 3.75 0 0 1 0 5.304m-7.425 2.121a6.75 6.75 0 0 1 0-9.546m9.546 0a6.75 6.75 0 0 1 0 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.788m13.788 0c3.808 3.808 3.808 9.98 0 13.788M12 12h.008v.008H12V12Z";
+    const string IconMap    = "M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z";
+    const string IconTable  = "M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25";
+    const string IconLog    = "M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z";
+    const string IconLink   = "M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244";
+    const string IconChip   = "M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z";
+    const string IconShield = "M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z";
+
+    var tools = new[]
+    {
+        new ToolCardViewModel("VPN doctor", "Config, interface, handshake, policy routing, firewall, kernel and journal checks for the WireGuard tunnel.", "/Diagnostics/Vpn", IconShield, "doctor", "badge-info"),
+        new ToolCardViewModel("WAN doctor", "Uplinks, failover config and verdict, per-WAN marks and routing, default-route owner, live probe per WAN.", "/Diagnostics/Wan", IconSignal, "doctor", "badge-info"),
+        new ToolCardViewModel("DHCP doctor", "Server unit and listener, scopes against their interfaces, pool pressure, lease activity, firewall.", "/Diagnostics/Dhcp", IconTable, "doctor", "badge-info"),
+        new ToolCardViewModel("DNS doctor", "Resolver unit and listeners, a real query locally and from each LAN address, port-53 rules, upstream reachability.", "/Diagnostics/Dns", IconChip, "doctor", "badge-info"),
+        new ToolCardViewModel("Ping", "ICMP probe steered by fwmark (WAN1 / WAN2 / tunnel) or by interface — the way the box really routes.", "/Diagnostics/ping", IconSignal),
+        new ToolCardViewModel("Traceroute", "Hop list via traceroute, or via ping -t per hop when a mark is set.", "/Diagnostics/traceroute", IconMap),
+        new ToolCardViewModel("Route oracle", "ip route get with mark / from / iif: which table and device would a packet take?", "/Diagnostics/route", IconMap),
+        new ToolCardViewModel("Conntrack lookup", "Filtered flow table with reply tuples — shows whether a flow was NATed out a WAN or the tunnel.", "/Diagnostics/conntrack", IconTable),
+        new ToolCardViewModel("Drop log", "Kernel journal explorer for INPUT_DROP / FORWARD_DROP / SPOOFED_SRC / martians, with top sources and ports.", "/Diagnostics/drop-log", IconLog),
+        new ToolCardViewModel("Interfaces & neighbours", "Link state, MTU, counters and errors from sysfs; ARP/ND table.", "/Diagnostics/interfaces", IconLink),
+        new ToolCardViewModel("Kernel tunables", "ip_forward, rp_filter (effective), martian logging, conntrack headroom.", "/Diagnostics/sysctl", IconChip),
+    };
+
+    // Invasive tools sit in their own row: they mutate the kernel or write raw
+    // traffic to disk, and are Admin + step-up only.
+    var invasive = new[]
+    {
+        new ToolCardViewModel("Flow inspector", "Follow a packet through every chain and see which rule decided its fate (nft trace).", "/Diagnostics/trace", IconMap, "admin + TOTP", "badge-warning"),
+        new ToolCardViewModel("Packet capture", "Bounded tcpdump to a downloadable .pcap — capped by packets and seconds.", "/Diagnostics/capture", IconLog, "admin + TOTP", "badge-warning"),
+    };
+}
+
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Diagnostics",
+    "Ask the box where a packet goes and where it dies. Every run is recorded in History. Tools execute in the daemon; they are read-only.", null))
+
+@if (!Model.DaemonEnabled)
+{
+    <div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+        The daemon is disabled in this environment — tools will report "daemon disabled". History is still readable.
+    </div>
+}
+
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    @foreach (var t in tools)
+    {
+        @await Html.PartialAsync("_ToolCard", t)
+    }
+</div>
+
+@if (User.IsInRole(NetFirewall.Models.Auth.UserRoles.Admin))
+{
+    <h2 class="text-sm font-semibold mt-6 mb-2">Invasive tools</h2>
+    <p class="text-xs mb-3 text-surface-fg-muted">These change the box while they run. One at a time, confirmed with your authenticator, and audited.</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3" style="animation: var(--animate-slide-up); animation-delay: 90ms;">
+        @foreach (var t in invasive)
+        {
+            @await Html.PartialAsync("_ToolCard", t)
+        }
+    </div>
+}
+
+<section class="card mt-6" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
+    <header class="flex items-baseline justify-between mb-3">
+        <h2 class="text-base font-semibold">Recent runs</h2>
+        <a href="/Diagnostics/History" class="text-xs text-accent hover:underline">Full history →</a>
+    </header>
+    <div id="diag-recent" class="loading-host"
+         hx-get="/Diagnostics/recent" hx-trigger="load, every 30s, refreshDiagHistory from:body" hx-swap="innerHTML">
+        @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+    </div>
+</section>

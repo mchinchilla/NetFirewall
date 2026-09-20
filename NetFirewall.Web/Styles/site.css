@@ -625,14 +625,22 @@ html[data-theme][data-sidebar="light"] {
     to   { opacity: 1; }
 }
 
+/* Entry animations end on `transform: none`, NOT `translateY(0)`. The tokens
+ * run with fill-mode `both`, so the last keyframe's value is retained forever —
+ * and ANY retained transform turns the element into a permanent stacking
+ * context. With `translateY(0)` every animated page header and card became
+ * one, so a dropdown opened from a header (WireGuard "Apply VPN ▾", z-20 but
+ * trapped *inside* the header's context) painted underneath the next animated
+ * card. `none` is visually identical at the end of the motion (it interpolates
+ * as the identity transform) and leaves no stacking context behind. */
 @keyframes slide-up {
     from { opacity: 0; transform: translateY(12px); }
-    to   { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: none; }
 }
 
 @keyframes toast-in {
     from { opacity: 0; transform: translateY(-12px) scale(0.96); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 1; transform: none; }
 }
 
 /* Soft halo pulse for the currently-active wizard stepper node. The ring is the

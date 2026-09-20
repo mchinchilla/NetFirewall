@@ -1,0 +1,10 @@
+@model NetFirewall.Web.Models.Diagnostics.CopyButtonModel
+@*
+    Copy-to-clipboard for any element: pass a CSS selector (usually an id) whose
+    textContent should be copied. Alpine `copyButton` lives in site.js.
+*@
+<button type="button" class="btn btn-ghost text-xs"
+        x-data="copyButton('@Model.TargetSelector')"
+        @@click="copy()"
+        :aria-label="copied ? 'Copied' : '@Model.Label'"
+        x-text="copied ? 'Copied!' : '@Model.Label'"></button>

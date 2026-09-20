@@ -1,0 +1,28 @@
+@model NetFirewall.Web.Models.Diagnostics.PanelViewModel<IReadOnlyList<NetFirewall.Models.Diagnostics.NeighborEntry>>
+@if (Model.Error is not null)
+{
+    <p class="text-sm py-4 text-center text-feedback-warning-fg">@Model.Error</p>
+}
+else if (Model.Data is null || Model.Data.Count == 0)
+{
+    <p class="text-sm py-4 text-center text-surface-fg-muted">No neighbours.</p>
+}
+else
+{
+    <div class="overflow-auto max-h-96">
+        <table class="w-full text-xs font-mono">
+            <thead class="text-surface-fg-muted sticky top-0 bg-surface-elevated"><tr><th class="text-left py-1">address</th><th class="text-left">mac</th><th class="text-left">dev</th><th class="text-left">state</th></tr></thead>
+            <tbody>
+            @foreach (var n in Model.Data.OrderBy(n => n.Dev).ThenBy(n => n.Ip))
+            {
+                <tr class="border-t border-surface-border">
+                    <td class="py-1">@n.Ip</td>
+                    <td>@(n.Mac ?? "—")</td>
+                    <td>@n.Dev</td>
+                    <td><span class="badge @(n.State.Contains("REACHABLE") ? "badge-success" : n.State.Contains("FAILED") ? "badge-danger" : "badge-muted")">@n.State</span></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}

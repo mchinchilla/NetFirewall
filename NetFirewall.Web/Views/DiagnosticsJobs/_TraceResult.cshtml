@@ -1,0 +1,49 @@
+@model NetFirewall.Models.Diagnostics.TraceResult
+@using NetFirewall.Models.Diagnostics
+@if (Model.Error is not null)
+{
+    <p class="text-sm text-feedback-danger-fg">@Model.Error</p>
+}
+@if (Model.Events.Count == 0)
+{
+    <p class="text-sm text-surface-fg-muted">
+        No packet matched <span class="font-mono">@Model.RuleSpec</span> while the trace was running.
+        Either nothing of that shape crossed the firewall, or it was dropped before the prerouting hook.
+    </p>
+}
+else
+{
+    <p class="text-xs mb-2 text-surface-fg-muted">
+        <span class="font-mono">@Model.RuleSpec</span> · @Model.PacketCount packet(s), @Model.Events.Count event(s)
+        @if (Model.Truncated) { <span class="text-feedback-warning-fg">· truncated (limit reached@(Model.DroppedLines > 0 ? $", {Model.DroppedLines} line(s) dropped" : ""))</span> }
+    </p>
+    <div class="space-y-3 max-h-[32rem] overflow-auto">
+        @foreach (var packet in Model.Events.GroupBy(e => e.TraceId))
+        {
+            var verdict = packet.LastOrDefault(e => e.Kind is "verdict" or "policy");
+            var isDrop = verdict?.Detail.Contains("drop", StringComparison.OrdinalIgnoreCase) == true;
+            <div class="rounded-lg border border-surface-border">
+                <div class="flex items-center gap-2 px-3 py-1.5 border-b border-surface-border">
+                    <span class="badge @(isDrop ? "badge-danger" : verdict is null ? "badge-muted" : "badge-success")">
+                        @(verdict is null ? "no verdict" : verdict.Detail.Trim())
+                    </span>
+                    <span class="text-xs font-mono text-surface-fg-muted">trace @packet.Key</span>
+                </div>
+                <ol class="text-xs font-mono divide-y divide-surface-border">
+                    @foreach (var e in packet)
+                    {
+                        <li class="px-3 py-1 flex gap-2">
+                            <span class="w-16 shrink-0 text-surface-fg-muted">@e.Kind</span>
+                            <span class="w-40 shrink-0 text-surface-fg-muted">@e.Family @e.Table @e.Chain</span>
+                            <span class="break-all">@e.Detail</span>
+                        </li>
+                    }
+                </ol>
+            </div>
+        }
+    </div>
+    <p class="text-xs mt-2 text-surface-fg-muted">
+        Each block is one packet's journey: <span class="font-mono">packet</span> describes it,
+        <span class="font-mono">rule</span> lines are the rules it was tested against, and the badge is what finally happened to it.
+    </p>
+}

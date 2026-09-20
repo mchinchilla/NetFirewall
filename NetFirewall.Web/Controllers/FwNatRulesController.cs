@@ -48,6 +48,10 @@ public sealed class FwNatRulesController : Controller
     [HttpPost("save"), ValidateAntiForgeryToken]
     public async Task<IActionResult> Save(NatRuleFormViewModel form, CancellationToken ct)
     {
+        if (!ModelState.IsValid)
+            return this.ToHtmxResponse(ServiceResponse<FwNatRule>.Fail(
+                string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
+
         try
         {
             var entity = ToEntity(form);

@@ -1,0 +1,42 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Conntrack lookup";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Conntrack lookup",
+    "Filtered view of the kernel flow table. The reply tuple tells you what a flow was NATed to: a reply destination of the tunnel address means it left via wg0, a WAN address means it left via that WAN."))
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/conntrack/run" hx-target="#result" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+              class="space-y-4">
+            @Html.AntiForgeryToken()
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Src", Label = "Source", Placeholder = "192.168.99.60 or /24", Pattern = "[0-9A-Fa-f.:/]{0,49}", MaxLength = 49 })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Dst", Label = "Destination", Placeholder = "1.1.1.1", Pattern = "[0-9A-Fa-f.:/]{0,49}", MaxLength = 49 })
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Proto", Label = "Protocol", Kind = FormFieldKind.Select,
+                    Options = new[] { new FormFieldViewModel.SelectOption("", "any"), new("tcp", "TCP"), new("udp", "UDP"), new("icmp", "ICMP") }
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Port", Label = "Dest. port", Kind = FormFieldKind.Number, Min = "1", Max = "65535", Placeholder = "443", Help = "tcp/udp only" })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Limit", Label = "Max rows", Kind = FormFieldKind.Number, Value = "200", Min = "1", Max = "500" })
+            </div>
+            <p class="text-xs text-surface-fg-muted">At least one filter is required — the full table can hold tens of thousands of flows.</p>
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Look up flows</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="result">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">Matching flows appear here.</p>
+        </div>
+    </section>
+</div>

@@ -1,0 +1,28 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.RouteGetResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+    var summary = r is null ? null : r.Error ?? (r.Dev is null ? $"no route to {r.Target}" : $"{r.Target} → dev {r.Dev}" + (r.Table is null ? "" : $" (table {r.Table})"));
+}
+@await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.RouteGet, summary))
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No result captured.</p>
+}
+else
+{
+    @if (r.Error is not null) { <p class="text-sm mb-3 text-feedback-danger-fg">@r.Error</p> }
+    <dl class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-sm">
+        <div><dt class="text-xs text-surface-fg-muted">Device</dt><dd class="font-mono font-semibold">@(r.Dev ?? "—")</dd></div>
+        <div><dt class="text-xs text-surface-fg-muted">Gateway</dt><dd class="font-mono">@(r.Gateway ?? "(on-link)")</dd></div>
+        <div><dt class="text-xs text-surface-fg-muted">Source</dt><dd class="font-mono">@(r.Src ?? "—")</dd></div>
+        <div><dt class="text-xs text-surface-fg-muted">Table</dt><dd class="font-mono">@(r.Table ?? "main")</dd></div>
+        <div><dt class="text-xs text-surface-fg-muted">Mark</dt><dd class="font-mono">@(r.Mark ?? "—")</dd></div>
+    </dl>
+    @foreach (var w in r.Warnings)
+    {
+        <p class="text-sm mb-2 text-feedback-warning-fg">⚠ @w</p>
+    }
+    @await Html.PartialAsync("_DiagEvidence", (IReadOnlyList<DiagEvidence>)new[] { new DiagEvidence($"ip -j route get {r.Target}" + (r.Mark is null ? "" : $" mark {r.Mark}"), r.Raw) })
+}

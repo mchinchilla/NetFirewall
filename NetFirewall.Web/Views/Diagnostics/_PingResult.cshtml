@@ -1,0 +1,39 @@
+@model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>
+@using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    var r = Model.Result;
+    var summary = r is null ? null : r.Error ?? $"{r.Received}/{r.Sent} replies via {r.Via}";
+}
+@await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.Ping, summary))
+@if (r is null)
+{
+    <p class="text-sm text-surface-fg-muted">No result captured.</p>
+}
+else
+{
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="kpi"><span class="text-xs text-surface-fg-muted">Sent / received</span><span class="kpi-value">@r.Received<span class="text-base text-surface-fg-muted">/@r.Sent</span></span></div>
+        <div class="kpi"><span class="text-xs text-surface-fg-muted">Loss</span><span class="kpi-value @(r.LossPct > 0 ? "text-feedback-danger-fg" : "")">@r.LossPct.ToString("0.#")%</span></div>
+        <div class="kpi"><span class="text-xs text-surface-fg-muted">Avg RTT</span><span class="kpi-value">@(r.RttAvgMs is { } a ? $"{a:0.#}" : "—")<span class="text-base text-surface-fg-muted"> ms</span></span></div>
+        <div class="kpi"><span class="text-xs text-surface-fg-muted">Min / max</span><span class="kpi-value text-xl">@(r.RttMinMs is { } mn ? $"{mn:0.#}" : "—") / @(r.RttMaxMs is { } mx ? $"{mx:0.#}" : "—")</span></div>
+    </div>
+    <p class="text-xs font-mono text-surface-fg-muted mb-3">target @r.Target → @r.ResolvedIp · @r.Via</p>
+    @if (r.Error is not null)
+    {
+        <p class="text-sm mb-3 text-feedback-danger-fg">@r.Error</p>
+    }
+    @if (r.Replies.Count > 0)
+    {
+        <table class="w-full text-xs font-mono mb-3">
+            <thead class="text-surface-fg-muted"><tr><th class="text-left py-1">seq</th><th class="text-left">ttl</th><th class="text-left">time</th></tr></thead>
+            <tbody>
+            @foreach (var p in r.Replies)
+            {
+                <tr class="border-t border-surface-border"><td class="py-1">@p.Seq</td><td>@(p.Ttl?.ToString() ?? "—")</td><td>@p.TimeMs.ToString("0.###") ms</td></tr>
+            }
+            </tbody>
+        </table>
+    }
+    @await Html.PartialAsync("_DiagEvidence", (IReadOnlyList<DiagEvidence>)new[] { new DiagEvidence($"ping -n -c {r.Sent} … {r.ResolvedIp}", r.Raw) })
+}

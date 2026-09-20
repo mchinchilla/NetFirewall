@@ -28,6 +28,14 @@ public interface IWireGuardImporter
     /// public_key, server matched by name).
     /// </summary>
     Task<WireGuardImportResult> ImportAsync(string interfaceName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Parse wg-quick text WITHOUT touching disk or the DB and without keeping any
+    /// secret: PrivateKey/PresharedKey are dropped at parse time. Used by the VPN
+    /// doctor's "compare with issued config" (the operator pastes what the remote
+    /// admin sent them).
+    /// </summary>
+    NetFirewall.Models.Vpn.WgQuickConfig Parse(string text);
 }
 
 public sealed record WireGuardImportResult(

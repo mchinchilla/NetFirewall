@@ -1,0 +1,44 @@
+@model NetFirewall.Web.Models.Diagnostics.DiagToolPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "Route oracle";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("Route oracle",
+    "ip route get: which device, gateway and table the kernel would pick for a packet. Add a mark to consult a policy-routing table; add a source and ingress interface to simulate a forwarded LAN packet."))
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/route/run" hx-target="#result" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+              class="space-y-4">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Target", Label = "Destination", Required = true, Value = Model.DefaultTarget,
+                Placeholder = "1.1.1.1 or host.example", Pattern = DiagPatterns.Host.Trim('^', '$'), MaxLength = 253
+            })
+            @await Html.PartialAsync("_SteeringFields", new SteeringFieldsViewModel(Model, null, null, ShowInterface: false))
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "From", Label = "Source address (optional)", Placeholder = "192.168.99.60",
+                    Pattern = "[0-9A-Fa-f.:]{0,45}", MaxLength = 45, Help = "Simulate a packet from this host."
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "Interface", Label = "Ingress interface (iif)", Kind = FormFieldKind.Select,
+                    Options = Model.InterfaceOptions("(locally generated)"), Help = "Requires a source address."
+                })
+            </div>
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`running… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy">Look up route</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="result">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">The kernel's answer appears here.</p>
+        </div>
+    </section>
+</div>

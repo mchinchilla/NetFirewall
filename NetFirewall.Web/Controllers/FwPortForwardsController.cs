@@ -48,6 +48,10 @@ public sealed class FwPortForwardsController : Controller
     [HttpPost("save"), ValidateAntiForgeryToken]
     public async Task<IActionResult> Save(PortForwardFormViewModel form, CancellationToken ct)
     {
+        if (!ModelState.IsValid)
+            return this.ToHtmxResponse(ServiceResponse<FwPortForward>.Fail(
+                string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
+
         try
         {
             var entity = ToEntity(form);

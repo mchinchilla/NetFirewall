@@ -1,0 +1,15 @@
+@model NetFirewall.Web.Models.Diagnostics.ToolPageHeaderViewModel
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4" style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Diagnostics</p>
+        <h1 class="text-2xl font-semibold tracking-tight">@Model.Title</h1>
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">@Model.Subtitle</p>
+    </div>
+    <div class="flex items-center gap-2">
+        <a href="/Diagnostics/History" class="btn btn-ghost text-xs">History</a>
+        @if (!string.IsNullOrEmpty(Model.BackHref))
+        {
+            <a href="@Model.BackHref" class="btn btn-ghost text-xs">All tools</a>
+        }
+    </div>
+</div>

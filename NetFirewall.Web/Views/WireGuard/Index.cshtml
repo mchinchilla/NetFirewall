@@ -27,8 +27,17 @@
     </div>
 }
 
+@* The split-button menu's Alpine scope lives on the animated page header, not
+   on the button: while the menu is open the header gets `relative z-30`, which
+   lifts the header's own stacking context above every card below it. The entry
+   animation (fill-mode both) can leave this wrapper as a stacking context, and
+   a z-20 menu INSIDE such a wrapper paints under the next animated card no
+   matter how high its own z-index is. Lifted only while open so the header
+   never competes with the sticky z-30 top bar during normal scrolling. *@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
-     style="animation: var(--animate-slide-up);">
+     style="animation: var(--animate-slide-up);"
+     x-data="{ more: false }"
+     :class="{ 'relative z-30': more }">
     <div>
         <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">VPN</p>
         <h1 class="text-2xl font-semibold tracking-tight">WireGuard</h1>
@@ -39,6 +48,7 @@
     @if (server is not null)
     {
         <div class="flex items-center gap-2">
+            <a href="/Diagnostics/Vpn" class="btn btn-ghost" title="Run the VPN doctor: config, interface, handshake, routing, firewall, kernel, journal.">Diagnose</a>
             <button type="button" class="btn btn-ghost"
                     hx-post="/Vpn/WireGuard/stop" hx-trigger="confirmed-stop"
                     @@click.prevent="(async () => {
@@ -50,7 +60,7 @@
                         });
                         if (ok) htmx.trigger($el, 'confirmed-stop');
                     })()">Stop</button>
-            <div class="relative" x-data="{ more: false }">
+            <div class="relative">
                 <div class="inline-flex items-stretch">
                     <button type="button" class="btn btn-primary rounded-r-none"
                             hx-post="/Vpn/WireGuard/apply-all" hx-trigger="confirmed-apply-all"

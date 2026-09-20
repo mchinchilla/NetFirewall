@@ -185,4 +185,46 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<AlertsDto>.Ok(
             new AlertsDto(Array.Empty<NetFirewall.Models.Vpn.SystemAlert>()), "Daemon disabled."));
+
+    // ───────────── Diagnostics — every tool needs the daemon (root, CAP_NET_ADMIN) ─────────────
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>> RunPingAsync(NetFirewall.Models.Diagnostics.PingRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.TracerouteResult>>> RunTracerouteAsync(NetFirewall.Models.Diagnostics.TracerouteRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.TracerouteResult>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.RouteGetResult>>> RunRouteGetAsync(NetFirewall.Models.Diagnostics.RouteGetRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.RouteGetResult>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.ConntrackLookupResult>>> RunConntrackLookupAsync(NetFirewall.Models.Diagnostics.ConntrackLookupRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.ConntrackLookupResult>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DropLogResult>>> RunDropLogAsync(NetFirewall.Models.Diagnostics.DropLogRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DropLogResult>>());
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.InterfaceHealth>>> GetInterfaceHealthAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<NetFirewall.Models.Diagnostics.InterfaceHealth>>());
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.NeighborEntry>>> GetNeighborsAsync(string? iface = null, CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<NetFirewall.Models.Diagnostics.NeighborEntry>>());
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagCheck>>> GetSysctlSanityAsync(string? iface = null, CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagCheck>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunVpnDoctorAsync(NetFirewall.Models.Diagnostics.VpnDoctorRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnProbeResult>>> RunVpnProbeAsync(NetFirewall.Models.Diagnostics.VpnProbeRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnProbeResult>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnCompareResult>>> RunVpnCompareAsync(NetFirewall.Models.Diagnostics.VpnCompareRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnCompareResult>>());
+    public Task<ServiceResponse<Guid>> StartTraceAsync(NetFirewall.Models.Diagnostics.TraceRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<Guid>());
+    public Task<ServiceResponse<Guid>> StartCaptureAsync(NetFirewall.Models.Diagnostics.CaptureRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<Guid>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagJobSnapshot>> GetDiagJobAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagJobSnapshot>());
+    public Task<ServiceResponse<object>> CancelDiagJobAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Disabled<object>());
+    public Task<Stream?> DownloadCaptureAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult<Stream?>(null);
+    public Task<ServiceResponse<object>> DeleteCaptureAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Disabled<object>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunWanDoctorAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDhcpDoctorAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>());
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDnsDoctorAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>());
 }

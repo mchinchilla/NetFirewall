@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using NetFirewall.Models.Vpn;
+using NetFirewall.Services.Network;
 using NetFirewall.Services.Processes;
 using NetFirewall.Services.Vpn;
 using NetFirewall.Tests.Infra;
@@ -177,5 +178,54 @@ public class WireGuardApplyServiceTests : IDisposable
 
         Assert.True(result.Success);
         Assert.Equal("interface down", result.Output);
+    }
+
+    [Fact]
+    public async Task GetStatus_InterfaceAbsent_SkipsWgShowAndReportsNoPeers()
+    {
+        // A stopped tunnel is a normal state: the status poll must not shell
+        // out (and log an exec failure) once per poll while wg0 is gone.
+        var links = new Mock<INetworkLinkProbe>();
+        links.Setup(l => l.Exists("wg0")).Returns(false);
+        var svc = new WireGuardApplyService(_config.Object, _runner.Object, NullLogger<WireGuardApplyService>.Instance,
+            Options.Create(new WireGuardApplyOptions { ConfigDir = _tempDir, BashPath = "/bin/bash", CommandTimeoutSeconds = 5 }),
+            links.Object);
+
+        var peers = await svc.GetStatusAsync("wg0");
+
+        Assert.Empty(peers);
+        _runner.Verify(r => r.RunAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── apply script: hot reload vs cold restart ─────────────────────────
+
+    [Fact]
+    public void BuildApplyScript_ColdRestartsWhenAddressOrMtuDrift_HotReloadsOtherwise()
+    {
+        var script = WireGuardApplyService.BuildApplyScript("wg0", "192.168.3.2/32", 1420);
+
+        Assert.Contains("grep -qF 'inet 192.168.3.2/32 '", script);
+        Assert.Contains("grep -qw 'mtu 1420'", script);
+        Assert.Contains("then wg syncconf wg0 <(wg-quick strip wg0); else wg-quick down wg0; wg-quick up wg0; fi", script);
+        Assert.EndsWith("else wg-quick up wg0; fi", script);   // link absent → plain cold start
+        Assert.DoesNotContain("\"", script);                  // travels inside bash -c "…"
+    }
+
+    [Fact]
+    public void BuildApplyScript_WithoutMtu_ChecksOnlyTheAddress()
+    {
+        var script = WireGuardApplyService.BuildApplyScript("wg0", "10.10.0.1/24", null);
+
+        Assert.Contains("inet 10.10.0.1/24 ", script);
+        Assert.DoesNotContain("mtu", script);
+    }
+
+    [Fact]
+    public void BuildApplyScript_SkipsDriftCheck_ForANonInertAddress()
+    {
+        var script = WireGuardApplyService.BuildApplyScript("wg0", "1.2.3.4/32; rm -rf /", null);
+
+        Assert.DoesNotContain("rm -rf", script);
+        Assert.Contains("then wg syncconf wg0 <(wg-quick strip wg0); else wg-quick up wg0; fi", script);
     }
 }

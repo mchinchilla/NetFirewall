@@ -41,8 +41,11 @@ public interface IVpnRoutingService
 
     /// <summary>
     /// Ensure the NAT (masquerade) + FORWARD rules a connected peer needs to reach
-    /// the LAN / internet per its RouteMode (full/split/restricted/site). Generates
-    /// FwNatRule/FwFilterRule rows tagged [vpn-auto], deduped against existing rows.
+    /// the LAN / internet per its RouteMode (split/restricted/none for clients).
+    /// Site peers get BOTH directions between our LAN(s) and their remote LAN
+    /// subnets (wg→LAN scoped by saddr, LAN→wg scoped by daddr); with nothing
+    /// specific to scope to, no LAN rule is emitted. Generates FwNatRule /
+    /// FwFilterRule rows tagged [vpn-auto], deduped against existing rows.
     /// </summary>
     Task EnsurePeerForwardingAsync(WgServer server, WgPeer peer, CancellationToken ct = default);
 

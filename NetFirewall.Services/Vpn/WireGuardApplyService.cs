@@ -1,8 +1,10 @@
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetFirewall.Models.Vpn;
 using NetFirewall.Services.Firewall;
+using NetFirewall.Services.Network;
 using NetFirewall.Services.Processes;
 
 namespace NetFirewall.Services.Vpn;
@@ -24,6 +26,7 @@ public sealed class WireGuardApplyService : IWireGuardApplyService
 {
     private readonly IWireGuardConfigService _config;
     private readonly IProcessRunner _runner;
+    private readonly INetworkLinkProbe? _links;
     private readonly ILogger<WireGuardApplyService> _logger;
     private readonly WireGuardApplyOptions _options;
 
@@ -31,11 +34,13 @@ public sealed class WireGuardApplyService : IWireGuardApplyService
         IWireGuardConfigService config,
         IProcessRunner runner,
         ILogger<WireGuardApplyService> logger,
-        IOptions<WireGuardApplyOptions>? options = null)
+        IOptions<WireGuardApplyOptions>? options = null,
+        INetworkLinkProbe? links = null)
     {
         _config = config;
         _runner = runner;
         _logger = logger;
+        _links = links;
         _options = options?.Value ?? new WireGuardApplyOptions();
     }
 
@@ -107,11 +112,7 @@ public sealed class WireGuardApplyService : IWireGuardApplyService
             try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
             catch { /* not on a unix-y FS — fine */ }
 
-            // If the iface is already up, hot-reload (preserves handshakes).
-            // Otherwise bring it up cold.
-            var script = $"set -euo pipefail; if ip link show {server.Name} >/dev/null 2>&1; then " +
-                         $"wg syncconf {server.Name} <(wg-quick strip {server.Name}); " +
-                         $"else wg-quick up {server.Name}; fi";
+            var script = BuildApplyScript(server.Name, server.AddressCidr, server.Mtu);
             var proc = await _runner.RunAsync(
                 _options.BashPath,
                 $"-c \"{script}\"",
@@ -139,11 +140,55 @@ public sealed class WireGuardApplyService : IWireGuardApplyService
         }
     }
 
+    private static readonly Regex ShellInert = new(@"^[0-9./]+$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Bash for "make the live interface match the config". <c>wg syncconf</c>
+    /// is the gentle path (peers/keys/port only — handshakes survive), but it
+    /// can NOT change the interface address or MTU: those are wg-quick's job at
+    /// <c>up</c>. So when the live address/MTU drift from the config we do a
+    /// cold down/up — the only way the change reaches the kernel. (tekium: the
+    /// address was saved as .2 but the box kept sourcing from .3 until a manual
+    /// restart, and the remote server silently dropped every data packet.)
+    /// Values are only embedded when provably shell-inert; anything odd skips
+    /// drift detection and keeps the syncconf path. No double quotes anywhere:
+    /// the script travels inside <c>bash -c "…"</c>.
+    /// </summary>
+    internal static string BuildApplyScript(string name, string addressCidr, int? mtu)
+    {
+        var up   = $"wg-quick up {name}";
+        var sync = $"wg syncconf {name} <(wg-quick strip {name})";
+        var cold = $"wg-quick down {name}; {up}";
+
+        var checks = new List<string>();
+        if (!string.IsNullOrEmpty(addressCidr) && ShellInert.IsMatch(addressCidr))
+            checks.Add($"ip -4 -o addr show dev {name} | grep -qF 'inet {addressCidr} '");
+        if (mtu is > 0)
+            checks.Add($"ip -o link show dev {name} | grep -qw 'mtu {mtu}'");
+
+        var whenUp = checks.Count == 0
+            ? sync
+            : $"if {string.Join(" && ", checks)}; then {sync}; else {cold}; fi";
+
+        return $"set -euo pipefail; if ip link show {name} >/dev/null 2>&1; then {whenUp}; else {up}; fi";
+    }
+
     public async Task<IReadOnlyList<WgPeerLiveStatus>> GetStatusAsync(string interfaceName, CancellationToken ct = default)
     {
         // `wg show <iface> dump` — tab-separated:
         //   line 1 (interface): priv \t pub \t listen_port \t fwmark
         //   line N (peers):     pub \t psk \t endpoint \t allowed_ips \t handshake_unix \t rx \t tx \t keepalive
+        if (_links is not null && !_links.Exists(interfaceName))
+        {
+            // Tunnel intentionally down (Stop) or never created: no interface,
+            // no peers. Skip the exec entirely — otherwise every status poll
+            // (UI every few seconds + the health monitor) logs a WRN
+            // "wg show … Unable to access interface: No such device" while the
+            // operator has simply stopped the VPN.
+            _logger.LogDebug("wg interface {Iface} is not present — reporting no live peers", interfaceName);
+            return Array.Empty<WgPeerLiveStatus>();
+        }
+
         var result = await _runner.RunAsync(
             "wg",
             $"show {interfaceName} dump",
@@ -157,24 +202,11 @@ public sealed class WireGuardApplyService : IWireGuardApplyService
             return Array.Empty<WgPeerLiveStatus>();
         }
 
-        var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var peers = new List<WgPeerLiveStatus>();
-        foreach (var line in lines.Skip(1)) // skip interface line
-        {
-            var f = line.Split('\t');
-            if (f.Length < 8) continue;
-
-            var pub = f[0];
-            var endpoint = f[2] == "(none)" ? null : f[2];
-            DateTime? hs = long.TryParse(f[4], out var ts) && ts > 0
-                ? DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime
-                : null;
-            long.TryParse(f[5], out var rx);
-            long.TryParse(f[6], out var tx);
-
-            peers.Add(new WgPeerLiveStatus(pub, endpoint, hs, rx, tx));
-        }
-        return peers;
+        // One parser for the dump format (shared with the diagnostics reader); it
+        // drops the private/preshared keys, so nothing secret reaches callers.
+        return WgDumpParser.Parse(result.Output).Peers
+            .Select(p => new WgPeerLiveStatus(p.PublicKey, p.Endpoint, p.LatestHandshakeUtc, p.RxBytes, p.TxBytes))
+            .ToList();
     }
 
     public async Task<NftApplyResult> StopAsync(string interfaceName, CancellationToken ct = default)

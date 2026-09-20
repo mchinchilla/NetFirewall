@@ -229,6 +229,85 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         => PostAsync<NetFirewall.Services.Firewall.PolicyRoutingApplyResult>(
             $"/v1/firewall/apply-policy-routing?dryRun={(dryRun ? "true" : "false")}", ct);
 
+    // ───────────── Diagnostics ─────────────
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>> RunPingAsync(NetFirewall.Models.Diagnostics.PingRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.PingRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>("/v1/diagnostics/ping", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.TracerouteResult>>> RunTracerouteAsync(NetFirewall.Models.Diagnostics.TracerouteRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.TracerouteRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.TracerouteResult>>("/v1/diagnostics/traceroute", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.RouteGetResult>>> RunRouteGetAsync(NetFirewall.Models.Diagnostics.RouteGetRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.RouteGetRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.RouteGetResult>>("/v1/diagnostics/route-get", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.ConntrackLookupResult>>> RunConntrackLookupAsync(NetFirewall.Models.Diagnostics.ConntrackLookupRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.ConntrackLookupRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.ConntrackLookupResult>>("/v1/diagnostics/conntrack", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DropLogResult>>> RunDropLogAsync(NetFirewall.Models.Diagnostics.DropLogRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.DropLogRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DropLogResult>>("/v1/diagnostics/drop-log", request, ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.InterfaceHealth>>> GetInterfaceHealthAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Models.Diagnostics.InterfaceHealth>>("/v1/diagnostics/interfaces/health", ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.NeighborEntry>>> GetNeighborsAsync(string? iface = null, CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Models.Diagnostics.NeighborEntry>>(
+            "/v1/diagnostics/neighbors" + (string.IsNullOrEmpty(iface) ? string.Empty : "?iface=" + Uri.EscapeDataString(iface)), ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagCheck>>> GetSysctlSanityAsync(string? iface = null, CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagCheck>>(
+            "/v1/diagnostics/sysctl" + (string.IsNullOrEmpty(iface) ? string.Empty : "?iface=" + Uri.EscapeDataString(iface)), ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunVpnDoctorAsync(NetFirewall.Models.Diagnostics.VpnDoctorRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.VpnDoctorRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>("/v1/diagnostics/vpn/doctor", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnProbeResult>>> RunVpnProbeAsync(NetFirewall.Models.Diagnostics.VpnProbeRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.VpnProbeRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnProbeResult>>("/v1/diagnostics/vpn/probe", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnCompareResult>>> RunVpnCompareAsync(NetFirewall.Models.Diagnostics.VpnCompareRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.VpnCompareRequest, NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.VpnCompareResult>>("/v1/diagnostics/vpn/compare", request, ct);
+
+    public Task<ServiceResponse<Guid>> StartTraceAsync(NetFirewall.Models.Diagnostics.TraceRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.TraceRequest, Guid>("/v1/diagnostics/trace/start", request, ct);
+
+    public Task<ServiceResponse<Guid>> StartCaptureAsync(NetFirewall.Models.Diagnostics.CaptureRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.CaptureRequest, Guid>("/v1/diagnostics/capture/start", request, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagJobSnapshot>> GetDiagJobAsync(Guid id, CancellationToken ct = default)
+        => GetAsync<NetFirewall.Models.Diagnostics.DiagJobSnapshot>($"/v1/diagnostics/jobs/{id}", ct);
+
+    public Task<ServiceResponse<object>> CancelDiagJobAsync(Guid id, CancellationToken ct = default)
+        => PostAsync<object>($"/v1/diagnostics/jobs/{id}/cancel", ct);
+
+    public async Task<Stream?> DownloadCaptureAsync(Guid id, CancellationToken ct = default)
+    {
+        // Headers-read so the pcap streams through instead of being buffered in the
+        // Web's memory. The response is disposed when the returned stream is.
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/v1/diagnostics/capture/{id}/download");
+        AttachSessionHeader(req);
+        try
+        {
+            var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!resp.IsSuccessStatusCode) { resp.Dispose(); return null; }
+            return await resp.Content.ReadAsStreamAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Capture download {Id} failed", id);
+            return null;
+        }
+    }
+
+    public Task<ServiceResponse<object>> DeleteCaptureAsync(Guid id, CancellationToken ct = default)
+        => SendJsonAsync<object, object>(HttpMethod.Delete, $"/v1/diagnostics/capture/{id}", new { }, ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunWanDoctorAsync(CancellationToken ct = default)
+        => PostAsync<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>("/v1/diagnostics/wan/doctor", ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDhcpDoctorAsync(CancellationToken ct = default)
+        => PostAsync<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>("/v1/diagnostics/dhcp/doctor", ct);
+
+    public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDnsDoctorAsync(CancellationToken ct = default)
+        => PostAsync<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>("/v1/diagnostics/dns/doctor", ct);
+
     public Task<ServiceResponse<TopTalkersDto>> GetTopTalkersAsync(int hours = 24, int limit = 5, CancellationToken ct = default)
         => GetAsync<TopTalkersDto>($"/v1/system/top-talkers?hours={hours}&limit={limit}", ct);
 
@@ -382,27 +461,40 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
         }
     }
 
-    private static async Task<ServiceResponse<T>> ReadEnvelopeAsync<T>(HttpResponseMessage resp, CancellationToken ct)
+    internal static async Task<ServiceResponse<T>> ReadEnvelopeAsync<T>(HttpResponseMessage resp, CancellationToken ct)
     {
-        // Daemon's contract: always 200 + ServiceResponse<T> JSON, even for
-        // operation failures (Success=false in the envelope). Anything else
-        // (5xx from a middleware, ProblemDetails JSON, plaintext) means the
-        // daemon itself is broken — synthesize a Fail with the HTTP status so
-        // the operator sees something more useful than "Success=false, Message=null".
+        // Daemon's contract: a ServiceResponse<T> JSON envelope, Success=false
+        // for operation failures. Most endpoints send it with 200; a few
+        // (/firewall/apply) send the SAME envelope with 500 so a raw HTTP
+        // client also sees the failure. Read the body FIRST, whatever the
+        // status — that envelope carries the real reason (nft's "Interface
+        // does not exist" plus the offending line). Only when the body isn't
+        // an envelope that says something (5xx from a middleware,
+        // ProblemDetails, plaintext) do we synthesize a Fail from the status,
+        // which is still better than "Success=false, Message=null".
         var statusFallback = $"Daemon returned HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}";
-        if (!resp.IsSuccessStatusCode)
-        {
-            return ServiceResponse<T>.Fail(statusFallback);
-        }
 
+        ServiceResponse<T>? envelope = null;
         try
         {
-            var envelope = await resp.Content.ReadFromJsonAsync<ServiceResponse<T>>(JsonOpts, ct);
-            if (envelope is not null) return envelope;
+            envelope = await resp.Content.ReadFromJsonAsync<ServiceResponse<T>>(JsonOpts, ct);
         }
         catch
         {
-            // Non-JSON body — fall through to generic failure.
+            // Non-JSON / empty body — fall through to the status fallback.
+        }
+
+        if (resp.IsSuccessStatusCode)
+        {
+            return envelope ?? ServiceResponse<T>.Fail(statusFallback);
+        }
+
+        // Non-2xx: trust the body only when it actually explains itself.
+        if (envelope is not null && !string.IsNullOrWhiteSpace(envelope.Message))
+        {
+            return envelope.Success
+                ? ServiceResponse<T>.Fail(envelope.Message)   // status and body disagree — the status wins
+                : envelope;
         }
         return ServiceResponse<T>.Fail(statusFallback);
     }
