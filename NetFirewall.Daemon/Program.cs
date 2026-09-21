@@ -34,6 +34,17 @@ builder.Host.UseSerilog((ctx, services, configuration) =>
 
 builder.AddServiceDefaults();
 
+// Fail at startup, not at the first request. A service the container cannot build
+// is invisible until an endpoint asks for it: the VPN doctor shipped missing
+// IVpnRoutingService and answered 500 for a week. ValidateOnBuild walks every
+// descriptor and throws ONE aggregate naming all of them. Scope validation stays
+// on in Development only — singletons here deliberately hold their own scopes.
+builder.Host.UseDefaultServiceProvider((ctx, o) =>
+{
+    o.ValidateOnBuild = true;
+    o.ValidateScopes = ctx.HostingEnvironment.IsDevelopment();
+});
+
 // DataProtection keys persist to disk so the daemon's antiforgery / session
 // crypto survives restarts. The daemon doesn't directly issue cookies but
 // the framework still spins up a key ring at startup; without this it warns
@@ -109,6 +120,7 @@ builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.DiagRunPruner
 // two at once would collide. The sweeper removes a leftover trace table at startup.
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Jobs.IDiagnosticJobRegistry, NetFirewall.Services.Diagnostics.Jobs.DiagnosticJobRegistry>();
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.ICaptureStore, NetFirewall.Services.Diagnostics.Capture.CaptureStore>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.ICaptureCapabilityProbe, NetFirewall.Services.Diagnostics.Capture.AfPacketCapabilityProbe>();
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Trace.IFlowInspectorService, NetFirewall.Services.Diagnostics.Trace.FlowInspectorService>();
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.IPacketCaptureService, NetFirewall.Services.Diagnostics.Capture.PacketCaptureService>();
 builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.Trace.DiagnosticsSweeperService>();
@@ -304,6 +316,7 @@ builder.Services.AddScoped<IAuthAuditService, AuthAuditService>();
 builder.Services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddSingleton<ITotpService, TotpService>();
 builder.Services.AddScoped<IUserTotpService, UserTotpService>();
+builder.Services.AddSingleton<IRecoveryCodeGenerator, RecoveryCodeGenerator>();
 builder.Services.AddScoped<IRecoveryCodeService, RecoveryCodeService>();
 
 // TOTP cipher — the master key now lives HERE, not in the Web. The Web
@@ -334,6 +347,11 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardBringUpService,
                            NetFirewall.Services.Vpn.WireGuardBringUpService>();
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardImporter,
                            NetFirewall.Services.Vpn.WireGuardImporter>();
+// Bridges WireGuard <-> policy-routing/firewall rows. The Web registers this for
+// the egress UI; the daemon needs it because the VPN doctor's context asks it
+// which LAN sources are routed through the tunnel.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnRoutingService,
+                           NetFirewall.Services.Vpn.VpnRoutingService>();
 builder.Services.Configure<NetFirewall.Services.Vpn.WireGuardApplyOptions>(
     builder.Configuration.GetSection("WireGuard"));
 

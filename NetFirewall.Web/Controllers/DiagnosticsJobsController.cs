@@ -55,7 +55,7 @@ public sealed class DiagnosticsJobsController : Controller
             Blank(form.Src), Blank(form.Dst), Blank(form.Protocol), form.Port,
             Blank(form.Interface), form.DurationSec, form.MaxEvents), ct);
 
-        return StartedOrToast(env, "_JobPanel");
+        return StartedOrToast(env, DiagJobKind.Trace);
     }
 
     // ───────────────────────── packet capture ─────────────────────────
@@ -72,7 +72,7 @@ public sealed class DiagnosticsJobsController : Controller
         var env = await _daemon.StartCaptureAsync(new CaptureRequest(
             form.Interface.Trim(), Blank(form.Filter), form.DurationSec, form.MaxPackets, form.Snaplen), ct);
 
-        return StartedOrToast(env, "_JobPanel");
+        return StartedOrToast(env, DiagJobKind.Capture);
     }
 
     // ───────────────────────── job lifecycle ─────────────────────────
@@ -136,7 +136,7 @@ public sealed class DiagnosticsJobsController : Controller
     }
 
     /// <summary>On success swap in the polling panel; otherwise leave the page alone and toast why.</summary>
-    private IActionResult StartedOrToast(ServiceResponse<Guid> env, string partial)
+    private IActionResult StartedOrToast(ServiceResponse<Guid> env, DiagJobKind kind)
     {
         if (!env.Success || env.Data == Guid.Empty)
         {
@@ -146,8 +146,11 @@ public sealed class DiagnosticsJobsController : Controller
             return Json(env);
         }
         this.AttachToastTrigger(ServiceResponse<object>.Ok(new { }, env.Message ?? "Started."));
-        return PartialView(partial, new PanelViewModel<DiagJobSnapshot>(
-            new DiagJobSnapshot(env.Data, DiagJobKind.Trace, DiagJobState.Running, DateTime.UtcNow, null, 0, User.Identity?.Name, "starting…", 0, false, null), null));
+        // Optimistic first frame so the panel appears immediately; the poll it starts
+        // replaces it with the daemon's own snapshot ~2 s later. The kind has to be the
+        // caller's — hardcoding Trace here labelled every capture "Flow inspector".
+        return PartialView("_JobPanel", new PanelViewModel<DiagJobSnapshot>(
+            new DiagJobSnapshot(env.Data, kind, DiagJobState.Running, DateTime.UtcNow, null, 0, User.Identity?.Name, "starting…", 0, false, null), null));
     }
 
     private IActionResult Invalid() =>

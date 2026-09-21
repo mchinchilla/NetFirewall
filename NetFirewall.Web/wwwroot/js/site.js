@@ -1038,6 +1038,18 @@ document.addEventListener("alpine:init", () => {
         get uptime() { return window.NetFw.formatUptime(this.nowMs - this.startedAtMs); }
     }));
 
+    /* ---------- store: diagJob ---------- Is an invasive diagnostics job (flow
+     * inspector / packet capture) running right now? The daemon allows exactly one
+     * box-wide, so a second Start can only earn a 409. The job panel and the start
+     * form are separate x-data scopes, so the flag lives in a store: the panel sets
+     * it on every poll, the form's submit button reads it.
+     *   panel: x-data x-init="$store.diagJob.set(true|false)"
+     *   form:  :disabled="busy || $store.diagJob.running" */
+    Alpine.store("diagJob", {
+        running: false,
+        set(v) { this.running = !!v; },
+    });
+
     /* ---------- diagTool ---------- Busy state + elapsed seconds for a diagnostics
      * form. Wire on the <form>:
      *   x-data="diagTool()" @htmx:before-request="start()" @htmx:after-request="stop()"
@@ -2361,10 +2373,16 @@ document.addEventListener("alpine:init", () => {
         code: "",
         error: "",
         busy: false,
-        retry: null, // { url, method }
+        retry: null,   // { url, method } from the 401
+        source: null,  // the element that made the challenged request
 
-        request(retry) {
+        request(retry, source) {
             this.retry = retry || null;
+            // The server can only tell us the URL and the verb. Replaying a form POST
+            // from those alone posts an EMPTY BODY, which is why the first Start after
+            // a step-up came back "the Interface field is required" and the second one
+            // worked. Keep the originating element so htmx re-reads the form.
+            this.source = source || null;
             this.code = "";
             this.error = "";
             this.busy = false;
@@ -2376,7 +2394,32 @@ document.addEventListener("alpine:init", () => {
         cancel() {
             this.open = false;
             this.retry = null;
+            this.source = null;
             this.code = "";
+        },
+
+        /* A privileged link (a file download) cannot recover from the step-up 401 on
+         * its own: the browser follows the href and renders the JSON body. Elevation
+         * also expires on a timer, so what the page knew when it rendered may be
+         * stale. Ask first, then either navigate or take the code and navigate after.
+         * Called as @click.prevent="$store.elevation.navigate($el.href)". */
+        async navigate(url) {
+            if (!url) return;
+            let elevated = false;
+            try {
+                const res = await fetch("/auth/elevation-state", {
+                    credentials: "same-origin",
+                    headers: { "HX-Request": "true" }
+                });
+                const env = await res.json().catch(() => null);
+                elevated = res.ok && env?.success === true && env?.data?.elevated === true;
+            } catch {
+                // Unreachable check: fall through to the modal rather than navigate
+                // into a 401 the browser would render as raw JSON.
+            }
+
+            if (elevated) { window.location.assign(url); return; }
+            this.request({ url, method: "GET", navigate: true }, null);
         },
 
         async submit() {
@@ -2414,12 +2457,20 @@ document.addEventListener("alpine:init", () => {
                     return;
                 }
 
-                // Success — close modal and replay the original request.
+                // Success — close the modal and replay the original request.
                 const retry = this.retry;
+                // Only replay through an element that is still on the page; a swap
+                // during the modal could have removed it.
+                const source = this.source && document.body.contains(this.source) ? this.source : null;
                 this.cancel();
+                // A guarded link just wanted the elevation; hand it the browser.
+                if (retry?.navigate && retry.url) { window.location.assign(retry.url); return; }
                 if (retry?.url && window.htmx) {
                     const verb = (retry.method || "GET").toLowerCase();
-                    window.htmx.ajax(verb, retry.url, { target: "body", swap: "none" });
+                    // With a source, htmx gathers that element's form values and uses its
+                    // own hx-target / hx-swap, so the replay behaves like the click did.
+                    // Without one, fall back to firing it and discarding the response.
+                    window.htmx.ajax(verb, retry.url, source ? { source } : { target: "body", swap: "none" });
                 }
             } catch (err) {
                 this.error = `Network error: ${err.message}`;
@@ -2543,7 +2594,9 @@ document.addEventListener("htmx:beforeRequest", (event) => {
 document.addEventListener("showElevationModal", (event) => {
     const elev = window.Alpine?.store("elevation");
     if (!elev) return;
-    elev.request(event.detail || null);
+    // htmx sets detail.elt to the element that made the request; event.target is the
+    // same thing before the event bubbles. Either one lets the retry re-read the form.
+    elev.request(event.detail || null, event.detail?.elt || event.target);
 });
 
 /* HTMX server errors → red toast. Skip the noise on 401 elevation challenges

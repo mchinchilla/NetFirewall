@@ -7,6 +7,7 @@ using NetFirewall.Services.Diagnostics.Capture;
 using NetFirewall.Services.Diagnostics.Jobs;
 using NetFirewall.Services.Diagnostics.Trace;
 using NetFirewall.Services.Processes;
+using NetFirewall.Tests.Infra;
 
 namespace NetFirewall.Tests.Diagnostics;
 
@@ -130,6 +131,68 @@ public class FlowInspectorAndCaptureTests
     [InlineData("tcpdump: listening on ens192\n", null)]
     public void Capture_ParsesTcpdumpCounters(string stderr, int? expected) =>
         Assert.Equal(expected, PacketCaptureService.ParseCapturedCount(stderr));
+
+    // libpcap names the DEVICE for failures that are really about the process, so the
+    // wording alone cannot tell the two apart. The probe's errno can, and the message
+    // has to follow it rather than always blaming the sandbox.
+    private static CapturePreflight Probe(CaptureCapability status) => new(status, "probe detail");
+
+    [Theory]
+    [InlineData(CaptureCapability.BlockedBySandbox, "AF_PACKET")]
+    [InlineData(CaptureCapability.PermissionDenied, "CAP_NET_RAW")]
+    [InlineData(CaptureCapability.Available, "ens192 itself")]
+    [InlineData(CaptureCapability.Unknown, "could not determine")]
+    public void Capture_DeviceRefusal_IsExplainedByWhatTheProbeFound(CaptureCapability status, string expected)
+    {
+        const string message = "tcpdump: ens192: Packet capture is not supported on that device";
+        var explained = PacketCaptureService.Explain(message, "ens192", Probe(status));
+
+        Assert.Contains(expected, explained, StringComparison.Ordinal);
+        Assert.StartsWith(message, explained, StringComparison.Ordinal);   // the original text survives
+    }
+
+    [Fact]
+    public void Capture_WorkingSandbox_DoesNotBlameTheUnit()
+    {
+        // The regression this guards: the first version always said "add AF_PACKET",
+        // which would have sent the operator to edit a unit that was already correct.
+        var explained = PacketCaptureService.Explain(
+            "tcpdump: ens192: Packet capture is not supported on that device", "ens192", Probe(CaptureCapability.Available));
+        Assert.DoesNotContain("RestrictAddressFamilies", explained, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Capture_OrdinaryErrors_AreLeftAlone()
+    {
+        const string plain = "tcpdump: syntax error in filter expression";
+        Assert.Equal(plain, PacketCaptureService.Explain(plain, "ens192", Probe(CaptureCapability.BlockedBySandbox)));
+    }
+
+    [LinuxOnlyFact]
+    public async Task Capture_TcpdumpRefused_EndsFailedNotCompleted()
+    {
+        // A capture that produced no file is a failure. Completing it painted the
+        // panel green over an error the operator has to act on.
+        var runner = new Mock<IProcessRunner>();
+        runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new ProcessResult(1, "", "tcpdump: ens192: Packet capture is not supported on that device\n"));
+
+        var registry = new DiagnosticJobRegistry(NullLogger<DiagnosticJobRegistry>.Instance);
+        var dir = Path.Combine(Path.GetTempPath(), "nf-capture-" + Guid.NewGuid().ToString("N"));
+        var store = new CaptureStore(Options.Create(new DiagnosticsOptions { CaptureDirectory = dir }), NullLogger<CaptureStore>.Instance);
+        var probe = new Mock<ICaptureCapabilityProbe>();
+        probe.Setup(p => p.Probe()).Returns(new CapturePreflight(CaptureCapability.BlockedBySandbox, "EAFNOSUPPORT"));
+        var svc = new PacketCaptureService(runner.Object, registry, store, probe.Object, Options.Create(new DiagnosticsOptions()), NullLogger<PacketCaptureService>.Instance);
+
+        var id = svc.Start(new CaptureRequest("ens192", null, 5, 10, 64), "marvin")!;
+        var snap = await WaitForFinishAsync(registry, id.Value);
+
+        Assert.Equal(DiagJobState.Failed, snap.State);
+        Assert.Contains("AF_PACKET", snap.Message);
+        Assert.Null(snap.Capture);
+
+        try { Directory.Delete(dir, true); } catch { /* best effort */ }
+    }
 
     [Fact]
     public void CaptureStore_KeysFilesByJobId_AndPurgesByAge()

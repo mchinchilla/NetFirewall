@@ -15,6 +15,7 @@ public sealed partial class PacketCaptureService : IPacketCaptureService
     private readonly IProcessRunner _runner;
     private readonly IDiagnosticJobRegistry _jobs;
     private readonly ICaptureStore _store;
+    private readonly ICaptureCapabilityProbe _capability;
     private readonly DiagnosticsOptions _opts;
     private readonly ILogger<PacketCaptureService> _logger;
 
@@ -22,12 +23,14 @@ public sealed partial class PacketCaptureService : IPacketCaptureService
         IProcessRunner runner,
         IDiagnosticJobRegistry jobs,
         ICaptureStore store,
+        ICaptureCapabilityProbe capability,
         IOptions<DiagnosticsOptions> opts,
         ILogger<PacketCaptureService> logger)
     {
         _runner = runner;
         _jobs = jobs;
         _store = store;
+        _capability = capability;
         _opts = opts.Value;
         _logger = logger;
     }
@@ -94,9 +97,11 @@ public sealed partial class PacketCaptureService : IPacketCaptureService
                 var timedOut = res.ExitCode == 124;        // duration elapsed
                 if (!reachedCount && !timedOut)
                 {
-                    var why = FirstLine(res.Error) ?? $"tcpdump exited with {res.ExitCode}";
+                    var why = Explain(FirstLine(res.Error) ?? $"tcpdump exited with {res.ExitCode}",
+                                      request.Interface, _capability.Probe());
                     _store.Delete(handle.Id);
-                    handle.Complete(new CaptureResult(string.Empty, 0, 0, Array.Empty<string>(), false, why));
+                    // No pcap, no packets — a failure, not a green "completed" panel.
+                    handle.Fail(why);
                     return;
                 }
 
@@ -151,6 +156,44 @@ public sealed partial class PacketCaptureService : IPacketCaptureService
     {
         var m = CapturedRx().Match(stderr ?? string.Empty);
         return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : null;
+    }
+
+    /// <summary>
+    /// Replace tcpdump's least helpful error with what the probe actually found.
+    ///
+    /// libpcap says "Packet capture is not supported on that device" for several
+    /// unrelated reasons, and by naming the device it points the operator at the
+    /// NIC. Asking the kernel ourselves says which one it is, so the panel states a
+    /// fact instead of listing suspects.
+    /// </summary>
+    internal static string Explain(string message, string iface, CapturePreflight probe)
+    {
+        var deviceRefused = message.Contains("not supported on that device", StringComparison.OrdinalIgnoreCase)
+                            || message.Contains("You don't have permission", StringComparison.OrdinalIgnoreCase)
+                            || message.Contains("Operation not permitted", StringComparison.OrdinalIgnoreCase);
+        if (!deviceRefused) return message;
+
+        return probe.Status switch
+        {
+            CaptureCapability.BlockedBySandbox =>
+                $"{message} — this is not the NIC. The daemon may not open capture sockets at all "
+                + $"({probe.Detail}): add AF_PACKET to RestrictAddressFamilies in "
+                + "netfirewall-daemon.service, then `systemctl daemon-reload && systemctl restart "
+                + "netfirewall-daemon`. Re-running deploy/install.sh installs the current unit.",
+
+            CaptureCapability.PermissionDenied =>
+                $"{message} — the daemon may not open capture sockets ({probe.Detail}). "
+                + "It needs CAP_NET_RAW; check CapabilityBoundingSet in netfirewall-daemon.service.",
+
+            // The sandbox is fine, so the device really is the problem.
+            CaptureCapability.Available =>
+                $"{message} — the daemon CAN open capture sockets ({probe.Detail}), so the refusal is "
+                + $"about {iface} itself: check that it exists, is up, and is a type tcpdump can read "
+                + $"(`ip -br link show {iface}`).",
+
+            _ => $"{message} — could not determine whether the daemon may open capture sockets "
+                 + $"({probe.Detail}).",
+        };
     }
 
     private static string? FirstLine(string? s) =>

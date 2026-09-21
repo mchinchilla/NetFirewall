@@ -6,6 +6,7 @@ using NetFirewall.Services.Network;
 using NetFirewall.Services.Processes;
 using NetFirewall.Tests.Infra;
 using System.Net;
+using System.Runtime.Versioning;
 using Xunit;
 
 namespace NetFirewall.Tests.Firewall;
@@ -15,6 +16,11 @@ namespace NetFirewall.Tests.Firewall;
 /// scoped re-install a WireGuard bring-up runs. Real Postgres for the rows,
 /// mocked runner for the kernel.
 /// </summary>
+// PolicyRoutingApplyService is [SupportedOSPlatform("linux")]; the runner is mocked
+// here, so nothing platform-specific executes and the tests run cross-platform.
+// Marking the class silences CA1416 without skipping them off Linux — the same
+// treatment ConntrackSamplerClassificationTests gets.
+[SupportedOSPlatform("linux")]
 [Collection("Postgres")]
 public sealed class PolicyRoutingReapplyTests : IAsyncLifetime
 {

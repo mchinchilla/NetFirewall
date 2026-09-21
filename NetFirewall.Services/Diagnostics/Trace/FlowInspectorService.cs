@@ -66,7 +66,9 @@ public sealed partial class FlowInspectorService : IFlowInspectorService
                 error = await InstallAsync(preMatch, outMatch, handle.Token);
                 if (error is not null)
                 {
-                    handle.Complete(new TraceResult(events, spec, false, 0, error));
+                    // Nothing was traced and nothing will be. Completing here would paint
+                    // the panel green over an error the operator has to act on.
+                    handle.Fail(error);
                     return;
                 }
                 installed = true;

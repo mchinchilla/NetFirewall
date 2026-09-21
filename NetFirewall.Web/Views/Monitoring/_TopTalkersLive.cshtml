@@ -29,7 +29,7 @@
             var active = r == Model.Range;
             <button type="button" class="px-2.5 py-1 rounded font-medium transition@(active ? " shadow-sm" : "")"
                     style="@(active ? "background-color: var(--surface-elevated); color: var(--surface-fg);" : "color: var(--surface-fg-muted);")"
-                    @(active ? "aria-current=true" : "")
+                    @Html.Raw(active ? "aria-current=\"true\"" : "")
                     @@click="talkersRange = '@r'; htmx.ajax('GET', '/Monitoring/toptalkers?range=@r', { target: $el.closest('.loading-host'), swap: 'innerHTML' })">@r</button>
         }
     </div>

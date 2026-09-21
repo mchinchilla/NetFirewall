@@ -12,7 +12,8 @@
     <div class="flex flex-wrap items-center gap-3 mb-3">
         <span class="text-sm">@c.PacketsCaptured packet(s) · @DiagUi.Bytes(c.SizeBytes)</span>
         @if (c.ReachedLimit) { <span class="badge badge-warning">packet limit reached</span> }
-        <a href="/Diagnostics/Jobs/@Model.JobId/download" class="btn btn-primary text-xs ml-auto">Download .pcap</a>
+        <a href="/Diagnostics/Jobs/@Model.JobId/download" class="btn btn-primary text-xs ml-auto"
+           @@click.prevent="$store.elevation.navigate($el.href)">Download .pcap</a>
         <form hx-post="/Diagnostics/Jobs/@Model.JobId/delete" hx-swap="none" hx-trigger="confirmed-delete">
             @Html.AntiForgeryToken()
             <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"

@@ -6,6 +6,13 @@
     // The panel polls itself while the job runs and simply stops emitting the
     // trigger once it does not — no timer to clean up, no Alpine state.
     var poll = job is { IsRunning: true };
+    // Built as one raw string on purpose, quotes included. A conditional expression
+    // written straight into the tag emits the attribute UNQUOTED, and the parser then
+    // reads hx-trigger=every plus a stray boolean attribute 2s — htmx sees an invalid
+    // trigger and never polls, so the panel sat at 0 packets / 0s until a reload.
+    var pollAttrs = poll
+        ? $"hx-get=\"/Diagnostics/Jobs/{job!.Id}\" hx-trigger=\"every 2s\" hx-swap=\"outerHTML\""
+        : string.Empty;
     var badge = job?.State switch
     {
         DiagJobState.Completed => "badge-success",
@@ -25,10 +32,9 @@ else if (job is null)
 }
 else
 {
-    <div id="job-panel"
-         @(poll ? "hx-get=/Diagnostics/Jobs/" + job.Id : "")
-         @(poll ? "hx-trigger=every 2s" : "")
-         @(poll ? "hx-swap=outerHTML" : "")>
+    @* Publish the running flag so the start form on the same page can keep its
+       button disabled for the whole job, not just for the POST that starts it. *@
+    <div id="job-panel" x-data x-init="$store.diagJob.set(@(job.IsRunning ? "true" : "false"))" @Html.Raw(pollAttrs)>
         <div class="flex flex-wrap items-center gap-2 mb-3">
             <span class="badge @badge">@job.State.ToString().ToUpperInvariant()</span>
             <span class="text-sm font-medium">@(job.Kind == DiagJobKind.Trace ? "Flow inspector" : "Packet capture")</span>

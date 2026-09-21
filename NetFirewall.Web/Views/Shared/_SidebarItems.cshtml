@@ -1,3 +1,4 @@
+@using NetFirewall.Web.Helpers
 @*
     Sidebar nav items. Reused by desktop rail and mobile drawer.
     When ViewData["ForceExpanded"] == true, labels render unconditionally
@@ -9,22 +10,21 @@
 
     var path = Context.Request.Path.Value ?? "/";
 
-    // True when the current request is exactly this URL or a child route.
-    // Use trailing-slash matching so "/Firewall/Qos" doesn't light up
-    // "/Firewall/QosOther" but does match "/Firewall/Qos/{id}/Classes".
-    bool IsActive(string href)
-    {
-        if (string.IsNullOrEmpty(href) || href == "#") return false;
-        if (href == "/") return path == "/";
-        return string.Equals(path, href, StringComparison.OrdinalIgnoreCase)
-               || path.StartsWith(href + "/", StringComparison.OrdinalIgnoreCase);
-    }
+    // Matching rules live in NavActiveState so they can be tested. A link matches
+    // its own route and anything beneath it; inside a group the longest match wins,
+    // so a section index ("All tools" = /Diagnostics) goes dark once a child page
+    // like /Diagnostics/Vpn is open instead of both looking selected.
+    bool IsActive(string href) => NavActiveState.Matches(path, href);
 
     // True when ANY child route in the same section matches — used to auto-open
     // the collapsible group on first render.
-    bool AnyActive(params string[] hrefs) => hrefs.Any(IsActive);
+    bool AnyActive(params string?[] hrefs) => NavActiveState.AnyActive(path, hrefs);
 
     string ActiveCls(string href) => IsActive(href) ? " active" : string.Empty;
+
+    // Same, but only when no sibling in the group is a closer match.
+    string ActiveIn(string?[] group, string href) =>
+        NavActiveState.IsActive(path, href, group) ? " active" : string.Empty;
 
     // Pre-compute group open states — avoids re-evaluating per link.
     var diagHrefs = new[] {
@@ -157,7 +157,7 @@
         </svg>
     </button>
     <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
-        <a href="@Url.Action("Index", "Diagnostics")"        class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "Diagnostics")!))">All tools</a>
+        <a href="@Url.Action("Index", "Diagnostics")"        class="nav-link py-1.5@(ActiveIn(diagHrefs, Url.Action("Index", "Diagnostics")!))">All tools</a>
         <a href="/Diagnostics/Vpn"                             class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Vpn"))">VPN doctor</a>
         <a href="/Diagnostics/Wan"                             class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Wan"))">WAN doctor</a>
         <a href="/Diagnostics/Dhcp"                            class="nav-link py-1.5 text-accent@(ActiveCls("/Diagnostics/Dhcp"))">DHCP doctor</a>

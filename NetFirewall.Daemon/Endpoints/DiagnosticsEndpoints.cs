@@ -482,11 +482,20 @@ public static class DiagnosticsEndpoints
         inv.MapPost("/jobs/{id:guid}/cancel", async (
                 Guid id, IDiagnosticJobRegistry jobs, IAuthAuditService audit, ClaimsPrincipal user, HttpContext ctx, CancellationToken ct) =>
         {
-            var stopped = jobs.Cancel(id);
-            if (stopped) await AuditJobAsync(audit, AuthAuditEvents.DiagJobCancelled, user, ctx, new { runId = id }, ct);
-            return Results.Json(stopped
-                ? ServiceResponse<object>.Ok(new { }, "Stopping — the partial result is kept.")
-                : ServiceResponse<object>.Fail("That job is not running."));
+            var job = jobs.Get(id);
+            if (job is null)
+                return Results.Json(ServiceResponse<object>.Fail("Unknown or expired job."), statusCode: 404);
+
+            if (jobs.Cancel(id))
+            {
+                await AuditJobAsync(audit, AuthAuditEvents.DiagJobCancelled, user, ctx, new { runId = id }, ct);
+                return Results.Json(ServiceResponse<object>.Ok(new { }, "Stopping — the partial result is kept."));
+            }
+
+            // It finished between the panel's last refresh and the click. Nothing went
+            // wrong, so this is not a red toast — the caller re-reads the job anyway.
+            return Results.Json(ServiceResponse<object>.Ok(new { },
+                $"That job already finished ({job.State.ToString().ToLowerInvariant()})."));
         })
         .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
 

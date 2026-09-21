@@ -37,7 +37,7 @@
             })
             <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
                 <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`starting… ${elapsed}s`"></span>
-                <button type="submit" class="btn btn-primary" :disabled="busy">Start capture</button>
+                <button type="submit" class="btn btn-primary" :disabled="busy || $store.diagJob.running">Start capture</button>
             </div>
         </form>
     </section>

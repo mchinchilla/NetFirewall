@@ -188,6 +188,26 @@ public sealed class AuthController : Controller
         return Request.IsHtmxRequest() ? HtmxRedirect(destination) : LocalRedirect(destination);
     }
 
+    // ---------------------------------------------------- /auth/elevation-state
+
+    /// <summary>
+    /// Read-only: is this session still elevated? Nothing is audited and nothing
+    /// changes, so a control can ask before it navigates somewhere privileged.
+    /// A plain link cannot recover from the step-up 401 — the browser just renders
+    /// the JSON body — so "Download .pcap" checks here and opens the modal instead.
+    /// </summary>
+    [HttpGet("/auth/elevation-state"), Authorize]
+    public IActionResult ElevationState()
+    {
+        var elevated = string.Equals(
+            User.FindFirstValue(SessionCookieAuthHandler.AuthLevelClaim),
+            AuthLevels.Elevated, StringComparison.OrdinalIgnoreCase);
+
+        return Json(ServiceResponse<NetFirewall.Models.Auth.ElevationState>.Ok(
+            new NetFirewall.Models.Auth.ElevationState(elevated),
+            elevated ? "Session is elevated." : "Session needs a TOTP step-up."));
+    }
+
     // ----------------------------------------------------------- /auth/elevate
 
     [HttpPost("/auth/elevate"), ValidateAntiForgeryToken, Authorize]

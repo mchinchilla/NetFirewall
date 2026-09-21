@@ -29,6 +29,17 @@ builder.Host.UseSerilog((context, services, configuration) =>
 
 builder.AddServiceDefaults();
 
+// Walk every descriptor at startup and refuse to run with one the container
+// cannot build. The hand-kept mustResolve list below predates this and still
+// earns its place: ValidateOnBuild skips factory registrations, which is most
+// of the daemon-vs-null client wiring. Scope validation stays in Development —
+// singletons here deliberately create their own scopes.
+builder.Host.UseDefaultServiceProvider((ctx, o) =>
+{
+    o.ValidateOnBuild = true;
+    o.ValidateScopes = ctx.HostingEnvironment.IsDevelopment();
+});
+
 // DataProtection keys go to a persistent dir so sessions survive a Web
 // restart. systemd's StateDirectory= (netfirewall/web) creates the parent
 // owned by the netfirewall-web user; we just nest "keys" under it. Without
