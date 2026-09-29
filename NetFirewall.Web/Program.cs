@@ -209,6 +209,9 @@ builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceResolver,
 // (IDaemonClient.WakeOnLanAsync) — it binds to the LAN link, the Web cannot.
 builder.Services.AddScoped<NetFirewall.Services.Wol.IWolDeviceService,
                            NetFirewall.Services.Wol.WolDeviceService>();
+// Wake one saved device / all of them: daemon call + last_woken stamp per device.
+builder.Services.AddScoped<NetFirewall.Services.Wol.IWolDeviceWakeService,
+                           NetFirewall.Services.Wol.WolDeviceWakeService>();
 
 // Full-text search — Postgres tsvector + GIN, fed by per-source triggers.
 builder.Services.AddScoped<NetFirewall.Services.Search.ISearchService,

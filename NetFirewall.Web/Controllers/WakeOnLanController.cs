@@ -25,13 +25,18 @@ namespace NetFirewall.Web.Controllers;
 [Route("/Network/WakeOnLan")]
 public sealed class WakeOnLanController : Controller
 {
+    /// <summary>Upper bound on ticked ids in one request — a list, not a flood.</summary>
+    private const int MaxSelection = 500;
+
     private readonly IWolDeviceService _devices;
+    private readonly IWolDeviceWakeService _waker;
     private readonly IDaemonClient _daemon;
     private readonly IFirewallService _fw;
 
-    public WakeOnLanController(IWolDeviceService devices, IDaemonClient daemon, IFirewallService fw)
+    public WakeOnLanController(IWolDeviceService devices, IWolDeviceWakeService waker, IDaemonClient daemon, IFirewallService fw)
     {
         _devices = devices;
+        _waker = waker;
         _daemon = daemon;
         _fw = fw;
     }
@@ -99,16 +104,40 @@ public sealed class WakeOnLanController : Controller
     [HttpPost("wake/{id:guid}"), ValidateAntiForgeryToken]
     public async Task<IActionResult> WakeDevice(Guid id, CancellationToken ct)
     {
-        var device = await _devices.GetByIdAsync(id, ct);
-        if (device is null) return this.ToHtmxResponse(ServiceResponse<WolWakeResult>.Fail("Device not found."));
+        var sent = await _waker.WakeAsync(id, User.Identity?.Name, ct);
+        if (sent.Success) this.AttachHxEvent("refreshWol", new { });
+        return this.ToHtmxResponse(sent);
+    }
 
-        var sent = await _daemon.WakeOnLanAsync(new WolWakeRequest(device.MacAddress, device.Interface, null, device.Port), ct);
-        if (sent.Success)
+    /// <summary>
+    /// The ticked devices, or every saved device when none is ticked (the list's one
+    /// "Wake all / Wake selected" button). Partial success comes back as a warning
+    /// naming the ones that failed.
+    /// </summary>
+    [HttpPost("wake-many"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> WakeMany([FromForm] string? scope, [FromForm] List<Guid>? ids, CancellationToken ct)
+    {
+        // The scope is explicit so a selection that fails to reach us is refused,
+        // never silently widened into "wake everything".
+        IReadOnlyCollection<Guid>? selection;
+        switch (scope)
         {
-            await _devices.MarkWokenAsync(id, User.Identity?.Name, ct);
-            sent = ServiceResponse<WolWakeResult>.Ok(sent.Data!, $"Wake sent to {device.Name} on {sent.Data!.Interface}. It usually takes 10-60 s to show up as online.");
-            this.AttachHxEvent("refreshWol", new { });
+            case "all":
+                selection = null;
+                break;
+            case "selected" when ids is { Count: > 0 and <= MaxSelection }:
+                selection = ids;
+                break;
+            case "selected":
+                return this.ToHtmxResponse(ServiceResponse<WolBatchResult>.Fail(ids is { Count: > 0 }
+                    ? $"Select at most {MaxSelection} devices at a time."
+                    : "Nothing is selected."));
+            default:
+                return this.ToHtmxResponse(ServiceResponse<WolBatchResult>.Fail("Scope must be 'all' or 'selected'."));
         }
+
+        var sent = await _waker.WakeManyAsync(selection, User.Identity?.Name, ct);
+        if (sent.Data?.Sent > 0) this.AttachHxEvent("refreshWol", new { });
         return this.ToHtmxResponse(sent);
     }
 

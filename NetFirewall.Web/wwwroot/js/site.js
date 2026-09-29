@@ -1069,6 +1069,49 @@ document.addEventListener("alpine:init", () => {
         destroy() { this._clear(); }
     }));
 
+    /* ---------- wolSelection ---------- Wake-on-LAN device list: a checkbox per
+     * row and ONE button that wakes the ticked devices, or all of them when
+     * nothing is ticked. The scope travels explicitly (hx-vals) so the server can
+     * refuse "selected" with no ids instead of widening it to everything.
+     *   wrapper: x-data="wolSelection(<device count>)"
+     *   rows:    <input type="checkbox" name="ids" value="<id>" x-model="selected" data-wol-select>
+     *   button:  hx-post=… hx-trigger="confirmed-wake" hx-include="[data-wol-select]"
+     *            :hx-vals="JSON.stringify({ scope })" @click.prevent="confirmWake($el)"
+     * "Select all" only touches rows the table filter left visible. */
+    Alpine.data("wolSelection", (total) => ({
+        total,
+        selected: [],
+        get count() { return this.selected.length; },
+        get scope() { return this.count > 0 ? "selected" : "all"; },
+        get label() { return this.count > 0 ? `Wake selected (${this.count})` : `Wake all (${this.total})`; },
+        _visibleIds() {
+            return Array.from(this.$root.querySelectorAll("input[data-wol-select]"))
+                .filter((cb) => !cb.closest("tr")?.classList.contains("hidden"))
+                .map((cb) => cb.value);
+        },
+        allVisibleSelected() {
+            const ids = this._visibleIds();
+            return ids.length > 0 && ids.every((id) => this.selected.includes(id));
+        },
+        toggleVisible(on) {
+            const ids = this._visibleIds();
+            this.selected = on
+                ? Array.from(new Set([...this.selected, ...ids]))
+                : this.selected.filter((id) => !ids.includes(id));
+        },
+        async confirmWake(el) {
+            const n = this.count > 0 ? this.count : this.total;
+            const plural = n === 1 ? "" : "s";
+            const ok = await Alpine.store("confirm").ask({
+                title: this.count > 0 ? `Wake ${n} selected device${plural}?` : `Wake all ${n} device${plural}?`,
+                message: "A magic packet goes out on each device's own interface. Machines that are already on ignore it.",
+                confirmLabel: "Send wake",
+                level: "default"
+            });
+            if (ok) htmx.trigger(el, "confirmed-wake");
+        }
+    }));
+
     /* ---------- copyButton ---------- Copies the textContent of a selector.
      *   x-data="copyButton('#run-params')" @click="copy()" x-text="copied ? 'Copied!' : 'Copy'" */
     Alpine.data("copyButton", (selector) => ({

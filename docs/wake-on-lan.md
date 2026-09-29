@@ -36,6 +36,15 @@ interface, UDP port (default 9), description, last woken at/by. The list joins
 DHCP by MAC to show the reserved (else last-leased) IP and hostname, and rows are
 in the global search (`entity_type = 'wol_device'`).
 
+**Waking several at once**: tick devices and the list's button becomes
+**Wake selected (k)**; with nothing ticked it is **Wake all (N)**. Both confirm
+with the exact count first. `POST /Network/WakeOnLan/wake-many` carries an explicit
+`scope` (`all` | `selected`); `selected` without ids is refused rather than
+widened to everything. `WolDeviceWakeService` sends 4 at a time, each through the
+normal daemon endpoint (so each is audited on its own) and stamps only the ones
+that left. The toast is green when all were sent, amber naming the failures when
+some were, red when none were. "Select all" ticks only the rows the filter shows.
+
 **Status** is the firewall's ARP table (`GET /v1/diagnostics/neighbors`),
 re-read every 15 s and swapped into the badges out-of-band:
 

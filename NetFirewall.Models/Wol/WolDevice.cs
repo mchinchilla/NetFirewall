@@ -49,6 +49,16 @@ public static class WolDefaults
 /// </summary>
 public sealed record WolWakeRequest(string Mac, string? Interface = null, string? IpHint = null, int? Port = null);
 
+/// <summary>Outcome of waking every saved device: one item per device, in list order.</summary>
+public sealed record WolBatchResult(IReadOnlyList<WolBatchItem> Items)
+{
+    public int Total => Items.Count;
+    public int Sent => Items.Count(i => i.Sent);
+}
+
+/// <param name="Error">Why the daemon refused or failed this one; null when sent.</param>
+public sealed record WolBatchItem(Guid DeviceId, string Name, bool Sent, string? Interface, string? Error);
+
 /// <param name="Mac">Canonical MAC the packet carries.</param>
 /// <param name="Interface">Link it left through.</param>
 /// <param name="InterfaceSource">Why that link: <c>requested</c>, or <c>subnet 192.168.10.0/24</c> when resolved from the IP hint.</param>
