@@ -20,6 +20,7 @@
         "dhcp_reservation" => "DHCP reservation",
         "dhcp_lease"      => "DHCP lease",
         "wg_peer"        => "WireGuard peer",
+        "wol_device"      => "Wake-on-LAN device",
         _                 => t
     };
     // Tailwind utility class for the section header tint — keeps every color
@@ -31,7 +32,7 @@
             or "traffic_mark" or "qos_config" or "qos_class" or "fw_schedule" => "text-accent",
         "network_object"  => "text-feedback-info-fg",
         "network_service" => "text-feedback-info-fg",
-        "static_route" or "fw_interface" => "text-feedback-info-fg",
+        "static_route" or "fw_interface" or "wol_device" => "text-feedback-info-fg",
         "dhcp_subnet" or "dhcp_reservation" or "dhcp_lease" => "text-feedback-success-fg",
         "wg_peer"         => "text-feedback-warning-fg",
         _                 => "text-surface-fg-muted"
@@ -45,7 +46,7 @@
     {
         "filter_rule", "nat_rule", "port_forward", "mangle_rule", "traffic_mark",
         "qos_config", "qos_class", "fw_schedule", "static_route",
-        "network_object", "network_service", "dhcp_reservation"
+        "network_object", "network_service", "dhcp_reservation", "wol_device"
     };
     static string EditTitle(string t) => t switch
     {
@@ -61,6 +62,7 @@
         "network_object"   => "Edit object",
         "network_service"  => "Edit service",
         "dhcp_reservation" => "Edit reservation",
+        "wol_device"       => "Edit device",
         _                  => "Edit"
     };
     var grouped = Model.GroupBy(h => h.EntityType).OrderByDescending(g => g.First().Rank).ToList();

@@ -1,0 +1,79 @@
+@model NetFirewall.Web.Models.Network.WolPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Network
+@{
+    ViewData["Title"] = "Network — Wake-on-LAN";
+    Layout = "_Layout";
+}
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4"
+     style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Wake-on-LAN</h1>
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+            Power on sleeping machines from the firewall. The daemon broadcasts the magic packet out of the LAN interface the device is plugged into, so it works from anywhere you can reach this page, VPN included.
+        </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="btn btn-primary"
+                hx-get="/Network/WakeOnLan/edit"
+                hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('Add device')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add device
+        </button>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <div class="xl:col-span-2 space-y-4">
+        <div class="flex flex-wrap items-center gap-2" style="animation: var(--animate-slide-up); animation-delay: 40ms;">
+            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "wol-devices-table", Placeholder = "Filter by name, MAC, IP, interface…", ClientSide = true })
+        </div>
+
+        <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
+            <div id="wol-devices-table"
+                 hx-get="/Network/WakeOnLan/table"
+                 hx-trigger="load, refreshWol from:body"
+                 hx-swap="innerHTML">
+                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+            </div>
+            @* Presence comes from the ARP table: re-read it every 15 s so a machine that was just woken turns "online" on its own. Badges only (out-of-band), never the rows. *@
+            <div hx-get="/Network/WakeOnLan/presence" hx-trigger="every 15s" hx-swap="none" aria-hidden="true"></div>
+        </section>
+    </div>
+
+    <div class="space-y-4">
+        <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+            <h2 class="text-sm font-semibold mb-1">Wake a MAC once</h2>
+            <p class="text-xs text-surface-fg-muted mb-4">For a machine you don't need to keep in the list. DHCP reservations and leases also have a Wake button.</p>
+            <form hx-post="/Network/WakeOnLan/wake" hx-swap="none"
+                  x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()"
+                  class="space-y-4">
+                @Html.AntiForgeryToken()
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(WolWakeFormViewModel.MacAddress), Label = "MAC address", Required = true,
+                    Placeholder = "AA:BB:CC:DD:EE:FF", Pattern = WolPatterns.Mac, MaxLength = 17,
+                    Help = "Any of AA:BB:CC:DD:EE:FF, aa-bb-cc-dd-ee-ff, aabb.ccdd.eeff or AABBCCDDEEFF."
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(WolWakeFormViewModel.Interface), Label = "Interface", Required = true,
+                    Kind = FormFieldKind.Select, Options = Model.InterfaceOptions,
+                    Help = "The LAN the machine is plugged into. A wake never crosses a router."
+                })
+                <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                    <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak>sending…</span>
+                    <button type="submit" class="btn btn-primary" :disabled="busy">Send wake</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card text-xs text-surface-fg-muted space-y-2" style="animation: var(--animate-slide-up); animation-delay: 100ms;">
+            <h2 class="text-sm font-semibold text-surface-fg">If nothing wakes up</h2>
+            <p>Wake-on-LAN has to be enabled on the machine itself: in the BIOS/UEFI (often "Power on by PCI-E" or "Wake on LAN") and, on Windows, on the network adapter ("Wake on Magic Packet", with Fast Startup off).</p>
+            <p>Most NICs only listen while the machine is asleep or soft-off and still has standby power, and most Wi-Fi adapters do not listen at all.</p>
+            <p><span class="font-medium text-surface-fg">Status</span> is the firewall's ARP table: <span class="badge badge-success">online</span> means the NIC answered in the last ~30 s; <span class="badge badge-muted">idle</span> means it is remembered but quiet, which is also what a sleeping machine looks like.</p>
+        </section>
+    </div>
+</div>

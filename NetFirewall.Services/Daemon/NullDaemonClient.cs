@@ -186,6 +186,9 @@ public sealed class NullDaemonClient : IDaemonClient
         => Task.FromResult(ServiceResponse<AlertsDto>.Ok(
             new AlertsDto(Array.Empty<NetFirewall.Models.Vpn.SystemAlert>()), "Daemon disabled."));
 
+    public Task<ServiceResponse<NetFirewall.Models.Wol.WolWakeResult>> WakeOnLanAsync(NetFirewall.Models.Wol.WolWakeRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<NetFirewall.Models.Wol.WolWakeResult>());
+
     // ───────────── Diagnostics — every tool needs the daemon (root, CAP_NET_ADMIN) ─────────────
     public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>> RunPingAsync(NetFirewall.Models.Diagnostics.PingRequest request, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>>());

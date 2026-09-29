@@ -1,0 +1,52 @@
+@model NetFirewall.Web.Models.Network.WolDeviceFormPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Network
+@{
+    var f = Model.Form;
+}
+
+<form id="wol-device-form"
+      hx-post="/Network/WakeOnLan/save"
+      hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (f.Id.HasValue)
+    {
+        <input type="hidden" name="Id" value="@f.Id" />
+    }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(f.Name), Label = "Name", Required = true, Value = f.Name, MaxLength = 64,
+            Placeholder = "office-desktop, nas, media-pc…"
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(f.MacAddress), Label = "MAC address", Required = true, Value = f.MacAddress,
+            Placeholder = "AA:BB:CC:DD:EE:FF", Pattern = WolPatterns.Mac, MaxLength = 17,
+            Help = "The wired NIC's address. Any of AA:BB:CC:DD:EE:FF, aa-bb-cc-dd-ee-ff, aabb.ccdd.eeff or AABBCCDDEEFF."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(f.Interface), Label = "Interface", Required = true, Value = f.Interface,
+            Kind = FormFieldKind.Select, Options = Model.InterfaceOptions,
+            Help = "The LAN the machine is plugged into; the wake is broadcast only there."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(f.Port), Label = "UDP port", Kind = FormFieldKind.Number, Required = true,
+            Value = f.Port.ToString(), Min = "1", Max = "65535",
+            Help = "9 works for nearly everything; some older NICs want 7."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(f.Description), Label = "Description", Kind = FormFieldKind.Textarea,
+            Value = f.Description, MaxLength = 255,
+            Placeholder = "where it is, who uses it…"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(f.Id.HasValue ? "Save changes" : "Add device")</button>
+    </div>
+</form>

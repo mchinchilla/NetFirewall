@@ -254,6 +254,10 @@ public interface IDaemonClient
     /// <summary><c>GET /v1/system/alerts</c> — recent system alerts (active + resolved),
     /// the unified activity feed. Powers the notifications dropdown + history page.</summary>
     Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default);
+
+    /// <summary><c>POST /v1/wol/wake</c> — broadcast a magic packet on a LAN link (by
+    /// name, or the link whose subnet holds the request's IP hint).</summary>
+    Task<ServiceResponse<NetFirewall.Models.Wol.WolWakeResult>> WakeOnLanAsync(NetFirewall.Models.Wol.WolWakeRequest request, CancellationToken ct = default);
 }
 
 public sealed record TerminalTicketDto(string Ticket);

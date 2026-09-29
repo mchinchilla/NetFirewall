@@ -52,7 +52,7 @@ public sealed class ValidationToServiceResponseFilter : IActionFilter
         {
             // Fallback: plain HX-Trigger without controller convenience.
             context.HttpContext.Response.Headers["HX-Trigger"] =
-                System.Text.Json.JsonSerializer.Serialize(new { showToast = new { level = "warning", message = envelope.Message ?? "Validation failed" } });
+                System.Text.Json.JsonSerializer.Serialize(new { showToast = new { level = "warning", message = envelope.Message ?? "Validation failed", target = "body" } });
         }
 
         context.Result = new JsonResult(envelope) { StatusCode = 422 };

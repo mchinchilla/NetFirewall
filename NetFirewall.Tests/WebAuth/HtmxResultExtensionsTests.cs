@@ -65,6 +65,19 @@ public class HtmxResultExtensionsTests
     }
 
     [Fact]
+    public void AttachToastTrigger_AnchorsTheEventToBody()
+    {
+        // htmx fires HX-Trigger events on the requesting element unless the payload
+        // names a target. A row button swapped out by a list poll mid-request is
+        // detached, and its toast would never reach the document listener.
+        var c = MakeController();
+        c.AttachToastTrigger(ServiceResponse<string>.Ok("data", "Wake sent."));
+
+        var toast = ParseTrigger(c.Response.Headers["HX-Trigger"].ToString())["showToast"];
+        Assert.Equal("body", toast.GetProperty("target").GetString());
+    }
+
+    [Fact]
     public void AttachToastTrigger_SuccessNoMessage_NoHeaderEmitted()
     {
         // Silent success on a partial swap — nothing to toast about.

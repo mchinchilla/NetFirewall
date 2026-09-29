@@ -49,7 +49,7 @@
     var netHrefs = new[] {
         Url.Action("Interfaces", "Network")!, Url.Action("Index", "StaticRoutes")!,
         Url.Action("Index", "NetworkObjects")!, Url.Action("Index", "NetworkServices")!,
-        Url.Action("Index", "WanFailover")!
+        Url.Action("Index", "WanFailover")!, Url.Action("Index", "WakeOnLan")!
     };
 
     var dhcpOpen = AnyActive(dhcpHrefs) ? "true" : "false";
@@ -126,6 +126,7 @@
         <a href="@Url.Action("Index", "StaticRoutes")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "StaticRoutes")!))">Static routes</a>
         <a href="@Url.Action("Index", "NetworkObjects")"  class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkObjects")!))">Objects</a>
         <a href="@Url.Action("Index", "NetworkServices")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "NetworkServices")!))">Services</a>
+        <a href="@Url.Action("Index", "WakeOnLan")"       class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "WakeOnLan")!))">Wake-on-LAN</a>
     </div>
 </div>
 

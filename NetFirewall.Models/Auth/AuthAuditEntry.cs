@@ -57,4 +57,8 @@ public static class AuthAuditEvents
     public const string DiagCaptureStarted   = "diag.capture.started";
     public const string DiagCaptureDownloaded = "diag.capture.downloaded";
     public const string DiagJobCancelled     = "diag.job.cancelled";
+
+    // Wake-on-LAN: a broadcast the daemon puts on a LAN segment on someone's behalf.
+    public const string WolSent          = "wol.sent";
+    public const string WolFailed        = "wol.failed";
 }

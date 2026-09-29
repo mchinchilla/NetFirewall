@@ -50,7 +50,7 @@ else
                         <th class="px-2 py-1.5 font-medium hidden md:table-cell">Host</th>
                         <th class="px-2 py-1.5 font-medium hidden lg:table-cell">Expires</th>
                         <th class="px-2 py-1.5 font-medium w-20">Status</th>
-                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                        <th class="pl-2 pr-5 py-1.5 font-medium text-right w-40">Actions</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y border-surface-border">
@@ -84,6 +84,12 @@ else
                                 }
                             </td>
                             <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                                @* Wake on every row: an expired lease is usually a machine that is asleep. *@
+                                @await Html.PartialAsync("_WakeButton", new WakeButtonViewModel
+                                {
+                                    Subject = l.Hostname ?? l.MacAddress.ToString(),
+                                    Values = new Dictionary<string, string> { ["MacAddress"] = l.MacAddress.ToString(), ["IpHint"] = l.IpAddress.ToString() }
+                                })
                                 @if (!expiredRow)
                                 {
                                     var msg = $"Release lease {l.IpAddress} (MAC {l.MacAddress})? The client will need to renew via DHCPREQUEST.";
@@ -100,10 +106,6 @@ else
                                                 });
                                                 if (ok) htmx.trigger($el, 'confirmed-rel');
                                             })()">Release</button>
-                                }
-                                else
-                                {
-                                    <span class="text-xs text-surface-fg-muted">—</span>
                                 }
                             </td>
                         </tr>

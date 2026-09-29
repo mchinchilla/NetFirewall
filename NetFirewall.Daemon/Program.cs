@@ -115,6 +115,11 @@ builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.ISysctlSanityServ
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IWgLiveReader, NetFirewall.Services.Diagnostics.WgLiveReader>();
 builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.DiagRunPrunerService>();
 
+// Wake-on-LAN (docs/wake-on-lan.md): the sender binds its socket to the LAN link
+// (SO_BINDTODEVICE), which is why wakes are sent here and not by the Web.
+builder.Services.AddSingleton<NetFirewall.Services.Wol.IWolPacketSender, NetFirewall.Services.Wol.UdpWolPacketSender>();
+builder.Services.AddScoped<NetFirewall.Services.Wol.IWakeOnLanService, NetFirewall.Services.Wol.WakeOnLanService>();
+
 // Phase-2 invasive tools. The job registry is a singleton with ONE slot: a trace
 // installs a temporary nftables table and a capture opens an AF_PACKET socket, so
 // two at once would collide. The sweeper removes a leftover trace table at startup.
@@ -436,6 +441,7 @@ app.MapWireGuardEndpoints();
 app.MapDnsEndpoints();
 app.MapTerminalEndpoints();
 app.MapDiagnosticsEndpoints();
+app.MapWolEndpoints();
 
 // Fail-fast visibility: in non-Development, the daemon owns the TOTP cipher key.
 // If it's missing, login-via-Web may still work (the Web can hold its own key) but

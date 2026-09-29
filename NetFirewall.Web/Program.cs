@@ -205,6 +205,11 @@ builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceService,
 builder.Services.AddScoped<NetFirewall.Services.Network.INetworkServiceResolver,
                            NetFirewall.Services.Network.NetworkServiceResolver>();
 
+// Wake-on-LAN saved devices (DB CRUD). The packet itself is sent by the daemon
+// (IDaemonClient.WakeOnLanAsync) — it binds to the LAN link, the Web cannot.
+builder.Services.AddScoped<NetFirewall.Services.Wol.IWolDeviceService,
+                           NetFirewall.Services.Wol.WolDeviceService>();
+
 // Full-text search — Postgres tsvector + GIN, fed by per-source triggers.
 builder.Services.AddScoped<NetFirewall.Services.Search.ISearchService,
                            NetFirewall.Services.Search.SearchService>();

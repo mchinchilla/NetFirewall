@@ -29,7 +29,7 @@ else
                 <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
                     <th class="pl-5 pr-2 py-1.5 font-medium">Reservation</th>
                     <th class="px-2 py-1.5 font-medium hidden md:table-cell">Description</th>
-                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-28">Actions</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-40">Actions</th>
                 </tr>
             </thead>
             <tbody class="divide-y border-surface-border">
@@ -46,6 +46,11 @@ else
                             @(r.Description ?? "—")
                         </td>
                         <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                            @await Html.PartialAsync("_WakeButton", new WakeButtonViewModel
+                            {
+                                Subject = r.Description ?? r.MacAddress.ToString(),
+                                Values = new Dictionary<string, string> { ["MacAddress"] = r.MacAddress.ToString(), ["IpHint"] = r.ReservedIp.ToString() }
+                            })
                             @await Html.PartialAsync("_RowActions", new RowActionsViewModel
                             {
                                 EditUrl = $"/Dhcp/Reservations/edit/{r.Id}",

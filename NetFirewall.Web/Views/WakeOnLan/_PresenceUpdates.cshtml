@@ -1,0 +1,12 @@
+@model NetFirewall.Web.Models.Network.WolDevicesTableViewModel
+@using NetFirewall.Web.Models.Network
+@*
+    Response of the 15 s presence poll: out-of-band badges only. Re-rendering the
+    whole table instead would replace the row buttons under an open confirm dialog
+    or an in-flight wake, and their response events would fire on a detached node.
+*@
+@foreach (var row in Model.Rows)
+{
+    @await Html.PartialAsync("_PresenceBadge", new WolPresenceBadgeViewModel(row.Device.Id, row.Presence, OutOfBand: true))
+}
+@await Html.PartialAsync("_PresenceError", new WolPresenceErrorViewModel(Model.PresenceError, OutOfBand: true))

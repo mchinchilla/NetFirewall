@@ -335,6 +335,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default)
         => GetAsync<AlertsDto>($"/v1/system/alerts?limit={limit}", ct);
 
+    public Task<ServiceResponse<NetFirewall.Models.Wol.WolWakeResult>> WakeOnLanAsync(NetFirewall.Models.Wol.WolWakeRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Wol.WolWakeRequest, NetFirewall.Models.Wol.WolWakeResult>("/v1/wol/wake", request, ct);
+
     private async Task<byte[]> CryptoCallAsync(string path, byte[] data, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, path)

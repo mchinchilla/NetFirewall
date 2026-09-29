@@ -1,0 +1,4 @@
+@model NetFirewall.Web.Models.Network.WolPresenceBadgeViewModel
+@* One device's ARP presence. Rendered in the table, and again out-of-band by the presence poll so only the badge changes. *@
+<span id="wol-presence-@Model.DeviceId" hx-swap-oob="@(Model.OutOfBand ? "true" : null)"
+      class="badge @Model.Presence.BadgeClass" title="@Model.Presence.Title">@Model.Presence.Label</span>

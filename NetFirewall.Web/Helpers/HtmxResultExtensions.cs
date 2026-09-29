@@ -65,7 +65,12 @@ public static class HtmxResultExtensions
                           ? string.Join(", ", response.Errors.Select(kv => $"{kv.Key}: {string.Join(", ", kv.Value)}"))
                           : string.Empty);
 
-        controller.AttachHxEvent("showToast", new { level, message });
+        // target: htmx dispatches HX-Trigger events on the element that made the
+        // request. On a polling list (DHCP leases, every 30 s) that button can be
+        // swapped out while its request is in flight, and an event fired on a
+        // detached node never reaches the document listener — the toast vanished.
+        // Anchoring it to <body> keeps rule #6 true whatever happened to the row.
+        controller.AttachHxEvent("showToast", new { level, message, target = "body" });
     }
 
     /// <summary>

@@ -1,0 +1,3 @@
+@model NetFirewall.Web.Models.Network.WolPresenceErrorViewModel
+@* Why the status column is blank (daemon down / disabled). Always rendered, empty when fine, so the presence poll has a target. *@
+<span id="wol-presence-error" hx-swap-oob="@(Model.OutOfBand ? "true" : null)" class="text-feedback-warning-fg">@(Model.Error is null ? "" : $"· status unavailable: {Model.Error}")</span>

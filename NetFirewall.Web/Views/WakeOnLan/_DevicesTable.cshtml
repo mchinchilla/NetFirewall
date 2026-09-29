@@ -1,0 +1,94 @@
+@model NetFirewall.Web.Models.Network.WolDevicesTableViewModel
+@using NetFirewall.Models.Wol
+@using NetFirewall.Web.Models.Network
+@using NetFirewall.Web.Models.Shared
+
+@if (Model.Rows.Count == 0)
+{
+    <div class="text-sm py-10 text-center text-surface-fg-muted">
+        No saved devices yet. Click <span class="font-medium text-surface-fg">Add device</span> for machines you wake often,
+        or use the Wake button next to a DHCP reservation or lease.
+    </div>
+}
+else
+{
+    <div class="px-5 pb-2 text-xs text-surface-fg-muted flex flex-wrap items-center gap-x-2">
+        <span><span class="font-medium text-surface-fg">@Model.Rows.Count</span> device@(Model.Rows.Count == 1 ? "" : "s")</span>
+        @await Html.PartialAsync("_PresenceError", new WolPresenceErrorViewModel(Model.PresenceError))
+    </div>
+    <div class="overflow-x-auto -mx-5">
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted border-b border-surface-border">
+                    <th class="pl-5 pr-2 py-1.5 font-medium">Device</th>
+                    <th class="px-2 py-1.5 font-medium hidden md:table-cell">Interface</th>
+                    <th class="px-2 py-1.5 font-medium w-24">Status</th>
+                    <th class="px-2 py-1.5 font-medium hidden lg:table-cell">Last woken</th>
+                    <th class="pl-2 pr-5 py-1.5 font-medium text-right w-40">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y border-surface-border">
+                @foreach (var row in Model.Rows)
+                {
+                    var d = row.Device;
+                    var ip = d.KnownIp ?? row.Presence.Ip;
+                    <tr>
+                        <td class="pl-5 pr-2 py-2.5">
+                            <div class="font-medium text-surface-fg">@d.Name</div>
+                            <div class="flex items-center gap-1 flex-wrap mt-1">
+                                @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "mac", Value = d.MacAddress, Title = d.MacAddress })
+                                @if (ip is not null)
+                                {
+                                    @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "ip", Value = ip })
+                                }
+                                @if (d.KnownHostname is not null)
+                                {
+                                    <span class="text-xs text-surface-fg-muted">@d.KnownHostname</span>
+                                }
+                            </div>
+                            @if (d.Description is not null)
+                            {
+                                <div class="text-xs text-surface-fg-muted mt-1">@d.Description</div>
+                            }
+                        </td>
+                        <td class="px-2 py-2.5 hidden md:table-cell">
+                            @await Html.PartialAsync("_RuleChip", new RuleChipViewModel { Label = "dev", Value = d.Interface })
+                            @if (d.Port != WolDefaults.Port)
+                            {
+                                <span class="text-xs font-mono text-surface-fg-muted ml-1">udp/@d.Port</span>
+                            }
+                        </td>
+                        <td class="px-2 py-2.5 whitespace-nowrap">
+                            @await Html.PartialAsync("_PresenceBadge", new WolPresenceBadgeViewModel(d.Id, row.Presence))
+                        </td>
+                        <td class="px-2 py-2.5 hidden lg:table-cell text-xs text-surface-fg-muted">
+                            @if (d.LastWokenAt is { } at)
+                            {
+                                <span title="@at.ToLocalTime().ToString("u")">@at.ToLocalTime().ToString("g")</span>
+                                @if (d.LastWokenBy is not null) { <span>· @d.LastWokenBy</span> }
+                            }
+                            else
+                            {
+                                <span>never</span>
+                            }
+                        </td>
+                        <td class="pl-2 pr-5 py-2.5 text-right whitespace-nowrap">
+                            <div class="inline-flex items-center gap-1">
+                                @await Html.PartialAsync("_WakeButton", new WakeButtonViewModel { Url = $"/Network/WakeOnLan/wake/{d.Id}", Subject = d.Name })
+                                @await Html.PartialAsync("_RowActions", new RowActionsViewModel
+                                {
+                                    EditUrl = $"/Network/WakeOnLan/edit/{d.Id}",
+                                    EditDrawerTitle = "Edit device",
+                                    DeleteUrl = $"/Network/WakeOnLan/delete/{d.Id}",
+                                    DeleteDialogTitle = "Remove device?",
+                                    DeleteMessage = $"Remove {d.Name} ({d.MacAddress}) from the Wake-on-LAN list? DHCP is not touched.",
+                                    DeleteConfirmLabel = "Remove"
+                                })
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
