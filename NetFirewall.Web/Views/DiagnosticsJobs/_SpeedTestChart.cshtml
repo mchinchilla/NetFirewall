@@ -3,7 +3,7 @@
 @{
     // Throughput per second as one line. Drawn server-side so it re-renders with
     // every 2 s poll of the job panel — no chart library, nothing to tear down.
-    const double W = 600, H = 160, Left = 44, Right = 8, Top = 10, Bottom = 22;
+    const double W = 900, H = 200, Left = 44, Right = 8, Top = 14, Bottom = 22;
     var samples = Model;
     var peak = samples.Count == 0 ? 0 : samples.Max();
     // Round the axis up to a 1/2/5 step so the gridline labels read cleanly.
@@ -26,7 +26,7 @@
 else
 {
     <figure>
-        <svg viewBox="0 0 @F(W) @F(H)" class="w-full h-40" role="img"
+        <svg viewBox="0 0 @F(W) @F(H)" class="w-full h-auto" role="img"
              aria-label="Throughput per second, peak @F(peak) Mbps over @samples.Count seconds">
             @foreach (var g in new[] { 0.0, top / 2, top })
             {

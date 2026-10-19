@@ -1,5 +1,6 @@
 @model NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.PingResult>
 @using NetFirewall.Models.Diagnostics
+@using NetFirewall.Web.Models
 @using NetFirewall.Web.Models.Diagnostics
 @{
     var r = Model.Result;
@@ -13,10 +14,10 @@
 else
 {
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <div class="kpi"><span class="text-xs text-surface-fg-muted">Sent / received</span><span class="kpi-value">@r.Received<span class="text-base text-surface-fg-muted">/@r.Sent</span></span></div>
-        <div class="kpi"><span class="text-xs text-surface-fg-muted">Loss</span><span class="kpi-value @(r.LossPct > 0 ? "text-feedback-danger-fg" : "")">@r.LossPct.ToString("0.#")%</span></div>
-        <div class="kpi"><span class="text-xs text-surface-fg-muted">Avg RTT</span><span class="kpi-value">@(r.RttAvgMs is { } a ? $"{a:0.#}" : "—")<span class="text-base text-surface-fg-muted"> ms</span></span></div>
-        <div class="kpi"><span class="text-xs text-surface-fg-muted">Min / max</span><span class="kpi-value text-xl">@(r.RttMinMs is { } mn ? $"{mn:0.#}" : "—") / @(r.RttMaxMs is { } mx ? $"{mx:0.#}" : "—")</span></div>
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Received / sent", $"{r.Received}/{r.Sent}"))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Loss", $"{r.LossPct:0.#}%", Tone: r.LossPct > 0 ? StatTone.Danger : StatTone.Normal))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Avg RTT", r.RttAvgMs is { } a ? $"{a:0.#}" : "—", "ms"))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Min / max", $"{(r.RttMinMs is { } mn ? $"{mn:0.#}" : "—")} / {(r.RttMaxMs is { } mx ? $"{mx:0.#}" : "—")}", "ms"))
     </div>
     <p class="text-xs font-mono text-surface-fg-muted mb-3">target @r.Target → @r.ResolvedIp · @r.Via</p>
     @if (r.Error is not null)

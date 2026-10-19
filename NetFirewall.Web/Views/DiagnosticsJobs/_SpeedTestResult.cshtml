@@ -1,14 +1,15 @@
 @model NetFirewall.Models.Diagnostics.SpeedTestResult
+@using NetFirewall.Web.Models
 @using NetFirewall.Web.Models.Diagnostics
 @{
     var r = Model;
 }
 @* Used live (inside the polling job panel) and from History; both pass the bare result. *@
-<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-    <div class="kpi"><span class="text-xs text-surface-fg-muted">Average</span><span class="kpi-value">@r.AvgMbps.ToString("0.#")<span class="text-base text-surface-fg-muted"> Mbps</span></span></div>
-    <div class="kpi"><span class="text-xs text-surface-fg-muted">Peak second</span><span class="kpi-value">@r.PeakMbps.ToString("0.#")<span class="text-base text-surface-fg-muted"> Mbps</span></span></div>
-    <div class="kpi"><span class="text-xs text-surface-fg-muted">First byte</span><span class="kpi-value">@(r.TtfbMs is { } t ? t.ToString("0") : "—")<span class="text-base text-surface-fg-muted"> ms</span></span></div>
-    <div class="kpi"><span class="text-xs text-surface-fg-muted">Downloaded</span><span class="kpi-value text-xl">@DiagUi.Bytes(r.Bytes)</span><span class="text-xs text-surface-fg-muted">in @r.Seconds.ToString("0.#") s · @r.Streams stream(s)</span></div>
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+    @await Html.PartialAsync("_StatTile", new StatTileViewModel("Average", r.AvgMbps.ToString("0.#"), "Mbps"))
+    @await Html.PartialAsync("_StatTile", new StatTileViewModel("Peak second", r.PeakMbps.ToString("0.#"), "Mbps"))
+    @await Html.PartialAsync("_StatTile", new StatTileViewModel("First byte", r.TtfbMs is { } t ? t.ToString("0") : "—", "ms"))
+    @await Html.PartialAsync("_StatTile", new StatTileViewModel("Downloaded", DiagUi.Bytes(r.Bytes), null, $"in {r.Seconds:0.#} s · {r.Streams} stream(s)"))
 </div>
 
 @await Html.PartialAsync("~/Views/DiagnosticsJobs/_SpeedTestChart.cshtml", r.SamplesMbps)

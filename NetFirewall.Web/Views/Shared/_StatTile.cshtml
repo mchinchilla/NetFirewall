@@ -1,0 +1,23 @@
+@model NetFirewall.Web.Models.StatTileViewModel
+@{
+    var valueTone = Model.Tone switch
+    {
+        NetFirewall.Web.Models.StatTone.Danger  => "text-feedback-danger-fg",
+        NetFirewall.Web.Models.StatTone.Warning => "text-feedback-warning-fg",
+        _                                       => string.Empty,
+    };
+}
+@* Compact result tile: label on top, the number, an optional caption — stacked, never inline. *@
+<div class="kpi p-4 flex flex-col gap-1 min-w-0">
+    <span class="kpi-label truncate">@Model.Label</span>
+    <span class="text-2xl font-semibold tracking-tight tabular-nums leading-tight truncate @valueTone">
+        @Model.Value@if (!string.IsNullOrEmpty(Model.Suffix))
+        {
+            <span class="text-sm font-normal text-surface-fg-muted"> @Model.Suffix</span>
+        }
+    </span>
+    @if (!string.IsNullOrEmpty(Model.Caption))
+    {
+        <span class="text-xs text-surface-fg-muted truncate">@Model.Caption</span>
+    }
+</div>

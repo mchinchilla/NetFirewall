@@ -40,3 +40,8 @@ public sealed class VitalCardViewModel
     public string Unit { get; init; } = "%";
     public string Caption { get; init; } = "Last 60 min · % used";
 }
+
+/// <summary>Typed model for <c>_StatTile</c>: a small stacked result number (diagnostics result rows).</summary>
+public sealed record StatTileViewModel(string Label, string Value, string? Suffix = null, string? Caption = null, StatTone Tone = StatTone.Normal);
+
+public enum StatTone { Normal, Warning, Danger }
