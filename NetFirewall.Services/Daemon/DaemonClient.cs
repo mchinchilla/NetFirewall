@@ -274,6 +274,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagJobSnapshot>> GetDiagJobAsync(Guid id, CancellationToken ct = default)
         => GetAsync<NetFirewall.Models.Diagnostics.DiagJobSnapshot>($"/v1/diagnostics/jobs/{id}", ct);
 
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagJobSnapshot>>> ListDiagJobsAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagJobSnapshot>>("/v1/diagnostics/jobs", ct);
+
     public Task<ServiceResponse<object>> CancelDiagJobAsync(Guid id, CancellationToken ct = default)
         => PostAsync<object>($"/v1/diagnostics/jobs/{id}/cancel", ct);
 

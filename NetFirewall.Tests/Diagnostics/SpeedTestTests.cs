@@ -211,6 +211,215 @@ public sealed class SpeedTestTests : IDisposable
         Assert.Same(partial, done.SpeedTest);
     }
 
+    // ───────────────────────── full download ─────────────────────────
+
+    private static SpeedTestPlan FullPlan(bool keep, int streams = 3, int seconds = 30) =>
+        new("ens224", 0x200, "Fake ISO", new Uri("https://mirror.example.org/iso/Distro-DVD-x86_64.iso"),
+            seconds, 100_000_000_000, streams, keep, SpeedTestMode.FullFile);
+
+    private static byte At(long offset) => (byte)(offset % 251);
+
+    /// <summary>
+    /// A mirror: honours Range (or not), can drop the first body mid-way, can be slow.
+    /// Byte <c>i</c> of the file is <c>i % 251</c>, so any misplaced chunk shows.
+    /// </summary>
+    private sealed class MirrorServer(long size, bool ranges = true, long dropFirstAfter = -1, int delayMsPerRead = 0) : HttpMessageHandler
+    {
+        private int _dropped;
+        public int Requests;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Interlocked.Increment(ref Requests);
+            long from = 0, to = size - 1;
+            var partial = ranges && request.Headers.Range?.Ranges.FirstOrDefault() is { } r;
+            if (partial)
+            {
+                var r0 = request.Headers.Range!.Ranges.First();
+                from = r0.From ?? 0;
+                to = Math.Min(size - 1, r0.To ?? size - 1);
+            }
+            var drop = dropFirstAfter >= 0 && to - from + 1 > dropFirstAfter && Interlocked.Exchange(ref _dropped, 1) == 0
+                ? dropFirstAfter : -1;
+            var resp = new HttpResponseMessage(partial ? HttpStatusCode.PartialContent : HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new PatternStream(from, to - from + 1, drop, delayMsPerRead)),
+            };
+            resp.Content.Headers.ContentLength = to - from + 1;
+            if (partial) resp.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(from, to, size);
+            return Task.FromResult(resp);
+        }
+    }
+
+    private sealed class PatternStream(long start, long length, long dropAfter, int delayMs) : Stream
+    {
+        private long _pos;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => length;
+        public override long Position { get => _pos; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("async only");
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (delayMs > 0) await Task.Delay(delayMs, ct);
+            if (dropAfter >= 0 && _pos >= dropAfter) throw new IOException("connection reset by peer");
+            var n = (int)Math.Min(buffer.Length, length - _pos);
+            if (dropAfter >= 0) n = (int)Math.Min(n, dropAfter - _pos);
+            for (var i = 0; i < n; i++) buffer.Span[i] = At(start + _pos + i);
+            _pos += n;
+            return n;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
+            ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+    }
+
+    private async Task AssertPatternAsync(SpeedTestFile file, long size)
+    {
+        var opened = await Store().OpenReadAsync(file.Id);
+        Assert.NotNull(opened);
+        await using var content = opened.Value.Content;
+        var buf = new byte[1 << 16];
+        long offset = 0;
+        int n;
+        while ((n = await content.ReadAsync(buf)) > 0)
+        {
+            for (var i = 0; i < n; i++)
+                if (buf[i] != At(offset + i)) Assert.Fail($"byte {offset + i} is {buf[i]}, expected {At(offset + i)}");
+            offset += n;
+        }
+        Assert.Equal(size, offset);
+    }
+
+    [Fact]
+    public async Task FullFile_FetchesEveryByteOnce_InChunks_AndKeepsAnExactCopyUnderItsOwnName()
+    {
+        const long size = 20L << 20;   // 20 MiB → three 8 MiB-floor chunks
+        var server = new MirrorServer(size);
+        var h = NewService(server, Store());
+
+        var id = h.Service.Start(FullPlan(keep: true), "marvin")!.Value;
+        var job = await WaitAsync(h.Jobs, id);
+
+        Assert.Equal(DiagJobState.Completed, job.State);
+        var r = job.SpeedTest!;
+        Assert.True(r.Complete);
+        Assert.Equal(size, r.Bytes);           // once, not once per connection
+        Assert.Equal(size, r.TotalBytes);
+        Assert.Equal(0, r.Reconnects);
+        Assert.Null(r.Warning);
+
+        var file = Assert.IsType<SpeedTestFile>(r.File);
+        Assert.Equal("Distro-DVD-x86_64.iso", file.FileName);
+        Assert.True(file.Complete);
+        await AssertPatternAsync(file, size);
+        h.Runs.Verify(x => x.FinishAsync(It.IsAny<Guid>(), DiagRunStatus.Ok, It.IsAny<object?>(), It.Is<string?>(s => s!.StartsWith("Full download")), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task FullFile_ADroppedConnectionResumesItsChunk_AndTheFileIsStillExact()
+    {
+        const long size = 20L << 20;
+        var server = new MirrorServer(size, dropFirstAfter: 3_000_000);
+        var h = NewService(server, Store());
+
+        var id = h.Service.Start(FullPlan(keep: true), null)!.Value;
+        var r = (await WaitAsync(h.Jobs, id)).SpeedTest!;
+
+        Assert.True(r.Complete);
+        Assert.Equal(1, r.Reconnects);
+        Assert.Equal(size, r.Bytes);   // the resumed request asked only for the rest
+        await AssertPatternAsync(r.File!, size);
+    }
+
+    [Fact]
+    public async Task FullFile_WithoutRangeSupport_UsesOneConnection_AndSaysSo()
+    {
+        const long size = 5L << 20;
+        var server = new MirrorServer(size, ranges: false);
+        var h = NewService(server, Store());
+
+        var id = h.Service.Start(FullPlan(keep: true, streams: 4), null)!.Value;
+        var r = (await WaitAsync(h.Jobs, id)).SpeedTest!;
+
+        Assert.True(r.Complete);
+        Assert.Equal(size, r.Bytes);
+        Assert.Contains("byte ranges", r.Warning);
+        Assert.Equal(2, server.Requests);   // the probe plus one body
+        await AssertPatternAsync(r.File!, size);
+    }
+
+    [Fact]
+    public async Task FullFile_HittingTheTimeLimit_KeepsNothing_AndWarns()
+    {
+        var server = new MirrorServer(20L << 20, delayMsPerRead: 100);
+        var h = NewService(server, Store());
+
+        var id = h.Service.Start(FullPlan(keep: true, seconds: 1), null)!.Value;
+        var job = await WaitAsync(h.Jobs, id);
+        var r = job.SpeedTest!;
+
+        Assert.Equal(DiagJobState.Completed, job.State);
+        Assert.False(r.Complete);
+        Assert.True(r.Bytes > 0);
+        Assert.Null(r.File);
+        Assert.Contains("not kept", r.Warning);
+        Assert.Empty(await Store().ListAsync());
+        Assert.False(Directory.EnumerateFiles(_dir).Any());   // no half ISO left behind
+        h.Runs.Verify(x => x.FinishAsync(It.IsAny<Guid>(), DiagRunStatus.Warn, It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task FullFile_KeptFileAboveTheQuota_IsRefusedBeforeAnyByteLands()
+    {
+        var server = new MirrorServer(20L << 20);
+        var h = NewService(server, Store(quotaMb: 1));
+
+        var id = h.Service.Start(FullPlan(keep: true), null)!.Value;
+        var job = await WaitAsync(h.Jobs, id);
+
+        Assert.Equal(DiagJobState.Failed, job.State);
+        Assert.Contains("quota", job.Message);
+        Assert.Equal(1, server.Requests);   // only the size probe
+    }
+
+    [Fact]
+    public void Chunks_CoverTheFileExactly_WithinTheSizeBounds()
+    {
+        foreach (var total in new[] { 1L, 5L << 20, 4_700_000_000L, 10_000_000_007L })
+        {
+            var chunks = SpeedTestService.Chunks(total, 4);
+            Assert.Equal(0, chunks[0].Start);
+            Assert.Equal(total - 1, chunks[^1].End);
+            for (var i = 1; i < chunks.Count; i++) Assert.Equal(chunks[i - 1].End + 1, chunks[i].Start);
+            Assert.All(chunks.SkipLast(1), c => Assert.InRange(c.End - c.Start + 1, 8L << 20, 256L << 20));
+        }
+    }
+
+    [Fact]
+    public void Stability_SkipsWarmup_AndCountsStallsOnlyAfterTheFirstByte()
+    {
+        var (lowest, stalls) = SpeedTestService.Stability([0, 0, 50, 300, 280, 0, 310, 0]);
+        Assert.Equal(0, lowest);     // seconds 4+ include a stall
+        Assert.Equal(2, stalls);     // the two leading zeros are connecting, not stalling
+
+        Assert.Equal((290.0, 0), SpeedTestService.Stability([10, 100, 200, 300, 290, 305]));
+    }
+
+    [Theory]
+    [InlineData("https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-DVD-x86_64-Current.iso", "openSUSE-Tumbleweed-DVD-x86_64-Current.iso")]
+    [InlineData("https://speed.cloudflare.com/__down?bytes=100000000", null)]
+    [InlineData("https://x.example.com/a%20b.iso", null)]
+    [InlineData("https://x.example.com/", null)]
+    public void SafeFileName_KeepsOnlyPlainNames(string url, string? expected) =>
+        Assert.Equal(expected, SpeedTestService.SafeFileName(new Uri(url)));
+
     // ───────────────────────── kept files ─────────────────────────
 
     private async Task<Guid> CommitAsync(SpeedTestStore store, DateTime created, TimeSpan life)

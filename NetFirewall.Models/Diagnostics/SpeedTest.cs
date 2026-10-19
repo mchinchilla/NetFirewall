@@ -1,4 +1,19 @@
+using System.Text.Json.Serialization;
+
 namespace NetFirewall.Models.Diagnostics;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum SpeedTestMode
+{
+    /// <summary>Seconds-long burst: every connection re-requests the source until the time or byte cap ends it.</summary>
+    Burst,
+    /// <summary>
+    /// Endurance: download the source ONCE, to the last byte, split into HTTP Range
+    /// chunks across the connections, resuming a chunk when a connection drops.
+    /// Bounded by a time limit in minutes, so a whole ISO fits.
+    /// </summary>
+    FullFile
+}
 
 /// <summary>
 /// One WAN speed test: the daemon downloads from a test server through the
@@ -15,14 +30,19 @@ public sealed record SpeedTestRequest(
     int MaxMegabytes = 500,
     int Streams = 4,
     /// <summary>Keep the downloaded file for <c>SpeedTestRetentionHours</c> so it can be pulled to a LAN client.</summary>
-    bool KeepFile = false);
+    bool KeepFile = false,
+    SpeedTestMode Mode = SpeedTestMode.Burst,
+    /// <summary><see cref="SpeedTestMode.FullFile"/> only: give up (and keep nothing) after this long.</summary>
+    int TimeLimitMinutes = 60);
 
 public sealed record SpeedTestSource(string Id, string Name, string Url);
 
 /// <summary>
-/// Curated test servers. Every URL serves a large static payload over HTTPS and
-/// is fetched repeatedly until the duration or byte cap is hit, so the file
-/// size only has to be "big enough", not "big enough for the fastest link".
+/// Curated test servers. Every URL serves a large static payload over HTTPS. In a
+/// burst it is fetched repeatedly until the duration or byte cap is hit, so the
+/// file size only has to be "big enough"; a full download fetches it once. The
+/// ISO entries use the distributions' stable "latest/Current" names — Fedora and
+/// Debian version their file names, so those go through a custom URL.
 /// </summary>
 public static class SpeedTestSources
 {
@@ -35,6 +55,8 @@ public static class SpeedTestSources
         new("hetzner-hil",  "Hetzner · Hillsboro, US",    "https://hil-speed.hetzner.com/1GB.bin"),
         new("hetzner-fsn",  "Hetzner · Falkenstein, DE",  "https://fsn1-speed.hetzner.com/1GB.bin"),
         new("ovh-rbx",      "OVH · Roubaix, FR",          "https://proof.ovh.net/files/1Gb.dat"),
+        new("iso-tumbleweed", "ISO · openSUSE Tumbleweed DVD (~4.5 GB)", "https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-DVD-x86_64-Current.iso"),
+        new("iso-alma9",      "ISO · AlmaLinux 9 minimal (~2 GB)",       "https://repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-9-latest-x86_64-minimal.iso"),
     ];
 
     public static SpeedTestSource? Find(string? id) =>
@@ -65,8 +87,21 @@ public sealed record SpeedTestResult(
     SpeedTestFile? File = null,
     string? Error = null,
     /// <summary>Something that makes the number less trustworthy (a stream failed mid-test) without voiding it.</summary>
-    string? Warning = null)
+    string? Warning = null,
+    SpeedTestMode Mode = SpeedTestMode.Burst,
+    /// <summary>Full download: the source's size, when the server sent one.</summary>
+    long? TotalBytes = null,
+    /// <summary>Full download: every byte of the source arrived.</summary>
+    bool Complete = false,
+    /// <summary>Slowest whole second after the first 3 (TCP slow start excluded).</summary>
+    double? LowestMbps = null,
+    /// <summary>Whole seconds in which nothing arrived, after the first byte — the provider stalled.</summary>
+    int StallSeconds = 0,
+    /// <summary>Times a dropped connection was re-opened and its chunk resumed.</summary>
+    int Reconnects = 0)
 {
+    public double? ProgressPct => TotalBytes is > 0 ? Math.Min(100, Bytes * 100.0 / TotalBytes.Value) : null;
+
     public double? OtherTrafficMbps => OtherTrafficBytes is { } b && Seconds > 0 ? b * 8 / Seconds / 1_000_000 : null;
 }
 

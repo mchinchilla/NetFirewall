@@ -218,6 +218,25 @@ outright. `tcpdump` is a Recommends of the .deb and is in the ISO package list.
 
 Downloads from a test server through ONE uplink and reports average and peak
 Mbps, time to first byte, and a per-second curve that updates while it runs.
+Two modes:
+
+- **Speed burst** (5–30 s) — a quick number; described below.
+- **Full download** (time limit 1–180 min, `Diagnostics:SpeedTestMaxMinutes`) —
+  the provider's endurance: the whole file (e.g. a distro ISO), to the last byte.
+  The daemon first asks for byte 0 only: a `206` with a `Content-Range` length
+  means the server splits the file, and the final URL after redirects is pinned so
+  every chunk comes from the same mirror. The file is cut into 8–256 MB chunks
+  (~8 per connection, so a slow connection leaves only a short tail) that the
+  connections pull from a shared queue. A dropped connection resumes its chunk
+  from the last byte written; after 5 consecutive failures the rest of the chunk
+  goes back on the queue for another connection. Without range support it is one
+  connection that cannot resume, and the result says so. Besides average and peak
+  it reports the **slowest second** after 3 s of warm-up, **stall seconds**
+  (nothing arrived, after the first byte), **reconnects**, a progress bar with
+  an ETA, and the curve averaged into at most 240 points. Files above
+  `Diagnostics:SpeedTestMaxFullFileMegabytes` (100 GB) are refused.
+  It can run for hours, so the page loads the running (or last) test on arrival —
+  leave and come back.
 
 - **Steering is by fwmark, never by interface.** The daemon looks up the WAN's
   `probe_fwmark` in `wan_health_config` and sets `SO_MARK` on every socket
@@ -230,7 +249,10 @@ Mbps, time to first byte, and a per-second curve that updates while it runs.
   re-requests the source until the duration (5–30 s) or byte cap (10–2000 MB)
   ends the test, so the file size never caps the measurement.
 - **Sources** are a curated list (`SpeedTestSources`: Cloudflare, Hetzner,
-  OVH) plus a custom URL: http/https only, no credentials, and the address is
+  OVH, plus openSUSE Tumbleweed DVD and AlmaLinux 9 minimal ISOs by their stable
+  "Current/latest" names — picking an ISO switches to a full download; Fedora
+  and Debian version their file names, so paste those as a custom URL) plus a
+  custom URL: http/https only, no credentials, and the address is
   checked to be **public** at connect time (redirects included), so the test
   cannot be pointed at the LAN or a metadata endpoint.
 - **Other traffic**: the WAN's rx counter is read before and after; what is not
@@ -239,7 +261,12 @@ Mbps, time to first byte, and a per-second curve that updates while it runs.
 - It takes the shared invasive slot (one job box-wide) and writes a `diag_runs`
   row (`speedtest`), so History renders the same result panel.
 
-**Keeping the file** (checkbox, off by default). The first connection's bytes are
+**Keeping the file** (checkbox, off by default). In a full download every
+connection writes its chunk in place (positional writes into a file preallocated
+to the advertised size, so a full disk fails at the start, not 40 minutes in). The
+kept file carries the source's own name (`openSUSE-…-Current.iso`), and it is kept
+**only when every byte arrived** — a file with holes is no ISO. The quota is
+checked against the real size before the first byte. In a burst, the first connection's bytes are
 also written to `/var/lib/netfirewall/daemon/speedtests/{id}.part`, promoted to
 `{id}.bin` plus an `{id}.json` sidecar (`SpeedTestFile`, with `expires_at`) when
 the test ends. The file is a faithful copy of the source, or its prefix when the
@@ -250,7 +277,8 @@ may have set the pace — re-run without keeping the file to measure the WAN alo
 - **Downloadable for 24 h** (`Diagnostics:SpeedTestRetentionHours`), then gone:
   the store refuses an expired file immediately, and `SpeedTestFileSweeperService`
   deletes it within 15 min (it also removes `.part` leftovers at daemon start).
-- **Quota** `Diagnostics:SpeedTestQuotaMegabytes` (default 4096) and a free-space
+- **Quota** `Diagnostics:SpeedTestQuotaMegabytes` (default 20480 — a couple of
+  DVD ISOs) and a free-space
   reserve `SpeedTestFreeSpaceReserveMegabytes` (default 1024): a test whose cap
   could break either is refused before it starts.
 - The Web streams the download straight through (`X-Accel-Buffering: no`), and

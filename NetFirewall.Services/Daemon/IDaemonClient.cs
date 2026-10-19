@@ -202,6 +202,9 @@ public interface IDaemonClient
     /// <summary><c>GET /v1/diagnostics/jobs/{id}</c> — poll a running or finished job.</summary>
     Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagJobSnapshot>> GetDiagJobAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary><c>GET /v1/diagnostics/jobs</c> — the running job (if any) and the recently finished ones, newest first.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagJobSnapshot>>> ListDiagJobsAsync(CancellationToken ct = default);
+
     /// <summary><c>POST /v1/diagnostics/jobs/{id}/cancel</c> — stop early, keeping the partial result.</summary>
     Task<ServiceResponse<object>> CancelDiagJobAsync(Guid id, CancellationToken ct = default);
 

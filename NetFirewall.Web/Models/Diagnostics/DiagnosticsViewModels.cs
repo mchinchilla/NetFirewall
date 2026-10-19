@@ -229,6 +229,12 @@ public static class DiagUi
             : $"{(int)span.TotalDays} d ago";
     }
 
+    /// <summary>"42 s", "3 m 05 s", "1 h 12 m".</summary>
+    public static string Duration(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes:00} m"
+        : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} m {t.Seconds:00} s"
+        : $"{Math.Max(0, (int)t.TotalSeconds)} s";
+
     public static string Bytes(long b) => b switch
     {
         >= 1L << 30 => $"{b / (double)(1L << 30):0.##} GB",
@@ -356,8 +362,14 @@ public sealed class SpeedTestFormViewModel
     [StringLength(500), Url(ErrorMessage = "Enter an http:// or https:// URL.")]
     public string? CustomUrl { get; set; }
 
+    public SpeedTestMode Mode { get; set; } = SpeedTestMode.Burst;
+
+    /// <summary>Burst only.</summary>
     [Range(5, 30)]    public int DurationSec { get; set; } = 10;
+    /// <summary>Burst only.</summary>
     [Range(10, 2000)] public int MaxMegabytes { get; set; } = 500;
+    /// <summary>Full download only: give up after this long. The daemon applies its own ceiling too.</summary>
+    [Range(1, 180)]   public int TimeLimitMinutes { get; set; } = 60;
     [Range(1, 8)]     public int Streams { get; set; } = 4;
     public bool KeepFile { get; set; }
 
@@ -376,6 +388,12 @@ public sealed record SpeedTestPageViewModel(DiagToolPageViewModel Page, IReadOnl
                     : $"{w.Name} · no probe mark (set it in WAN failover)"))
             .Prepend(new FormFieldViewModel.SelectOption("", "(pick a WAN)"))
             .ToList();
+
+    public static IReadOnlyList<FormFieldViewModel.SelectOption> ModeOptions() =>
+    [
+        new(nameof(SpeedTestMode.Burst), "Speed burst (seconds)"),
+        new(nameof(SpeedTestMode.FullFile), "Full download (endurance)"),
+    ];
 
     public static IReadOnlyList<FormFieldViewModel.SelectOption> SourceOptions() =>
         SpeedTestSources.All.Select(s => new FormFieldViewModel.SelectOption(s.Id, s.Name))

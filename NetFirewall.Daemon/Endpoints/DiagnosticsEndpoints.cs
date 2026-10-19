@@ -536,14 +536,17 @@ public static class DiagnosticsEndpoints
                 NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestStore store,
                 IFirewallService fw,
                 NetFirewall.Services.WanMonitor.IWanHealthService wans,
+                IOptions<DiagnosticsOptions> opts,
                 IAuthAuditService audit,
                 ClaimsPrincipal user,
                 HttpContext ctx,
                 CancellationToken ct) =>
         {
-            var (plan, err) = await PlanSpeedTestAsync(req, v, fw, wans, ct);
+            var (plan, err) = await PlanSpeedTestAsync(req, v, fw, wans, opts.Value, ct);
             if (plan is null) return BadJob(err);
-            if (plan.KeepFile && store.CheckCapacity(plan.MaxBytes) is { } full) return BadJob(full);
+            // A burst's cap is known now; a full download's size only after the daemon
+            // asks the server, so the job checks that one itself before any byte lands.
+            if (plan is { KeepFile: true, Mode: SpeedTestMode.Burst } && store.CheckCapacity(plan.MaxBytes) is { } full) return BadJob(full);
 
             var id = speed.Start(plan, user.Identity?.Name);
             if (id is null) return Busy<Guid>("Another diagnostics job (trace, capture or speed test) is already running.");
@@ -551,7 +554,7 @@ public static class DiagnosticsEndpoints
             await AuditJobAsync(audit, AuthAuditEvents.DiagSpeedTestStarted, user, ctx, new
             {
                 runId = id, plan.Wan, Fwmark = $"0x{plan.Fwmark:x}", Source = plan.SourceName, Url = plan.Url.ToString(),
-                plan.DurationSec, plan.Streams, plan.KeepFile,
+                Mode = plan.Mode.ToString(), plan.DurationSec, plan.Streams, plan.KeepFile,
             }, ct);
             return Results.Json(ServiceResponse<Guid>.Ok(id.Value, $"Speed test started on {plan.Wan}."));
         })
@@ -626,7 +629,7 @@ public static class DiagnosticsEndpoints
     /// </summary>
     private static async Task<(NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestPlan? Plan, string? Error)> PlanSpeedTestAsync(
         SpeedTestRequest req, IDiagnosticInputValidator v, IFirewallService fw,
-        NetFirewall.Services.WanMonitor.IWanHealthService wans, CancellationToken ct)
+        NetFirewall.Services.WanMonitor.IWanHealthService wans, DiagnosticsOptions opts, CancellationToken ct)
     {
         var wanNames = (await fw.GetInterfacesAsync(ct))
             .Where(i => i.Enabled && string.Equals(i.Type, "WAN", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(i.Name))
@@ -658,10 +661,15 @@ public static class DiagnosticsEndpoints
 
         return (new NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestPlan(
             wan, cfg.ProbeFwmark.Value, sourceName, url,
-            v.Clamp(req.DurationSec, 5, 30),
-            (long)v.Clamp(req.MaxMegabytes, 10, 2000) * 1_000_000,
+            req.Mode == SpeedTestMode.FullFile
+                ? v.Clamp(req.TimeLimitMinutes, 1, Math.Max(1, opts.SpeedTestMaxMinutes)) * 60
+                : v.Clamp(req.DurationSec, 5, 30),
+            req.Mode == SpeedTestMode.FullFile
+                ? (long)Math.Max(1, opts.SpeedTestMaxFullFileMegabytes) * 1_000_000
+                : (long)v.Clamp(req.MaxMegabytes, 10, 2000) * 1_000_000,
             v.Clamp(req.Streams, 1, 8),
-            req.KeepFile), null);
+            req.KeepFile,
+            req.Mode == SpeedTestMode.FullFile ? SpeedTestMode.FullFile : SpeedTestMode.Burst), null);
     }
 
     private static IResult BadJob(string? error) =>

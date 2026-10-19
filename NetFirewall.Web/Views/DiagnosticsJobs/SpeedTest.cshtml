@@ -31,31 +31,55 @@
                 Options = Model.WanOptions(),
                 Help = "The test is steered with the WAN's probe fwmark (WAN failover settings), never by interface."
             })
-            <div x-data="{ source: 'cloudflare' }" class="space-y-4">
+            @* One scope for both choices: picking an ISO switches to a full download. *@
+            <div x-data="{ source: 'cloudflare', mode: 'Burst' }" class="space-y-4">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Mode", Label = "Test", Kind = FormFieldKind.Select, Required = true,
+                Value = "Burst", Options = SpeedTestPageViewModel.ModeOptions(), AlpineModel = "mode",
+                Help = "Burst: a quick number. Full download: the whole file, to the last byte — how the provider holds up over minutes."
+            })
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = "SourceId", Label = "Test server", Kind = FormFieldKind.Select, Required = true,
                 Value = "cloudflare", Options = SpeedTestPageViewModel.SourceOptions(), AlpineModel = "source",
+                AlpineExtra = "@change=\"if ($event.target.value.startsWith('iso-')) mode = 'FullFile'\"",
                 Help = "Pick one near you; a far server measures the ocean, not your provider."
             })
             <div x-show="source === 'custom'" x-cloak>
                 @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                     Name = "CustomUrl", Label = "File URL", MaxLength = 500,
-                    Placeholder = "https://speedtest.your-isp.net/1GB.bin", Pattern = "https?://.+",
+                    Placeholder = "https://mirror.example.org/fedora/…/Fedora-Workstation-Live-x86_64.iso", Pattern = "https?://.+",
                     AlpineExtra = ":required=\"source === 'custom'\" :disabled=\"source !== 'custom'\"",
-                    Help = "A large file on a public server, e.g. your provider's own speed-test host."
+                    Help = "A large file on a public server — a distro ISO from a nearby mirror, or your provider's own speed-test host. Fedora and Debian version their ISO names, so paste the current link here."
                 })
             </div>
-            </div>
+
+            @* Mode-specific fields are disabled, not just hidden, so the browser neither
+               validates nor posts them; Connections is shared (one field, one id). *@
             <div class="grid grid-cols-3 gap-3">
-                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "DurationSec", Label = "Seconds", Kind = FormFieldKind.Number, Value = "10", Min = "5", Max = "30", Required = true })
+                <div x-show="mode === 'Burst'">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "DurationSec", Label = "Seconds", Kind = FormFieldKind.Number, Value = "10", Min = "5", Max = "30", Required = true, AlpineExtra = ":disabled=\"mode !== 'Burst'\"" })
+                </div>
+                <div x-show="mode === 'FullFile'" x-cloak>
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "TimeLimitMinutes", Label = "Limit (min)", Kind = FormFieldKind.Number, Value = "60", Min = "1", Max = "180", Required = true, AlpineExtra = ":disabled=\"mode !== 'FullFile'\"" })
+                </div>
                 @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Streams", Label = "Connections", Kind = FormFieldKind.Number, Value = "4", Min = "1", Max = "8", Required = true })
-                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "MaxMegabytes", Label = "Cap (MB)", Kind = FormFieldKind.Number, Value = "500", Min = "10", Max = "2000", Required = true })
+                <div x-show="mode === 'Burst'">
+                    @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "MaxMegabytes", Label = "Cap (MB)", Kind = FormFieldKind.Number, Value = "500", Min = "10", Max = "2000", Required = true, AlpineExtra = ":disabled=\"mode !== 'Burst'\"" })
+                </div>
             </div>
-            <p class="text-xs text-surface-fg-muted -mt-2">Stops at whichever comes first: the seconds or the size cap. One connection rarely fills a fast link; four usually does.</p>
+            <p class="text-xs text-surface-fg-muted -mt-2" x-show="mode === 'Burst'">
+                Stops at whichever comes first: the seconds or the size cap. One connection rarely fills a fast link; four usually does.
+            </p>
+            <p class="text-xs text-surface-fg-muted -mt-2" x-show="mode === 'FullFile'" x-cloak>
+                The file is split into chunks the connections share; a dropped connection resumes where it stopped.
+                Ends when the last byte arrives, or gives up at the limit. You can leave this page — come back and the test is still here.
+            </p>
+
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = "KeepFile", Label = "Keep the file for download", Kind = FormFieldKind.Checkbox,
-                Help = "Saves what the first connection downloaded on the firewall for 24 hours, then deletes it. Download it to a LAN machine, or measure the firewall → browser leg right here. Leave off to measure the WAN alone, without the disk."
+                Help = "Saves the file on the firewall for 24 hours, then deletes it — a full download keeps the real file (e.g. the ISO, with its own name), and only when every byte arrived. Download it to a LAN machine, or measure the firewall → browser leg right here. Leave off to measure the WAN alone, without the disk."
             })
+            </div>
             <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
                 <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`starting… ${elapsed}s`"></span>
                 <button type="submit" class="btn btn-primary" :disabled="busy || $store.diagJob.running">Start test</button>
@@ -64,7 +88,8 @@
     </section>
 
     <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-        <div id="job-host">
+        @* Loads the running or last test on arrival (204 = none, the placeholder stays). *@
+        <div id="job-host" hx-get="/Diagnostics/Jobs/speedtest/current" hx-trigger="load" hx-swap="innerHTML">
             <p class="text-sm text-surface-fg-muted py-8 text-center">The live curve appears here, then the average, peak and first-byte time.</p>
         </div>
     </section>

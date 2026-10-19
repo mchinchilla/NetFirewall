@@ -218,6 +218,8 @@ public sealed class NullDaemonClient : IDaemonClient
         => Task.FromResult(Disabled<Guid>());
     public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagJobSnapshot>> GetDiagJobAsync(Guid id, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagJobSnapshot>());
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagJobSnapshot>>> ListDiagJobsAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<NetFirewall.Models.Diagnostics.DiagJobSnapshot>>());
     public Task<ServiceResponse<object>> CancelDiagJobAsync(Guid id, CancellationToken ct = default)
         => Task.FromResult(Disabled<object>());
     public Task<Stream?> DownloadCaptureAsync(Guid id, CancellationToken ct = default)

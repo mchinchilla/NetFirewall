@@ -1,16 +1,27 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32.SafeHandles;
 using NetFirewall.Models.Diagnostics;
 using NetFirewall.Services.Diagnostics.Jobs;
 
 namespace NetFirewall.Services.Diagnostics.SpeedTest;
 
-public sealed class SpeedTestService : ISpeedTestService
+public sealed partial class SpeedTestService : ISpeedTestService
 {
     private const int BufferSize = 64 * 1024;
+
+    /// <summary>A dropped connection is re-opened and its chunk resumed this many times in a row before the chunk is given up.</summary>
+    internal const int MaxChunkRetries = 5;
+
+    /// <summary>Seconds of TCP slow start left out of <see cref="SpeedTestResult.LowestMbps"/>.</summary>
+    internal const int WarmupSeconds = 3;
 
     /// <summary>
     /// Wire bytes per payload byte on a typical Ethernet + IPv4 + TCP + TLS download
@@ -47,7 +58,8 @@ public sealed class SpeedTestService : ISpeedTestService
 
     public Guid? Start(SpeedTestPlan plan, string? requestedBy)
     {
-        var handle = _jobs.TryStart(DiagJobKind.SpeedTest, $"{plan.Wan} (0x{plan.Fwmark:x}) · {plan.SourceName}", requestedBy);
+        var kind = plan.Mode == SpeedTestMode.FullFile ? "full download" : "burst";
+        var handle = _jobs.TryStart(DiagJobKind.SpeedTest, $"{plan.Wan} (0x{plan.Fwmark:x}) · {plan.SourceName} · {kind}", requestedBy);
         if (handle is null) return null;
 
         _ = Task.Run(() => RunAsync(handle, plan, requestedBy));
@@ -63,6 +75,17 @@ public sealed class SpeedTestService : ISpeedTestService
             try
             {
                 result = await MeasureAsync(handle, plan, requestedBy);
+            }
+            catch (SpeedTestAbort abort)
+            {
+                // An expected refusal (server status, too big, no room): a message, not a stack trace.
+                _store.Discard(handle.Id);
+                result = Empty(plan, abort.Message) with { TotalBytes = abort.TotalBytes };
+            }
+            catch (Exception ex) when (ex is OperationCanceledException && handle.CancellationRequested)
+            {
+                _store.Discard(handle.Id);
+                result = Empty(plan, "Stopped before the download started.");
             }
             catch (Exception ex)
             {
@@ -93,16 +116,16 @@ public sealed class SpeedTestService : ISpeedTestService
 
         var rxBefore = await RxBytesAsync(plan.Wan);
         var meter = new ThroughputMeter(plan.MaxBytes);
-        await using var sink = plan.KeepFile ? new FileSink(_store.PartPathFor(handle.Id)) : null;
-
         var clock = Stopwatch.StartNew();
-        var workers = Enumerable.Range(0, plan.Streams)
-            .Select(i => Task.Run(() => WorkerAsync(client, plan.Url, meter, i == 0 ? sink : null, clock, stop)))
-            .ToArray();
-        var all = Task.WhenAll(workers);
+
+        var transfer = plan.Mode == SpeedTestMode.FullFile
+            ? await StartFullFileAsync(handle.Id, plan, client, meter, clock, stop)
+            : StartBurst(handle.Id, plan, client, meter, clock, stop);
+        await using var sink = transfer.Sink;
 
         // One sample per whole second, published as a partial result for the live curve.
         var samples = new List<double>();
+        var all = Task.WhenAll(transfer.Workers);
         using (var tick = new PeriodicTimer(TimeSpan.FromSeconds(1)))
         {
             long last = 0;
@@ -113,7 +136,7 @@ public sealed class SpeedTestService : ISpeedTestService
                 var now = meter.Bytes;
                 samples.Add(Mbps(now - last, 1));
                 last = now;
-                handle.Report(Build(plan, meter, clock.Elapsed.TotalSeconds, samples.ToList(), null, null, null));
+                handle.Report(Build(plan, meter, clock.Elapsed.TotalSeconds, samples.ToList(), transfer.Total, complete: false));
             }
         }
 
@@ -124,20 +147,49 @@ public sealed class SpeedTestService : ISpeedTestService
             ? Math.Max(0, a - b - (long)(meter.Bytes * WireOverhead))
             : null;
 
+        var complete = transfer.IsComplete();
+        var (error, warning) = Explain(errors, plan.Streams, meter.Bytes);
+        if (plan.Mode == SpeedTestMode.FullFile && !complete && meter.Bytes > 0)
+            warning = Join(warning, IncompleteReason(meter.Bytes, transfer.Total, handle.CancellationRequested, plan));
+        warning = Join(warning, transfer.Note);
+
         SpeedTestFile? file = null;
         if (sink is not null)
-            file = await KeepAsync(handle.Id, plan, sink, meter, seconds, requestedBy);
+        {
+            await sink.DisposeAsync();
+            // A full download with holes is no ISO; only a whole one is worth keeping.
+            var keep = sink.Written > 0 && (plan.Mode == SpeedTestMode.Burst || complete);
+            if (keep)
+                file = await KeepAsync(handle.Id, plan, sink, transfer, meter, seconds, complete, requestedBy);
+            else
+                _store.Discard(handle.Id);
+            if (!keep && sink.Written > 0)
+                warning = Join(warning, "The file was incomplete, so it was not kept.");
+        }
 
-        var (error, warning) = Explain(errors, plan.Streams, meter.Bytes);
-        return Build(plan, meter, seconds, samples, other, file, error) with { Warning = warning };
+        return Build(plan, meter, seconds, samples, transfer.Total, complete) with
+        {
+            OtherTrafficBytes = other, File = file, Error = error, Warning = warning,
+        };
+    }
+
+    // ───────────────────────── burst ─────────────────────────
+
+    private Transfer StartBurst(Guid id, SpeedTestPlan plan, HttpClient client, ThroughputMeter meter, Stopwatch clock, CancellationTokenSource stop)
+    {
+        var sink = plan.KeepFile ? new PayloadSink(_store.PartPathFor(id), preallocate: 0) : null;
+        var workers = Enumerable.Range(0, plan.Streams)
+            .Select(i => Task.Run(() => BurstWorkerAsync(client, plan.Url, meter, i == 0 ? sink : null, clock, stop)))
+            .ToArray();
+        return new Transfer(workers, sink, null, () => sink?.Done ?? false, null);
     }
 
     /// <summary>
-    /// One connection: request the source again and again until the test stops.
+    /// One burst connection: request the source again and again until the test stops.
     /// Returns null when it ended because the test did, or why it gave up.
     /// </summary>
-    private static async Task<string?> WorkerAsync(
-        HttpClient client, Uri url, ThroughputMeter meter, FileSink? sink, Stopwatch clock, CancellationTokenSource stop)
+    private static async Task<string?> BurstWorkerAsync(
+        HttpClient client, Uri url, ThroughputMeter meter, PayloadSink? sink, Stopwatch clock, CancellationTokenSource stop)
     {
         var ct = stop.Token;
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
@@ -148,8 +200,7 @@ public sealed class SpeedTestService : ISpeedTestService
             {
                 var sentAt = clock.Elapsed;
                 using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-                if (!resp.IsSuccessStatusCode)
-                    return $"{url.Host} answered HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}".TrimEnd();
+                if (!resp.IsSuccessStatusCode) return StatusError(url, resp);
 
                 await using var body = await resp.Content.ReadAsStreamAsync(ct);
                 long got = 0;
@@ -158,11 +209,12 @@ public sealed class SpeedTestService : ISpeedTestService
                 {
                     if (got == 0 && firstRequest) meter.FirstByte(clock.Elapsed - sentAt);
                     got += n;
-                    if (sink is { Done: false }) await sink.WriteAsync(buffer.AsMemory(0, n), ct);
+                    // One writer, in order: the kept file is the first response, byte for byte.
+                    if (sink is { Done: false }) await sink.WriteAsync(sink.Written, buffer.AsMemory(0, n), ct);
                     if (meter.Add(n)) stop.Cancel();   // byte cap reached: end the whole test
                 }
                 firstRequest = false;
-                sink?.MarkComplete();   // the first full response is the kept file
+                sink?.MarkComplete();
                 if (got == 0) return $"{url.Host} sent an empty response.";
             }
             return null;
@@ -171,13 +223,9 @@ public sealed class SpeedTestService : ISpeedTestService
         {
             return null;   // the deadline, the cap or the operator — a normal end, whatever the socket threw
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            return ex.InnerException is { } inner ? $"{ex.Message} ({inner.Message})" : ex.Message;
-        }
-        catch (IOException ex)
-        {
-            return ex.Message;
+            return Describe(ex);
         }
         finally
         {
@@ -185,21 +233,186 @@ public sealed class SpeedTestService : ISpeedTestService
         }
     }
 
-    private async Task<SpeedTestFile?> KeepAsync(Guid id, SpeedTestPlan plan, FileSink sink, ThroughputMeter meter, double seconds, string? requestedBy)
+    // ───────────────────────── full download ─────────────────────────
+
+    private async Task<Transfer> StartFullFileAsync(Guid id, SpeedTestPlan plan, HttpClient client, ThroughputMeter meter, Stopwatch clock, CancellationTokenSource stop)
     {
-        await sink.DisposeAsync();
-        if (sink.Written == 0)
+        var probe = await ProbeAsync(client, plan.Url, stop.Token);
+        if (probe.Total is { } size && size > plan.MaxBytes)
+            throw new SpeedTestAbort($"The file is {Gb(size)}, above the {Gb(plan.MaxBytes)} limit for one test.", size);
+        if (plan.KeepFile)
         {
-            _store.Discard(id);
-            return null;
+            if (probe.Total is not { } known)
+                throw new SpeedTestAbort($"{plan.Url.Host} did not say how big the file is, so it cannot be checked against the disk quota. Run without keeping the file.");
+            if (_store.CheckCapacity(known) is { } full)
+                throw new SpeedTestAbort($"The file is {Gb(known)}. {full}", known);
         }
 
+        // Preallocating reserves the space up front, so a full disk fails now, not 40 minutes in.
+        var sink = plan.KeepFile ? new PayloadSink(_store.PartPathFor(id), probe.Total ?? 0) : null;
+
+        if (probe.Ranges && probe.Total is { } total)
+        {
+            var queue = new ConcurrentQueue<Chunk>(Chunks(total, plan.Streams));
+            var workers = Enumerable.Range(0, plan.Streams)
+                .Select(_ => Task.Run(() => ChunkWorkerAsync(client, probe.Url, queue, meter, sink, clock, stop.Token)))
+                .ToArray();
+            return new Transfer(workers, sink, total, () => meter.CompletedBytes >= total, null);
+        }
+
+        // No range support (or no size): one connection reads the body to the end, and
+        // a drop cannot be resumed. Say so, because it changes what the number means.
+        var single = Task.Run(() => WholeBodyWorkerAsync(client, probe.Url, meter, sink, clock, stop.Token));
+        var note = $"{plan.Url.Host} does not serve byte ranges, so the file came over one connection and a dropped connection could not be resumed.";
+        return new Transfer([single], sink, probe.Total, () => meter.CompletedBytes > 0 && (probe.Total is null || meter.CompletedBytes >= probe.Total), note);
+    }
+
+    /// <summary>
+    /// Ask for the first byte only. A 206 with a Content-Range length means the server
+    /// splits the file; the final URL (after redirects to a mirror) is used for every
+    /// chunk, so the chunks cannot land on different mirrors.
+    /// </summary>
+    private static async Task<Probe> ProbeAsync(HttpClient client, Uri url, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Range = new RangeHeaderValue(0, 0);
+        using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        var final = resp.RequestMessage?.RequestUri ?? url;
+
+        if (resp.StatusCode == HttpStatusCode.PartialContent && resp.Content.Headers.ContentRange is { HasLength: true } range)
+            return new Probe(final, range.Length, Ranges: true);
+        if (resp.IsSuccessStatusCode)
+            return new Probe(final, resp.Content.Headers.ContentLength, Ranges: false);
+        throw new SpeedTestAbort(StatusError(url, resp));
+    }
+
+    /// <summary>
+    /// Pull chunks off the shared queue until it is empty. A dropped connection resumes
+    /// its chunk from the last byte written; after <see cref="MaxChunkRetries"/> failures
+    /// in a row the remainder goes back on the queue for another connection.
+    /// </summary>
+    private static async Task<string?> ChunkWorkerAsync(
+        HttpClient client, Uri url, ConcurrentQueue<Chunk> queue, ThroughputMeter meter, PayloadSink? sink, Stopwatch clock, CancellationToken ct)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        var first = true;
+        try
+        {
+            while (queue.TryDequeue(out var chunk))
+            {
+                var pos = chunk.Start;
+                var failures = 0;
+                while (pos <= chunk.End)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                        req.Headers.Range = new RangeHeaderValue(pos, chunk.End);
+                        var sentAt = clock.Elapsed;
+                        using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                        if (IsTransient(resp.StatusCode))
+                            throw new HttpRequestException($"{url.Host} answered HTTP {(int)resp.StatusCode}", null, resp.StatusCode);
+                        if (resp.StatusCode != HttpStatusCode.PartialContent)
+                        {
+                            queue.Enqueue(chunk with { Start = pos });
+                            return resp.IsSuccessStatusCode
+                                ? $"{url.Host} stopped honouring byte ranges mid-download (HTTP {(int)resp.StatusCode})."
+                                : StatusError(url, resp);
+                        }
+
+                        await using var body = await resp.Content.ReadAsStreamAsync(ct);
+                        int n;
+                        while (pos <= chunk.End &&
+                               (n = await body.ReadAsync(buffer.AsMemory(0, (int)Math.Min(BufferSize, chunk.End - pos + 1)), ct)) > 0)
+                        {
+                            if (first) { meter.FirstByte(clock.Elapsed - sentAt); first = false; }
+                            if (sink is not null) await sink.WriteAsync(pos, buffer.AsMemory(0, n), ct);
+                            pos += n;
+                            failures = 0;   // progress resets the streak: only consecutive failures give up
+                            meter.Add(n);
+                        }
+                        if (pos <= chunk.End) throw new IOException($"{url.Host} closed the connection mid-chunk.");
+                    }
+                    catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or IOException)
+                    {
+                        if (++failures > MaxChunkRetries)
+                        {
+                            queue.Enqueue(chunk with { Start = pos });
+                            return Describe(ex);
+                        }
+                        meter.Reconnected();
+                        await Task.Delay(TimeSpan.FromSeconds(failures), ct);
+                    }
+                }
+                meter.ChunkDone(chunk.End - chunk.Start + 1);
+            }
+            return null;
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            return null;   // time limit or operator — whatever the socket threw
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static async Task<string?> WholeBodyWorkerAsync(
+        HttpClient client, Uri url, ThroughputMeter meter, PayloadSink? sink, Stopwatch clock, CancellationToken ct)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        try
+        {
+            var sentAt = clock.Elapsed;
+            using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!resp.IsSuccessStatusCode) return StatusError(url, resp);
+
+            await using var body = await resp.Content.ReadAsStreamAsync(ct);
+            long pos = 0;
+            int n;
+            while ((n = await body.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
+            {
+                if (pos == 0) meter.FirstByte(clock.Elapsed - sentAt);
+                if (sink is not null) await sink.WriteAsync(pos, buffer.AsMemory(0, n), ct);
+                pos += n;
+                meter.Add(n);
+            }
+            meter.ChunkDone(pos);   // EOF reached: the body is whole
+            return null;
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            return Describe(ex);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    // ───────────────────────── keeping the file ─────────────────────────
+
+    private async Task<SpeedTestFile?> KeepAsync(Guid id, SpeedTestPlan plan, PayloadSink sink, Transfer transfer, ThroughputMeter meter,
+        double seconds, bool complete, string? requestedBy)
+    {
         var now = DateTime.UtcNow;
+        var name = plan.Mode == SpeedTestMode.FullFile
+            ? SafeFileName(plan.Url) ?? $"download-{plan.Wan}-{now:yyyyMMdd-HHmmss}.bin"
+            : $"speedtest-{plan.Wan}-{now:yyyyMMdd-HHmmss}.bin";
+        // Burst: one sequential writer. Full download: every connection writes, so
+        // compare against all of their time together.
+        var writerSeconds = plan.Mode == SpeedTestMode.FullFile ? seconds * transfer.Workers.Length : sink.ActiveSeconds;
+
         var meta = new SpeedTestFile(
-            id,
-            $"speedtest-{plan.Wan}-{now:yyyyMMdd-HHmmss}.bin",
-            sink.Written,
-            sink.Done,
+            id, name,
+            plan.Mode == SpeedTestMode.FullFile ? transfer.Total ?? sink.Written : sink.Written,
+            complete,
             plan.Wan,
             plan.SourceName,
             Math.Round(Mbps(meter.Bytes, seconds), 1),
@@ -207,7 +420,7 @@ public sealed class SpeedTestService : ISpeedTestService
             now.AddHours(Math.Max(1, _opts.SpeedTestRetentionHours)),
             requestedBy,
             sink.WriteSeconds > 0 ? Math.Round(Mbps(sink.Written, sink.WriteSeconds), 1) : null,
-            DiskLimited: sink.WriteSeconds > sink.ActiveSeconds * 0.5);
+            DiskLimited: writerSeconds > 0 && sink.WriteSeconds > writerSeconds * 0.5);
 
         try
         {
@@ -233,7 +446,7 @@ public sealed class SpeedTestService : ISpeedTestService
             return await store.StartAsync(DiagTools.SpeedTest, plan.Wan, requestedBy, new
             {
                 plan.Wan, Fwmark = $"0x{plan.Fwmark:x}", Source = plan.SourceName, Url = plan.Url.ToString(),
-                plan.DurationSec, MaxMegabytes = plan.MaxBytes / 1_000_000, plan.Streams, plan.KeepFile,
+                Mode = plan.Mode.ToString(), plan.DurationSec, MaxMegabytes = plan.MaxBytes / 1_000_000, plan.Streams, plan.KeepFile,
             });
         }
         catch (Exception ex)
@@ -263,14 +476,21 @@ public sealed class SpeedTestService : ISpeedTestService
 
     internal static string RunStatus(SpeedTestResult r, bool cancelled) =>
         r.Bytes == 0 ? DiagRunStatus.Error
-        : cancelled || r.Warning is not null ? DiagRunStatus.Warn
+        : cancelled || r.Warning is not null || (r.Mode == SpeedTestMode.FullFile && !r.Complete) ? DiagRunStatus.Warn
         : DiagRunStatus.Ok;
 
-    internal static string Summary(SpeedTestResult r, bool cancelled) =>
-        r.Bytes == 0
-            ? r.Error ?? "Nothing was downloaded."
-            : $"{r.AvgMbps:0.#} Mbps avg, peak {r.PeakMbps:0.#} via {r.Wan} (0x{r.Fwmark:x}) from {r.Source}"
-              + (cancelled ? " — stopped early" : string.Empty);
+    internal static string Summary(SpeedTestResult r, bool cancelled)
+    {
+        if (r.Bytes == 0) return r.Error ?? "Nothing was downloaded.";
+        var via = $"via {r.Wan} (0x{r.Fwmark:x}) from {r.Source}";
+        if (r.Mode == SpeedTestMode.Burst)
+            return $"{r.AvgMbps:0.#} Mbps avg, peak {r.PeakMbps:0.#} {via}" + (cancelled ? " — stopped early" : string.Empty);
+
+        var what = r.Complete
+            ? $"Full download of {Gb(r.TotalBytes ?? r.Bytes)} in {Clock(r.Seconds)}"
+            : $"{r.ProgressPct ?? 0:0.#}% of {(r.TotalBytes is { } t ? Gb(t) : "the file")} in {Clock(r.Seconds)}" + (cancelled ? " (stopped)" : " (incomplete)");
+        return $"{what}: {r.AvgMbps:0.#} Mbps avg, lowest {r.LowestMbps ?? 0:0.#}, {r.StallSeconds} stall s, {r.Reconnects} reconnect(s) {via}";
+    }
 
     /// <summary>
     /// Stream failures void the test only when nothing arrived; otherwise they are a
@@ -285,20 +505,73 @@ public sealed class SpeedTestService : ISpeedTestService
             : (null, $"{errors.Count} of {streams} connection(s) failed during the test ({first}); the result may understate the link.");
     }
 
+    /// <summary>Split a file into range chunks: ~8 per connection so a slow one leaves only a short tail, 8–256 MB each.</summary>
+    internal static IReadOnlyList<Chunk> Chunks(long total, int streams)
+    {
+        var size = Math.Clamp(total / (Math.Max(1, streams) * 8L), 8L << 20, 256L << 20);
+        var list = new List<Chunk>();
+        for (long start = 0; start < total; start += size)
+            list.Add(new Chunk(start, Math.Min(total, start + size) - 1));
+        return list;
+    }
+
+    /// <summary>Slowest second after warm-up, and seconds with nothing at all after the first byte.</summary>
+    internal static (double? Lowest, int Stalls) Stability(IReadOnlyList<double> samples)
+    {
+        var steady = samples.Skip(WarmupSeconds).ToList();
+        var firstByte = samples.ToList().FindIndex(s => s > 0);
+        var stalls = firstByte < 0 ? 0 : samples.Skip(firstByte).Count(s => s == 0);
+        return (steady.Count == 0 ? null : Math.Round(steady.Min(), 1), stalls);
+    }
+
     internal static double Mbps(long bytes, double seconds) => seconds <= 0 ? 0 : bytes * 8 / seconds / 1_000_000;
 
-    private static SpeedTestResult Build(SpeedTestPlan plan, ThroughputMeter meter, double seconds, IReadOnlyList<double> samples,
-        long? other, SpeedTestFile? file, string? error) =>
-        new(plan.Wan, plan.Fwmark, plan.SourceName, plan.Url.ToString(), plan.Streams,
+    /// <summary>The source's own file name (an ISO keeps its name), or null when it is not a plain safe name.</summary>
+    internal static string? SafeFileName(Uri url)
+    {
+        var name = Path.GetFileName(Uri.UnescapeDataString(url.AbsolutePath));
+        return SafeNameRx().IsMatch(name) ? name : null;
+    }
+
+    private static string IncompleteReason(long bytes, long? total, bool cancelled, SpeedTestPlan plan)
+    {
+        var got = total is > 0 ? $"{bytes * 100.0 / total.Value:0.#}% of {Gb(total.Value)}" : Gb(bytes);
+        return cancelled
+            ? $"Stopped with {got} downloaded."
+            : $"Only {got} arrived within the {plan.DurationSec / 60}-minute limit.";
+    }
+
+    private static SpeedTestResult Build(SpeedTestPlan plan, ThroughputMeter meter, double seconds, IReadOnlyList<double> samples, long? total, bool complete)
+    {
+        var (lowest, stalls) = Stability(samples);
+        return new SpeedTestResult(plan.Wan, plan.Fwmark, plan.SourceName, plan.Url.ToString(), plan.Streams,
             meter.Bytes, Math.Round(seconds, 2),
             Math.Round(Mbps(meter.Bytes, seconds), 1),
             Math.Round(samples.Count == 0 ? Mbps(meter.Bytes, seconds) : samples.Max(), 1),
             meter.TtfbMs, samples.Select(s => Math.Round(s, 1)).ToList(),
-            meter.ReachedCap, other, file, error);
+            meter.ReachedCap,
+            Mode: plan.Mode, TotalBytes: total, Complete: complete,
+            LowestMbps: lowest, StallSeconds: stalls, Reconnects: meter.Reconnects);
+    }
 
     private static SpeedTestResult Empty(SpeedTestPlan plan, string error) =>
         new(plan.Wan, plan.Fwmark, plan.SourceName, plan.Url.ToString(), plan.Streams, 0, 0, 0, 0, null,
-            Array.Empty<double>(), false, Error: error);
+            Array.Empty<double>(), false, Error: error, Mode: plan.Mode);
+
+    private static bool IsTransient(HttpStatusCode code) => code is HttpStatusCode.TooManyRequests || (int)code >= 500;
+
+    private static string StatusError(Uri url, HttpResponseMessage resp) =>
+        $"{url.Host} answered HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}".TrimEnd();
+
+    private static string Describe(Exception ex) =>
+        ex.InnerException is { } inner ? $"{ex.Message} ({inner.Message})" : ex.Message;
+
+    private static string? Join(string? a, string? b) =>
+        string.IsNullOrEmpty(a) ? b : string.IsNullOrEmpty(b) ? a : $"{a} {b}";
+
+    private static string Gb(long bytes) => bytes >= 1_000_000_000 ? $"{bytes / 1e9:0.##} GB" : $"{bytes / 1e6:0.#} MB";
+
+    private static string Clock(double seconds) => TimeSpan.FromSeconds(Math.Round(seconds)).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss");
 
     private async Task<long?> RxBytesAsync(string iface)
     {
@@ -306,14 +579,37 @@ public sealed class SpeedTestService : ISpeedTestService
         catch (Exception ex) { _logger.LogDebug(ex, "rx counter for {Iface} unavailable", iface); return null; }
     }
 
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._\-]{0,150}$")]
+    private static partial Regex SafeNameRx();
+
+    // ───────────────────────── moving parts ─────────────────────────
+
+    internal sealed record Chunk(long Start, long End);
+
+    private sealed record Probe(Uri Url, long? Total, bool Ranges);
+
+    /// <summary>What a started transfer hands back to the shared sampling loop.</summary>
+    private sealed record Transfer(Task<string?>[] Workers, PayloadSink? Sink, long? Total, Func<bool> IsComplete, string? Note);
+
+    private sealed class SpeedTestAbort(string message, long? totalBytes = null) : Exception(message)
+    {
+        public long? TotalBytes { get; } = totalBytes;
+    }
+
     /// <summary>Byte counter shared by every connection of one test. Thread-safe.</summary>
     internal sealed class ThroughputMeter(long cap)
     {
         private long _bytes;
+        private long _completed;
+        private int _reconnects;
         private long _ttfbTicks = long.MaxValue;
 
         public long Bytes => Interlocked.Read(ref _bytes);
+        /// <summary>Bytes in chunks that finished — counts only whole pieces of the file.</summary>
+        public long CompletedBytes => Interlocked.Read(ref _completed);
+        public int Reconnects => Volatile.Read(ref _reconnects);
         public bool ReachedCap => Bytes >= cap;
+
         public double? TtfbMs
         {
             get
@@ -326,6 +622,10 @@ public sealed class SpeedTestService : ISpeedTestService
         /// <summary>Count <paramref name="n"/> bytes; true once the cap is reached.</summary>
         public bool Add(int n) => Interlocked.Add(ref _bytes, n) >= cap;
 
+        public void ChunkDone(long length) => Interlocked.Add(ref _completed, length);
+
+        public void Reconnected() => Interlocked.Increment(ref _reconnects);
+
         /// <summary>Keep the fastest first-byte time across connections.</summary>
         public void FirstByte(TimeSpan delay)
         {
@@ -337,40 +637,38 @@ public sealed class SpeedTestService : ISpeedTestService
     }
 
     /// <summary>
-    /// Writes ONE connection's bytes to the kept file and times the writes, so the
-    /// result can say when the disk, not the WAN, set the pace.
+    /// The kept file. Writes go to explicit offsets, so a burst's single writer appends
+    /// and a full download's connections fill their own chunks. Time inside writes is
+    /// summed across writers, so the result can say when the disk set the pace.
     /// </summary>
-    internal sealed class FileSink : IAsyncDisposable
+    internal sealed class PayloadSink : IAsyncDisposable
     {
-        private readonly FileStream _fs;
+        private readonly SafeFileHandle _file;
         private readonly Stopwatch _active = new();
-        private readonly Stopwatch _writing = new();
-        private bool _disposed;
+        private long _written;
+        private long _writeTicks;
+        private int _disposed;
 
-        public FileSink(string path)
+        public PayloadSink(string path, long preallocate)
         {
-            _fs = new FileStream(path, new FileStreamOptions
-            {
-                Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None,
-                Options = FileOptions.Asynchronous, BufferSize = 1 << 20,
-            });
+            _file = File.OpenHandle(path, FileMode.Create, FileAccess.Write, FileShare.None, FileOptions.Asynchronous, preallocate);
         }
 
-        /// <summary>The first response finished: stop writing, the file is a full copy.</summary>
+        /// <summary>Burst only: the first response finished — stop writing, the file is a full copy.</summary>
         public bool Done { get; private set; }
-        public long Written { get; private set; }
-        public double WriteSeconds => _writing.Elapsed.TotalSeconds;
-        /// <summary>From the first write until the file was complete or the test ended.</summary>
+        public long Written => Interlocked.Read(ref _written);
+        public double WriteSeconds => TimeSpan.FromTicks(Interlocked.Read(ref _writeTicks)).TotalSeconds;
+        /// <summary>Burst only: from the first write until the file was complete or the test ended.</summary>
         public double ActiveSeconds => _active.Elapsed.TotalSeconds;
 
-        public async ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
+        public async ValueTask WriteAsync(long offset, ReadOnlyMemory<byte> data, CancellationToken ct)
         {
-            if (Done || _disposed) return;
+            if (Done || Volatile.Read(ref _disposed) == 1) return;
             _active.Start();
-            _writing.Start();
-            try { await _fs.WriteAsync(data, ct); }
-            finally { _writing.Stop(); }
-            Written += data.Length;
+            var started = Stopwatch.GetTimestamp();
+            await RandomAccess.WriteAsync(_file, data, offset, ct);
+            Interlocked.Add(ref _writeTicks, Stopwatch.GetElapsedTime(started).Ticks);
+            Interlocked.Add(ref _written, data.Length);
         }
 
         public void MarkComplete()
@@ -380,12 +678,12 @@ public sealed class SpeedTestService : ISpeedTestService
             _active.Stop();
         }
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            if (_disposed) return;
-            _disposed = true;
+            if (Interlocked.Exchange(ref _disposed, 1) == 1) return ValueTask.CompletedTask;
             _active.Stop();
-            await _fs.DisposeAsync();
+            _file.Dispose();
+            return ValueTask.CompletedTask;
         }
     }
 }

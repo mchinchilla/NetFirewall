@@ -95,9 +95,24 @@ public sealed class DiagnosticsJobsController : Controller
 
         var env = await _daemon.StartSpeedTestAsync(new SpeedTestRequest(
             form.Wan.Trim(), form.SourceId, form.IsCustom ? Blank(form.CustomUrl) : null,
-            form.DurationSec, form.MaxMegabytes, form.Streams, form.KeepFile), ct);
+            form.DurationSec, form.MaxMegabytes, form.Streams, form.KeepFile, form.Mode, form.TimeLimitMinutes), ct);
 
         return StartedOrToast(env, DiagJobKind.SpeedTest);
+    }
+
+    /// <summary>
+    /// The page asks on load: a full download runs for up to hours, so coming back
+    /// to the page must pick the running (or just-finished) test up again. 204 keeps
+    /// the placeholder when there is none.
+    /// </summary>
+    [HttpGet("speedtest/current")]
+    public async Task<IActionResult> SpeedTestCurrent(CancellationToken ct)
+    {
+        var jobs = (await _daemon.ListDiagJobsAsync(ct)).Data ?? Array.Empty<DiagJobSnapshot>();
+        var job = jobs.Where(j => j.Kind == DiagJobKind.SpeedTest)
+            .OrderByDescending(j => j.IsRunning).ThenByDescending(j => j.StartedAtUtc)
+            .FirstOrDefault();
+        return job is null ? NoContent() : PartialView("_JobPanel", new PanelViewModel<DiagJobSnapshot>(job, null));
     }
 
     /// <summary>Kept files, polled by the page (and refreshed when a test finishes or a file is deleted).</summary>

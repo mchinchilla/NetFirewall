@@ -1,4 +1,5 @@
 @model NetFirewall.Models.Diagnostics.SpeedTestResult
+@using NetFirewall.Models.Diagnostics
 @using NetFirewall.Web.Models
 @using NetFirewall.Web.Models.Diagnostics
 @{
@@ -11,6 +12,35 @@
     @await Html.PartialAsync("_StatTile", new StatTileViewModel("First byte", r.TtfbMs is { } t ? t.ToString("0") : "—", "ms"))
     @await Html.PartialAsync("_StatTile", new StatTileViewModel("Downloaded", DiagUi.Bytes(r.Bytes), null, $"in {r.Seconds:0.#} s · {r.Streams} stream(s)"))
 </div>
+
+@if (r.Mode == SpeedTestMode.FullFile)
+{
+    var pct = r.Complete ? 100 : r.ProgressPct ?? 0;
+    // Warning/Error are only set once the test has ended, so their absence means "still going".
+    var eta = !r.Complete && r.Error is null && r.Warning is null && r.TotalBytes is { } total && r.AvgMbps > 0
+        ? TimeSpan.FromSeconds((total - r.Bytes) * 8 / (r.AvgMbps * 1_000_000))
+        : (TimeSpan?)null;
+    <div class="mb-4">
+        <div class="flex items-baseline justify-between text-xs mb-1">
+            <span class="font-medium">
+                @(r.Complete ? "Complete" : $"{pct:0.#}%")
+                @if (r.TotalBytes is { } size) { <span class="text-surface-fg-muted">of @DiagUi.Bytes(size)</span> }
+            </span>
+            <span class="font-mono text-surface-fg-muted">
+                @(eta is { } left ? $"≈ {DiagUi.Duration(left)} left at the current average" : $"elapsed {DiagUi.Duration(TimeSpan.FromSeconds(r.Seconds))}")
+            </span>
+        </div>
+        <div class="h-2 rounded-full overflow-hidden bg-surface-muted" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@pct.ToString("0", System.Globalization.CultureInfo.InvariantCulture)">
+            <div class="h-full rounded-full @(r.Complete ? "bg-feedback-success-fg" : "bg-accent")" style="width: @pct.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+        </div>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Slowest second", r.LowestMbps is { } low ? low.ToString("0.#") : "—", "Mbps", "after 3 s of warm-up"))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Stalls", r.StallSeconds.ToString(), "s", "seconds with nothing arriving", r.StallSeconds > 0 ? StatTone.Warning : StatTone.Normal))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Reconnects", r.Reconnects.ToString(), null, "dropped connections resumed", r.Reconnects > 0 ? StatTone.Warning : StatTone.Normal))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Duration", DiagUi.Duration(TimeSpan.FromSeconds(r.Seconds))))
+    </div>
+}
 
 @await Html.PartialAsync("~/Views/DiagnosticsJobs/_SpeedTestChart.cshtml", r.SamplesMbps)
 
@@ -28,7 +58,7 @@
         }
     </p>
 }
-@if (r.ReachedByteCap)
+@if (r.ReachedByteCap && r.Mode == SpeedTestMode.Burst)
 {
     <p class="text-sm mt-2 text-surface-fg-muted">Stopped at the size cap before the time ran out — raise the cap for a longer sample.</p>
 }
