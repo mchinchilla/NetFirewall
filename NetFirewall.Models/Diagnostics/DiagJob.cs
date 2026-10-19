@@ -11,7 +11,8 @@ namespace NetFirewall.Models.Diagnostics;
 public enum DiagJobKind
 {
     Trace,
-    Capture
+    Capture,
+    SpeedTest
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -34,13 +35,15 @@ public sealed record DiagJobSnapshot(
     int ElapsedMs,
     string? RequestedBy,
     string Subject,
-    /// <summary>Events (trace) or packets (capture) collected so far.</summary>
+    /// <summary>Events (trace), packets (capture) or megabytes (speed test) collected so far.</summary>
     int ItemCount,
     bool Truncated,
     string? Message,
     /// <summary>Set once the job is done; shape depends on <see cref="Kind"/>.</summary>
     TraceResult? Trace = null,
-    CaptureResult? Capture = null)
+    CaptureResult? Capture = null,
+    /// <summary>Speed tests also publish their partial result while running, for the live curve.</summary>
+    SpeedTestResult? SpeedTest = null)
 {
     public bool IsRunning => State == DiagJobState.Running;
 }

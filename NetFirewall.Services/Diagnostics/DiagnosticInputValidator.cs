@@ -173,6 +173,58 @@ public sealed partial class DiagnosticInputValidator : IDiagnosticInputValidator
     public string RedactWgConfig(string text) =>
         string.IsNullOrEmpty(text) ? string.Empty : WgSecretLineRx().Replace(text, "$1 = <redacted>");
 
+    public bool TryTestUrl(string? input, out Uri url, out string? error)
+    {
+        url = null!;
+        var s = (input ?? string.Empty).Trim();
+        if (s.Length == 0) { error = "Test URL is required."; return false; }
+        if (s.Length > 500) { error = "Test URL is too long (500 characters max)."; return false; }
+        if (!Uri.TryCreate(s, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("http" or "https"))
+        {
+            error = "Test URL must be an absolute http:// or https:// address.";
+            return false;
+        }
+        if (!string.IsNullOrEmpty(parsed.UserInfo)) { error = "Test URL must not carry credentials."; return false; }
+
+        var host = parsed.IdnHost.Trim('[', ']');
+        if (TryIpLiteral(host, out var ip))
+        {
+            if (!IsPublicAddress(ip)) { error = "Test URL must point at a public address — the test measures a WAN."; return false; }
+        }
+        else if (!HostnameRx().IsMatch(host) || !host.Contains('.'))
+        {
+            error = "Test URL host is not a valid public hostname.";
+            return false;
+        }
+
+        url = parsed;
+        error = null;
+        return true;
+    }
+
+    public bool IsPublicAddress(IPAddress ip)
+    {
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        if (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any) || ip.Equals(IPAddress.Broadcast))
+            return false;
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var b = ip.GetAddressBytes();
+            return !(b[0] == 0                                   // this network
+                     || b[0] == 10                               // RFC 1918
+                     || (b[0] == 100 && b[1] is >= 64 and <= 127) // CGNAT
+                     || (b[0] == 169 && b[1] == 254)             // link-local
+                     || (b[0] == 172 && b[1] is >= 16 and <= 31) // RFC 1918
+                     || (b[0] == 192 && b[1] == 168)             // RFC 1918
+                     || (b[0] == 192 && b[1] == 0 && b[2] == 0)  // IETF protocol assignments
+                     || (b[0] == 198 && b[1] is 18 or 19)        // benchmarking
+                     || b[0] >= 224);                            // multicast + reserved
+        }
+
+        return !(ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast || ip.IsIPv6UniqueLocal);
+    }
+
     /// <summary>
     /// Strict IP literal. <c>IPAddress.TryParse</c> accepts shorthand like "1.2.3" (→ 1.2.0.3)
     /// and zone ids ("fe80::1%eth0"); neither is welcome in a command argument.

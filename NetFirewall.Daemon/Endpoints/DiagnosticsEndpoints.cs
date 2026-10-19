@@ -393,8 +393,9 @@ public static class DiagnosticsEndpoints
 
         // ═════════════════════ phase 2: invasive tools ═════════════════════
         // Admin only, TOTP step-up, audited at start/stop/download. These either
-        // mutate the kernel (a temporary nftables table) or write raw traffic to
-        // disk, so they do not share the read-only group's relaxed gate.
+        // mutate the kernel (a temporary nftables table), write raw traffic to
+        // disk, or saturate an uplink, so they do not share the read-only group's
+        // relaxed gate.
         var inv = app.MapGroup("/v1/diagnostics")
             .RequireAuthorization(p => p.RequireRole(UserRoles.Admin));
 
@@ -522,6 +523,65 @@ public static class DiagnosticsEndpoints
                 ? ServiceResponse<object>.Ok(new { }, "Capture deleted.")
                 : ServiceResponse<object>.Fail("Capture not found.")))
         .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
+
+        // ── WAN speed test ──
+        // Starting one is step-up gated like the other jobs: it saturates the uplink
+        // for every user while it runs. The kept payload is test data, not traffic,
+        // so listing / downloading / deleting it is Admin without step-up — the
+        // browser-side LAN measurement fetches it directly.
+        inv.MapPost("/speedtest/start", async (
+                SpeedTestRequest req,
+                IDiagnosticInputValidator v,
+                NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestService speed,
+                NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestStore store,
+                IFirewallService fw,
+                NetFirewall.Services.WanMonitor.IWanHealthService wans,
+                IAuthAuditService audit,
+                ClaimsPrincipal user,
+                HttpContext ctx,
+                CancellationToken ct) =>
+        {
+            var (plan, err) = await PlanSpeedTestAsync(req, v, fw, wans, ct);
+            if (plan is null) return BadJob(err);
+            if (plan.KeepFile && store.CheckCapacity(plan.MaxBytes) is { } full) return BadJob(full);
+
+            var id = speed.Start(plan, user.Identity?.Name);
+            if (id is null) return Busy<Guid>("Another diagnostics job (trace, capture or speed test) is already running.");
+
+            await AuditJobAsync(audit, AuthAuditEvents.DiagSpeedTestStarted, user, ctx, new
+            {
+                runId = id, plan.Wan, Fwmark = $"0x{plan.Fwmark:x}", Source = plan.SourceName, Url = plan.Url.ToString(),
+                plan.DurationSec, plan.Streams, plan.KeepFile,
+            }, ct);
+            return Results.Json(ServiceResponse<Guid>.Ok(id.Value, $"Speed test started on {plan.Wan}."));
+        })
+        .WithMetadata(new DaemonAllowRootPeerAttribute(), new DaemonRequireElevatedAttribute());
+
+        inv.MapGet("/speedtest/files", async (NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestStore store, CancellationToken ct) =>
+            Results.Json(ServiceResponse<IReadOnlyList<SpeedTestFile>>.Ok(await store.ListAsync(ct), "OK")))
+        .WithMetadata(new DaemonAllowRootPeerAttribute());
+
+        inv.MapGet("/speedtest/{id:guid}/download", async (
+                Guid id,
+                NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestStore store,
+                IAuthAuditService audit,
+                ClaimsPrincipal user,
+                HttpContext ctx,
+                CancellationToken ct) =>
+        {
+            if (await store.OpenReadAsync(id, ct) is not { } file)
+                return Results.Json(ServiceResponse<object>.Fail("That file expired or was deleted."), statusCode: 404);
+
+            await AuditJobAsync(audit, AuthAuditEvents.DiagSpeedTestDownloaded, user, ctx, new { runId = id, file.Meta.FileName, file.Meta.SizeBytes }, ct);
+            return Results.Stream(file.Content, "application/octet-stream", file.Meta.FileName);
+        })
+        .WithMetadata(new DaemonAllowRootPeerAttribute());
+
+        inv.MapDelete("/speedtest/{id:guid}", (Guid id, NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestStore store) =>
+            Results.Json(store.Delete(id)
+                ? ServiceResponse<object>.Ok(new { }, "Speed-test file deleted.")
+                : ServiceResponse<object>.Fail("That file is already gone.")))
+        .WithMetadata(new DaemonAllowRootPeerAttribute());
     }
 
     // ───────────────────────── helpers ─────────────────────────
@@ -557,6 +617,51 @@ public static class DiagnosticsEndpoints
         foreach (var i in await fw.GetInterfacesAsync(ct))
             if (!string.IsNullOrWhiteSpace(i.Name)) set.Add(i.Name);
         return set;
+    }
+
+    /// <summary>
+    /// Turn a speed-test request into a plan, or say why not. The WAN must be an
+    /// enabled WAN interface with a probe fwmark: the mark is what pins the test to
+    /// that uplink (binding to the interface is ignored by policy routing).
+    /// </summary>
+    private static async Task<(NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestPlan? Plan, string? Error)> PlanSpeedTestAsync(
+        SpeedTestRequest req, IDiagnosticInputValidator v, IFirewallService fw,
+        NetFirewall.Services.WanMonitor.IWanHealthService wans, CancellationToken ct)
+    {
+        var wanNames = (await fw.GetInterfacesAsync(ct))
+            .Where(i => i.Enabled && string.Equals(i.Type, "WAN", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(i.Name))
+            .Select(i => i.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (!v.TryInterfaceName(req.Wan, wanNames, out var wan, out var err))
+            return (null, $"{err} Pick one of the enabled WAN interfaces.");
+
+        var cfg = (await wans.GetAllConfigsAsync(ct)).FirstOrDefault(c => string.Equals(c.InterfaceName, wan, StringComparison.Ordinal));
+        if (cfg?.ProbeFwmark is not > 0)
+            return (null, $"{wan} has no probe fwmark, so the test cannot be pinned to it. Set probe_fwmark for {wan} in WAN failover first.");
+
+        Uri url;
+        string sourceName;
+        if (string.Equals(req.SourceId, SpeedTestSources.CustomId, StringComparison.Ordinal))
+        {
+            if (!v.TryTestUrl(req.CustomUrl, out url, out err)) return (null, err);
+            sourceName = url.Host;
+        }
+        else if (SpeedTestSources.Find(req.SourceId) is { } src)
+        {
+            url = new Uri(src.Url);
+            sourceName = src.Name;
+        }
+        else
+        {
+            return (null, "Unknown test server.");
+        }
+
+        return (new NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestPlan(
+            wan, cfg.ProbeFwmark.Value, sourceName, url,
+            v.Clamp(req.DurationSec, 5, 30),
+            (long)v.Clamp(req.MaxMegabytes, 10, 2000) * 1_000_000,
+            v.Clamp(req.Streams, 1, 8),
+            req.KeepFile), null);
     }
 
     private static IResult BadJob(string? error) =>

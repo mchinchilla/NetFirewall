@@ -224,6 +224,14 @@ public sealed class NullDaemonClient : IDaemonClient
         => Task.FromResult<Stream?>(null);
     public Task<ServiceResponse<object>> DeleteCaptureAsync(Guid id, CancellationToken ct = default)
         => Task.FromResult(Disabled<object>());
+    public Task<ServiceResponse<Guid>> StartSpeedTestAsync(NetFirewall.Models.Diagnostics.SpeedTestRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<Guid>());
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.SpeedTestFile>>> ListSpeedTestFilesAsync(CancellationToken ct = default)
+        => Task.FromResult(Disabled<IReadOnlyList<NetFirewall.Models.Diagnostics.SpeedTestFile>>());
+    public Task<(Stream Content, long? Length, string? FileName)?> DownloadSpeedTestFileAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult<(Stream Content, long? Length, string? FileName)?>(null);
+    public Task<ServiceResponse<object>> DeleteSpeedTestFileAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Disabled<object>());
     public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunWanDoctorAsync(CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>());
     public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunDhcpDoctorAsync(CancellationToken ct = default)

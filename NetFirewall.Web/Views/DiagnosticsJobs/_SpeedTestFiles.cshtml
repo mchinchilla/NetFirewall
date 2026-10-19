@@ -1,0 +1,27 @@
+@model NetFirewall.Web.Models.Diagnostics.SpeedTestFilesViewModel
+@using NetFirewall.Web.Models.Diagnostics
+@if (Model.Error is not null)
+{
+    <p class="text-sm py-4 text-center text-feedback-warning-fg">@Model.Error</p>
+}
+else if (Model.Files.Count == 0)
+{
+    <p class="text-sm py-4 text-center text-surface-fg-muted">No kept files. Tick "Keep the file" on a test to pull its payload to a LAN machine.</p>
+}
+else
+{
+    <ul class="divide-y divide-surface-border">
+        @foreach (var f in Model.Files)
+        {
+            <li class="py-3 space-y-2">
+                <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+                    <span class="font-mono">@f.FileName</span>
+                    <span class="text-surface-fg-muted">@DiagUi.Bytes(f.SizeBytes)@(f.Complete ? "" : " · partial copy")</span>
+                    <span class="text-surface-fg-muted">WAN @f.Wan measured @f.AvgMbps.ToString("0.#") Mbps from @f.Source</span>
+                    <span class="text-xs text-surface-fg-muted ml-auto">@DiagUi.Ago(f.CreatedAtUtc)@(f.RequestedBy is null ? "" : $" · {f.RequestedBy}")</span>
+                </div>
+                @await Html.PartialAsync("~/Views/DiagnosticsJobs/_SpeedTestFileActions.cshtml", f)
+            </li>
+        }
+    </ul>
+}

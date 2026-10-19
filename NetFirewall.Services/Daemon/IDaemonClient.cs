@@ -214,6 +214,21 @@ public interface IDaemonClient
     /// <summary><c>DELETE /v1/diagnostics/capture/{id}</c>.</summary>
     Task<ServiceResponse<object>> DeleteCaptureAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary><c>POST /v1/diagnostics/speedtest/start</c> — download through one WAN (pinned by its probe fwmark) and measure it.</summary>
+    Task<ServiceResponse<Guid>> StartSpeedTestAsync(NetFirewall.Models.Diagnostics.SpeedTestRequest request, CancellationToken ct = default);
+
+    /// <summary><c>GET /v1/diagnostics/speedtest/files</c> — kept payloads that have not expired yet.</summary>
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.SpeedTestFile>>> ListSpeedTestFilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <c>GET /v1/diagnostics/speedtest/{id}/download</c> — the kept payload as a stream,
+    /// plus its length and download name. Null when it expired or was deleted. The caller owns the stream.
+    /// </summary>
+    Task<(Stream Content, long? Length, string? FileName)?> DownloadSpeedTestFileAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary><c>DELETE /v1/diagnostics/speedtest/{id}</c>.</summary>
+    Task<ServiceResponse<object>> DeleteSpeedTestFileAsync(Guid id, CancellationToken ct = default);
+
     /// <summary><c>POST /v1/diagnostics/wan/doctor</c> — uplinks, failover config/state, per-WAN routing and reachability.</summary>
     Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunWanDoctorAsync(CancellationToken ct = default);
 

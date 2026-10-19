@@ -129,6 +129,11 @@ builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.ICaptureC
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Trace.IFlowInspectorService, NetFirewall.Services.Diagnostics.Trace.FlowInspectorService>();
 builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.Capture.IPacketCaptureService, NetFirewall.Services.Diagnostics.Capture.PacketCaptureService>();
 builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.Trace.DiagnosticsSweeperService>();
+// WAN speed test: a job in the same single slot; SO_MARK steering needs CAP_NET_ADMIN (held).
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.SpeedTest.IMarkedHttpClientFactory, NetFirewall.Services.Diagnostics.SpeedTest.MarkedHttpClientFactory>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestStore, NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestStore>();
+builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.SpeedTest.ISpeedTestService, NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestService>();
+builder.Services.AddHostedService<NetFirewall.Services.Diagnostics.SpeedTest.SpeedTestFileSweeperService>();
 
 // VPN doctor: checks run concurrently against one memoised context, in this order.
 // Shared doctor plumbing: one fan-out (bounded concurrency + per-check timeout)

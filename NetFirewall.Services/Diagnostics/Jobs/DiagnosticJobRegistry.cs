@@ -99,6 +99,7 @@ public sealed class DiagnosticJobRegistry : IDiagnosticJobRegistry, IDisposable
         private string? _message;
         private TraceResult? _trace;
         private CaptureResult? _capture;
+        private SpeedTestResult? _speed;
         private int _elapsedMs;
 
         public CancellationToken Token => _cts.Token;
@@ -111,7 +112,15 @@ public sealed class DiagnosticJobRegistry : IDiagnosticJobRegistry, IDisposable
             if (truncated) _truncated = true;
         }
 
-        public void Finish(DiagJobState state, string? message, TraceResult? trace, CaptureResult? capture)
+        /// <summary>A running speed test's partial result; replaced on every report, kept by <see cref="Finish"/> unless it brings its own.</summary>
+        public void Live(SpeedTestResult partial)
+        {
+            if (State != DiagJobState.Running) return;
+            Volatile.Write(ref _speed, partial);
+            Volatile.Write(ref _items, (int)(partial.Bytes / 1_000_000));
+        }
+
+        public void Finish(DiagJobState state, string? message, TraceResult? trace, CaptureResult? capture, SpeedTestResult? speed = null)
         {
             if (State != DiagJobState.Running) return;
             _elapsedMs = (int)_sw.ElapsedMilliseconds;
@@ -120,6 +129,7 @@ public sealed class DiagnosticJobRegistry : IDiagnosticJobRegistry, IDisposable
             _message = message;
             _trace = trace;
             _capture = capture;
+            if (speed is not null) { _speed = speed; Volatile.Write(ref _items, (int)(speed.Bytes / 1_000_000)); _truncated |= speed.ReachedByteCap; }
             if (trace is not null) { Volatile.Write(ref _items, trace.Events.Count); _truncated |= trace.Truncated; }
             if (capture is not null) { Volatile.Write(ref _items, capture.PacketsCaptured); _truncated |= capture.ReachedLimit; }
         }
@@ -127,7 +137,7 @@ public sealed class DiagnosticJobRegistry : IDiagnosticJobRegistry, IDisposable
         public DiagJobSnapshot Snapshot() => new(
             Id, Kind, State, StartedAt, FinishedAt,
             State == DiagJobState.Running ? (int)_sw.ElapsedMilliseconds : _elapsedMs,
-            RequestedBy, Subject, Volatile.Read(ref _items), _truncated, _message, _trace, _capture);
+            RequestedBy, Subject, Volatile.Read(ref _items), _truncated, _message, _trace, _capture, Volatile.Read(ref _speed));
 
         public void Dispose() { try { _cts.Dispose(); } catch { /* best effort */ } }
     }
@@ -151,6 +161,11 @@ public sealed class DiagnosticJobRegistry : IDiagnosticJobRegistry, IDisposable
 
         public void Complete(CaptureResult result) =>
             _entry.Finish(_entry.CancellationRequested ? DiagJobState.Cancelled : DiagJobState.Completed, result.Error, null, result);
+
+        public void Report(SpeedTestResult partial) => _entry.Live(partial);
+
+        public void Complete(SpeedTestResult result) =>
+            _entry.Finish(_entry.CancellationRequested ? DiagJobState.Cancelled : DiagJobState.Completed, result.Error, null, null, result);
 
         public void Fail(string message) => _entry.Finish(DiagJobState.Failed, message, null, null);
 

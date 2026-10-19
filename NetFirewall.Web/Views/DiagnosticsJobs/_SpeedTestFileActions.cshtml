@@ -1,0 +1,37 @@
+@model NetFirewall.Models.Diagnostics.SpeedTestFile
+@using System.Globalization
+@{
+    var f = Model;
+    var url = $"/Diagnostics/Jobs/speedtest/{f.Id}/download";
+    var left = f.ExpiresAtUtc - DateTime.UtcNow;
+    var expired = left <= TimeSpan.Zero;
+    var leftText = expired ? "expired" : left.TotalHours >= 1 ? $"expires in {(int)left.TotalHours} h {left.Minutes} m" : $"expires in {Math.Max(1, left.Minutes)} m";
+    var wan = f.AvgMbps.ToString("0.#", CultureInfo.InvariantCulture);
+}
+@*
+    Download / measure-to-this-browser / delete for one kept file. Shared by the
+    finished test's result and the kept-files list so the two never drift.
+*@
+<div class="flex flex-wrap items-center gap-2" x-data="speedLan('@url', @wan)">
+    <span class="badge @(expired ? "badge-muted" : "badge-info")" title="@f.ExpiresAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")">@leftText</span>
+    @if (!expired)
+    {
+        <a href="@url" class="btn btn-primary text-xs" download>Download</a>
+        <button type="button" class="btn btn-ghost text-xs" x-show="!running" @@click="run()">Measure to this browser</button>
+        <button type="button" class="btn btn-ghost text-xs" x-show="running" x-cloak @@click="stop()">Stop</button>
+        <span class="text-xs font-mono text-surface-fg-muted" x-show="mbps !== null" x-cloak
+              x-text="`${mbps.toFixed(1)} Mbps${pct !== null && pct < 100 ? ` · ${pct.toFixed(0)}%` : ''}`"></span>
+        <span class="text-xs text-feedback-danger-fg" x-show="error" x-cloak x-text="error"></span>
+        <form hx-post="/Diagnostics/Jobs/speedtest/@f.Id/delete" hx-swap="none" hx-trigger="confirmed-delete" class="ml-auto">
+            @Html.AntiForgeryToken()
+            <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+                    @@click.prevent="(async () => {
+                        const ok = await $store.confirm.ask({
+                            title: 'Delete this file now?',
+                            message: 'It is removed from the firewall before its 24-hour expiry. Download it first if you still need it.',
+                            confirmLabel: 'Delete', level: 'danger' });
+                        if (ok) htmx.trigger($el.closest('form'), 'confirmed-delete');
+                    })()">Delete now</button>
+        </form>
+    }
+</div>

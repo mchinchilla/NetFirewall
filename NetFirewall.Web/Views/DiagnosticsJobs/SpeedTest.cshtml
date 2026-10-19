@@ -1,0 +1,83 @@
+@model NetFirewall.Web.Models.Diagnostics.SpeedTestPageViewModel
+@using NetFirewall.Web.Models
+@using NetFirewall.Web.Models.Diagnostics
+@{
+    ViewData["Title"] = "WAN speed test";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_ToolPageHeader", new ToolPageHeaderViewModel("WAN speed test",
+    "Download from a test server through one uplink — pinned by its fwmark, the way the WAN monitor's probes are — and measure what the provider delivers. Optionally keep the file to pull it to a LAN machine and compare."))
+
+<div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+    The test fills the uplink for its duration, so everyone behind it feels it. It measures the capacity left over by other traffic,
+    not necessarily the contracted rate — the result says how busy the link was. Admin only, confirmed with your authenticator,
+    and one diagnostics job at a time.
+</div>
+
+@if (Model.Wans.Count == 0)
+{
+    <div class="rounded-lg border-l-2 px-3 py-2 mb-4 text-sm bg-feedback-info-bg text-feedback-info-fg border-feedback-info-bd">
+        No enabled WAN interface is configured. Mark an interface as WAN under Firewall → Interfaces first.
+    </div>
+}
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <section class="card xl:col-span-1" style="animation: var(--animate-slide-up);">
+        <form hx-post="/Diagnostics/Jobs/speedtest/start" hx-target="#job-host" hx-swap="innerHTML"
+              x-data="diagTool()" @@htmx:before-request="start()" @@htmx:after-request="stop()" class="space-y-4">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "Wan", Label = "WAN", Kind = FormFieldKind.Select, Required = true,
+                Options = Model.WanOptions(),
+                Help = "The test is steered with the WAN's probe fwmark (WAN failover settings), never by interface."
+            })
+            <div x-data="{ source: 'cloudflare' }" class="space-y-4">
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "SourceId", Label = "Test server", Kind = FormFieldKind.Select, Required = true,
+                Value = "cloudflare", Options = SpeedTestPageViewModel.SourceOptions(), AlpineModel = "source",
+                Help = "Pick one near you; a far server measures the ocean, not your provider."
+            })
+            <div x-show="source === 'custom'" x-cloak>
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = "CustomUrl", Label = "File URL", MaxLength = 500,
+                    Placeholder = "https://speedtest.your-isp.net/1GB.bin", Pattern = "https?://.+",
+                    AlpineExtra = ":required=\"source === 'custom'\" :disabled=\"source !== 'custom'\"",
+                    Help = "A large file on a public server, e.g. your provider's own speed-test host."
+                })
+            </div>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "DurationSec", Label = "Seconds", Kind = FormFieldKind.Number, Value = "10", Min = "5", Max = "30", Required = true })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "Streams", Label = "Connections", Kind = FormFieldKind.Number, Value = "4", Min = "1", Max = "8", Required = true })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel { Name = "MaxMegabytes", Label = "Cap (MB)", Kind = FormFieldKind.Number, Value = "500", Min = "10", Max = "2000", Required = true })
+            </div>
+            <p class="text-xs text-surface-fg-muted -mt-2">Stops at whichever comes first: the seconds or the size cap. One connection rarely fills a fast link; four usually does.</p>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = "KeepFile", Label = "Keep the file for download", Kind = FormFieldKind.Checkbox,
+                Help = "Saves what the first connection downloaded on the firewall for 24 hours, then deletes it. Download it to a LAN machine, or measure the firewall → browser leg right here. Leave off to measure the WAN alone, without the disk."
+            })
+            <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-border">
+                <span class="text-xs font-mono text-surface-fg-muted" x-show="busy" x-cloak x-text="`starting… ${elapsed}s`"></span>
+                <button type="submit" class="btn btn-primary" :disabled="busy || $store.diagJob.running">Start test</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card xl:col-span-2 min-h-48" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div id="job-host">
+            <p class="text-sm text-surface-fg-muted py-8 text-center">The live curve appears here, then the average, peak and first-byte time.</p>
+        </div>
+    </section>
+</div>
+
+@* Not polled on a timer: a re-render would tear down a running in-browser LAN measurement. *@
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 90ms;">
+    <header class="flex items-baseline justify-between mb-2">
+        <h2 class="text-base font-semibold">Kept files</h2>
+        <span class="text-xs text-surface-fg-muted">deleted automatically 24 hours after the test</span>
+    </header>
+    <div id="speed-files" class="loading-host"
+         hx-get="/Diagnostics/Jobs/speedtest/files" hx-trigger="load, refreshSpeedFiles from:body" hx-swap="innerHTML">
+        @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
+    </div>
+</section>

@@ -1,0 +1,55 @@
+@model IReadOnlyList<double>
+@using System.Globalization
+@{
+    // Throughput per second as one line. Drawn server-side so it re-renders with
+    // every 2 s poll of the job panel — no chart library, nothing to tear down.
+    const double W = 600, H = 160, Left = 44, Right = 8, Top = 10, Bottom = 22;
+    var samples = Model;
+    var peak = samples.Count == 0 ? 0 : samples.Max();
+    // Round the axis up to a 1/2/5 step so the gridline labels read cleanly.
+    var top = 10.0;
+    foreach (var step in new[] { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000 })
+    {
+        top = step;
+        if (step >= peak) break;
+    }
+    double X(int i) => samples.Count <= 1 ? Left : Left + i * (W - Left - Right) / (samples.Count - 1);
+    double Y(double v) => Top + (1 - v / top) * (H - Top - Bottom);
+    string F(double v) => v.ToString("0.#", CultureInfo.InvariantCulture);
+    var line = string.Join(" ", samples.Select((v, i) => $"{F(X(i))},{F(Y(v))}"));
+    var area = samples.Count == 0 ? "" : $"{F(X(0))},{F(Y(0))} {line} {F(X(samples.Count - 1))},{F(Y(0))}";
+}
+@if (samples.Count < 2)
+{
+    <p class="text-xs text-surface-fg-muted py-6 text-center">The curve appears after the first two seconds.</p>
+}
+else
+{
+    <figure>
+        <svg viewBox="0 0 @F(W) @F(H)" class="w-full h-40" role="img"
+             aria-label="Throughput per second, peak @F(peak) Mbps over @samples.Count seconds">
+            @foreach (var g in new[] { 0.0, top / 2, top })
+            {
+                @* One <g> per gridline: a bare <text> directly in a code block is Razor's own tag. *@
+                <g>
+                    <line x1="@F(Left)" x2="@F(W - Right)" y1="@F(Y(g))" y2="@F(Y(g))" class="stroke-surface-border" stroke-width="1" />
+                    <text x="@F(Left - 6)" y="@F(Y(g) + 4)" text-anchor="end" class="fill-surface-fg-muted" font-size="11">@F(g)</text>
+                </g>
+            }
+            <text x="@F(Left)" y="@F(H - 6)" class="fill-surface-fg-muted" font-size="11">1 s</text>
+            <text x="@F(W - Right)" y="@F(H - 6)" text-anchor="end" class="fill-surface-fg-muted" font-size="11">@samples.Count s</text>
+            <polygon points="@area" class="fill-accent-soft" />
+            <polyline points="@line" fill="none" class="stroke-accent" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+            @for (var i = 0; i < samples.Count; i++)
+            {
+                @* The visible dot is small; the transparent ring around it is the hover target. *@
+                <g class="group">
+                    <circle cx="@F(X(i))" cy="@F(Y(samples[i]))" r="10" fill="transparent" />
+                    <circle cx="@F(X(i))" cy="@F(Y(samples[i]))" r="4" class="fill-accent stroke-surface opacity-0 group-hover:opacity-100" stroke-width="2" />
+                    <title>second @(i + 1): @F(samples[i]) Mbps</title>
+                </g>
+            }
+        </svg>
+        <figcaption class="text-xs text-surface-fg-muted">Mbps per second. Hover a point for its value.</figcaption>
+    </figure>
+}

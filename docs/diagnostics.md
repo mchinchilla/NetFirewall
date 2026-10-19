@@ -138,12 +138,13 @@ dnsutils is not a dependency of this appliance.
 |---|---|---|
 | Every read-only tool (ping … VPN doctor) | Admin, Operator | no |
 | Purge history | Admin | yes (TOTP) |
-| Flow inspector, packet capture | Admin | yes (TOTP) |
+| Flow inspector, packet capture, start a WAN speed test | Admin | yes (TOTP) |
+| List / download / delete kept speed-test files | Admin | no |
 
 Audit events: `diag.run` per tool run, `diag.denied` when the concurrency gate
 refused one, `diag.purge` on a history purge, and `diag.trace.started`,
-`diag.capture.started`, `diag.capture.downloaded`, `diag.job.cancelled` for the
-invasive tools.
+`diag.capture.started`, `diag.capture.downloaded`, `diag.speedtest.started`,
+`diag.speedtest.downloaded`, `diag.job.cancelled` for the invasive tools.
 
 ## History
 
@@ -166,8 +167,8 @@ must stay under the 30 s daemon-client timeout), `diagnostics.probe_default_targ
 
 ## Invasive tools
 
-Two tools change the box while they run, so they are **Admin only, behind TOTP
-step-up**, audited at start, cancel and download, and limited to **one at a time
+Three tools change the box (or fill an uplink) while they run, so they are
+**Admin only, behind TOTP step-up** to start, audited at start, cancel and download, and limited to **one at a time
 box-wide** by an in-memory job registry. They outlive a request: the daemon runs
 them as jobs and the page polls until they finish.
 
@@ -212,6 +213,49 @@ Results group by trace id: one block per packet, with the `packet` line, each
 `RestrictAddressFamilies` (`deploy/systemd/netfirewall-daemon.service`). It is
 listed there now, with a comment saying why; remove it to disable captures
 outright. `tcpdump` is a Recommends of the .deb and is in the ISO package list.
+
+### WAN speed test (`/Diagnostics/speedtest`)
+
+Downloads from a test server through ONE uplink and reports average and peak
+Mbps, time to first byte, and a per-second curve that updates while it runs.
+
+- **Steering is by fwmark, never by interface.** The daemon looks up the WAN's
+  `probe_fwmark` in `wan_health_config` and sets `SO_MARK` on every socket
+  (`MarkedHttpClientFactory`, needs `CAP_NET_ADMIN`, which the daemon has), so the
+  policy rules route it exactly like `ping -m`. A WAN with no probe mark is
+  refused with a pointer to WAN failover — `curl --interface` would be ignored by
+  policy routing just like `ping -I`.
+- **N parallel HTTP/1.1 connections** (1–8, default 4); HTTP/2 is disabled on
+  purpose because it would multiplex them onto one TCP connection. Each connection
+  re-requests the source until the duration (5–30 s) or byte cap (10–2000 MB)
+  ends the test, so the file size never caps the measurement.
+- **Sources** are a curated list (`SpeedTestSources`: Cloudflare, Hetzner,
+  OVH) plus a custom URL: http/https only, no credentials, and the address is
+  checked to be **public** at connect time (redirects included), so the test
+  cannot be pointed at the LAN or a metadata endpoint.
+- **Other traffic**: the WAN's rx counter is read before and after; what is not
+  ours (allowing ~5 % wire overhead) is shown as "other traffic during the test" —
+  the result is the capacity left over, not necessarily the contracted rate.
+- It takes the shared invasive slot (one job box-wide) and writes a `diag_runs`
+  row (`speedtest`), so History renders the same result panel.
+
+**Keeping the file** (checkbox, off by default). The first connection's bytes are
+also written to `/var/lib/netfirewall/daemon/speedtests/{id}.part`, promoted to
+`{id}.bin` plus an `{id}.json` sidecar (`SpeedTestFile`, with `expires_at`) when
+the test ends. The file is a faithful copy of the source, or its prefix when the
+test stopped first (shown as "partial copy"). Write time is measured: when writes
+took most of that connection's time the result warns that the disk, not the WAN,
+may have set the pace — re-run without keeping the file to measure the WAN alone.
+
+- **Downloadable for 24 h** (`Diagnostics:SpeedTestRetentionHours`), then gone:
+  the store refuses an expired file immediately, and `SpeedTestFileSweeperService`
+  deletes it within 15 min (it also removes `.part` leftovers at daemon start).
+- **Quota** `Diagnostics:SpeedTestQuotaMegabytes` (default 4096) and a free-space
+  reserve `SpeedTestFreeSpaceReserveMegabytes` (default 1024): a test whose cap
+  could break either is refused before it starts.
+- The Web streams the download straight through (`X-Accel-Buffering: no`), and
+  each kept file has **Measure to this browser**: the page fetches it and discards
+  the bytes, giving firewall → client Mbps to compare with the WAN number.
 
 ## Safety rules for new tools
 

@@ -1069,6 +1069,67 @@ document.addEventListener("alpine:init", () => {
         destroy() { this._clear(); }
     }));
 
+    /* ---------- speedLan ---------- Measures the firewall → this-browser leg by
+     * downloading a kept speed-test file and throwing the bytes away (nothing is
+     * saved). Compared with the WAN number it says whether the uplink or the LAN /
+     * Wi-Fi is the bottleneck.
+     *   x-data="speedLan('/Diagnostics/Jobs/speedtest/{id}/download', 312.4)"
+     * Aborts on stop() and on navigate-away (destroy). */
+    Alpine.data("speedLan", (url, wanMbps) => ({
+        running: false,
+        mbps: null,
+        pct: null,
+        error: null,
+        _abort: null,
+        async run() {
+            if (this.running) return;
+            this.running = true;
+            this.error = null;
+            this.mbps = null;
+            this.pct = null;
+            this._abort = new AbortController();
+            const started = performance.now();
+            let bytes = 0;
+            try {
+                const resp = await fetch(url, { signal: this._abort.signal, cache: "no-store", credentials: "same-origin" });
+                if (!resp.ok || !resp.body) throw new Error(resp.status === 404 ? "The file expired or was deleted." : `HTTP ${resp.status}`);
+                const total = Number(resp.headers.get("Content-Length")) || 0;
+                const reader = resp.body.getReader();
+                let lastPaint = 0;
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    bytes += value.byteLength;
+                    const now = performance.now();
+                    if (now - lastPaint > 250) {
+                        lastPaint = now;
+                        this.mbps = (bytes * 8) / ((now - started) / 1000) / 1e6;
+                        this.pct = total ? Math.min(100, (bytes / total) * 100) : null;
+                    }
+                }
+                this.mbps = (bytes * 8) / ((performance.now() - started) / 1000) / 1e6;
+                this.pct = 100;
+                const verdict = wanMbps && this.mbps < wanMbps * 0.8
+                    ? " — slower than the WAN, so the LAN / Wi-Fi path is the bottleneck."
+                    : wanMbps ? " — the LAN keeps up with the WAN." : "";
+                Alpine.store("toasts").success(`${this.mbps.toFixed(1)} Mbps firewall → this browser${verdict}`, "LAN measurement");
+            } catch (err) {
+                if (err.name === "AbortError") {
+                    if (bytes > 0) this.mbps = (bytes * 8) / ((performance.now() - started) / 1000) / 1e6;
+                    Alpine.store("toasts").info("LAN measurement stopped.", "LAN measurement");
+                } else {
+                    this.error = err.message || "Download failed.";
+                    Alpine.store("toasts").error(this.error, "LAN measurement failed");
+                }
+            } finally {
+                this.running = false;
+                this._abort = null;
+            }
+        },
+        stop() { this._abort?.abort(); },
+        destroy() { this._abort?.abort(); }
+    }));
+
     /* ---------- wolSelection ---------- Wake-on-LAN device list: a checkbox per
      * row and ONE button that wakes the ticked devices, or all of them when
      * nothing is ticked. The scope travels explicitly (hx-vals) so the server can

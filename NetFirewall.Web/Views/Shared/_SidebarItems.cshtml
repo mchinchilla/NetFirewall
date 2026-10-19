@@ -31,7 +31,7 @@
         Url.Action("Index", "Diagnostics"), Url.Action("Ping", "Diagnostics"), Url.Action("Traceroute", "Diagnostics"),
         Url.Action("Route", "Diagnostics"), Url.Action("Conntrack", "Diagnostics"), Url.Action("DropLog", "Diagnostics"),
         Url.Action("Interfaces", "Diagnostics"), Url.Action("Sysctl", "Diagnostics"), Url.Action("Index", "DiagnosticsHistory"),
-        "/Diagnostics/Vpn", "/Diagnostics/Wan", "/Diagnostics/Dhcp", "/Diagnostics/Dns", "/Diagnostics/trace", "/Diagnostics/capture",
+        "/Diagnostics/Vpn", "/Diagnostics/Wan", "/Diagnostics/Dhcp", "/Diagnostics/Dns", "/Diagnostics/trace", "/Diagnostics/capture", "/Diagnostics/speedtest",
     };
     var diagOpen = AnyActive(diagHrefs!) ? "true" : "false";
     var dhcpHrefs = new[] {
@@ -175,6 +175,7 @@
             @* Invasive tools: they add kernel state / write raw traffic, so Admin only. *@
             <a href="/Diagnostics/trace"   class="nav-link py-1.5@(ActiveCls("/Diagnostics/trace"))">Flow inspector</a>
             <a href="/Diagnostics/capture" class="nav-link py-1.5@(ActiveCls("/Diagnostics/capture"))">Packet capture</a>
+            <a href="/Diagnostics/speedtest" class="nav-link py-1.5@(ActiveCls("/Diagnostics/speedtest"))">WAN speed test</a>
         }
         <a href="@Url.Action("Index", "DiagnosticsHistory")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DiagnosticsHistory")!))">History</a>
     </div>

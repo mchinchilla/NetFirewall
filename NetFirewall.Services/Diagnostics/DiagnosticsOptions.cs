@@ -33,6 +33,18 @@ public sealed class DiagnosticsOptions
     /// </summary>
     public string CaptureDirectory { get; set; } = "/var/lib/netfirewall/daemon/captures";
 
+    /// <summary>Where kept speed-test payloads are written (same sandbox rule as <see cref="CaptureDirectory"/>).</summary>
+    public string SpeedTestDirectory { get; set; } = "/var/lib/netfirewall/daemon/speedtests";
+
+    /// <summary>A kept speed-test file is downloadable for this long, then deleted.</summary>
+    public int SpeedTestRetentionHours { get; set; } = 24;
+
+    /// <summary>Ceiling for all kept speed-test files together; a test that could exceed it is refused.</summary>
+    public int SpeedTestQuotaMegabytes { get; set; } = 4096;
+
+    /// <summary>Free space that must remain on the disk after the largest possible kept file.</summary>
+    public int SpeedTestFreeSpaceReserveMegabytes { get; set; } = 1024;
+
     /// <summary>Wall-clock budget for a whole doctor run. Must stay under the daemon client's 30 s timeout.</summary>
     public int DoctorBudgetSeconds { get; set; } = 25;
 

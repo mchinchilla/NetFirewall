@@ -200,6 +200,7 @@ public static class DiagUi
         DiagTools.WanDoctor   => "WAN doctor",
         DiagTools.DhcpDoctor  => "DHCP doctor",
         DiagTools.DnsDoctor   => "DNS doctor",
+        DiagTools.SpeedTest   => "WAN speed test",
         _                     => tool,
     };
 
@@ -215,6 +216,7 @@ public static class DiagUi
         DiagTools.WanDoctor  => "/Diagnostics/Wan",
         DiagTools.DhcpDoctor => "/Diagnostics/Dhcp",
         DiagTools.DnsDoctor  => "/Diagnostics/Dns",
+        DiagTools.SpeedTest  => "/Diagnostics/speedtest",
         _                    => "/Diagnostics",
     };
 
@@ -254,6 +256,7 @@ public static class DiagRunPartials
             DiagTools.DropLog    => ("~/Views/Diagnostics/_DropLogResult.cshtml",    Envelope<DropLogResult>(run)),
             DiagTools.VpnDoctor or DiagTools.WanDoctor or DiagTools.DhcpDoctor or DiagTools.DnsDoctor
                                  => ("~/Views/Shared/_DiagCheckList.cshtml",         Deserialize<DiagReport>(run.ResultJson)),
+            DiagTools.SpeedTest  => ("~/Views/DiagnosticsJobs/_SpeedTestResult.cshtml", Deserialize<SpeedTestResult>(run.ResultJson)),
             _ => (null, null),
         };
     }
@@ -340,6 +343,48 @@ public sealed class CaptureFormViewModel
     [Range(10, 2000)]   public int MaxPackets { get; set; } = 500;
     [Range(64, 262144)] public int Snaplen { get; set; } = 262144;
 }
+
+public sealed class SpeedTestFormViewModel
+{
+    [Required(ErrorMessage = "Pick a WAN."), StringLength(15), RegularExpression(DiagPatterns.Iface, ErrorMessage = "Invalid interface name.")]
+    public string Wan { get; set; } = string.Empty;
+
+    [Required, StringLength(32), RegularExpression(@"^[a-z0-9\-]{1,32}$", ErrorMessage = "Unknown test server.")]
+    public string SourceId { get; set; } = "cloudflare";
+
+    /// <summary>Only read when <see cref="SourceId"/> is "custom"; the daemon re-validates and checks the resolved address is public.</summary>
+    [StringLength(500), Url(ErrorMessage = "Enter an http:// or https:// URL.")]
+    public string? CustomUrl { get; set; }
+
+    [Range(5, 30)]    public int DurationSec { get; set; } = 10;
+    [Range(10, 2000)] public int MaxMegabytes { get; set; } = 500;
+    [Range(1, 8)]     public int Streams { get; set; } = 4;
+    public bool KeepFile { get; set; }
+
+    public bool IsCustom => string.Equals(SourceId, SpeedTestSources.CustomId, StringComparison.Ordinal);
+}
+
+/// <summary>One WAN the speed test can be pinned to. A WAN without a probe mark is listed but refused by the daemon.</summary>
+public sealed record SpeedTestWanOption(string Name, long? Fwmark, int? Priority);
+
+public sealed record SpeedTestPageViewModel(DiagToolPageViewModel Page, IReadOnlyList<SpeedTestWanOption> Wans)
+{
+    public IReadOnlyList<FormFieldViewModel.SelectOption> WanOptions() =>
+        Wans.Select(w => new FormFieldViewModel.SelectOption(w.Name,
+                w.Fwmark is > 0
+                    ? $"{w.Name} · mark 0x{w.Fwmark:x}" + (w.Priority is { } p ? $" · priority {p}" : string.Empty)
+                    : $"{w.Name} · no probe mark (set it in WAN failover)"))
+            .Prepend(new FormFieldViewModel.SelectOption("", "(pick a WAN)"))
+            .ToList();
+
+    public static IReadOnlyList<FormFieldViewModel.SelectOption> SourceOptions() =>
+        SpeedTestSources.All.Select(s => new FormFieldViewModel.SelectOption(s.Id, s.Name))
+            .Append(new FormFieldViewModel.SelectOption(SpeedTestSources.CustomId, "Custom URL…"))
+            .ToList();
+}
+
+/// <summary>Kept files panel: the list plus a daemon error that must not toast on every poll.</summary>
+public sealed record SpeedTestFilesViewModel(IReadOnlyList<SpeedTestFile> Files, string? Error = null);
 
 /// <summary>Shell for a job page: the form plus whichever job is currently polling.</summary>
 public sealed record JobPageViewModel(DiagToolPageViewModel Page, Guid? JobId = null, string? Error = null);

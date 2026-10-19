@@ -6,16 +6,18 @@ using NetFirewall.Models.Diagnostics;
 using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Settings;
+using NetFirewall.Services.WanMonitor;
 using NetFirewall.Web.Helpers;
 using NetFirewall.Web.Models.Diagnostics;
 
 namespace NetFirewall.Web.Controllers;
 
 /// <summary>
-/// The two invasive diagnostics: the flow inspector (a temporary nftables table
-/// plus <c>nft monitor trace</c>) and bounded packet capture. Both mutate the box
-/// or write raw traffic to disk, so unlike the rest of Diagnostics they are
-/// **Admin only behind TOTP step-up** and audited at start, cancel and download.
+/// The invasive diagnostics: the flow inspector (a temporary nftables table plus
+/// <c>nft monitor trace</c>), bounded packet capture, and the WAN speed test. They
+/// mutate the box, write raw traffic to disk, or saturate an uplink, so unlike the
+/// rest of Diagnostics they are **Admin only behind TOTP step-up** to start, and
+/// audited at start, cancel and download.
 ///
 /// They also outlive a request: the daemon runs them as jobs and the page polls
 /// the job until it finishes. Only one may run at a time, box-wide.
@@ -27,13 +29,15 @@ public sealed class DiagnosticsJobsController : Controller
     private readonly IDaemonClient _daemon;
     private readonly IFirewallService _fw;
     private readonly IAppSettingsService _settings;
+    private readonly IWanHealthService _wans;
     private readonly ILogger<DiagnosticsJobsController> _logger;
 
-    public DiagnosticsJobsController(IDaemonClient daemon, IFirewallService fw, IAppSettingsService settings, ILogger<DiagnosticsJobsController> logger)
+    public DiagnosticsJobsController(IDaemonClient daemon, IFirewallService fw, IAppSettingsService settings, IWanHealthService wans, ILogger<DiagnosticsJobsController> logger)
     {
         _daemon = daemon;
         _fw = fw;
         _settings = settings;
+        _wans = wans;
         _logger = logger;
     }
 
@@ -73,6 +77,61 @@ public sealed class DiagnosticsJobsController : Controller
             form.Interface.Trim(), Blank(form.Filter), form.DurationSec, form.MaxPackets, form.Snaplen), ct);
 
         return StartedOrToast(env, DiagJobKind.Capture);
+    }
+
+    // ───────────────────────── WAN speed test ─────────────────────────
+
+    [HttpGet("~/Diagnostics/speedtest")]
+    public async Task<IActionResult> SpeedTest(CancellationToken ct) =>
+        View("SpeedTest", new SpeedTestPageViewModel(await PageAsync(ct), await WanOptionsAsync(ct)));
+
+    [HttpPost("speedtest/start"), ValidateAntiForgeryToken]
+    [Filters.RequireElevated]
+    public async Task<IActionResult> SpeedTestStart(SpeedTestFormViewModel form, CancellationToken ct)
+    {
+        if (form.IsCustom && string.IsNullOrWhiteSpace(form.CustomUrl))
+            ModelState.AddModelError(nameof(form.CustomUrl), "Enter the URL of the file to download.");
+        if (!ModelState.IsValid) return Invalid();
+
+        var env = await _daemon.StartSpeedTestAsync(new SpeedTestRequest(
+            form.Wan.Trim(), form.SourceId, form.IsCustom ? Blank(form.CustomUrl) : null,
+            form.DurationSec, form.MaxMegabytes, form.Streams, form.KeepFile), ct);
+
+        return StartedOrToast(env, DiagJobKind.SpeedTest);
+    }
+
+    /// <summary>Kept files, polled by the page (and refreshed when a test finishes or a file is deleted).</summary>
+    [HttpGet("speedtest/files")]
+    public async Task<IActionResult> SpeedTestFiles(CancellationToken ct)
+    {
+        var env = await _daemon.ListSpeedTestFilesAsync(ct);
+        return PartialView("_SpeedTestFiles", new SpeedTestFilesViewModel(env.Data ?? Array.Empty<SpeedTestFile>(), env.Success ? null : env.Message));
+    }
+
+    /// <summary>
+    /// No step-up: the payload is test data, and the page also fetches it from
+    /// script to measure the firewall → this-browser leg.
+    /// </summary>
+    [HttpGet("speedtest/{id:guid}/download")]
+    public async Task<IActionResult> SpeedTestDownload(Guid id, CancellationToken ct)
+    {
+        if (await _daemon.DownloadSpeedTestFileAsync(id, ct) is not { } file)
+            return NotFound("That file expired or was deleted.");
+
+        var name = string.IsNullOrWhiteSpace(file.FileName) ? $"speedtest-{id:N}.bin" : Path.GetFileName(file.FileName);
+        if (file.Length is { } len) Response.ContentLength = len;   // progress bars + the LAN meter's total
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers["X-Accel-Buffering"] = "no";               // nginx: stream, do not spool a GB to disk first
+        return File(file.Content, "application/octet-stream", name);
+    }
+
+    [HttpPost("speedtest/{id:guid}/delete"), ValidateAntiForgeryToken]
+    public async Task<IActionResult> SpeedTestDelete(Guid id, CancellationToken ct)
+    {
+        var env = await _daemon.DeleteSpeedTestFileAsync(id, ct);
+        var resp = this.ToHtmxResponse(env);
+        this.AttachHxEvent("refreshSpeedFiles", new { });
+        return resp;
     }
 
     // ───────────────────────── job lifecycle ─────────────────────────
@@ -133,6 +192,26 @@ public sealed class DiagnosticsJobsController : Controller
             DefaultTarget = string.IsNullOrWhiteSpace(target) ? "1.1.1.1" : target,
             DaemonEnabled = _daemon is not NullDaemonClient,
         };
+    }
+
+    /// <summary>Enabled WANs with the probe mark the daemon will pin the test to.</summary>
+    private async Task<IReadOnlyList<SpeedTestWanOption>> WanOptionsAsync(CancellationToken ct)
+    {
+        var configs = new Dictionary<string, (long? Mark, int Priority)>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var c in await _wans.GetAllConfigsAsync(ct))
+                configs[c.InterfaceName] = (c.ProbeFwmark, c.Priority);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "WAN health config unavailable"); }
+
+        return (await _fw.GetInterfacesAsync(ct))
+            .Where(i => i.Enabled && string.Equals(i.Type, "WAN", StringComparison.OrdinalIgnoreCase))
+            .Select(i => configs.TryGetValue(i.Name, out var c)
+                ? new SpeedTestWanOption(i.Name, c.Mark, c.Priority)
+                : new SpeedTestWanOption(i.Name, null, null))
+            .OrderBy(w => w.Priority ?? int.MaxValue).ThenBy(w => w.Name, StringComparer.Ordinal)
+            .ToList();
     }
 
     /// <summary>On success swap in the polling panel; otherwise leave the page alone and toast why.</summary>

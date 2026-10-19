@@ -35,6 +35,16 @@ public interface IDiagnosticInputValidator
     /// </summary>
     bool TryBpfFilter(string? input, out string normalized, out string? error);
 
+    /// <summary>
+    /// A speed-test URL: absolute http/https, no credentials, a dotted hostname or a
+    /// PUBLIC IP literal. Hostnames are re-checked after resolution, at connect time,
+    /// by the marked HTTP client (<see cref="IsPublicAddress"/>).
+    /// </summary>
+    bool TryTestUrl(string? input, out Uri url, out string? error);
+
+    /// <summary>False for loopback, RFC 1918, CGNAT, link-local, ULA, multicast and reserved ranges.</summary>
+    bool IsPublicAddress(System.Net.IPAddress ip);
+
     /// <summary>Remove <c>PrivateKey</c>/<c>PresharedKey</c> lines from a pasted wg-quick config.</summary>
     string RedactWgConfig(string text);
 }

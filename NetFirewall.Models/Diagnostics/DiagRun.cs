@@ -35,10 +35,11 @@ public static class DiagTools
     public const string WanDoctor   = "wan-doctor";
     public const string DhcpDoctor  = "dhcp-doctor";
     public const string DnsDoctor   = "dns-doctor";
+    public const string SpeedTest   = "speedtest";
 
     public static readonly IReadOnlyList<string> All =
         [Ping, Traceroute, RouteGet, Conntrack, DropLog, IfaceHealth, Sysctl,
-         VpnDoctor, VpnProbe, VpnCompare, WanDoctor, DhcpDoctor, DnsDoctor];
+         VpnDoctor, VpnProbe, VpnCompare, WanDoctor, DhcpDoctor, DnsDoctor, SpeedTest];
 }
 
 /// <summary>

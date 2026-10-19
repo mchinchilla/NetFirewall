@@ -299,6 +299,37 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<object>> DeleteCaptureAsync(Guid id, CancellationToken ct = default)
         => SendJsonAsync<object, object>(HttpMethod.Delete, $"/v1/diagnostics/capture/{id}", new { }, ct);
 
+    public Task<ServiceResponse<Guid>> StartSpeedTestAsync(NetFirewall.Models.Diagnostics.SpeedTestRequest request, CancellationToken ct = default)
+        => PostJsonAsync<NetFirewall.Models.Diagnostics.SpeedTestRequest, Guid>("/v1/diagnostics/speedtest/start", request, ct);
+
+    public Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Diagnostics.SpeedTestFile>>> ListSpeedTestFilesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<NetFirewall.Models.Diagnostics.SpeedTestFile>>("/v1/diagnostics/speedtest/files", ct);
+
+    public async Task<(Stream Content, long? Length, string? FileName)?> DownloadSpeedTestFileAsync(Guid id, CancellationToken ct = default)
+    {
+        // Headers-read, as for captures: a kept payload can be a gigabyte and must
+        // stream through, never sit in the Web's memory. HttpClient.Timeout covers
+        // only the headers here, so a long body is not cut at 30 s.
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/v1/diagnostics/speedtest/{id}/download");
+        AttachSessionHeader(req);
+        try
+        {
+            var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!resp.IsSuccessStatusCode) { resp.Dispose(); return null; }
+            var disposition = resp.Content.Headers.ContentDisposition;
+            return (await resp.Content.ReadAsStreamAsync(ct), resp.Content.Headers.ContentLength,
+                (disposition?.FileNameStar ?? disposition?.FileName)?.Trim('"'));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Speed-test file download {Id} failed", id);
+            return null;
+        }
+    }
+
+    public Task<ServiceResponse<object>> DeleteSpeedTestFileAsync(Guid id, CancellationToken ct = default)
+        => SendJsonAsync<object, object>(HttpMethod.Delete, $"/v1/diagnostics/speedtest/{id}", new { }, ct);
+
     public Task<ServiceResponse<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>> RunWanDoctorAsync(CancellationToken ct = default)
         => PostAsync<NetFirewall.Models.Diagnostics.DiagRunEnvelope<NetFirewall.Models.Diagnostics.DiagReport>>("/v1/diagnostics/wan/doctor", ct);
 

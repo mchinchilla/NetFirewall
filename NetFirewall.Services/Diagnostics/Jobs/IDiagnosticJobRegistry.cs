@@ -4,7 +4,7 @@ namespace NetFirewall.Services.Diagnostics.Jobs;
 
 /// <summary>
 /// In-memory registry for the invasive diagnostics jobs (flow inspector, packet
-/// capture). Singleton, modelled on <c>ITerminalSessionRegistry</c>: at most ONE
+/// capture, WAN speed test). Singleton, modelled on <c>ITerminalSessionRegistry</c>: at most ONE
 /// invasive job runs at a time on the whole box — each one inserts kernel state or
 /// opens a capture socket, and two operators racing would trip over each other's
 /// nftables table.
@@ -43,5 +43,8 @@ public interface IDiagnosticJobHandle : IDisposable
     void Progress(int itemCount, bool truncated = false);
     void Complete(TraceResult result);
     void Complete(CaptureResult result);
+    void Complete(SpeedTestResult result);
+    /// <summary>Publish a running speed test's partial result (the UI draws the curve from it).</summary>
+    void Report(SpeedTestResult partial);
     void Fail(string message);
 }

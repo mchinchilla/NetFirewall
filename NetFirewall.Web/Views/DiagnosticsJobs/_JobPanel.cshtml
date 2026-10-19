@@ -21,6 +21,24 @@
         DiagJobState.Failed    => "badge-danger",
         _                      => "badge-muted",
     };
+    var kindLabel = job?.Kind switch
+    {
+        DiagJobKind.Trace     => "Flow inspector",
+        DiagJobKind.SpeedTest => "WAN speed test",
+        _                     => "Packet capture",
+    };
+    var runningText = job?.Kind switch
+    {
+        DiagJobKind.Trace     => "Generate the traffic you want to see now — matching packets are being traced.",
+        DiagJobKind.SpeedTest => "Connecting to the test server…",
+        _                     => "Capturing…",
+    };
+    var countLabel = job?.Kind switch
+    {
+        DiagJobKind.Trace     => $"{job.ItemCount} events",
+        DiagJobKind.SpeedTest => $"{job.ItemCount} MB",
+        _                     => $"{job?.ItemCount} packets",
+    };
 }
 @if (Model.Error is not null)
 {
@@ -37,10 +55,10 @@ else
     <div id="job-panel" x-data x-init="$store.diagJob.set(@(job.IsRunning ? "true" : "false"))" @Html.Raw(pollAttrs)>
         <div class="flex flex-wrap items-center gap-2 mb-3">
             <span class="badge @badge">@job.State.ToString().ToUpperInvariant()</span>
-            <span class="text-sm font-medium">@(job.Kind == DiagJobKind.Trace ? "Flow inspector" : "Packet capture")</span>
+            <span class="text-sm font-medium">@kindLabel</span>
             <span class="text-xs font-mono text-surface-fg-muted truncate">@job.Subject</span>
             <span class="ml-auto text-xs font-mono text-surface-fg-muted">
-                @(job.Kind == DiagJobKind.Trace ? $"{job.ItemCount} events" : $"{job.ItemCount} packets") · @(job.ElapsedMs / 1000)s
+                @countLabel · @(job.ElapsedMs / 1000)s
             </span>
             @if (job.IsRunning)
             {
@@ -64,12 +82,19 @@ else
         {
             @await Html.PartialAsync("_CaptureResult", (job.Id, capture))
         }
+        else if (job.SpeedTest is { } speed)
+        {
+            @* Present while running too: the partial result draws the live curve. *@
+            @await Html.PartialAsync("_SpeedTestResult", speed)
+            @if (!job.IsRunning && speed.File is not null)
+            {
+                <div x-data x-init="htmx.trigger(document.body, 'refreshSpeedFiles')"></div>
+            }
+        }
         else if (job.IsRunning)
         {
             <p class="text-sm text-surface-fg-muted">
-                @(job.Kind == DiagJobKind.Trace
-                    ? "Generate the traffic you want to see now — matching packets are being traced."
-                    : "Capturing…")
+                @runningText
             </p>
         }
     </div>

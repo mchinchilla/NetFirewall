@@ -28,12 +28,13 @@
         new ToolCardViewModel("Kernel tunables", "ip_forward, rp_filter (effective), martian logging, conntrack headroom.", "/Diagnostics/sysctl", IconChip),
     };
 
-    // Invasive tools sit in their own row: they mutate the kernel or write raw
-    // traffic to disk, and are Admin + step-up only.
+    // Invasive tools sit in their own row: they mutate the kernel, write raw
+    // traffic to disk or saturate an uplink, and are Admin + step-up only.
     var invasive = new[]
     {
         new ToolCardViewModel("Flow inspector", "Follow a packet through every chain and see which rule decided its fate (nft trace).", "/Diagnostics/trace", IconMap, "admin + TOTP", "badge-warning"),
         new ToolCardViewModel("Packet capture", "Bounded tcpdump to a downloadable .pcap — capped by packets and seconds.", "/Diagnostics/capture", IconLog, "admin + TOTP", "badge-warning"),
+        new ToolCardViewModel("WAN speed test", "Download through one uplink, pinned by its mark: average, peak and first byte — and keep the file to compare against a LAN client.", "/Diagnostics/speedtest", IconSignal, "admin + TOTP", "badge-warning"),
     };
 }
 
