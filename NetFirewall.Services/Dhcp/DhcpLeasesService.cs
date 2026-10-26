@@ -726,8 +726,8 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
                 }
             }
 
-            // Use RepoDb BinaryBulkInsert for PostgreSQL COPY protocol
-            var inserted = await connection.BinaryBulkInsertAsync(
+            // Use RepoDb BulkInsert for PostgreSQL COPY protocol
+            var inserted = await connection.BulkInsertAsync(
                 tableName: "dhcp_mac_reservations",
                 entities: reservationList,
                 cancellationToken: cancellationToken
@@ -771,8 +771,8 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
                 }
             }
 
-            // Use RepoDb BinaryBulkInsert for PostgreSQL COPY protocol
-            var inserted = await connection.BinaryBulkInsertAsync(
+            // Use RepoDb BulkInsert for PostgreSQL COPY protocol
+            var inserted = await connection.BulkInsertAsync(
                 tableName: "dhcp_leases",
                 entities: leaseList,
                 cancellationToken: cancellationToken
