@@ -7,7 +7,8 @@
 **Firewall moderno, autohospedado y single-pane construido desde cero en C# / .NET 10**
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18%2B-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![RepoDB](https://img.shields.io/badge/RepoDB-1.17-E34F26)](https://repodb.net/)
 [![nftables](https://img.shields.io/badge/nftables-native-0F4C81)](https://wiki.nftables.org/)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE.txt)
 [![Estado](https://img.shields.io/badge/estado-producci%C3%B3n-success)]()
@@ -22,14 +23,19 @@ nftables · DHCP · WireGuard · failover dual-WAN · QoS · policy routing — 
 
 ![Panel de NetFirewall](docs/images/dashboard.png)
 
-Vista única consolidada, actualizada en vivo sin recargar la página:
+Vista única consolidada, actualizada en vivo vía HTMX sin recargar la página (los datos sensibles están difuminados en la captura):
 
-- **Tarjetas KPI** — leases activos, interfaces, filter rules, throughput en vivo, clientes VPN.
-- **Sparklines de salud del sistema en vivo** — CPU %, memoria % y throughput de red WAN, cada uno un sparkline de 60 minutos que se actualiza in-place cada 10s.
-- **Tráfico — últimas 24h** — throughput horario solo-WAN (Internet real in/out, sin doble conteo del NAT), con un pulso live de in/out arriba.
-- **Servicios · Salud WAN · A dónde va el tráfico** — salud de unidades systemd, alcance por WAN, y los destinos más activos de toda la LAN **enriquecidos con ASN / organización / país** (ej. "Amazon", "Cloudflare").
-- **Top hosts / servicios** — totales de bytes por host y por servicio desde el sampler de conntrack, con un **drill-down de destinos por host** (clic en un host para ver exactamente a dónde va su tráfico, por ASN).
-- Utilización de subnets & pools, atajos operativos de un click, y un **footer con datos del host** (OS, kernel, tipo de virtualización, cores de CPU, RAM, uptime).
+- **Barra de sincronía** — estado del ruleset (`In sync` / cambios pendientes), hora del último apply y los subsistemas que tocó (nftables · tc · wireguard), con **Apply firewall** de un click.
+- **Tarjetas KPI** — leases activos, interfaces (WAN vs LAN), filter rules habilitadas, throughput en vivo de todas las NICs, clientes VPN conectados.
+- **Salud del sistema** — CPU % y memoria % como sparklines de 60 minutos que se refrescan cada 10 s.
+- **Tráfico WAN** — bajada/subida en vivo por enlace (primario / secundario), más **Tráfico — últimas 24h** por interface con filtros solo-WAN / todas (Internet real in/out, sin doble conteo del NAT).
+- **Salud WAN · Servicios** — alcance y latencia por enlace (la misma tarjeta que usa la página de failover) y salud systemd de daemon, web, bootstrap, DHCP, PostgreSQL, nginx y `wg-quick@wg0`.
+- **A dónde va el tráfico** — los destinos más activos de toda la LAN **enriquecidos con ASN / organización / país**.
+- **Top hosts / Top servicios** — totales de bytes muestreados de conntrack en ventana de 1h / 6h / 24h / 7d, con **drill-down de destinos por host**.
+- **Subnets & pools · WireGuard** — utilización de leases por subnet y estado de handshake de túneles/peers.
+- **Leases recientes · Port forwards · Drops en vivo** — leases DHCP más nuevos, reglas DNAT activas y las reglas drop/reject habilitadas.
+- **Audit log · Alertas del sistema** — últimos cambios de configuración y eventos de WAN / VPN / failover.
+- **Acciones rápidas** — recargar firewall, reiniciar `wg0`, re-aplicar routing, abrir logs — y un **footer con datos del host** (OS, kernel, virtualización, cores, RAM, uptime).
 
 ## ✨ Qué hace
 
@@ -38,11 +44,16 @@ Vista única consolidada, actualizada en vivo sin recargar la página:
 | 🛡️ **Firewall** | Ruleset de nftables generado desde la DB — filter rules, NAT, port forwards, mangle, traffic marks. Apply con un click; backup antes de cada push. |
 | 📡 **Servidor DHCP** | Servidor RFC 2131 en C# puro con PXE boot, subnets/pools/exclusiones/reservas MAC/DDNS, raw sockets AF_PACKET para manejar DISCOVER sin IP. |
 | 🌐 **Failover dual-WAN** | Health monitor en el daemon pinguea cada WAN vía fwmark de policy routing (para que el probe salga por el enlace correcto), con histéresis (3 fallos → down, 5 éxitos → up). Cambio automático de default route. |
-| 🔐 **VPN WireGuard** | Ambos modos: hub-server con N peers Y cliente-saliente a un servidor remoto. Importación de archivos `/etc/wireguard/*.conf` existentes hacia la DB. |
+| 🔐 **VPN WireGuard** | Roles por peer — túnel upstream, cliente road-warrior, site-to-site — en una sola interface. Importa `/etc/wireguard/*.conf` existentes hacia la DB; detección de túnel caído con histéresis, banner en la UI y alertas SMTP opcionales. |
 | 📊 **QoS (tc HTB)** | Hierarchical Token Bucket por interface con porcentajes de banda por traffic mark. |
 | 🛣️ **Policy routing** | `fw_route_tables` + `fw_policy_rules` modelan `ip rule` + `ip route` declarativamente. El daemon reconcilia `/etc/iproute2/rt_tables` + estado del kernel. |
 | 📈 **Monitoreo** | Health de servicios systemd, alcance WAN, sparklines en vivo de CPU/memoria/red, gráficas de tráfico solo-WAN (sin doble conteo del NAT), detector de pending changes. |
 | 🌍 **Tráfico por destino** | El sampler de conntrack registra *a dónde* va el tráfico de cada host de la LAN (top-N destinos por host), enriquecido con ASN/org/país vía [ip.guide](https://ip.guide) (cacheado por prefijo). Haz drill-down en cualquier host para ver sus destinos. |
+| 🩺 **Diagnósticos** | Ping por fwmark, oráculo de rutas, búsqueda en conntrack, log de drops, salud de interfaces, sanidad de sysctl — más **cuatro doctores** (VPN, WAN, DHCP, DNS), un **inspector de flujos** (tabla de trace temporal, siempre se limpia), **captura tcpdump** acotada y **speed test** por WAN fijado con `SO_MARK`. Cada ejecución queda en el historial. |
+| ⏰ **Wake-on-LAN** | Dispositivos guardados (unidos al DHCP por MAC), despertar uno / seleccionados / todos; el daemon envía el magic packet atado al enlace LAN correcto. También hay botones Wake en reservas y leases DHCP. |
+| 🧙 **Setup wizard** | Generador del rule set inicial — arquetipo Gateway / Router / Bastion + toggles de capacidades → reglas default-deny sobre network objects con nombre. Idempotente. |
+| 💻 **Terminal web** | Shell root solo para admins en el navegador (xterm.js sobre un PTY en el daemon), protegida con TOTP. |
+| 🖥️ **TUI + Doctor** | `netfirewall-tui` para administrar desde consola y recuperación de emergencia (reset de password / TOTP / lockout); `netfirewall-doctor` valida env, sincronía de master key, units, socket, DHCP y PostgreSQL (`--json` para CI). |
 | 👤 **Auth** | Session cookies, enrollment TOTP + recovery codes, elevation para ops destructivas, audit log completo. |
 
 ## 🏗️ Arquitectura
@@ -106,6 +117,7 @@ NetFirewall/
 ├── NetFirewall.Web              # ASP.NET Core MVC — HTMX + Alpine.js + Tailwind 4
 ├── NetFirewall.DhcpServer       # RFC 2131 + PXE — unidad systemd independiente
 ├── NetFirewall.Tui              # TUI en Spectre.Console para admin de emergencia
+├── NetFirewall.Doctor           # Validador de requisitos (netfirewall-doctor)
 ├── NetFirewall.Services         # Lógica de negocio + Npgsql + sql/migrations/
 ├── NetFirewall.Models           # POCOs (DHCP, Firewall, Vpn, WanMonitor, Auth)
 ├── NetFirewall.Migrations       # Runner SQL forward-only
@@ -116,6 +128,7 @@ NetFirewall/
     ├── bootstrap/               # Script /usr/local/bin/netfirewall-bootstrap
     ├── nginx/                   # Ejemplo de reverse proxy
     ├── seeds/                   # Seed SQL por deployment
+    ├── debian/ firstboot/ iso/  # Appliance .deb + ISO Debian 13
     └── install.sh               # Instalador one-shot
 ```
 
@@ -125,7 +138,7 @@ NetFirewall/
 
 - 🐧 Debian 13 / Ubuntu 24.04 / Rocky 9 (systemd moderno + kernel 5.x+)
 - 🟣 .NET 10 SDK + runtime
-- 🐘 PostgreSQL 14+
+- 🐘 PostgreSQL 18+
 - 🔧 Paquetes `nftables`, `iproute2`, `wireguard-tools`, `conntrack`
 - 🌐 nginx (o cualquier reverse proxy) para terminar TLS
 
@@ -144,7 +157,7 @@ apt update
 apt install -y nftables iproute2 wireguard-tools conntrack iputils-ping \
                openssl curl ca-certificates
 
-# PostgreSQL 14+ (servidor + cliente; el runner de migraciones usa psql)
+# PostgreSQL 18+ (servidor + cliente; el runner de migraciones usa psql)
 apt install -y postgresql postgresql-client
 
 # nginx para terminar TLS (omítelo si usas otro reverse proxy)
@@ -270,7 +283,7 @@ stateDiagram-v2
     Down --> [*]: removida del config
 ```
 
-## 🗄️ Esquema de DB (26 migraciones)
+## 🗄️ Esquema de DB (42 migraciones)
 
 | Rango | Dominio |
 |---|---|
@@ -284,6 +297,13 @@ stateDiagram-v2
 | `00023` | Policy routing (named tables + reglas fwmark) |
 | `00024` | LAN traffic samples (top talkers desde conntrack) |
 | `00025–00026` | WAN health + probe fwmark |
+| `00027–00029` | Tráfico por destino, cache de ASN, métricas de red |
+| `00030–00031` | Índice de búsqueda global (DHCP + firewall) |
+| `00032–00033, 00036–00037` | Modos de ruta WireGuard, monitor de salud VPN, roles de peer (upstream / client / site) |
+| `00034–00035` | Auto-seed de WAN health + override manual de la WAN activa |
+| `00038–00040` | Notify al borrar leases DHCP, inversión de horarios, limpieza de huérfanos |
+| `00041` | Historial de diagnósticos (`diag_runs`) |
+| `00042` | Dispositivos Wake-on-LAN |
 
 Forward-only; la tabla `__migrations` guarda el SHA-256 de cada archivo aplicado para detectar drift.
 
@@ -397,7 +417,7 @@ wg-quick up wg0                          # levantar manualmente (normalmente lo 
 
 ```bash
 sysctl net.ipv4.ip_forward               # debe ser 1 para un router
-ping -I ens192 -c2 1.1.1.1               # probar una WAN específica
+ping -m 256 -c2 1.1.1.1                  # probar una WAN por su probe fwmark (policy routing ignora -I)
 ip route show default
 ```
 
@@ -439,6 +459,11 @@ Estos artefactos quedan en el repo como referencia pero ya no se usan en producc
 - [`docs/DEPLOY_HANDOFF.md`](docs/DEPLOY_HANDOFF.md) — estado del deployment + notas de handoff
 - [`docs/PerformanceAnalysis.md`](docs/PerformanceAnalysis.md) — budget del hot path DHCP + reglas zero-allocation
 - [`docs/DHCP_FEATURE_COMPARISON.md`](docs/DHCP_FEATURE_COMPARISON.md) — paridad de features vs isc-dhcp / kea
+- [`docs/diagnostics.md`](docs/diagnostics.md) — sección de Diagnósticos: herramientas, doctores, historial, reglas de seguridad
+- [`docs/appliance-iso.md`](docs/appliance-iso.md) — appliance `.deb` + ISO Debian 13, aprovisionamiento en el primer arranque
+- [`docs/doctor.md`](docs/doctor.md) — checks y remedios de `netfirewall-doctor`
+- [`docs/master-key.md`](docs/master-key.md) — master key de TOTP: ubicación, regla de sincronía daemon ↔ Web
+- [`docs/wake-on-lan.md`](docs/wake-on-lan.md) — diseño y uso de Wake-on-LAN
 - [`CLAUDE.md`](CLAUDE.md) — reglas del proyecto (no negociables)
 
 ## 📜 Licencia
@@ -449,6 +474,6 @@ MIT — ver [LICENSE.txt](LICENSE.txt).
 
 <div align="center">
 
-**Construido con ❤️ en C# / .NET 10 · Powered by PostgreSQL + nftables**
+**Construido con ❤️ en C# / .NET 10 · Powered by PostgreSQL + RepoDB + nftables**
 
 </div>

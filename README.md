@@ -7,7 +7,8 @@
 **A modern, self-hosted, single-pane firewall built from scratch in C# / .NET 10**
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18%2B-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![RepoDB](https://img.shields.io/badge/RepoDB-1.17-E34F26)](https://repodb.net/)
 [![nftables](https://img.shields.io/badge/nftables-native-0F4C81)](https://wiki.nftables.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
 [![Status](https://img.shields.io/badge/status-production-success)]()
@@ -22,14 +23,19 @@ nftables · DHCP · WireGuard · dual-WAN failover · QoS · policy routing — 
 
 ![NetFirewall dashboard](docs/images/dashboard.png)
 
-Single overview pane, updated live without page reloads:
+Single overview pane, updated live over HTMX without page reloads (sensitive values blurred in the screenshot):
 
-- **KPI cards** — active leases, interfaces, filter rules, live throughput, VPN clients.
-- **Live system-health sparklines** — CPU %, memory %, and WAN network throughput, each a 60-minute sparkline refreshed in place every 10s.
-- **Traffic — last 24h** — WAN-only hourly throughput (real Internet in/out, no NAT double-count), with a live in/out pulse on top.
-- **Services · WAN health · Where traffic is going** — systemd unit health, per-WAN reachability, and the busiest destinations across the LAN **enriched with ASN / organisation / country** (e.g. "Amazon", "Cloudflare").
-- **Top hosts / services** — per-host and per-service byte totals from the conntrack sampler, with a per-host **destination drill-down** (click a host to see exactly where its traffic goes, by ASN).
-- Subnets & pools utilisation, one-click operational shortcuts, and a **host-facts footer** (OS, kernel, virtualization type, CPU cores, RAM, uptime).
+- **Sync bar** — ruleset state (`In sync` / pending changes), time of the last apply and the subsystems it touched (nftables · tc · wireguard), with a one-click **Apply firewall**.
+- **KPI cards** — active leases, interfaces (WAN vs LAN), enabled filter rules, live throughput across every NIC, connected VPN clients.
+- **System health** — CPU % and memory % as 60-minute sparklines refreshed every 10 s.
+- **WAN traffic** — live download/upload per uplink (primary / secondary), plus **Traffic — last 24h** per interface with WAN-only / show-all toggles (real Internet in/out, no NAT double-count).
+- **WAN health · Services** — per-uplink reachability and latency (the same card the failover page uses) and systemd health of daemon, web, bootstrap, DHCP, PostgreSQL, nginx and `wg-quick@wg0`.
+- **Where traffic is going** — busiest destinations across the LAN **enriched with ASN / organisation / country**.
+- **Top hosts / Top services** — conntrack-sampled byte totals over a 1h / 6h / 24h / 7d window, with a per-host **destination drill-down**.
+- **Subnets & pools · WireGuard** — lease utilisation per subnet and tunnel/peer handshake state.
+- **Recent leases · Port forwards · Live drops** — newest DHCP leases, active DNAT rules and the enabled drop/reject rules.
+- **Audit log · System alerts** — latest configuration changes and WAN / VPN / failover events.
+- **Quick actions** — reload firewall, restart `wg0`, re-apply routing, open logs — and a **host-facts footer** (OS, kernel, virtualization, CPU cores, RAM, uptime).
 
 ## ✨ What it does
 
@@ -38,11 +44,16 @@ Single overview pane, updated live without page reloads:
 | 🛡️ **Firewall** | Native nftables ruleset generated from DB — filter rules, NAT, port forwards, mangle, traffic marks. Apply with one click; backups taken before every push. |
 | 📡 **DHCP server** | Pure-C# RFC 2131 server with PXE boot, subnets/pools/exclusions/MAC reservations/DDNS, AF_PACKET raw sockets for zero-IP DISCOVER handling. |
 | 🌐 **Dual-WAN failover** | Daemon-side health monitor pings each WAN via fwmark policy routing (so probes hit the right link), with hysteresis (3 fails → down, 5 succ → up). Automatic default route swap when winner changes. |
-| 🔐 **WireGuard VPN** | Both modes: hub-server with N peers AND outbound-client to a remote server. Import existing `/etc/wireguard/*.conf` files from disk into DB. |
+| 🔐 **WireGuard VPN** | Per-peer roles — upstream tunnel, road-warrior client, site-to-site — on one interface. Import existing `/etc/wireguard/*.conf` into the DB; tunnel-down detection with hysteresis, UI banner and optional SMTP alerts. |
 | 📊 **QoS (tc HTB)** | Hierarchical Token Bucket per interface with per-traffic-mark class shares. |
 | 🛣️ **Policy routing** | `fw_route_tables` + `fw_policy_rules` model `ip rule` + `ip route` declaratively. The daemon reconciles `/etc/iproute2/rt_tables` + kernel state. |
 | 📈 **Monitoring** | systemd service health, WAN reachability, live CPU/memory/network sparklines, WAN-only traffic graphs (no NAT double-count), pending-changes detector. |
 | 🌍 **Per-destination traffic** | conntrack sampler records *where* each LAN host's traffic goes (top-N destinations per host), enriched with ASN/org/country via [ip.guide](https://ip.guide) (cached by prefix). Drill into any host to see its destinations. |
+| 🩺 **Diagnostics** | Ping by fwmark, route oracle, conntrack lookup, drop log, interface health, sysctl sanity — plus **four doctors** (VPN, WAN, DHCP, DNS), a **flow inspector** (temporary trace table, always cleaned up), bounded **tcpdump capture** and a per-WAN **speed test** pinned by `SO_MARK`. Every run is recorded in history. |
+| ⏰ **Wake-on-LAN** | Saved devices (joined to DHCP by MAC), wake one / selected / all; the daemon sends the magic packet bound to the right LAN link. Wake buttons on DHCP reservations and leases too. |
+| 🧙 **Setup wizard** | Starting rule set generator — Gateway / Router / Bastion archetype + capability toggles → default-deny rules built on named network objects. Idempotent. |
+| 💻 **Web terminal** | Admin-only root shell in the browser (xterm.js over a PTY in the daemon), gated by TOTP. |
+| 🖥️ **TUI + Doctor** | `netfirewall-tui` for console admin and break-glass recovery (reset password / TOTP / lockout); `netfirewall-doctor` validates env, master-key sync, units, socket, DHCP and PostgreSQL (`--json` for CI). |
 | 👤 **Auth** | Custom session cookies, TOTP enrollment + recovery codes, elevation gates for destructive ops, comprehensive audit log. |
 
 ## 🏗️ Architecture
@@ -106,6 +117,7 @@ NetFirewall/
 ├── NetFirewall.Web              # ASP.NET Core MVC — HTMX + Alpine.js + Tailwind 4
 ├── NetFirewall.DhcpServer       # RFC 2131 + PXE — independent systemd unit
 ├── NetFirewall.Tui              # Spectre.Console TUI for break-glass admin
+├── NetFirewall.Doctor           # Requirements validator (netfirewall-doctor)
 ├── NetFirewall.Services         # Business logic + Npgsql + sql/migrations/
 ├── NetFirewall.Models           # POCOs (DHCP, Firewall, Vpn, WanMonitor, Auth)
 ├── NetFirewall.Migrations       # Forward-only SQL migration runner
@@ -116,6 +128,7 @@ NetFirewall/
     ├── bootstrap/               # /usr/local/bin/netfirewall-bootstrap script
     ├── nginx/                   # Reverse-proxy example
     ├── seeds/                   # Per-deployment seed SQL
+    ├── debian/ firstboot/ iso/  # Appliance .deb + Debian 13 ISO
     └── install.sh               # One-shot installer
 ```
 
@@ -125,7 +138,7 @@ NetFirewall/
 
 - 🐧 Debian 13 / Ubuntu 24.04 / Rocky 9 (any modern systemd + Linux 5.x)
 - 🟣 .NET 10 SDK + runtime
-- 🐘 PostgreSQL 14+
+- 🐘 PostgreSQL 18+
 - 🔧 `nftables`, `iproute2`, `wireguard-tools`, `conntrack` packages
 - 🌐 nginx (or any reverse proxy) for TLS termination
 
@@ -145,7 +158,7 @@ apt update
 apt install -y nftables iproute2 wireguard-tools conntrack iputils-ping \
                openssl curl ca-certificates
 
-# PostgreSQL 14+ (server + client; psql is needed by the migration runner)
+# PostgreSQL 18+ (server + client; psql is needed by the migration runner)
 apt install -y postgresql postgresql-client
 
 # nginx for TLS termination (skip if you front it with something else)
@@ -286,7 +299,7 @@ stateDiagram-v2
     Down --> [*]: removed from config
 ```
 
-## 🗄️ Database schema (26 migrations)
+## 🗄️ Database schema (42 migrations)
 
 | Range | Domain |
 |---|---|
@@ -300,6 +313,13 @@ stateDiagram-v2
 | `00023` | Policy routing (named tables + fwmark rules) |
 | `00024` | LAN traffic samples (conntrack-fed top talkers) |
 | `00025–00026` | WAN health + probe fwmark |
+| `00027–00029` | Per-destination traffic, ASN cache, network metrics |
+| `00030–00031` | Global search index (DHCP + firewall) |
+| `00032–00033, 00036–00037` | WireGuard route modes, VPN health monitor, peer roles (upstream / client / site) |
+| `00034–00035` | WAN health auto-seed + manual active-WAN override |
+| `00038–00040` | DHCP lease-delete notify, schedule inversion, orphan cleanup |
+| `00041` | Diagnostics run history (`diag_runs`) |
+| `00042` | Wake-on-LAN devices |
 
 Forward-only; `__migrations` table tracks SHA-256 of every applied file to detect drift.
 
@@ -412,7 +432,7 @@ wg-quick up wg0                          # bring up manually (daemon normally do
 
 ```bash
 sysctl net.ipv4.ip_forward                          # must be 1 for a router
-ping -I ens192 -c2 1.1.1.1                           # test a specific WAN link
+ping -m 256 -c2 1.1.1.1                              # test a WAN by its probe fwmark (-I is ignored by policy routing)
 ip route show default                               # current default route
 ```
 
@@ -454,7 +474,11 @@ These artifacts are kept in the repo for reference but no longer active in produ
 - [`docs/DEPLOY_HANDOFF.md`](docs/DEPLOY_HANDOFF.md) — current deployment state + handoff notes
 - [`docs/PerformanceAnalysis.md`](docs/PerformanceAnalysis.md) — DHCP hot path budget + zero-allocation rules
 - [`docs/DHCP_FEATURE_COMPARISON.md`](docs/DHCP_FEATURE_COMPARISON.md) — feature parity vs isc-dhcp / kea
-- [`docs/diagnostics.md`](docs/diagnostics.md) — Diagnostics section: tools, VPN doctor, history, safety rules
+- [`docs/diagnostics.md`](docs/diagnostics.md) — Diagnostics section: tools, doctors, history, safety rules
+- [`docs/appliance-iso.md`](docs/appliance-iso.md) — appliance `.deb` + Debian 13 ISO, first-boot provisioning
+- [`docs/doctor.md`](docs/doctor.md) — `netfirewall-doctor` checks and remedies
+- [`docs/master-key.md`](docs/master-key.md) — TOTP master key: location, daemon ↔ Web sync rule
+- [`docs/wake-on-lan.md`](docs/wake-on-lan.md) — Wake-on-LAN design and usage
 - [`CLAUDE.md`](CLAUDE.md) — project rules (non-negotiable)
 
 ## 📜 License
@@ -465,6 +489,6 @@ MIT — see [LICENSE.txt](LICENSE.txt).
 
 <div align="center">
 
-**Built with ❤️ in C# / .NET 10 · Powered by PostgreSQL + nftables**
+**Built with ❤️ in C# / .NET 10 · Powered by PostgreSQL + RepoDB + nftables**
 
 </div>
