@@ -120,6 +120,21 @@
     --chart-in:  var(--accent);
     --chart-out: var(--feedback-info-bd);
 
+    /* Host monitor series (dot matrices + legend swatches). One hue per
+       metric so CPU / memory / load / disk / network read apart at a glance;
+       stacked series of one metric share a family (CPU system vs user). */
+    --metric-cpu-system: var(--coral-600);
+    --metric-cpu-user:   var(--coral-300);
+    --metric-cpu-iowait: var(--taupe-gray-400);
+    --metric-memory:     var(--magic-mint-700);
+    --metric-load:       var(--twilight-600);
+    --metric-disk-read:  var(--jordy-blue-600);
+    --metric-disk-write: var(--taupe-gray-600);
+    --metric-net-in:     var(--magic-mint-500);
+    --metric-net-out:    var(--jordy-blue-500);
+    --metric-dot-empty:  color-mix(in srgb, var(--surface-fg) 9%, transparent);
+    --metric-well:       var(--surface-muted);
+
     /* Solid button colors for destructive / warning actions. Foreground is
      * always near-white because the bd color is dark enough for AA contrast. */
     --feedback-danger-btn-bg:  var(--coral-600);
@@ -170,6 +185,19 @@
 
     --chart-in:  var(--surface-fg);
     --chart-out: color-mix(in srgb, var(--feedback-info-bd) 38%, var(--surface-fg-muted));
+
+    /* Brighter steps of the same hues — the dots sit on a dark well. */
+    --metric-cpu-system: var(--coral-400);
+    --metric-cpu-user:   var(--coral-200);
+    --metric-cpu-iowait: var(--taupe-gray-300);
+    --metric-memory:     var(--magic-mint-400);
+    --metric-load:       var(--twilight-400);
+    --metric-disk-read:  var(--jordy-blue-400);
+    --metric-disk-write: var(--taupe-gray-400);
+    --metric-net-in:     var(--magic-mint-300);
+    --metric-net-out:    var(--jordy-blue-300);
+    --metric-dot-empty:  color-mix(in srgb, var(--surface-fg) 12%, transparent);
+    --metric-well:       color-mix(in srgb, var(--surface-bg) 70%, transparent);
 
     --card-radius: 0.75rem;
     --control-radius: 0.5rem;
@@ -968,6 +996,23 @@ html[data-theme][data-sidebar="light"] {
         color: var(--accent);
     }
     .kpi-icon-sm { width: 2rem; height: 2rem; }
+
+    /* Host monitor cards: the card sets --metric-tone to its series token and
+       the icon disc / title / swatches follow it. */
+    .metric-icon {
+        @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl;
+        background: color-mix(in srgb, var(--metric-tone) 14%, transparent);
+        color: var(--metric-tone);
+    }
+    .metric-title  { color: var(--metric-tone); }
+    .metric-swatch { @apply inline-block h-2 w-2 shrink-0 rounded-[2px]; background: var(--swatch); }
+    .dot-well      { @apply rounded-xl p-3; background: var(--metric-well); }
+    .dot-well-sm   { @apply rounded-lg p-1.5; background: var(--metric-well); }
+    .metric-tile {
+        @apply block min-w-0 rounded-xl border p-3 transition-colors;
+        border-color: var(--surface-border);
+    }
+    .metric-tile:hover { border-color: var(--accent); }
     .kpi-tint-accent { background: var(--accent-soft); color: var(--accent); }
     .kpi-tint-coral  { background: var(--tint-coral-bg);  color: var(--tint-coral-fg); }
     .kpi-tint-mint   { background: var(--tint-mint-bg);   color: var(--tint-mint-fg); }

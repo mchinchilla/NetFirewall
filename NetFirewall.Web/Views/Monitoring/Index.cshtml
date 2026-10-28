@@ -46,6 +46,13 @@
     @* ---------- Live tab ---------- *@
     <div x-show="tab === 'live'">
 
+        <div id="monitoring-server" class="mb-4 loading-host"
+             hx-get="@Url.Action("Strip", "ServerMonitor")"
+             :hx-trigger="paused ? 'load' : 'load, every 5s'"
+             hx-swap="innerHTML">
+            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        </div>
+
         @await Html.PartialAsync("_WanTrafficCharts",
             WanTrafficChartsViewModel.Monitoring(Url.Action("Interfaces", "Network")))
 

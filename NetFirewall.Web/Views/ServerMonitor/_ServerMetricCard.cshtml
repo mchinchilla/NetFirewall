@@ -1,0 +1,30 @@
+@model NetFirewall.Web.Models.Monitoring.ServerMetricCard
+@* One host monitor card: icon + name, the current figure, its legend and the window's dot matrix. *@
+<article class="card flex min-w-0 flex-col @(Model.Wide ? "lg:col-span-3" : "lg:col-span-2")" style="--metric-tone: var(@Model.Tone);">
+    <header class="flex items-center gap-3">
+        <span class="metric-icon">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="@Model.IconPath" />
+            </svg>
+        </span>
+        <h3 class="metric-title text-base font-semibold">@Model.Title</h3>
+    </header>
+    <p class="mt-4 text-3xl font-semibold tracking-tight tabular-nums">@Model.Headline</p>
+    <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-surface-fg-muted">
+        @foreach (var item in Model.Legend)
+        {
+            <span class="inline-flex items-center gap-1.5 tabular-nums">
+                @if (item.Token is not null)
+                {
+                    <span class="metric-swatch" style="--swatch: var(@item.Token);" aria-hidden="true"></span>
+                }
+                @item.Text
+            </span>
+        }
+    </p>
+    <div class="dot-well mt-4">@Model.Chart</div>
+    @if (Model.Caption is not null)
+    {
+        <p class="mt-2 text-right text-xs tabular-nums text-surface-fg-muted">@Model.Caption</p>
+    }
+</article>

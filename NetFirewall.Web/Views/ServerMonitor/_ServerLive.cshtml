@@ -1,0 +1,153 @@
+@using System.Globalization
+@using NetFirewall.Services.Monitoring.Host
+@using NetFirewall.Web.Models.Monitoring
+@model ServerMonitorViewModel
+@*
+    The live section. HTMX re-requests it every few seconds while the tab is
+    visible and not paused (Alpine mirrors the page's pause onto data-paused),
+    and the window chips swap it without a reload. All from memory: refreshing
+    asks nothing of PostgreSQL or the daemon.
+*@
+@{
+    var m = Model.View;
+    var inv = CultureInfo.InvariantCulture;
+    var url = Url.Action("Index", "ServerMonitor", new { window = Model.WindowSeconds });
+}
+<section id="server-live" class="space-y-4"
+         hx-get="@url"
+         hx-trigger="every @(Model.RefreshSeconds)s [document.visibilityState === 'visible' && !this.hasAttribute('data-paused')]"
+         hx-swap="outerHTML"
+         :data-paused="paused">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+            @if (m is not null)
+            {
+                <h2 class="text-lg font-semibold">@m.Identity.HostName</h2>
+                <p class="mt-0.5 text-sm text-surface-fg-muted">@ServerMonitorViewModel.IdentityLine(m)</p>
+            }
+        </div>
+        <div class="flex items-center gap-2">
+            <nav class="seg text-xs" aria-label="Window">
+                @foreach (var (seconds, label) in ServerMonitorViewModel.Windows)
+                {
+                    var active = seconds == Model.WindowSeconds;
+                    var chipUrl = Url.Action("Index", "ServerMonitor", new { window = seconds });
+                    <a class="seg-btn @(active ? "is-on" : null)" aria-current="@(active ? "page" : null)"
+                       href="@chipUrl" hx-get="@chipUrl" hx-target="#server-live" hx-swap="outerHTML" hx-push-url="true">@label</a>
+                }
+            </nav>
+            <button type="button" class="btn text-xs" :class="paused ? 'btn-primary' : 'btn-ghost'" @@click="paused = !paused" :aria-pressed="paused">
+                <span class="inline-flex h-1.5 w-1.5 rounded-full bg-feedback-success-bd" x-show="!paused"></span>
+                <span x-text="paused ? 'Resume' : 'Live · @(Model.RefreshSeconds)s'">Live · @(Model.RefreshSeconds)s</span>
+            </button>
+        </div>
+    </div>
+
+    @if (m is null)
+    {
+        <div class="rounded-lg border-l-2 px-3 py-2 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd" role="status">
+            @(Model.Status.Message ?? "The host monitor is unavailable.")
+        </div>
+    }
+    else if (m.Current is null)
+    {
+        <p class="card text-sm text-surface-fg-muted">Collecting the first samples — this fills in within a couple of seconds.</p>
+    }
+    else
+    {
+        <div class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-6">
+            @foreach (var card in Model.Cards())
+            {
+                @await Html.PartialAsync("_ServerMetricCard", card)
+            }
+
+            @* The programs burning the most CPU, their processes added up (postgres backends, nginx workers). *@
+            <article class="card min-w-0 md:col-span-2 lg:col-span-4">
+                <header class="flex items-center gap-3">
+                    <span class="kpi-icon kpi-icon-sm">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="@ServerMonitorViewModel.IconProcesses" /></svg>
+                    </span>
+                    <h3 class="text-base font-semibold">Processes</h3>
+                </header>
+                <p class="mt-2 text-xs text-surface-fg-muted">
+                    The @m.Processes.Count programs using the most CPU, with their processes added up. CPU is a share of the whole machine, measured every @m.Cost.ProcessScanSeconds s.
+                </p>
+                @if (m.Processes.Count == 0)
+                {
+                    <p class="mt-3 text-sm text-surface-fg-muted">No process walk yet.</p>
+                }
+                else
+                {
+                    var busiest = Math.Max(m.Processes.Max(p => p.CpuShare), 0.0001);
+                    <div class="mt-3 overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="text-left text-[11px] uppercase tracking-wider text-surface-fg-muted">
+                                <tr>
+                                    <th class="py-2 pr-4 font-medium">Program</th>
+                                    <th class="py-2 pr-4 text-right font-medium">Processes</th>
+                                    <th class="py-2 pr-4 text-right font-medium">CPU</th>
+                                    <th class="hidden py-2 pr-4 sm:table-cell"><span class="sr-only">CPU share</span></th>
+                                    <th class="py-2 text-right font-medium">Memory</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y border-surface-border">
+                                @foreach (var p in m.Processes)
+                                {
+                                    var width = (p.CpuShare / busiest * 100).ToString("0.#", inv);
+                                    <tr>
+                                        <td class="py-2 pr-4 font-mono text-xs">@(p.Name == HostProcessGroup.KernelThreads ? "kernel threads" : p.Name)</td>
+                                        <td class="py-2 pr-4 text-right tabular-nums">@p.Instances.ToString("N0", inv)</td>
+                                        <td class="py-2 pr-4 text-right tabular-nums">@((p.CpuShare * 100).ToString("0.0", inv)) %</td>
+                                        <td class="hidden w-1/3 py-2 pr-4 sm:table-cell">
+                                            <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--metric-dot-empty);">
+                                                <div class="h-full rounded-full" style="width: @(width)%; background: var(--metric-cpu-user);"></div>
+                                            </div>
+                                        </td>
+                                        <td class="py-2 text-right tabular-nums">@ServerMonitorViewModel.Bytes(p.ResidentBytes)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </article>
+
+            @* Local disks: what fills up silently (logs, captures, PostgreSQL) until writes start failing. *@
+            <article class="card min-w-0 md:col-span-2 lg:col-span-2">
+                <header class="flex items-center gap-3">
+                    <span class="kpi-icon kpi-icon-sm">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="@ServerMonitorViewModel.IconFilesystems" /></svg>
+                    </span>
+                    <h3 class="text-base font-semibold">Filesystems</h3>
+                </header>
+                @if (m.Filesystems.Count == 0)
+                {
+                    <p class="mt-3 text-sm text-surface-fg-muted">No local filesystems visible.</p>
+                }
+                @foreach (var fs in m.Filesystems)
+                {
+                    var used = ServerMonitorViewModel.Percent(fs.UsedBytes, fs.TotalBytes);
+                    var barColor = used >= 90 ? "var(--feedback-danger-bd)" : used >= 75 ? "var(--feedback-warning-bd)" : "var(--feedback-success-bd)";
+                    <div class="mt-4">
+                        <div class="flex items-baseline justify-between gap-2 text-sm">
+                            <span class="truncate font-mono text-xs">@fs.MountPoint</span>
+                            <span class="tabular-nums text-surface-fg-muted">@used %</span>
+                        </div>
+                        <div class="mt-1.5 h-2 rounded-full overflow-hidden" style="background: var(--metric-dot-empty);"
+                             role="meter" aria-label="@fs.MountPoint" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@used">
+                            <div class="h-full rounded-full" style="width: @(used)%; background: @barColor;"></div>
+                        </div>
+                        <p class="mt-1 text-xs text-surface-fg-muted">@ServerMonitorViewModel.Bytes(fs.UsedBytes) of @ServerMonitorViewModel.Bytes(fs.TotalBytes) used · @fs.Format</p>
+                    </div>
+                }
+            </article>
+        </div>
+
+        @* What watching costs: the monitor has to prove it stays out of the way. *@
+        <p class="text-xs text-surface-fg-muted">
+            The monitor reads /proc every @m.Cost.SampleSeconds s (about @m.Cost.SampleMicroseconds.ToString("0", inv) µs per reading)
+            and the processes every @m.Cost.ProcessScanSeconds s (@((m.Cost.ProcessScanMicroseconds / 1000).ToString("0.0", inv)) ms).
+            It keeps the last hour in memory (@ServerMonitorViewModel.Bytes(m.Cost.HistoryBytes)) and asks nothing of PostgreSQL or the daemon.
+        </p>
+    }
+</section>

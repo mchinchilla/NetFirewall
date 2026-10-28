@@ -27,7 +27,7 @@ Vista única consolidada, actualizada en vivo vía HTMX sin recargar la página 
 
 - **Barra de sincronía** — estado del ruleset (`In sync` / cambios pendientes), hora del último apply y los subsistemas que tocó (nftables · tc · wireguard), con **Apply firewall** de un click.
 - **Tarjetas KPI** — leases activos, interfaces (WAN vs LAN), filter rules habilitadas, throughput en vivo de todas las NICs, clientes VPN conectados.
-- **Salud del sistema** — CPU % y memoria % como sparklines de 60 minutos que se refrescan cada 10 s.
+- **Tira del servidor** — CPU, memoria, load, disco y red del host del firewall en los últimos 5 minutos como matrices de puntos, refrescadas cada 5 s desde un muestreador de `/proc` en memoria (sin ir a la base de datos). Un click abre **Monitoring → Server**.
 - **Tráfico WAN** — bajada/subida en vivo por enlace (primario / secundario), más **Tráfico — últimas 24h** por interface con filtros solo-WAN / todas (Internet real in/out, sin doble conteo del NAT).
 - **Salud WAN · Servicios** — alcance y latencia por enlace (la misma tarjeta que usa la página de failover) y salud systemd de daemon, web, bootstrap, DHCP, PostgreSQL, nginx y `wg-quick@wg0`.
 - **A dónde va el tráfico** — los destinos más activos de toda la LAN **enriquecidos con ASN / organización / país**.
@@ -47,7 +47,7 @@ Vista única consolidada, actualizada en vivo vía HTMX sin recargar la página 
 | 🔐 **VPN WireGuard** | Roles por peer — túnel upstream, cliente road-warrior, site-to-site — en una sola interface. Importa `/etc/wireguard/*.conf` existentes hacia la DB; detección de túnel caído con histéresis, banner en la UI y alertas SMTP opcionales. |
 | 📊 **QoS (tc HTB)** | Hierarchical Token Bucket por interface con porcentajes de banda por traffic mark. |
 | 🛣️ **Policy routing** | `fw_route_tables` + `fw_policy_rules` modelan `ip rule` + `ip route` declarativamente. El daemon reconcilia `/etc/iproute2/rt_tables` + estado del kernel. |
-| 📈 **Monitoreo** | Health de servicios systemd, alcance WAN, sparklines en vivo de CPU/memoria/red, gráficas de tráfico solo-WAN (sin doble conteo del NAT), detector de pending changes. |
+| 📈 **Monitoreo** | Health de servicios systemd, alcance WAN, gráficas de tráfico solo-WAN (sin doble conteo del NAT), detector de pending changes — más **Monitoring → Server**: un monitor del host que muestrea `/proc` cada segundo en memoria (la última hora, unos cientos de KB, ~µs por muestra) y muestra CPU (user / system / I/O wait), memoria, load, disco y throughput de las NICs como matrices de puntos en 1m / 5m / 15m / 1h, los programas que más consumen y los filesystems locales. |
 | 🌍 **Tráfico por destino** | El sampler de conntrack registra *a dónde* va el tráfico de cada host de la LAN (top-N destinos por host), enriquecido con ASN/org/país vía [ip.guide](https://ip.guide) (cacheado por prefijo). Haz drill-down en cualquier host para ver sus destinos. |
 | 🩺 **Diagnósticos** | Ping por fwmark, oráculo de rutas, búsqueda en conntrack, log de drops, salud de interfaces, sanidad de sysctl — más **cuatro doctores** (VPN, WAN, DHCP, DNS), un **inspector de flujos** (tabla de trace temporal, siempre se limpia), **captura tcpdump** acotada y **speed test** por WAN fijado con `SO_MARK`. Cada ejecución queda en el historial. |
 | ⏰ **Wake-on-LAN** | Dispositivos guardados (unidos al DHCP por MAC), despertar uno / seleccionados / todos; el daemon envía el magic packet atado al enlace LAN correcto. También hay botones Wake en reservas y leases DHCP. |

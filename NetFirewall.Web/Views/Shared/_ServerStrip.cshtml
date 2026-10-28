@@ -1,0 +1,52 @@
+@using NetFirewall.Web.Models.Monitoring
+@model ServerMonitorViewModel
+@*
+    The host monitor in miniature: Monitoring → Server's five charts in one
+    row over the last five minutes. Same dot matrices and tokens; no processes
+    or disks — those are for when you already know something is wrong. Served
+    from memory, so the caller can poll it every 5 s for free.
+*@
+@{
+    var m = Model.View;
+    var serverUrl = Url.Action("Index", "ServerMonitor");
+}
+<section class="card p-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-base font-semibold">
+            Server
+            @if (m is not null)
+            {
+                <span class="ml-1 text-sm font-normal text-surface-fg-muted">@m.Identity.HostName · last 5 minutes</span>
+            }
+        </h2>
+        <a class="text-xs hover:underline text-accent" href="@serverUrl">Open monitor →</a>
+    </div>
+
+    @if (m is null)
+    {
+        <div class="mt-3 rounded-lg border-l-2 px-3 py-2 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd" role="status">
+            @(Model.Status.Message ?? "The host monitor is unavailable.")
+        </div>
+    }
+    else if (m.Current is null)
+    {
+        <p class="mt-3 text-sm text-surface-fg-muted">Collecting the first samples…</p>
+    }
+    else
+    {
+        <div class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            @foreach (var tile in Model.Cards(strip: true))
+            {
+                <a class="metric-tile" href="@serverUrl" style="--metric-tone: var(@tile.Tone);">
+                    <span class="metric-title flex items-center gap-1.5 text-xs font-semibold">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="@tile.IconPath" /></svg>
+                        @tile.Title
+                    </span>
+                    <span class="mt-1 block truncate text-xl font-semibold tabular-nums">@tile.Headline</span>
+                    <span class="block truncate text-xs tabular-nums text-surface-fg-muted">@tile.Detail</span>
+                    <span class="dot-well-sm mt-2 block">@tile.Chart</span>
+                </a>
+            }
+        </div>
+    }
+</section>

@@ -52,6 +52,9 @@
         Url.Action("Index", "WanFailover")!, Url.Action("Index", "WakeOnLan")!
     };
 
+    var monHrefs = new[] { Url.Action("Index", "Monitoring")!, Url.Action("Index", "ServerMonitor")! };
+
+    var monOpen  = AnyActive(monHrefs)  ? "true" : "false";
     var dhcpOpen = AnyActive(dhcpHrefs) ? "true" : "false";
     var fwOpen   = AnyActive(fwHrefs)   ? "true" : "false";
     var netOpen  = AnyActive(netHrefs)  ? "true" : "false";
@@ -138,13 +141,22 @@
     <span class="whitespace-nowrap" @Html.Raw(ShowLabel())>VPN (WireGuard)</span>
 </a>
 
-@* Monitoring *@
-<a href="@Url.Action("Index", "Monitoring")" class="nav-link@(ActiveCls(Url.Action("Index", "Monitoring")!))">
-    <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941" />
-    </svg>
-    <span class="whitespace-nowrap" @Html.Raw(ShowLabel())>Monitoring</span>
-</a>
+@* Monitoring — overview (traffic, WAN, peers) + Server (host /proc monitor) *@
+<div x-data="{ open: @monOpen }">
+    <button type="button" class="w-full nav-link" @@click="open = !open">
+        <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.306 4.307a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941" />
+        </svg>
+        <span class="flex-1 text-left whitespace-nowrap" @Html.Raw(ShowLabel())>Monitoring</span>
+        <svg class="h-4 w-4 transition-transform shrink-0" :class="open && 'rotate-90'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" @Html.Raw(ShowLabel())>
+            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+        </svg>
+    </button>
+    <div x-show="open" x-transition.duration.150ms class="ml-9 mt-1 space-y-0.5" @Html.Raw(ShowLabel())>
+        <a href="@Url.Action("Index", "Monitoring")"    class="nav-link py-1.5@(ActiveIn(monHrefs, Url.Action("Index", "Monitoring")!))">Overview</a>
+        <a href="@Url.Action("Index", "ServerMonitor")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "ServerMonitor")!))">Server</a>
+    </div>
+</div>
 
 @* Diagnostics — daemon-executed, read-only tools + VPN doctor + run history *@
 <div x-data="{ open: @diagOpen }">

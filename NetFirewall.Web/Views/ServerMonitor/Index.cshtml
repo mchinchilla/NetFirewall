@@ -1,0 +1,24 @@
+@model NetFirewall.Web.Models.Monitoring.ServerMonitorViewModel
+@*
+    Monitoring → Server. The Web samples /proc once a second into memory and
+    this page only paints what's held there. Pause lives out here, outside the
+    section that swaps itself, so it survives every refresh.
+*@
+@{
+    ViewData["Title"] = "Server monitor";
+    Layout = "_Layout";
+}
+<div class="space-y-4" style="animation: var(--animate-slide-up);" x-data="{ paused: false }">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Monitoring</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Server</h1>
+            <p class="text-sm mt-1 text-surface-fg-muted">
+                CPU, memory, load, disk and network of this firewall, sampled from <span class="font-mono">/proc</span> every second.
+            </p>
+        </div>
+        <a href="@Url.Action("Index", "Monitoring")" class="btn btn-ghost text-xs">Monitoring overview</a>
+    </div>
+
+    @await Html.PartialAsync("_ServerLive", Model)
+</div>

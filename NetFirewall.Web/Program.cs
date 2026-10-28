@@ -280,6 +280,22 @@ builder.Services.AddScoped<NetFirewall.Services.Monitoring.IWanTrafficService,
 builder.Services.AddScoped<NetFirewall.Services.Monitoring.IInterfaceTrafficService,
                            NetFirewall.Services.Monitoring.InterfaceTrafficService>();
 
+// Host monitor (Monitoring → Server + the dashboard strip): /proc sampled once a
+// second into an in-memory ring — one hour, a few hundred KB, no DB, no daemon.
+// One singleton instance behind both interfaces: the hosted service drives the
+// loop, readers take snapshots.
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.Configure<NetFirewall.Services.Monitoring.Host.HostMonitorOptions>(
+    builder.Configuration.GetSection(NetFirewall.Services.Monitoring.Host.HostMonitorOptions.SectionName));
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.Host.HostMetricsSampler>();
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.Host.IHostMonitor>(
+    sp => sp.GetRequiredService<NetFirewall.Services.Monitoring.Host.HostMetricsSampler>());
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.Host.IHostMetricsSampler>(
+    sp => sp.GetRequiredService<NetFirewall.Services.Monitoring.Host.HostMetricsSampler>());
+builder.Services.AddSingleton<NetFirewall.Services.Monitoring.Host.IHostMonitorQueryService,
+                              NetFirewall.Services.Monitoring.Host.HostMonitorQueryService>();
+builder.Services.AddHostedService<NetFirewall.Services.Monitoring.Host.HostMonitorHostedService>();
+
 var app = builder.Build();
 
 {
@@ -309,6 +325,7 @@ var app = builder.Build();
         typeof(NetFirewall.Services.Monitoring.IGeoIpLookupService),
         typeof(NetFirewall.Services.Monitoring.IWanTrafficService),
         typeof(NetFirewall.Services.Monitoring.IInterfaceTrafficService),
+        typeof(NetFirewall.Services.Monitoring.Host.IHostMonitorQueryService),
         typeof(NetFirewall.Web.Services.ITerminalProxyService),
         typeof(NetFirewall.Services.Diagnostics.IDiagnosticRunStore),
     };

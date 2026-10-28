@@ -783,63 +783,6 @@ window.NetFw.charts = {
     },
 
     /**
-     * Single-series sparkline (e.g. CPU% or Memory%) updated in place. y-axis is
-     * fixed 0-100 when `percent` is true so the line reflects real load, not a
-     * rescaled view. data = { labels: string[], values: number[] }.
-     */
-    makeSparklineSingle(canvasEl, data, percent) {
-        const ctx = canvasEl.getContext("2d");
-        const accent = this.readColor("accent");
-        const elevated = this.readColor("surface-elevated");
-        const fg = this.readColor("surface-fg");
-        const fgMuted = this.readColor("surface-fg-muted");
-
-        const chart = new Chart(canvasEl, {
-            type: "line",
-            data: {
-                labels: data.labels,
-                datasets: [{
-                    data: data.values,
-                    borderColor: accent,
-                    backgroundColor: this._verticalGradient(ctx, canvasEl.clientHeight, accent),
-                    fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, animation: false,
-                interaction: { mode: "index", intersect: false },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        backgroundColor: elevated, titleColor: fg, bodyColor: fgMuted,
-                        borderColor: this.readColor("surface-border"), borderWidth: 1, padding: 8,
-                        callbacks: { label: (c) => `${c.parsed.y}${percent ? "%" : ""}` }
-                    }
-                },
-                scales: {
-                    x: { display: false },
-                    y: { display: false, beginAtZero: true, max: percent ? 100 : undefined }
-                }
-            }
-        });
-
-        this.register(chart, () => {
-            const a = this.readColor("accent");
-            chart.data.datasets[0].borderColor = a;
-            chart.data.datasets[0].backgroundColor = this._verticalGradient(ctx, canvasEl.clientHeight, a);
-        });
-        return chart;
-    },
-
-    /** Replace a single-series sparkline's data in place. */
-    updateSparklineSingle(chart, data) {
-        if (!chart) return;
-        chart.data.labels = data.labels;
-        chart.data.datasets[0].data = data.values;
-        chart.update("none");
-    },
-
-    /**
      * Live per-WAN up/down chart. Same data shape as makeSparkline
      * ({ labels, inSeries, outSeries }). `compact` hides axes/legend for
      * dashboard cards; the full variant is the Monitoring page.
@@ -1223,30 +1166,6 @@ document.addEventListener("alpine:init", () => {
                     return;
                 }
                 window.NetFw.charts.updateSparkline(chart, data);
-            }
-        };
-    });
-
-    /* ---------- liveStat ---------- HTMX + Alpine sparkline for one metric
-     * (CPU% / Memory%). Usage:
-     *   x-data="liveStat('cpu')"
-     *   hx-get="/Home/SystemSeries" hx-swap="none" @htmx:after-request="onHtmx($event)"
-     */
-    Alpine.data("liveStat", (field) => {
-        let chart = null;
-        return {
-            current: "—",
-            destroy() { try { chart?.destroy(); } catch { /* gone */ } chart = null; },
-            onHtmx(event) {
-                const j = htmxJson(event);
-                const data = { labels: j?.labels || [], values: (j && j[field]) || [] };
-                this.current = data.values.length ? data.values[data.values.length - 1] : "—";
-                if (!chart) {
-                    if (!this.$refs.spark) return;
-                    chart = window.NetFw.charts.makeSparklineSingle(this.$refs.spark, data, true);
-                    return;
-                }
-                window.NetFw.charts.updateSparklineSingle(chart, data);
             }
         };
     });

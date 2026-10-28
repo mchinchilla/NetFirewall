@@ -30,17 +30,6 @@ public enum KpiTint { Accent, Coral, Mint, Blue, Violet, Gold }
 
 public enum KpiSeverity { Normal, Warning, Critical }
 
-/// <summary>Live sparkline vital (CPU / Memory) on the dashboard.</summary>
-public sealed class VitalCardViewModel
-{
-    public required string Field { get; init; }
-    public required string Label { get; init; }
-    public required string IconPath { get; init; }
-    public KpiTint Tint { get; init; } = KpiTint.Coral;
-    public string Unit { get; init; } = "%";
-    public string Caption { get; init; } = "Last 60 min · % used";
-}
-
 /// <summary>Typed model for <c>_StatTile</c>: a small stacked result number (diagnostics result rows).</summary>
 public sealed record StatTileViewModel(string Label, string Value, string? Suffix = null, string? Caption = null, StatTone Tone = StatTone.Normal);
 
