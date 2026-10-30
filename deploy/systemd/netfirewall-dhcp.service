@@ -1,6 +1,6 @@
 [Unit]
 Description=NetFirewall DHCP server (RFC 2131 + PXE)
-Documentation=file:///opt/netfirewall/README.txt
+Documentation=file://@PREFIX@/current/README.txt
 PartOf=netfirewall-daemon.service
 After=network-online.target postgresql.service netfirewall-daemon.service
 Wants=network-online.target
@@ -17,8 +17,8 @@ NotifyAccess=main
 User=root
 Group=root
 
-WorkingDirectory=/opt/netfirewall/dhcp-server
-ExecStart=/opt/netfirewall/dhcp-server/NetFirewall.DhcpServer
+WorkingDirectory=@PREFIX@/current/dhcp-server
+ExecStart=@PREFIX@/current/dhcp-server/NetFirewall.DhcpServer
 EnvironmentFile=-/etc/netfirewall/dhcp.env
 
 LogsDirectory=netfirewall/dhcp

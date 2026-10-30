@@ -5,9 +5,9 @@ namespace NetFirewall.Doctor.Checks;
 /// appsettings.json all exist under <c>$Prefix/dhcp-server</c> (the unit's
 /// WorkingDirectory). Linux-only.
 ///
-/// NOTE: DHCP is opt-in — deploy/install.sh publishes it and installs its unit
-/// only when INSTALL_DHCP=yes (it binds UDP/67). On a host that didn't opt in,
-/// $Prefix/dhcp-server is absent and this Warns rather than Fails.
+/// NOTE: DHCP is opt-in — every release bundle ships the binaries, but deploy/setup.sh
+/// installs its unit only with --with-dhcp (it binds UDP/67). A release dir without
+/// dhcp-server/ (hand-built or legacy) Warns rather than Fails.
 /// </summary>
 public sealed class DhcpPathsCheck : ICheck
 {
@@ -17,6 +17,9 @@ public sealed class DhcpPathsCheck : ICheck
 
     public Task<CheckResult> RunAsync(DoctorContext ctx, CancellationToken ct)
     {
+        if (!ctx.DhcpEnabled)
+            return Task.FromResult(CheckResult.Skip(DoctorContext.DhcpNotEnabled));
+
         if (!ctx.IsLinux)
             return Task.FromResult(CheckResult.Skip("not applicable off Linux"));
 

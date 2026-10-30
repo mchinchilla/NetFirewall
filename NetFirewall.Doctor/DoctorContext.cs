@@ -4,15 +4,18 @@ namespace NetFirewall.Doctor;
 
 /// <summary>
 /// Shared, read-only state for all checks: resolved deployment paths, parsed env
-/// files, and OS info. Built once at startup. Path defaults match deploy/install.sh
-/// but are overridable (some hosts use /opt/tekium/... instead of /opt/netfirewall).
+/// files, and OS info. Built once at startup. Path defaults match deploy/setup.sh
+/// (<c>/opt/tekium/current</c>, the symlink to the active release) but are overridable.
 /// </summary>
 public sealed class DoctorContext
 {
     public bool IsLinux { get; init; } = OperatingSystem.IsLinux();
 
-    /// <summary>Install prefix (binaries). Default /opt/netfirewall.</summary>
-    public string Prefix { get; init; } = "/opt/netfirewall";
+    /// <summary>Install prefix (binaries) — the active release dir. Default <see cref="DefaultPrefix"/>.</summary>
+    public string Prefix { get; init; } = DefaultPrefix;
+
+    /// <summary>Where deploy/setup.sh points the units: <c>$PREFIX/current</c> with the default PREFIX.</summary>
+    public const string DefaultPrefix = "/opt/tekium/current";
 
     /// <summary>Config dir holding the env files. Default /etc/netfirewall.</summary>
     public string EtcDir { get; init; } = "/etc/netfirewall";
@@ -29,6 +32,15 @@ public sealed class DoctorContext
     /// <summary>The DHCP server's runtime dir (binary + appsettings.json). Default $Prefix/dhcp-server,
     /// matching deploy/systemd/netfirewall-dhcp.service WorkingDirectory.</summary>
     public string DhcpDir => Path.Combine(Prefix, "dhcp-server");
+
+    /// <summary>The DHCP server is opted in on this host: its unit is installed or its env file exists.
+    /// Every release ships the dhcp-server binaries, so their presence alone proves nothing — without
+    /// this the DHCP checks would validate the bundled dev appsettings.json on hosts that never enabled
+    /// DHCP. Defaults to true so a hand-built context (tests) runs the checks.</summary>
+    public bool DhcpEnabled { get; init; } = true;
+
+    /// <summary>The message every DHCP check skips with when <see cref="DhcpEnabled"/> is false.</summary>
+    public const string DhcpNotEnabled = "DHCP server not enabled on this host (setup.sh --with-dhcp)";
 
     /// <summary>Optional EnvironmentFile for the DHCP unit (loaded with a leading '-', so it may be absent).</summary>
     public string DhcpEnvPath => Path.Combine(EtcDir, "dhcp.env");
@@ -89,7 +101,7 @@ public sealed class DoctorContext
     /// <summary>Build a context: resolve paths and parse the env files (fail-soft).</summary>
     public static DoctorContext Build(string? prefix, string? etcDir)
     {
-        var pfx = prefix ?? "/opt/netfirewall";
+        var pfx = prefix ?? DetectPrefix(AppContext.BaseDirectory);
         var etc = etcDir ?? "/etc/netfirewall";
         var daemonEnv = EnvFile.TryParse(Path.Combine(etc, "daemon.env"));
         var webEnv = EnvFile.TryParse(Path.Combine(etc, "web.env"));
@@ -98,6 +110,10 @@ public sealed class DoctorContext
         var socket = daemonEnv is not null && daemonEnv.TryGetValue("Daemon__SocketPath", out var s) && !string.IsNullOrWhiteSpace(s)
             ? s
             : "/run/netfirewall/control.sock";
+
+        var dhcpEnabled = dhcpEnv is not null
+            || File.Exists("/etc/systemd/system/netfirewall-dhcp.service")
+            || File.Exists("/usr/lib/systemd/system/netfirewall-dhcp.service");
 
         var dhcpAppsettings = DhcpAppsettings.TryParse(Path.Combine(pfx, "dhcp-server", "appsettings.json"));
 
@@ -108,11 +124,31 @@ public sealed class DoctorContext
             DaemonEnv = daemonEnv,
             WebEnv = webEnv,
             DhcpEnv = dhcpEnv,
+            DhcpEnabled = dhcpEnabled,
             DaemonSocketPath = socket,
             DhcpConnectionString = ResolveDhcpConnection(dhcpEnv, dhcpAppsettings),
             DhcpInterfaces = ResolveDhcpInterfaces(dhcpEnv, dhcpAppsettings),
         };
     }
+
+    /// <summary>The release this Doctor binary ships in: it lives at <c>&lt;release&gt;/doctor/</c>, so
+    /// the parent is the prefix whenever it also holds <c>daemon/</c>. Run from the repo (or anywhere
+    /// else) it falls back to <see cref="DefaultPrefix"/>. The path is kept as given — through the
+    /// <c>current</c> symlink — so messages show the path the units use.</summary>
+    public static string DetectPrefix(string baseDirectory)
+    {
+        try
+        {
+            var parent = Directory.GetParent(baseDirectory.TrimEnd(Path.DirectorySeparatorChar));
+            if (parent is not null && Directory.Exists(Path.Combine(parent.FullName, "daemon")))
+                return parent.FullName;
+        }
+        catch { /* best effort */ }
+        return DefaultPrefix;
+    }
+
+    /// <summary>The bundle's <c>VERSION</c> file inside the release dir (written by build-bundle.sh).</summary>
+    public string ReleaseVersionPath => Path.Combine(Prefix, "VERSION");
 
     // .NET config layering: an env var (Section__Key) overrides the JSON value, so env wins.
     private static string? ResolveDhcpConnection(

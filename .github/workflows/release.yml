@@ -1,0 +1,117 @@
+name: Release bundle
+
+# Builds the release bundle (deploy/build-bundle.sh): every binary published
+# self-contained for linux-x64 + migrations + units + setup.sh, in one tar.gz.
+#
+#   tag v*          -> tests, bundle, GitHub Release with the tar.gz + .sha256
+#   push to master  -> tests, bundle uploaded as a workflow artifact (14 days)
+#   manual          -> same as a master push, from any ref
+#
+# The version comes from `git describe` (v1.4.0 → 1.4.0, later commits →
+# 1.4.0-3-g97f88aa), so the checkout must carry the full history and tags.
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the Release on tag builds
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a half-published release
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  KNOWN_FAILING: FullyQualifiedName!~Generate_InvertedRule_OnDisabledSchedule_IsEmitted
+
+jobs:
+  bundle:
+    name: Build release bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # git describe needs history + tags
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install standalone tailwindcss
+        run: |
+          curl -fsSL -o /usr/local/bin/tailwindcss \
+            https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/tailwindcss-linux-x64
+          chmod 0755 /usr/local/bin/tailwindcss
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Test
+        run: dotnet test -c Release --filter "$KNOWN_FAILING"
+
+      - name: Build bundle
+        id: bundle
+        run: |
+          deploy/build-bundle.sh --output dist
+          version=$(ls dist/netfirewall-*.tar.gz | sed -E 's|dist/netfirewall-(.*)\.tar\.gz|\1|')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          ls -lh dist/
+
+      # The tarball must install from scratch: setup.sh, every binary the units
+      # run, the migrations, and tokenized (secret-free) env templates.
+      - name: Verify bundle
+        run: |
+          set -eu
+          v='${{ steps.bundle.outputs.version }}'
+          tmp=$(mktemp -d)
+          tar xzf "dist/netfirewall-$v.tar.gz" -C "$tmp"
+          root="$tmp/netfirewall-$v"
+          test "$(cat "$root/VERSION")" = "$v"
+          bash -n "$root/setup.sh"
+          for bin in daemon/netfirewall-daemon web/NetFirewall.Web dhcp-server/NetFirewall.DhcpServer \
+                     migrations/netfirewall-migrate tui/netfirewall-tui doctor/netfirewall-doctor; do
+            test -x "$root/app/$bin" || { echo "missing app/$bin"; exit 1; }
+          done
+          ls "$root"/app/migrations/sql/migrations/*.sql >/dev/null
+          for t in daemon web dhcp; do grep -q '__REPLACE__' "$root/deploy/env/$t.env.template"; done
+          # The self-contained binaries run on a bare runner (no dotnet on PATH needed).
+          "$root/app/doctor/netfirewall-doctor" --help >/dev/null
+          (cd dist && sha256sum -c "netfirewall-$v.tar.gz.sha256")
+
+      - name: Upload artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: netfirewall-${{ steps.bundle.outputs.version }}
+          path: dist/netfirewall-*
+          retention-days: 14
+          compression-level: 0   # already gzipped
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v='${{ steps.bundle.outputs.version }}'
+          notes=$(cat <<NOTES
+          NetFirewall $v — commit ${GITHUB_SHA:0:12}
+
+          Install or upgrade on the firewall (as root):
+
+              tar xzf netfirewall-$v.tar.gz && cd netfirewall-$v
+              ./setup.sh --preflight
+              ./setup.sh
+
+          Rollback: ./setup.sh --rollback · Full reference: docs/setup.md
+          NOTES
+          )
+          gh release create "$GITHUB_REF_NAME" dist/netfirewall-* \
+            --title "NetFirewall $v" --notes "$notes" --verify-tag

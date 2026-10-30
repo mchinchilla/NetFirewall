@@ -17,7 +17,7 @@ public sealed class EnvFilesCheck : ICheck
         {
             return Task.FromResult(CheckResult.Fail(
                 $"Missing or unreadable: {string.Join(", ", missing)}",
-                remedy: "Run sudo deploy/install.sh, or create the env files from deploy/env/*.template."));
+                remedy: "Run ./setup.sh from the release bundle, or create the env files from deploy/env/*.template."));
         }
 
         // Mode sanity (Unix only — File.GetUnixFileMode is unsupported on Windows).

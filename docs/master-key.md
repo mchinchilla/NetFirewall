@@ -58,21 +58,25 @@ appear healthy (login works via the Web's local cipher) until someone opens the
 terminal — then `AesGcmTotpSecretCipher`'s ctor throws and the open fails.
 See [[deploy/README.txt]] troubleshooting.
 
-## How `install.sh` keeps them in sync
+## How `setup.sh` keeps them in sync
 
-`deploy/install.sh` resolves the key **once** and writes the **same** value into
-both env files, then asserts they match before finishing:
+`deploy/setup.sh` resolves the key **once** and writes the **same** value into
+both env files, then asserts they match before going on:
 
-1. Resolve: reuse an existing real key (prefer `web.env`, then `daemon.env`) — an
-   upgrade **never** rotates the key (rotating invalidates all enrollments).
-   Otherwise generate `openssl rand -base64 32`.
-2. Substitute the distinct template token `__REPLACE_MASTER_KEY__` in **both**
-   `deploy/env/daemon.env.template` and `deploy/env/web.env.template`.
-3. Post-condition: `diff` the `NETFIREWALL_MASTER_KEY=` line of both files and
-   `exit 1` if they differ — so template/token drift can't ship a silent outage.
+1. Resolve: reuse an existing real key from either file — an upgrade **never**
+   rotates the key (rotating invalidates all enrollments). If both files carry a
+   key and they **differ**, setup stops without touching anything: pick the one
+   the enrollments were made with and put it in both. Only when neither has one
+   is a new key generated (`openssl rand -base64 32`).
+2. A file that doesn't exist yet is rendered from its template, substituting the
+   distinct token `__REPLACE_MASTER_KEY__`; an existing file is kept and only
+   gets the key line set to the resolved value.
+3. Post-condition: compare the `NETFIREWALL_MASTER_KEY=` line of both files and
+   stop if they differ — so template/token drift can't ship a silent outage.
 
 A distinct token (`__REPLACE_MASTER_KEY__`, not the generic `__REPLACE__` used for
-the DB password) avoids any sed-ordering hazard between the two substitutions.
+the DB password) keeps the two substitutions independent. The release bundle
+never carries a key: `build-bundle.sh` fails if one shows up in it.
 
 ## Operating the key
 
@@ -81,7 +85,7 @@ the DB password) avoids any sed-ordering hazard between the two substitutions.
 - **Rotating** is a breaking change: set the new key in *both* env files, restart
   *both* services, and have every user re-enroll. There is no re-encrypt-in-place
   path.
-- **Upgrades** (`sudo deploy/install.sh` re-run) preserve the existing key.
+- **Upgrades** (`./setup.sh` from a newer bundle) preserve the existing key.
 
 ## Diagnosing a mismatch / absence on a live host (root)
 
@@ -107,17 +111,12 @@ chmod 0600 /etc/netfirewall/daemon.env
 systemctl restart netfirewall-daemon
 ```
 
-> Production paths on some hosts differ (e.g. `/opt/tekium/...` instead of
-> `/opt/netfirewall/...`); confirm the actual `EnvironmentFile` with
-> `systemctl cat netfirewall-daemon` before editing.
+> Confirm the actual `EnvironmentFile` with `systemctl cat netfirewall-daemon`
+> before editing (setup.sh installs `/etc/netfirewall/daemon.env`).
 
-## ISO / image builds
+## Images and cloned hosts
 
-Target is **Debian 13** (Alpine not decided; if ever used, note its default shell
-is `/bin/sh`/busybox — the terminal already falls back to it). The master key must
-**not** be baked into the image (every install would share one key). Generate it at
-first boot — run `install.sh` (which generates + syncs both env files) from the
-first-boot/cloud-init hook, or generate it in a oneshot unit before
-`netfirewall-daemon` starts and write the identical value to both env files using
-the same resolve-once-write-both pattern as `install.sh`. Then the diff
-post-condition guarantees they match.
+The key must **never** be baked into a VM template or disk image — every clone
+would share it. Install from the release bundle on each host (or run `./setup.sh`
+on first boot of a clone that has no `/etc/netfirewall/*.env` yet): setup.sh
+generates the key per host and writes the identical value to both env files.

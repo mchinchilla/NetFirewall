@@ -16,6 +16,9 @@ public sealed class DhcpConfigCheck : ICheck
 
     public Task<CheckResult> RunAsync(DoctorContext ctx, CancellationToken ct)
     {
+        if (!ctx.DhcpEnabled)
+            return Task.FromResult(CheckResult.Skip(DoctorContext.DhcpNotEnabled));
+
         // If neither config source produced anything, the server isn't configured here.
         var hasAppsettings = File.Exists(Path.Combine(ctx.DhcpDir, "appsettings.json"));
         if (ctx.DhcpConnectionString is null && ctx.DhcpInterfaces.Count == 0 && !hasAppsettings && ctx.DhcpEnv is null)

@@ -1,111 +1,93 @@
 NetFirewall — production deployment
 ====================================
 
-This directory contains everything needed to deploy NetFirewall on a
-systemd-based Linux host (Debian 12+, Ubuntu 22.04+, Rocky/Alma 9+,
-openSUSE Leap 15.5+).
+NetFirewall ships as a release bundle: netfirewall-<version>.tar.gz, built by
+deploy/build-bundle.sh (locally or by .github/workflows/release.yml on every
+v* tag). It holds every binary published self-contained for linux-x64 (no .NET
+on the host), the SQL migrations, the systemd units, config templates and
+setup.sh — which installs a new firewall AND upgrades a running one.
 
-Layout
-------
+Full reference (every option, every step, failure modes): docs/setup.md
 
-  systemd/
-    netfirewall-daemon.service   Privileged daemon (root, restricted CAPs)
-    netfirewall-web.service      Unprivileged Web (netfirewall-web user)
-    netfirewall-dhcp.service     DHCP server (root, CAP_NET_BIND_SERVICE+RAW) — opt-in
-
-  config/
-    daemon.json.template         Production appsettings for the daemon
-    web.json.template            Production appsettings for the Web
-
-  env/
-    daemon.env.template          DB password + peer UID (mode 0600 root)
-    web.env.template             DB password + master key (mode 0640 root:netfirewall-web)
-    dhcp.env.template            DB conn + fallback interface (mode 0640 root) — opt-in
-
-  nginx/
-    netfirewall.conf             Reverse-proxy example for TLS termination
-
-  install.sh                     Build + install + enable everything
-  uninstall.sh                   Reverse install (preserves data unless --purge)
-
-Prerequisites
+Bundle layout
 -------------
 
-* PostgreSQL 14+ running on the host (or reachable via network)
-* .NET 10 SDK installed (used to publish the projects)
-* `psql` client + `openssl` on PATH
-* systemd 250+ (for RuntimeDirectory, StateDirectory, etc.)
-* nginx, caddy or traefik for TLS termination (optional but strongly recommended)
+  setup.sh                       Install / upgrade / --rollback / --preflight
+  uninstall.sh                   Reverse setup (keeps data unless --purge)
+  VERSION, BUILD_INFO            git-describe version + commit + build date
+  app/                           Copied to <prefix>/releases/<version>
+    daemon/ web/ dhcp-server/ tui/ doctor/ migrations/ bin/
+  deploy/
+    systemd/                     Units (@PREFIX@ rendered by setup.sh)
+      netfirewall-daemon.service   Privileged daemon (root, restricted CAPs)
+      netfirewall-web.service      Unprivileged Web (netfirewall-web user)
+      netfirewall-dhcp.service     DHCP server — opt-in (--with-dhcp)
+      netfirewall-bootstrap.service  Boot-time apply — on for new installs
+    config/                      Production appsettings (no secrets)
+    env/                         daemon/web/dhcp env templates (tokenized)
+    nginx/                       TLS site (self-signed on fresh installs) + LE example
+    sysctl/ modprobe.d/ modules-load.d/ tmpfiles/
+    man/ completion/ seeds/
 
-PostgreSQL setup (one-time)
----------------------------
-
-  sudo -u postgres psql <<SQL
-    CREATE ROLE netfirewall WITH LOGIN PASSWORD 'CHANGEME';
-    CREATE DATABASE net_firewall OWNER netfirewall;
-    GRANT ALL PRIVILEGES ON DATABASE net_firewall TO netfirewall;
-  SQL
-
-Then run the installer.
-
-Installation
+Requirements
 ------------
 
-From a checked-out repo on the target server:
+* Debian 12/13 or Ubuntu 22.04+, x86_64, systemd running, root.
+* Nothing else: setup.sh apt-installs what is missing (PostgreSQL when the DB
+  is local, nginx on a fresh install, nftables/conntrack/tcpdump/… tools).
 
-  sudo deploy/install.sh
+Install
+-------
 
-The installer prompts for the PostgreSQL password (use what you set above),
-publishes both projects to /opt/netfirewall, applies migrations, generates
-an AES-256 master key for TOTP encryption, writes config + env files with
-correct ownership/perms, installs systemd units and starts everything.
+  tar xzf netfirewall-1.4.0.tar.gz && cd netfirewall-1.4.0
+  ./setup.sh --preflight        # checks only, changes nothing
+  ./setup.sh                    # installs
 
-The installer prints the master key on completion. **Save it somewhere
-secure** (password manager). Losing it permanently invalidates every TOTP
-enrollment — users would have to re-enroll from scratch.
+A fresh install provisions a local PostgreSQL role + database with a random
+password, generates the AES-256 master key (written identically to daemon.env
+and web.env), configures nginx with a self-signed certificate, starts the
+services and runs netfirewall-doctor.
+
+setup.sh prints the master key on completion. **Save it somewhere secure**
+(password manager). Losing it permanently invalidates every TOTP enrollment —
+users would have to re-enroll from scratch.
 
 After install
 -------------
 
-1. `sudo systemctl status netfirewall-daemon netfirewall-web`
-   Both should be `active (running)`.
+1. `systemctl status netfirewall-daemon netfirewall-web` — both active.
 
-2. `sudo journalctl -u netfirewall-web` — look for the bootstrap banner with
-   the one-time token to create the first admin user.
+2. `journalctl -u netfirewall-web | grep -i bootstrap` — the one-time token
+   to create the first admin user.
 
-3. Configure your reverse proxy (see nginx/netfirewall.conf for nginx).
+3. Replace the self-signed certificate:
+   `./setup.sh --tls-cert /path/fullchain.pem --tls-key /path/privkey.pem`
    NOTE: the web terminal (admin-only root shell) uses a WebSocket at
-   /terminal/ws. The shipped nginx config supports it via the
+   /terminal/ws. The shipped nginx configs support it via the
    `map $http_upgrade $connection_upgrade` block + a dedicated
    `location = /terminal/ws` with a long proxy_read_timeout. If you use a
    different proxy, it MUST forward the Upgrade/Connection headers and NOT
    apply a short read timeout to that path, or live terminals get dropped.
-   No systemd unit change is needed for the terminal: PTY allocation
-   (openpty + posix_spawn) was verified to work under the daemon's existing
-   hardened sandbox (PrivateDevices=yes + the SystemCallFilter) — see the
-   Phase 3a spike. The terminal runs in the daemon (root); the Web only
-   proxies bytes.
 
-4. Browse to https://your-host/setup/bootstrap?token=<...>
-
-5. Create the admin → enroll TOTP → run the setup wizard.
+4. Create the admin → enroll TOTP → run the setup wizard.
 
 Upgrading
 ---------
 
-Pull the latest code, then:
+Extract the newer bundle and run ./setup.sh — options are remembered in
+/etc/netfirewall/setup.conf. It backs up the DB (pg_dump), stages the release,
+migrates with the NEW binaries BEFORE switching, flips <prefix>/current,
+restarts and health-checks; if the daemon or Web don't come back it rolls back
+automatically. Master key, DB password and env-file edits are preserved.
 
-  sudo deploy/install.sh --skip-publish=false
-
-The installer is idempotent. It re-publishes binaries, re-applies missing
-migrations, and reuses the existing master key + connection password. TOTP
-enrollments and sessions survive.
+  ./setup.sh --list-releases
+  ./setup.sh --rollback [VERSION]   # schema is NOT rolled back (forward-only)
 
 Removing
 --------
 
-  sudo deploy/uninstall.sh           # stops + removes binaries + units
-  sudo deploy/uninstall.sh --purge   # also wipes config, secrets, logs, users
+  ./uninstall.sh           # stops + removes units, releases, tools
+  ./uninstall.sh --purge   # also wipes config, secrets, logs, users
 
 The PostgreSQL database is NEVER touched automatically. Drop it manually if
 you want a clean slate.
@@ -132,9 +114,9 @@ The daemon and web services are configured with extensive systemd sandboxing
   * MemoryDenyWriteExecute is intentionally OFF — it would crash the .NET
     JIT. Switch to ReadyToRun or NativeAOT publish to enable it.
 
-The TOTP master key currently lives in /etc/netfirewall/web.env (mode 0640,
-root + netfirewall-web). A future version will move it into the daemon
-(rule: only root reads the key, Web requests TOTP verification via socket).
+The TOTP master key lives in /etc/netfirewall/daemon.env (0600 root) and
+web.env (0640 root:netfirewall); with Daemon:UseForTotp=true the Web proxies
+crypto to the daemon. See docs/master-key.md.
 
 Troubleshooting
 ---------------
@@ -161,9 +143,8 @@ Troubleshooting
         >> /etc/netfirewall/daemon.env
       chmod 0600 /etc/netfirewall/daemon.env
       systemctl restart netfirewall-daemon
-  Full reference: docs/master-key.md. The installer now writes the same key
-  to both files and asserts they match; this only bites hosts provisioned
-  before that fix.
+  Full reference: docs/master-key.md. setup.sh writes the same key to both
+  files and asserts they match; this only bites hand-edited hosts.
 
 * TOTP codes always rejected after restart → the master key was regenerated
   (the env file was wiped or replaced) OR the daemon's key drifted from the
@@ -175,11 +156,11 @@ Validating a deployment (netfirewall-doctor)
 ------------------------------------------------------------------------
 `netfirewall-doctor` checks env vars, master-key sync, paths, systemd
 units, the daemon socket, and the database — one table, with a remedy per
-problem. The installer runs it as the final step; re-run it anytime:
+problem. setup.sh runs it as the final step; re-run it anytime:
 
     netfirewall-doctor                 # full check, human-readable
     netfirewall-doctor --json          # for CI / scripts (exit 1 on failure)
-    netfirewall-doctor --prefix /opt/tekium   # non-default install prefix
+    netfirewall-doctor --prefix /opt/tekium/current   # explicit release dir
 
 Full reference: docs/doctor.md.
 
@@ -188,7 +169,7 @@ Master key (NETFIREWALL_MASTER_KEY)
 ------------------------------------------------------------------------
 The AES-256 key that encrypts TOTP secrets. The daemon AND the Web must
 hold the byte-for-byte identical key (both decrypt the same secrets). The
-installer generates it once and writes it to both /etc/netfirewall/web.env
+setup.sh generates it once and writes it to both /etc/netfirewall/web.env
 and /etc/netfirewall/daemon.env, then verifies they match. Losing it
-invalidates every TOTP enrollment — keep a secure backup. Full rules,
-diagnostics, and ISO-build guidance: docs/master-key.md.
+invalidates every TOTP enrollment — keep a secure backup. Full rules and
+diagnostics: docs/master-key.md.

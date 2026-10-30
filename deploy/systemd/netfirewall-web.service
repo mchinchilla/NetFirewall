@@ -1,6 +1,6 @@
 [Unit]
 Description=NetFirewall web admin UI
-Documentation=file:///opt/netfirewall/README.txt
+Documentation=file://@PREFIX@/current/README.txt
 After=network-online.target postgresql.service netfirewall-daemon.service
 Wants=network-online.target
 Requires=netfirewall-daemon.service
@@ -13,8 +13,8 @@ NotifyAccess=main
 User=netfirewall-web
 Group=netfirewall
 
-WorkingDirectory=/opt/netfirewall/web
-ExecStart=/opt/netfirewall/web/NetFirewall.Web
+WorkingDirectory=@PREFIX@/current/web
+ExecStart=@PREFIX@/current/web/NetFirewall.Web
 EnvironmentFile=-/etc/netfirewall/web.env
 
 # State + logs under /var/lib/netfirewall/web (owned by netfirewall-web).

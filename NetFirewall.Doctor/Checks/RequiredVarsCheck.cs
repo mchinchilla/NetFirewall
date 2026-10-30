@@ -44,7 +44,7 @@ public sealed class RequiredVarsCheck : ICheck
         if (bad.Count > 0)
             return Task.FromResult(CheckResult.Fail(
                 $"Missing/placeholder: {string.Join(", ", bad)}",
-                remedy: $"Set these keys in {_path(ctx)} (re-run install.sh or edit by hand)."));
+                remedy: $"Set these keys in {_path(ctx)} (re-run setup.sh or edit by hand)."));
 
         return Task.FromResult(CheckResult.Pass($"all {_required.Length} required keys present"));
     }

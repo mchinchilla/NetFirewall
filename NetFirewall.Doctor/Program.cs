@@ -6,7 +6,7 @@ using Spectre.Console;
 // ── arg parsing ──
 //   --json                  machine-readable output
 //   --service <name>        filter checks by category/service (web|daemon|dhcp|tui|all)
-//   --prefix <path>         override install prefix (default /opt/netfirewall)
+//   --prefix <path>         override install prefix (default: the release this binary ships in)
 //   --etc <path>            override config dir (default /etc/netfirewall)
 //   --help / -h             usage
 if (args.Contains("--help") || args.Contains("-h"))
@@ -33,6 +33,7 @@ var checks = new ICheck[]
         "ConnectionStrings__DefaultConnection", "NETFIREWALL_MASTER_KEY", "ASPNETCORE_URLS", "Daemon__Enabled"),
     new MasterKeySyncCheck(),
     new PathsCheck(),
+    new ReleaseCheck(),
     new DhcpPathsCheck(),
     new SystemdUnitsCheck(),
     new DaemonSocketCheck(),
@@ -137,13 +138,14 @@ static void PrintHelp() => Console.WriteLine("""
     Runs every requirements check against this host and prints a table of
     pass / warn / fail / skip with a remedy for anything that is not passing.
     Read-only: it inspects files, units, sockets and the database, and changes
-    nothing. install.sh runs it as the post-install verification step.
+    nothing. setup.sh runs it as the post-install verification step.
 
     OPTIONS
       --service <name>   Only checks for one service: web | daemon | dhcp | tui | all.
                          Checks that belong to no service always run. Default: all.
       --json             Emit the results as JSON instead of a table (for CI).
-      --prefix <path>    Installation prefix to inspect.   Default: /opt/netfirewall
+      --prefix <path>    Release dir to inspect.           Default: the release this
+                         binary ships in, else /opt/tekium/current
       --etc <path>       Configuration directory.          Default: /etc/netfirewall
       --help, -h         Show this help.
 
@@ -153,13 +155,13 @@ static void PrintHelp() => Console.WriteLine("""
 
     NOTES
       Linux-only checks report "skipped" on other platforms rather than failing.
-      The production prefix on some deployments is /opt/tekium — pass --prefix
-      when it differs from the default.
+      setup.sh installs each version under <PREFIX>/releases/<version> and points
+      <PREFIX>/current at the active one; --prefix takes that release dir.
 
     EXAMPLES
       netfirewall-doctor
       netfirewall-doctor --service dhcp
-      netfirewall-doctor --prefix /opt/tekium --etc /etc/netfirewall
+      netfirewall-doctor --prefix /opt/tekium/current --etc /etc/netfirewall
       netfirewall-doctor --json | jq '.[] | select(.status == "fail")'
 
     SEE ALSO

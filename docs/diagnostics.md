@@ -212,7 +212,7 @@ Results group by trace id: one block per packet, with the `packet` line, each
 **Deployment requirement:** capture needs `AF_PACKET` in the daemon unit's
 `RestrictAddressFamilies` (`deploy/systemd/netfirewall-daemon.service`). It is
 listed there now, with a comment saying why; remove it to disable captures
-outright. `tcpdump` is a Recommends of the .deb and is in the ISO package list.
+outright. `tcpdump` is in the package list `setup.sh` installs.
 
 ### WAN speed test (`/Diagnostics/speedtest`)
 

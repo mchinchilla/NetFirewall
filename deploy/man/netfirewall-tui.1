@@ -33,7 +33,7 @@ The daemon enforces a peer-credential gate
 on Linux): only UIDs in
 .B Daemon__AcceptedPeerUids
 may connect.
-.B install.sh
+.B setup.sh
 populates this with the
 .B netfirewall-web
 UID and root, so
@@ -84,13 +84,14 @@ plus a fetch of
 .BR "nft list ruleset" .
 .SH FILES
 .TP
-.I /opt/netfirewall/tui/netfirewall-tui.dll
-The published binary. Invoked via the wrapper at
-.IR /opt/netfirewall/tui/netfirewall-tui ,
-which is symlinked to
+.I /opt/tekium/current/tui/netfirewall-tui
+The self-contained binary of the active release (the install prefix is
+configurable with
+.BR "setup.sh --prefix" ),
+symlinked to
 .IR /usr/local/bin/netfirewall-tui .
 .TP
-.I /opt/netfirewall/tui/appsettings.json
+.I /opt/tekium/current/tui/appsettings.json
 Resolves the daemon socket path. Mode 0644 \(em readable by anyone running
 the TUI.
 .TP

@@ -5,7 +5,7 @@ using Xunit;
 namespace NetFirewall.Tests.Tui;
 
 /// <summary>
-/// Pin the configuration shape that <c>install.sh</c> writes into
+/// Pin the configuration shape that <c>deploy/setup.sh</c> writes into
 /// <c>/etc/netfirewall/daemon.env</c>. The installer renders these env vars:
 ///
 /// <code>
@@ -25,7 +25,7 @@ public class DaemonOptionsBindingTests
     public void AcceptedPeerUids_BindsFromIndexedEnvVars()
     {
         // Mimics the EnvironmentVariablesConfigurationProvider's view of what
-        // install.sh writes to daemon.env. Two-element list: Web UID + root.
+        // setup.sh writes to daemon.env. Two-element list: Web UID + root.
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {

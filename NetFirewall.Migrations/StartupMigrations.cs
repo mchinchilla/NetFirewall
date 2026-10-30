@@ -65,6 +65,7 @@ public static class StartupMigrations
                 yield return Path.Combine(dir.FullName, "NetFirewall.Services", "sql", "migrations");
             }
         }
+        yield return "/opt/tekium/current/migrations/sql/migrations";
         yield return "/opt/tekium/migrations/sql/migrations";
         yield return "/opt/netfirewall/migrations/sql/migrations";
     }

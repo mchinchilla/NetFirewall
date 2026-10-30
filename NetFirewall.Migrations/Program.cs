@@ -22,8 +22,13 @@ if (string.IsNullOrEmpty(connectionString))
     return 2;
 }
 
+// A release ships the SQL next to the binary (<release>/migrations/sql/migrations);
+// from the repo, fall back to the source folder.
+var bundledDir = Path.Combine(AppContext.BaseDirectory, "sql", "migrations");
 var migrationsDir = migrationsDirOverride
-                    ?? Path.Combine(FindRepoRoot(), "NetFirewall.Services", "sql", "migrations");
+                    ?? (Directory.Exists(bundledDir)
+                        ? bundledDir
+                        : Path.Combine(FindRepoRoot(), "NetFirewall.Services", "sql", "migrations"));
 
 if (!Directory.Exists(migrationsDir))
 {

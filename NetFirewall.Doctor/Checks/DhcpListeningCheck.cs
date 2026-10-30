@@ -23,6 +23,9 @@ public sealed class DhcpListeningCheck : ICheck
 
     public async Task<CheckResult> RunAsync(DoctorContext ctx, CancellationToken ct)
     {
+        if (!ctx.DhcpEnabled)
+            return CheckResult.Skip(DoctorContext.DhcpNotEnabled);
+
         if (!ctx.IsLinux)
             return CheckResult.Skip("not applicable off Linux");
 

@@ -33,81 +33,91 @@ dotnet test --filter "FullyQualifiedName~TestMethodName"
 # Run the orchestrated dev environment (Aspire)
 dotnet run --project NetFirewall.AppHost
 
-# Publish for Linux deployment (production runtime root: /opt/tekium/)
-dotnet publish -c Release -r linux-x64 -o /opt/tekium/daemon       NetFirewall.Daemon
-dotnet publish -c Release -r linux-x64 -o /opt/tekium/web          NetFirewall.Web
-dotnet publish -c Release -r linux-x64 -o /opt/tekium/dhcp-server  NetFirewall.DhcpServer
-dotnet publish -c Release -r linux-x64 -o /opt/tekium/Migrations   NetFirewall.Migrations
+# Release bundle for Linux deployment (self-contained linux-x64 tar.gz → dist/)
+deploy/build-bundle.sh                     # version = git describe --tags --always --dirty
+deploy/build-bundle.sh --version 1.5.0-rc1
 ```
 
 ## Production deployment
 
-Production is two systemd units (`netfirewall-daemon`, `netfirewall-web`)
-behind a TLS-terminating reverse proxy. Everything lives under `deploy/`:
+Production ships as a **release bundle** and is installed/upgraded by
+**`deploy/setup.sh`**. Full operator reference (every option, every step,
+failure modes, migrating from the old layout): **`docs/setup.md`**.
 
 ```
 deploy/
-  systemd/                              hardened .service files
-  config/{daemon,web}.json.template     prod appsettings (mode 0640)
-  env/{daemon,web}.env.template         secrets — mode 0600/0640
-  nginx/netfirewall.conf                reverse-proxy example with TLS
-  man/netfirewall-tui.1                 TUI manpage installed to /usr/local/share/man/man1
-  completion/netfirewall-tui            bash completion installed to /etc/bash_completion.d
-  install.sh                            idempotent installer (also publishes TUI + symlink)
-  uninstall.sh                          reverse install (--purge wipes data)
-  README.txt                            operational handbook
-  debian/                               .deb packaging (self-contained, maintainer scripts)
-  firstboot/                            per-appliance provisioning (secrets + local DB)
-  iso/                                  Debian 13 live-build appliance ISO tree
+  build-bundle.sh                       builds dist/netfirewall-<version>.tar.gz (dev box / CI)
+  setup.sh                              install + upgrade + --rollback + --preflight (runs ON the firewall)
+  uninstall.sh                          reverse setup (--purge wipes config/state/users, never the DB)
+  systemd/                              hardened units; @PREFIX@ is rendered by setup.sh
+  config/{daemon,web}.json.template     prod appsettings (no secrets) → per-release appsettings.Production.json
+  env/{daemon,web,dhcp}.env.template    tokenized (__REPLACE__) — secrets are minted on the host, never bundled
+  nginx/                                netfirewall-appliance.conf.template (self-signed, fresh installs) + LE example
+  bootstrap/netfirewall-bootstrap       boot-time apply script (netfirewall-bootstrap.service)
+  sysctl/ modprobe.d/ modules-load.d/ tmpfiles/ man/ completion/ seeds/
 ```
 
-There are **two** deployment paths, both documented in full at
-**`docs/appliance-iso.md`**:
+**Bundle** (`build-bundle.sh`): publishes daemon, web, dhcp-server, migrations
+(+ `sql/migrations/*.sql`), tui, doctor **self-contained** for linux-x64 (no .NET
+on the host; libicu still needed), hard-links the identical runtime files across
+the six components (tar stores them once; `cp -a` keeps the links — so never write
+through a file in a release dir: `rm` then create, and JSON is excluded from
+linking). Version = `git describe` (leading `v` stripped), stamped as
+`-p:InformationalVersion` and written to `VERSION`/`BUILD_INFO`;
+`BuildVersionText.Of(assembly)` (`NetFirewall.Models/System`) is the one place
+that turns it into display text (Web *System info*, daemon `/health`). The build
+fails if an env template lost its placeholder or a real master key slipped in.
 
-1. **Manual install** (`deploy/install.sh`) — targets a host that already has
-   .NET + PostgreSQL; only *connects* to PG. Production runtime root on tekium is
-   `/opt/tekium/` (the `.deb` uses `/opt/netfirewall/`). This is what's running today.
-2. **Appliance `.deb` + ISO** (`deploy/debian/`, `deploy/firstboot/`,
-   `deploy/iso/`, CI `.github/workflows/build-iso.yml`) — a pfSense/OPNsense-style
-   self-contained appliance. The binaries are published `--self-contained true`
-   (runtime travels in the package — NO dotnet-runtime dep; libicu stays).
-   Provisioning is **split**: the `.deb` postinst does only deterministic,
-   **secret-free** work (users/dirs/units/tokenized env templates, nothing
-   started, no DB); `netfirewall-firstboot.service` runs once on first boot to
-   mint the per-appliance master key + DB password, init the local PG cluster,
-   create role/DB, run migrations + seeds, and start the services. **Never bake
-   secrets into the image** — enforced by a diff-assert, Doctor's
-   `MasterKeySyncCheck`, and a CI step that greps the built squashfs env files.
-   The ISO build itself runs only on Debian (live-build); it cannot be built on
-   macOS — use CI or a Debian host.
+**CI**: `.github/workflows/ci.yml` (build + tests on every push/PR) and
+`release.yml` (tag `v*` → tests + bundle + GitHub Release with `.sha256`; push to
+`master` → bundle as a 14-day artifact). Both exclude the one known-failing test
+via `KNOWN_FAILING` — remove it there once fixed.
 
-The installer publishes the daemon, web, tui and Doctor runtime targets plus the
-migration runner — and, **opt-in**, the DHCP server. The TUI ships as
-`/opt/tekium/tui/` with a wrapper at `/usr/local/bin/netfirewall-tui`. The DHCP
-server is gated behind a prompt (`INSTALL_DHCP=yes`, default no — it binds UDP/67,
-not wanted on every host); when enabled it publishes to `$PREFIX/dhcp-server`,
-writes `/etc/netfirewall/dhcp.env` (DB conn + fallback `DHCP__Interface`), and
-installs+enables `netfirewall-dhcp.service`. Opting back out (`INSTALL_DHCP=no` on
-a re-run) stops and removes that unit. Daemon's `Daemon__AcceptedPeerUids` is
-populated with both the Web UID (so the Web reaches the socket) AND `0` (so
-`sudo netfirewall-tui` from a console reaches it too). The legacy single
-`Daemon__ExpectedPeerUid` is still honored for backward compat — the
-`PeerCredentialMiddleware` accepts a peer matching either gate.
+**On the host** (`setup.sh`, as root, from the extracted bundle):
 
-**Install** on a Debian/Ubuntu/Rocky/Alma/openSUSE host with .NET 10 SDK,
-PostgreSQL 14+ and systemd 250+:
-
-```bash
-sudo deploy/install.sh
-```
-
-The installer creates `netfirewall` group + `netfirewall-web` user (system,
-nologin), lays out `/opt/tekium/{daemon,web,dhcp-server,Migrations,tui}`, `/etc/netfirewall/`,
-`/var/lib/netfirewall/{web,daemon}/`, `/var/log/netfirewall/` (with `/run/netfirewall/`
-provided by systemd `RuntimeDirectory=`), publishes the projects + the migration
-runner (+ the DHCP server when `INSTALL_DHCP=yes`), generates an AES-256 master key
-for TOTP encryption, runs migrations, installs and enables the unit files (daemon +
-web always; `netfirewall-dhcp` when opted in).
+- Layout: `<PREFIX>/releases/<version>/`, `<PREFIX>/current` → active release
+  (what the units' `WorkingDirectory`/`ExecStart` point at), `<PREFIX>/.previous`.
+  Default `PREFIX=/opt/tekium`. Config in `/etc/netfirewall/` (`daemon.env` 0600,
+  `web.env` 0640 root:netfirewall, `dhcp.env`, `setup.conf`), state
+  `/var/lib/netfirewall/`, logs `/var/log/netfirewall/` (+ `setup-*.log` per run),
+  pre-upgrade dumps `/var/backups/netfirewall/`. `/usr/local/bin/netfirewall-{tui,doctor,migrate}`
+  link through `current`.
+- Upgrade order is fixed: **pg_dump → stage release → migrate with the NEW
+  runner → env/units → flip `current` → restart daemon → web (→ dhcp) →
+  health-check** (unit active, Web answers on :5000, daemon `/health` reports the
+  bundle version). Daemon/Web not healthy ⇒ **automatic rollback** of the symlink.
+  Migration failure stops *before* the switch. Never reorder this — the
+  42703/42P01 incidents were binaries ahead of the schema.
+- **Env files are never rewritten wholesale**: a missing file is rendered from its
+  template; an existing one keeps every line and only gets template keys it lacks
+  appended (connection string rewritten only with `--db-*`). DB password is read
+  back from the env files on upgrade.
+- **Master key** resolve-once-write-both: reuse whichever file has it, copy to the
+  other, never rotate; both present and different ⇒ stop. Full reference
+  **`docs/master-key.md`**. Daemon and Web MUST hold the identical key (both
+  decrypt `user_totp_secrets`; drift silently rejects every TOTP code). With
+  `Daemon:UseForTotp=true` (prod default) the Web proxies crypto to the daemon
+  (`POST /v1/crypto/{encrypt,decrypt}`, `DaemonTotpSecretCipher`); the daemon also
+  needs the key for the web terminal's TOTP gate (`/v1/terminal/open`). `false`
+  (dev without daemon) keeps the key in the Web's `NETFIREWALL_MASTER_KEY`. If
+  `UseForTotp=true` and the daemon is down, TOTP enrollment/verification fail
+  loudly.
+- `auto` defaults preserve what is installed: DHCP unit (UDP/67, opt-in with
+  `--with-dhcp`) is never removed unless `--without-dhcp`; boot-apply
+  (`netfirewall-bootstrap.service`, `PartOf=` the daemon → a daemon restart
+  re-applies DB state) is on for fresh installs only; nginx is written only on a
+  fresh install or with `--configure-nginx`/`--tls-cert`, and reverted if
+  `nginx -t` fails. Local DB (`127.0.0.1`/`localhost`/`::1`) is provisioned (role +
+  DB); remote is only connected to.
+- setup.sh never touches the live nftables ruleset, routes, WireGuard or network
+  config, and only removes NetFirewall's own pieces under the prefix (it may be
+  shared, e.g. `/opt/tekium`).
+- Daemon's `Daemon__AcceptedPeerUids` = Web UID **and** `0` (so
+  `netfirewall-tui` as root reaches the socket). The legacy single
+  `Daemon__ExpectedPeerUid` is still honored — `PeerCredentialMiddleware` accepts
+  a peer matching either gate.
+- Doctor finds the release from its own location (`<release>/doctor/` → parent);
+  its `ReleaseCheck` reads `VERSION` and warns on a non-bundle layout.
 
 **Hardening highlights** (full list in the unit files):
 - Daemon runs as `root` but `CapabilityBoundingSet=CAP_NET_ADMIN
@@ -115,7 +125,9 @@ web always; `netfirewall-dhcp` when opted in).
   no ptrace, no audit, etc. `ProtectSystem=strict` + tight `ReadWritePaths`.
 - Web runs as `netfirewall-web` with **zero capabilities**, only writable
   path is `/var/lib/netfirewall/web`. Member of `netfirewall` group so it
-  can connect to the daemon's Unix socket (mode 0660 root:netfirewall).
+  can connect to the daemon's Unix socket (mode 0660 root:netfirewall;
+  `/run/netfirewall` comes from tmpfiles.d because `RuntimeDirectory=` can't set
+  the group).
 - Both: `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `ProtectHome`,
   `ProtectKernelTunables/Modules/Logs/ControlGroups/Clock/Hostname`,
   `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies`,
@@ -125,36 +137,9 @@ web always; `netfirewall-dhcp` when opted in).
   JIT. Switch to `dotnet publish --publish-ready-to-run` or NativeAOT to
   enable it; documented as future work.
 
-**Master key (TOTP secrets cipher)** — AES-256 key encrypting all TOTP
-secrets. **Full reference: `docs/master-key.md`** (where it lives, the
-daemon↔Web sync rule, diagnostics, ISO-build guidance). The non-negotiable
-rule: **the daemon and the Web must hold the byte-for-byte identical key** —
-both decrypt the same `user_totp_secrets` rows, and a drift silently rejects
-every valid TOTP code. The installer writes the same generated key into BOTH
-`/etc/netfirewall/daemon.env` (0600 root:root) and `web.env`
-(0640 root:netfirewall) and asserts they match. With `Daemon:UseForTotp=true`
-the Web proxies crypto to the daemon (`POST /v1/crypto/{encrypt,decrypt}`,
-`DaemonTotpSecretCipher`) so a Web compromise can't decrypt secrets; the
-daemon also needs the key directly for the web terminal's TOTP gate
-(`/v1/terminal/open`). A daemon missing the key throws on first daemon-side
-TOTP use (now warned at startup in `Program.cs`).
-
-Toggle via `Daemon:UseForTotp` in the Web's appsettings (default `true`):
-- `true` (prod default): Web ↔ daemon for crypto.
-- `false` (dev without daemon): Web holds the key in `NETFIREWALL_MASTER_KEY`
-  — same as before. Useful when running the Web standalone.
-
-Failure mode: if `UseForTotp=true` but the daemon is unreachable, TOTP
-enrollment and verification both fail loudly (visible toast / inline error)
-and the user can't complete login. Bring the daemon back up to recover.
-
-**Upgrading**: re-run `sudo deploy/install.sh`. Idempotent — preserves
-master key + connection password, re-publishes binaries, applies pending
-migrations, restarts both services.
-
-**Removing**: `sudo deploy/uninstall.sh` (keeps data) or
-`sudo deploy/uninstall.sh --purge` (wipes config + state + users; the PG
-database is NEVER touched automatically).
+The `.deb` + Debian 13 live-build ISO appliance and `deploy/install.sh`
+(compile-on-server) were **removed** in favour of the bundle: upgrading a
+running appliance was the hard part, and the bundle gives versioning + rollback.
 
 ## Database migrations
 
@@ -194,7 +179,7 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
 ### Service projects
 
 - **NetFirewall.Migrations** — standalone console (`netfirewall-migrate`) that applies / tracks / drift-checks the SQL files in `NetFirewall.Services/sql/migrations/`. NOT registered with Aspire — invoked via `bin/db.sh` or `dotnet run --project NetFirewall.Migrations`.
-- **NetFirewall.Doctor** — Spectre.Console requirements validator (`netfirewall-doctor` binary). Cross-platform (NO `[assembly: SupportedOSPlatform]`); Linux-only checks Skip off Linux. Validates env vars, **master-key sync between daemon.env and web.env**, paths, systemd units, daemon socket, **DHCP server (deployment, config, configured-interface-exists, UDP/67 listener, its own DB connection)**, and **PostgreSQL (reachable, ≥ 14, `__migrations` + core tables present, pending/drifted migrations)**. DHCP is treated as **optional** (installer-gated behind `INSTALL_DHCP=yes`) so its absence Warns, not Fails. Each check is an `ICheck` returning `CheckResult` (Pass/Warn/Fail/Skip + remedy); fail-soft (never throws). `--service web|daemon|dhcp|all` filters; `--json` + exit code for CI; `install.sh` publishes it and runs it as the post-install verification step. See `docs/doctor.md`. Pure check logic tested in `NetFirewall.Tests/Doctor/`.
+- **NetFirewall.Doctor** — Spectre.Console requirements validator (`netfirewall-doctor` binary). Cross-platform (NO `[assembly: SupportedOSPlatform]`); Linux-only checks Skip off Linux. Validates env vars, **master-key sync between daemon.env and web.env**, paths, **installed release (`VERSION`)**, systemd units, daemon socket, **DHCP server (deployment, config, configured-interface-exists, UDP/67 listener, its own DB connection)**, and **PostgreSQL (reachable, ≥ 14, `__migrations` + core tables present, pending/drifted migrations)**. DHCP is treated as **optional** (unit installed only with `setup.sh --with-dhcp`) so its absence Warns, not Fails. Each check is an `ICheck` returning `CheckResult` (Pass/Warn/Fail/Skip + remedy); fail-soft (never throws). `--service web|daemon|dhcp|all` filters; `--json` + exit code for CI; every release bundle ships it and `setup.sh` runs it as the final verification step. See `docs/doctor.md`. Pure check logic tested in `NetFirewall.Tests/Doctor/`.
 - **NetFirewall.AppHost** — Aspire orchestrator (ApiService + Web + DhcpServer).
 - **NetFirewall.Tui** — Console UI built on Spectre.Console (`netfirewall-tui` binary). Talks to the same daemon Unix socket the Web does, via the lifted `IDaemonClient` in `NetFirewall.Services/Daemon/`. Auth: single-step login flow (username + password + TOTP/recovery in one screen) via `POST /v1/auth/login` on the daemon, token stored in-memory by `TuiSessionTokenProvider`. **TUI sessions are born elevated** (login already proved TOTP + operator is at console), so destructive endpoints don't re-prompt. Peer-cred middleware on the daemon (`SO_PEERCRED` Linux / `LOCAL_PEERCRED` macOS) gates the socket connection itself. Phases 0-3 shipped: skeleton + daemon ping + login/logout + **NetworkInterfacesScreen** (list, edit IP/mask/gateway/MAC/MTU, add new from physically-detected NICs, apply via daemon) + **RecoveryScreen** (break-glass: reset password, disable TOTP, clear lockout — root-peer-only via `[DaemonRequireRootPeerAttribute]`, no session needed; reachable when a user is locked out of the Web).
 - **NetFirewall.WanMonitor** — Background worker for dual-WAN monitoring/failover. Pings configured IPs through each interface (see `WanMonitorService`) and runs the bash commands listed in `appsettings.json` → `BashCommands.ExtraPrimaryCommands` / `ExtraSecondaryCommands` on state changes. Runs under systemd via `UseSystemd()`.

@@ -42,6 +42,9 @@ public sealed class SystemdUnitsCheck : ICheck
 
         // DHCP is optional. is-active reports "active" / "inactive" / "failed";
         // a never-installed unit reports "inactive"/"unknown" with a non-zero exit.
+        if (!ctx.DhcpEnabled)
+            return CheckResult.Pass($"{string.Join(", ", RequiredUnits)} active (DHCP not enabled on this host)");
+
         var dhcp = (await Systemctl($"is-active {DhcpUnit}", ct)).Output.Trim();
         if (dhcp == "active")
             return CheckResult.Pass($"{string.Join(", ", RequiredUnits)}, {DhcpUnit} active");

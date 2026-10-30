@@ -25,7 +25,7 @@ public sealed class PathsCheck : ICheck
         if (missing.Count > 0)
             return Task.FromResult(CheckResult.Fail(
                 $"missing: {string.Join(", ", missing.Select(m => $"{m.Path} ({m.What})"))}",
-                remedy: "Run sudo deploy/install.sh. If your prefix differs (e.g. /opt/tekium), pass --prefix."));
+                remedy: "Run ./setup.sh from the release bundle. If your prefix differs, pass --prefix <PREFIX>/current."));
 
         return Task.FromResult(CheckResult.Pass($"binaries + dirs present under {ctx.Prefix} and {ctx.EtcDir}"));
     }

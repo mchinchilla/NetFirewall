@@ -17,6 +17,9 @@ public sealed class DhcpDatabaseCheck : ICheck
 
     public async Task<CheckResult> RunAsync(DoctorContext ctx, CancellationToken ct)
     {
+        if (!ctx.DhcpEnabled)
+            return CheckResult.Skip(DoctorContext.DhcpNotEnabled);
+
         var conn = ctx.DhcpConnectionString;
         if (string.IsNullOrWhiteSpace(conn) || conn.Contains("__REPLACE__"))
             return CheckResult.Skip("no DHCP connection string (see DHCP Configuration check)");

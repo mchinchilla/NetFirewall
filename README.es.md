@@ -124,116 +124,138 @@ NetFirewall/
 ├── NetFirewall.Benchmarks       # BenchmarkDotNet para validar hot paths
 ├── NetFirewall.Tests            # xUnit + Aspire.Hosting.Testing
 └── deploy/
-    ├── systemd/                 # Units endurecidas
-    ├── bootstrap/               # Script /usr/local/bin/netfirewall-bootstrap
-    ├── nginx/                   # Ejemplo de reverse proxy
-    ├── seeds/                   # Seed SQL por deployment
-    ├── debian/ firstboot/ iso/  # Appliance .deb + ISO Debian 13
-    └── install.sh               # Instalador one-shot
+    ├── build-bundle.sh          # Arma el tar.gz del release (dev / CI)
+    ├── setup.sh                 # Instala, actualiza y hace rollback en el firewall
+    ├── uninstall.sh             # Revierte setup (conserva datos salvo --purge)
+    ├── systemd/                 # Units endurecidas (@PREFIX@ lo rellena setup.sh)
+    ├── bootstrap/               # Script de boot-apply netfirewall-bootstrap
+    ├── nginx/                   # Sitio TLS (autofirmado en instalación nueva) + ejemplo LE
+    └── seeds/                   # Seed SQL por deployment
 ```
 
 ## 🚀 Inicio rápido
 
-### Requisitos
+NetFirewall se distribuye como un **bundle de release**: un `tar.gz` con todos
+los binarios publicados self-contained (el runtime de .NET va adentro), las
+migraciones SQL, las units de systemd y `setup.sh`, que **instala un firewall
+nuevo y actualiza uno que ya está corriendo**. Cada tag `v*` publica un bundle en
+[GitHub Releases](https://github.com/mchinchilla/NetFirewall/releases); la
+versión y el commit exacto quedan registrados automáticamente.
 
-- 🐧 Debian 13 / Ubuntu 24.04 / Rocky 9 (systemd moderno + kernel 5.x+)
-- 🟣 .NET 10 SDK + runtime
-- 🐘 PostgreSQL 18+
-- 🔧 Paquetes `nftables`, `iproute2`, `wireguard-tools`, `conntrack`
-- 🌐 nginx (o cualquier reverse proxy) para terminar TLS
-
-### Instalar las dependencias del sistema
-
-`deploy/install.sh` **no** instala paquetes del SO — solo verifica que estén
-presentes (`systemctl`, `dotnet`, `psql`, `openssl`) y aborta si falta alguno.
-Instala primero todo lo que el daemon invoca en tiempo de ejecución: `nft`,
-`ip`, `tc`, `wg` / `wg-quick`, `conntrack`, `ping` y `systemctl`.
-
-**Debian / Ubuntu**
-
-```bash
-# herramientas que el daemon ejecuta en runtime
-apt update
-apt install -y nftables iproute2 wireguard-tools conntrack iputils-ping \
-               openssl curl ca-certificates
-
-# PostgreSQL 18+ (servidor + cliente; el runner de migraciones usa psql)
-apt install -y postgresql postgresql-client
-
-# nginx para terminar TLS (omítelo si usas otro reverse proxy)
-apt install -y nginx
-
-# .NET 10 SDK — feed de Microsoft (Debian/Ubuntu)
-#   ver https://learn.microsoft.com/dotnet/core/install/linux según tu release
-apt install -y dotnet-sdk-10.0      # o baja el tarball y agrégalo al PATH
+```mermaid
+flowchart LR
+    A[git tag v1.4.0] --> B[release.yml<br/>tests + build-bundle.sh]
+    B --> C[GitHub Release<br/>netfirewall-1.4.0.tar.gz]
+    C -->|scp| D[firewall]
+    D --> E[./setup.sh]
+    E --> F["/opt/tekium/current → releases/1.4.0"]
 ```
 
-**Rocky / Alma / RHEL 9**
+### Requisitos (en el firewall)
 
-```bash
-dnf install -y nftables iproute-tc wireguard-tools conntrack-tools iputils \
-               openssl curl postgresql-server postgresql nginx dotnet-sdk-10.0
-postgresql-setup --initdb        # init del cluster PG la primera vez (familia RHEL)
-systemctl enable --now postgresql
-```
-
-**openSUSE**
-
-```bash
-zypper install -y nftables iproute2 wireguard-tools conntrack-tools iputils \
-                  openssl curl postgresql-server postgresql nginx dotnet-sdk-10.0
-```
-
-> Nombres de paquete: `conntrack` (Debian) = `conntrack-tools` (RHEL/SUSE);
-> `tc` viene en `iproute2` (Debian) pero en `iproute-tc` (RHEL); `ping` está en
-> `iputils-ping` (Debian) / `iputils` (RHEL/SUSE).
-
-### Habilitar funciones del kernel
-
-El firewall es un router, así que el forwarding IPv4 debe estar activo, y el
-panel de top-talkers necesita contabilidad de bytes en conntrack (`conntrack -L`
-solo emite `bytes=` cuando `nf_conntrack_acct=1`). El instalador deja
-`/etc/sysctl.d/netfirewall.conf` con `nf_conntrack_acct`, pero **el forwarding
-es decisión tuya** — actívalo explícitamente:
-
-```bash
-# persistente: escribe un drop-in de sysctl y aplícalo
-cat >/etc/sysctl.d/99-netfirewall-router.conf <<'EOF'
-net.ipv4.ip_forward = 1
-net.netfilter.nf_conntrack_acct = 1
-EOF
-sysctl --system
-
-# verificar
-sysctl net.ipv4.ip_forward net.netfilter.nf_conntrack_acct
-```
-
-> **Policy routing + `rp_filter`:** el filtrado estricto de ruta inversa
-> (`net.ipv4.conf.*.rp_filter=1`) descarta silenciosamente tráfico enrutado por
-> fwmark cuya ruta de respuesta difiere de la interfaz de entrada. Si el tráfico
-> marcado no sale por la WAN/VPN esperada aunque `ip rule` + la tabla de rutas
-> se vean bien, relájalo: `sysctl -w net.ipv4.conf.all.rp_filter=2` (modo loose).
-> Ver diagnóstico abajo.
+- 🐧 Debian 12/13 o Ubuntu 22.04+ · x86_64 · systemd · root
+- Nada más: **ni SDK ni runtime de .NET**. `setup.sh` instala con apt lo que
+  falte: PostgreSQL 18+ si la base es local, nginx en instalaciones nuevas,
+  `nftables`, `iproute2`, `conntrack`, `wireguard-tools`, `tcpdump`, …
 
 ### Instalación
 
 ```bash
-git clone https://github.com/your-org/NetFirewall /opt/tekium/src
-cd /opt/tekium/src
-deploy/install.sh
+# descarga el bundle de GitHub Releases (o arma uno: deploy/build-bundle.sh)
+tar xzf netfirewall-1.4.0.tar.gz && cd netfirewall-1.4.0
+
+./setup.sh --preflight      # revisa host, bundle, disco y BD — no cambia nada
+./setup.sh                  # instala
 ```
 
-El instalador publica los cinco binarios (`daemon`, `web`, `dhcp-server`, `migrations`, `tui`), crea el grupo `netfirewall` + usuario `netfirewall-web`, prepara `/etc/netfirewall/`, `/var/lib/netfirewall/`, `/var/log/netfirewall/`, genera una llave maestra AES-256 para cifrar TOTP, aplica todas las migraciones y arranca los servicios.
+Una instalación nueva crea el rol + base de PostgreSQL local (contraseña
+aleatoria), genera la master key AES-256 de TOTP (idéntica en `daemon.env` y
+`web.env` — **respáldala**, se muestra una sola vez), configura nginx con un
+certificado autofirmado, arranca daemon + Web y corre `netfirewall-doctor`. Luego:
+
+```bash
+journalctl -u netfirewall-web | grep -i bootstrap   # link de un solo uso para el primer admin
+```
+
+Variantes comunes:
+
+```bash
+./setup.sh --with-dhcp --dhcp-iface ens256                 # también servir DHCP (UDP/67)
+./setup.sh --db-host 10.0.0.5 --db-password 'S3cret'       # PostgreSQL remoto
+./setup.sh --tls-cert fullchain.pem --tls-key privkey.pem  # certificado real
+./setup.sh --skip-nginx --yes                              # proxy propio, desatendido
+```
+
+### Actualizar
+
+```bash
+tar xzf netfirewall-1.5.0.tar.gz && cd netfirewall-1.5.0
+./setup.sh                  # las opciones se recuerdan en /etc/netfirewall/setup.conf
+```
+
+Cada actualización: **backup con pg_dump** → copia `releases/1.5.0` → **migra con
+los binarios nuevos antes de cambiar** → mueve el symlink `current` → reinicia →
+verifica (el daemon debe reportar la versión nueva en `/health`). Si el daemon o
+la Web no levantan, hace **rollback automático**. La master key, la contraseña de
+la BD y tus ediciones a los env files se conservan; el ruleset nftables vivo y la
+configuración de red nunca se tocan.
+
+### Rollback
+
+```bash
+./setup.sh --list-releases         # ● activo  ↩ anterior
+./setup.sh --rollback              # vuelve al release anterior (segundos)
+./setup.sh --rollback 1.4.0        # o a uno concreto que siga en disco
+```
+
+El esquema **no** se revierte (las migraciones son forward-only); el dump de cada
+actualización en `/var/backups/netfirewall/` es el camino de vuelta ante una
+migración destructiva.
+
+**📘 Todos los parámetros, cada paso, el layout en disco y qué pasa si algo
+falla: [`docs/setup.md`](docs/setup.md)** (incluye cómo migrar un host desde el
+layout viejo de `install.sh`).
+
+### Armar un bundle
+
+```bash
+deploy/build-bundle.sh                    # → dist/netfirewall-<git describe>.tar.gz
+deploy/build-bundle.sh --version 1.5.0-rc1
+```
+
+Necesita el .NET 10 SDK y el binario standalone `tailwindcss` en el `PATH`. La
+versión sale de `git describe --tags --always --dirty` (`1.4.0`,
+`1.4.0-3-g97f88aa`, `…-dirty`) y queda en los ensamblados (tarjeta *System info*
+del login, `/health` del daemon), en `VERSION` y en `BUILD_INFO`.
+
+### Funciones del kernel
+
+El firewall es un router: el forwarding IPv4 debe estar activo, y el panel de
+top-talkers necesita la contabilidad de bytes de conntrack (`conntrack -L` solo
+emite `bytes=` con `nf_conntrack_acct=1`). `setup.sh` instala
+`/etc/sysctl.d/netfirewall.conf` y los drop-ins de modprobe/modules-load que hacen
+que `nf_conntrack_acct` sobreviva reinicios, pero **el forwarding lo decides tú**:
+
+```bash
+echo 'net.ipv4.ip_forward = 1' > /etc/sysctl.d/99-netfirewall-router.conf
+sysctl --system
+sysctl net.ipv4.ip_forward net.netfilter.nf_conntrack_acct
+```
+
+> **Policy routing + `rp_filter`:** el filtrado estricto de ruta inversa
+> (`net.ipv4.conf.*.rp_filter=1`) descarta en silencio el tráfico enrutado por
+> fwmark cuya ruta de respuesta difiere de la interfaz de entrada. Si el tráfico
+> marcado no sale por la WAN/VPN esperada aunque `ip rule` y la tabla se vean bien,
+> relájalo: `sysctl -w net.ipv4.conf.all.rp_filter=2` (modo loose).
+> Ver diagnóstico abajo.
 
 ### Verificación
 
 ```bash
-systemctl status netfirewall-*
-nft list ruleset | head
-curl -sS https://fw.example.com/login
+netfirewall-doctor                    # env, sincronía de master key, release, units, socket, BD
+systemctl status 'netfirewall-*'
+cat /opt/tekium/current/BUILD_INFO    # versión + commit exacto en producción
 ```
-
-Abre `https://fw.example.com/setup/bootstrap?token=<token-impreso-en-journalctl>` para crear el primer admin.
 
 ## 🔄 Workflow de apply al boot
 
@@ -326,18 +348,14 @@ curl --unix-socket "$SOCK" -X POST http://daemon/v1/firewall/apply-policy-routin
 curl --unix-socket "$SOCK" -X POST http://daemon/v1/wireguard/apply
 ```
 
-### Republicar tras un cambio de código
+### Llevar un cambio a producción
 
-Editar el código **no** cambia nada en el kernel hasta republicar los binarios,
-reiniciar los servicios y volver a aplicar. El generador de nftables vive en
-`NetFirewall.Services`, que enlazan tanto el daemon como el web → republica
-ambos:
+Editar el código **no** cambia nada en el kernel hasta que un release nuevo esté
+corriendo y se vuelva a aplicar. Etiqueta (o toma el artifact del bundle de
+`master` en el workflow *Release bundle*) y en el firewall:
 
 ```bash
-cd /opt/tekium/src && git pull        # trae los cambios
-dotnet publish -c Release -r linux-x64 -o /opt/tekium/daemon NetFirewall.Daemon
-dotnet publish -c Release -r linux-x64 -o /opt/tekium/web    NetFirewall.Web
-systemctl restart netfirewall-daemon netfirewall-web
+tar xzf netfirewall-1.5.1.tar.gz && cd netfirewall-1.5.1 && ./setup.sh
 # luego: UI → Firewall → Apply (TOTP), o el curl de "Apply manual" de arriba
 ```
 
@@ -453,6 +471,8 @@ Estos artefactos quedan en el repo como referencia pero ya no se usan en producc
 | `NetFirewall.WanMonitor` (proceso standalone) | `WanHealthMonitorService` (HostedService dentro del daemon) | El monitor viejo shelleaba comandos y no tenía estado en DB. El nuevo persiste `wan_health_state` + `wan_health_events`. |
 | `netfirewall-wanmonitor.service` | (ninguno — absorbido al daemon) | Desactiva y elimina si vienes de un deploy pre-2026-05. |
 | `BashCommandsConfig.Extra{Primary,Secondary}Commands` | Endpoints de Apply del daemon | El WanMonitor viejo ejecutaba esas listas de bash en failover; el daemon ahora hace lo equivalente declarativamente. |
+| `deploy/install.sh` (compilaba en el servidor) | Bundle de release + `setup.sh` | Requería el SDK de .NET en el firewall; sin versiones ni rollback. |
+| Appliance `.deb` + ISO Debian 13 | Bundle de release + `setup.sh` | Difícil de actualizar con el firewall corriendo; eliminado. |
 
 ## 📖 Documentación
 
@@ -460,7 +480,7 @@ Estos artefactos quedan en el repo como referencia pero ya no se usan en producc
 - [`docs/PerformanceAnalysis.md`](docs/PerformanceAnalysis.md) — budget del hot path DHCP + reglas zero-allocation
 - [`docs/DHCP_FEATURE_COMPARISON.md`](docs/DHCP_FEATURE_COMPARISON.md) — paridad de features vs isc-dhcp / kea
 - [`docs/diagnostics.md`](docs/diagnostics.md) — sección de Diagnósticos: herramientas, doctores, historial, reglas de seguridad
-- [`docs/appliance-iso.md`](docs/appliance-iso.md) — appliance `.deb` + ISO Debian 13, aprovisionamiento en el primer arranque
+- [`docs/setup.md`](docs/setup.md) — bundle de release, todos los parámetros de `setup.sh`, actualizaciones, rollback
 - [`docs/doctor.md`](docs/doctor.md) — checks y remedios de `netfirewall-doctor`
 - [`docs/master-key.md`](docs/master-key.md) — master key de TOTP: ubicación, regla de sincronía daemon ↔ Web
 - [`docs/wake-on-lan.md`](docs/wake-on-lan.md) — diseño y uso de Wake-on-LAN

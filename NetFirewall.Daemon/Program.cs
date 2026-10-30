@@ -536,4 +536,4 @@ static void ApplySocketMode(DaemonOptions opts)
 }
 
 static string ThisVersion() =>
-    typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    NetFirewall.Models.System.BuildVersionText.Of(typeof(Program).Assembly);

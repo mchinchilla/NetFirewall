@@ -23,7 +23,7 @@ public sealed class AppInfoService : IAppInfoService
     public AppInfoService(Microsoft.Extensions.Hosting.IHostEnvironment env)
     {
         StartedAt = DateTimeOffset.UtcNow;
-        Version = typeof(AppInfoService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        Version = NetFirewall.Models.System.BuildVersionText.Of(typeof(AppInfoService).Assembly);
         MachineName = System.Environment.MachineName;
         Environment = env.EnvironmentName;
     }

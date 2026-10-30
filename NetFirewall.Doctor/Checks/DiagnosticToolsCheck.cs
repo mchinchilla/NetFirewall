@@ -7,7 +7,7 @@ namespace NetFirewall.Doctor.Checks;
 /// The binaries the Diagnostics section shells out to (see docs/diagnostics.md).
 /// Missing ones are a Warn, not a Fail: the firewall itself keeps working, only
 /// the matching diagnostic tool reports "not installed". <c>ping</c> and
-/// <c>conntrack</c> are Depends of the .deb, the rest are Recommends — a manual
+/// <c>conntrack</c> are installed by setup.sh with the rest — a <c>--skip-packages</c>
 /// install on a minimal host is exactly where this check earns its keep.
 /// </summary>
 public sealed class DiagnosticToolsCheck : ICheck

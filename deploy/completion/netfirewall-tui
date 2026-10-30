@@ -1,5 +1,5 @@
 # Bash completion for netfirewall-tui.
-# Installed by deploy/install.sh to /etc/bash_completion.d/netfirewall-tui.
+# Installed by deploy/setup.sh to /etc/bash_completion.d/netfirewall-tui.
 #
 # The TUI is fully interactive — it doesn't take subcommands or flags. This
 # file exists so `netfirewall-tui <Tab>` doesn't complete random files in $PWD,

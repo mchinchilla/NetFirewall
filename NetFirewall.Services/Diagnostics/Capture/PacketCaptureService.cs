@@ -179,7 +179,7 @@ public sealed partial class PacketCaptureService : IPacketCaptureService
                 $"{message} — this is not the NIC. The daemon may not open capture sockets at all "
                 + $"({probe.Detail}): add AF_PACKET to RestrictAddressFamilies in "
                 + "netfirewall-daemon.service, then `systemctl daemon-reload && systemctl restart "
-                + "netfirewall-daemon`. Re-running deploy/install.sh installs the current unit.",
+                + "netfirewall-daemon`. Re-running setup.sh from the release bundle installs the current unit.",
 
             CaptureCapability.PermissionDenied =>
                 $"{message} — the daemon may not open capture sockets ({probe.Detail}). "

@@ -1,6 +1,6 @@
 [Unit]
 Description=NetFirewall boot-time apply (nftables + QoS + policy routing + wg)
-Documentation=file:///opt/netfirewall/README.txt
+Documentation=file://@PREFIX@/current/README.txt
 # Order: after daemon is fully up (sd_notify READY=1) and after networking is
 # available. Before the Web binds — keeps the window where the Web shows
 # "DB ahead of kernel" smaller.
@@ -18,7 +18,7 @@ Type=oneshot
 # without a session token.
 User=root
 Group=root
-ExecStart=/usr/bin/netfirewall-bootstrap
+ExecStart=@PREFIX@/current/bin/netfirewall-bootstrap
 
 # Short retry policy: 3 attempts, 5s apart. Don't loop forever — if the
 # daemon really isn't healthy we'd rather surface that than spam the log.

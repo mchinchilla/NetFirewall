@@ -1,6 +1,6 @@
 [Unit]
 Description=NetFirewall privileged daemon (network mutations)
-Documentation=file:///opt/netfirewall/README.txt
+Documentation=file://@PREFIX@/current/README.txt
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -17,8 +17,8 @@ NotifyAccess=main
 User=root
 Group=root
 
-WorkingDirectory=/opt/netfirewall/daemon
-ExecStart=/opt/netfirewall/daemon/netfirewall-daemon
+WorkingDirectory=@PREFIX@/current/daemon
+ExecStart=@PREFIX@/current/daemon/netfirewall-daemon
 EnvironmentFile=-/etc/netfirewall/daemon.env
 
 # /run/netfirewall is created by tmpfiles.d (deploy/tmpfiles/netfirewall.conf

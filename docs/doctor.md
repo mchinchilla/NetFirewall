@@ -24,14 +24,14 @@ and runs it as the final post-install verification step.
 
 - `--service web|daemon|dhcp|tui|all` — filter checks by category/service (default `all`).
 - `--json` — emit a JSON array of `{category, name, status, message, remedy, detail}`.
-- `--prefix <path>` — install prefix (default `/opt/netfirewall`; tekium uses `/opt/tekium`).
+- `--prefix <path>` — release dir to inspect (default: the release the Doctor binary ships in, else `/opt/tekium/current`).
 - `--etc <path>` — config dir holding the env files (default `/etc/netfirewall`).
 - `--help`, `-h` — print usage and exit 0, without running any check.
 
 ## Exit code
 
 - `0` — all checks passed (warnings allowed).
-- `1` — at least one check **failed**. Use in CI / install.sh.
+- `1` — at least one check **failed**. Use in CI / setup.sh.
 
 ## Checks
 
