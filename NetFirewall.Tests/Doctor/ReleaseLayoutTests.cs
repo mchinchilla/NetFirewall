@@ -1,14 +1,15 @@
 using NetFirewall.Doctor;
 using NetFirewall.Doctor.Checks;
 using NetFirewall.Models.System;
+using NetFirewall.Web.Models.Shared;
 using Xunit;
 
 namespace NetFirewall.Tests.Doctor;
 
 /// <summary>
-/// The release-bundle contract: build-bundle.sh stamps a version that every binary
-/// prints the same way, writes VERSION into the release dir, and Doctor finds that
-/// release from its own location (&lt;release&gt;/doctor/).
+/// The release-bundle contract: build-bundle.sh stamps a version + commit that every
+/// binary reads the same way (and the Web badge shortens), writes VERSION into the
+/// release dir, and Doctor finds that release from its own location (&lt;release&gt;/doctor/).
 /// </summary>
 public sealed class ReleaseLayoutTests : IDisposable
 {
@@ -17,14 +18,36 @@ public sealed class ReleaseLayoutTests : IDisposable
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
     [Theory]
-    [InlineData("v1.4.0", "1.4.0")]
-    [InlineData("1.4.0-3-g97f88aa", "1.4.0-3-g97f88aa")]
-    [InlineData("v1.4.0-3-g97f88aa-dirty", "1.4.0-3-g97f88aa-dirty")]
-    [InlineData("97f88aa", "97f88aa")]                       // no tag yet: git describe --always
-    [InlineData("1.0.0+97f88aa1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7", "1.0.0+97f88aa")] // SDK default
-    [InlineData("vlan-build", "vlan-build")]                 // leading 'v' only stripped before a digit
-    public void Normalize_prints_what_the_operator_tagged(string informational, string expected)
-        => Assert.Equal(expected, BuildVersionText.Normalize(informational));
+    //          informational version                                      version                    commit     release dirty
+    [InlineData("v0.6.1", "0.6.1", null, true, false)]
+    [InlineData("0.6.1+97f88aa1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7", "0.6.1", "97f88aa", true, false)]   // bundle: describe + SourceRevisionId
+    [InlineData("0.6.1-3-g97f88aa", "0.6.1-3-g97f88aa", "97f88aa", false, false)]
+    [InlineData("v0.6.1-3-g97f88aa-dirty+97f88aa1c2d3", "0.6.1-3-g97f88aa-dirty", "97f88aa", false, true)]
+    [InlineData("97f88aa", "97f88aa", "97f88aa", false, false)]                                     // no tag yet
+    [InlineData("1.0.0+97F88AA1C2D3E4F5", "1.0.0", "97f88aa", true, false)]                          // plain dotnet build
+    [InlineData("0.6.1+unknown", "0.6.1", null, true, false)]                                         // no git on the build box
+    [InlineData("vlan-build", "vlan-build", null, false, false)]                                      // 'v' only stripped before a digit
+    public void Parse_splits_version_and_commit(string informational, string version, string? commit, bool release, bool dirty)
+        => Assert.Equal(new BuildInfo(version, commit, release, dirty), BuildVersionText.Parse(informational));
+
+    [Theory]
+    [InlineData("0.6.1", "0.6.1")]
+    [InlineData("0.6.1-3-g97f88aa", "0.6.1+3")]
+    [InlineData("0.6.1-3-g97f88aa-dirty", "0.6.1+3")]
+    [InlineData("97f88aa-dirty", "97f88aa")]
+    public void Badge_prints_a_short_version(string version, string display)
+    {
+        var badge = new VersionBadgeViewModel { Build = BuildVersionText.Parse(version), Environment = "Production" };
+        Assert.Equal(display, badge.DisplayVersion);
+    }
+
+    [Fact]
+    public void Badge_does_not_repeat_the_sha_when_there_is_no_tag()
+    {
+        var badge = new VersionBadgeViewModel { Build = BuildVersionText.Parse("97f88aa"), Environment = "Production" };
+        Assert.False(badge.ShowCommit);
+        Assert.True(new VersionBadgeViewModel { Build = BuildVersionText.Parse("0.6.1+97f88aa1"), Environment = "Production" }.ShowCommit);
+    }
 
     [Fact]
     public void DetectPrefix_is_the_release_holding_doctor_and_daemon()

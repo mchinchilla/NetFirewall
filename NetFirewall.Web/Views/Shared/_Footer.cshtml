@@ -1,18 +1,38 @@
+@inject NetFirewall.Web.Auth.IAppInfoService AppInfo
 @*
-    Footer — minimal status bar.
+    Footer — product + build identity on the left (the running version, linked to its
+    GitHub Release, and the commit it was built from), project links on the right.
 *@
+@{
+    const string link = "inline-flex items-center gap-1.5 transition-colors hover:text-surface-fg";
+    const string external = "noopener noreferrer";
+    var releasesUrl = $"{AppInfo.RepositoryUrl}/releases";
+}
 <footer class="border-t mt-auto"
         style="border-color: var(--surface-border); background-color: color-mix(in srgb, var(--surface-elevated) 60%, transparent);">
-    <div class="flex flex-col sm:flex-row items-center justify-between gap-2 px-6 py-3 text-xs text-surface-fg-muted">
-        <div class="flex items-center gap-3">
-            <span>&copy; @DateTime.UtcNow.Year NetFirewall</span>
-            <span class="hidden sm:inline">·</span>
-            <span class="hidden sm:inline">v0.1.0-dev</span>
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3 text-xs text-surface-fg-muted">
+        <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5">
+            <span class="inline-flex items-center gap-1.5 font-semibold text-surface-fg">
+                <svg class="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
+                NetFirewall
+            </span>
+            @await Html.PartialAsync("_VersionBadge", NetFirewall.Web.Models.Shared.VersionBadgeViewModel.From(AppInfo))
+            <span class="hidden md:inline">&copy; @DateTime.UtcNow.Year</span>
         </div>
-        <div class="flex items-center gap-3">
-            <a href="#" class="hover:underline">Documentation</a>
-            <a href="#" class="hover:underline">API</a>
-            <a href="#" class="hover:underline">GitHub</a>
-        </div>
+
+        <nav class="flex items-center gap-4" aria-label="Project links">
+            <a href="@AppInfo.DocsUrl" target="_blank" rel="@external" class="@link">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/></svg>
+                Docs
+            </a>
+            <a href="@releasesUrl" target="_blank" rel="@external" class="@link">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"/></svg>
+                Releases
+            </a>
+            <a href="@AppInfo.RepositoryUrl" target="_blank" rel="@external" class="@link">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.17 1.18a10.98 10.98 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.77.11 3.06.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+                GitHub
+            </a>
+        </nav>
     </div>
 </footer>

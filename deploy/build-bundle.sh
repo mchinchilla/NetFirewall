@@ -13,9 +13,10 @@
 #
 # Without --version the version comes from `git describe --tags --always --dirty`
 # (v1.4.0, v1.4.0-3-g97f88aa, 97f88aa-dirty), so every bundle names the exact
-# commit it was built from. The same string is stamped into the assemblies'
-# InformationalVersion (shown in the Web, the daemon's /health and Doctor) and
-# written to VERSION inside the bundle.
+# commit it was built from. The assemblies carry it as InformationalVersion
+# "<version>+<commit sha>" (BuildVersionText splits the two: the Web footer shows
+# the version and links the commit; the daemon's /health reports the version),
+# and it is written to VERSION inside the bundle.
 #
 set -euo pipefail
 
@@ -76,7 +77,7 @@ publish() {
         -p:DebugType=none -p:DebugSymbols=false \
         -p:Version="$NUMERIC_VERSION" \
         -p:InformationalVersion="$VERSION" \
-        -p:IncludeSourceRevisionInInformationalVersion=false \
+        -p:SourceRevisionId="$COMMIT" \
         -o "$APP/$out" --nologo -v q
 }
 

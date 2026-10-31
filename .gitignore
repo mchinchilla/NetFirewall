@@ -372,3 +372,6 @@ FodyWeavers.xsd
 
 # Tailwind CSS standalone binary (install globally)
 **/tools/tailwindcss
+
+# ASP.NET Data Protection keys written by a local dev run of the Web
+NetFirewall.Web/.dp-keys/
