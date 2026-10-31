@@ -179,7 +179,7 @@ public sealed partial class SpeedTestService : ISpeedTestService
     {
         var sink = plan.KeepFile ? new PayloadSink(_store.PartPathFor(id), preallocate: 0) : null;
         var workers = Enumerable.Range(0, plan.Streams)
-            .Select(i => Task.Run(() => BurstWorkerAsync(client, plan.Url, meter, i == 0 ? sink : null, clock, stop)))
+            .Select(_ => Task.Run(() => BurstWorkerAsync(client, plan.Url, meter, sink, clock, stop)))
             .ToArray();
         return new Transfer(workers, sink, null, () => sink?.Done ?? false, null);
     }
@@ -194,6 +194,10 @@ public sealed partial class SpeedTestService : ISpeedTestService
         var ct = stop.Token;
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         var firstRequest = true;
+        // The kept file belongs to whichever connection starts receiving first. Pinning it
+        // to stream 0 lost it whenever the others reached the byte cap before stream 0's
+        // first byte arrived (a fast link, or a busy thread pool).
+        var ownsSink = false;
         try
         {
             while (!ct.IsCancellationRequested)
@@ -208,13 +212,15 @@ public sealed partial class SpeedTestService : ISpeedTestService
                 while ((n = await body.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
                 {
                     if (got == 0 && firstRequest) meter.FirstByte(clock.Elapsed - sentAt);
+                    // Claim only at the start of a response, so the file begins at its byte 0.
+                    if (got == 0 && sink is not null && !ownsSink) ownsSink = sink.TryClaim();
                     got += n;
                     // One writer, in order: the kept file is the first response, byte for byte.
-                    if (sink is { Done: false }) await sink.WriteAsync(sink.Written, buffer.AsMemory(0, n), ct);
+                    if (ownsSink && !sink!.Done) await sink.WriteAsync(sink.Written, buffer.AsMemory(0, n), ct);
                     if (meter.Add(n)) stop.Cancel();   // byte cap reached: end the whole test
                 }
                 firstRequest = false;
-                sink?.MarkComplete();
+                if (ownsSink) sink!.MarkComplete();
                 if (got == 0) return $"{url.Host} sent an empty response.";
             }
             return null;
@@ -648,11 +654,15 @@ public sealed partial class SpeedTestService : ISpeedTestService
         private long _written;
         private long _writeTicks;
         private int _disposed;
+        private int _claimed;
 
         public PayloadSink(string path, long preallocate)
         {
             _file = File.OpenHandle(path, FileMode.Create, FileAccess.Write, FileShare.None, FileOptions.Asynchronous, preallocate);
         }
+
+        /// <summary>Burst only: true for exactly one caller — the connection that writes the file.</summary>
+        public bool TryClaim() => Interlocked.CompareExchange(ref _claimed, 1, 0) == 0;
 
         /// <summary>Burst only: the first response finished — stop writing, the file is a full copy.</summary>
         public bool Done { get; private set; }
