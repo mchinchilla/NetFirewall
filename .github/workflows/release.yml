@@ -31,14 +31,24 @@ env:
 jobs:
   bundle:
     name: Build release bundle
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0        # git describe needs history + tags
 
-      - uses: actions/setup-dotnet@v4
+      # Before anything builds: the Web build regenerates the tracked
+      # wwwroot/css/site.css, and describing the tree after that would stamp
+      # every CI bundle "-dirty".
+      - name: Resolve version
+        id: version
+        run: |
+          v=$(git describe --tags --always --dirty)
+          echo "version=${v#v}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${v#v}"
+
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -48,7 +58,7 @@ jobs:
             https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/tailwindcss-linux-x64
           chmod 0755 /usr/local/bin/tailwindcss
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Packages.props') }}
@@ -60,8 +70,8 @@ jobs:
       - name: Build bundle
         id: bundle
         run: |
-          deploy/build-bundle.sh --output dist
-          version=$(ls dist/netfirewall-*.tar.gz | sed -E 's|dist/netfirewall-(.*)\.tar\.gz|\1|')
+          version='${{ steps.version.outputs.version }}'
+          deploy/build-bundle.sh --version "$version" --output dist
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -lh dist/
 
@@ -88,7 +98,7 @@ jobs:
 
       - name: Upload artifact
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: netfirewall-${{ steps.bundle.outputs.version }}
           path: dist/netfirewall-*
