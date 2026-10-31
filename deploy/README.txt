@@ -3,7 +3,7 @@ NetFirewall — production deployment
 
 NetFirewall ships as a release bundle: netfirewall-<version>.tar.gz, built by
 deploy/build-bundle.sh (locally or by .github/workflows/release.yml on every
-v* tag). It holds every binary published self-contained for linux-x64 (no .NET
+push to master, which tags the next version). It holds every binary published self-contained for linux-x64 (no .NET
 on the host), the SQL migrations, the systemd units, config templates and
 setup.sh — which installs a new firewall AND upgrades a running one.
 

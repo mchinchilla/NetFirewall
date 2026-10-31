@@ -8,10 +8,10 @@ unidades systemd, las plantillas de configuración y `setup.sh`. El mismo script
 ```
   dev / CI                         firewall (root)
   ─────────                        ───────────────
-  git tag v1.4.0                   tar xzf netfirewall-1.4.0.tar.gz
-  deploy/build-bundle.sh   ──scp──▶ cd netfirewall-1.4.0
-    → dist/netfirewall-1.4.0.tar.gz ./setup.sh --preflight
-                                    ./setup.sh
+  git push (master)                tar xzf netfirewall-1.4.1.tar.gz
+    → release.yml: v1.4.0 → v1.4.1  cd netfirewall-1.4.1
+    → GitHub Release   ──scp──▶     ./setup.sh --preflight
+      netfirewall-1.4.1.tar.gz      ./setup.sh
 ```
 
 Este método reemplaza a `deploy/install.sh` (que compilaba en el servidor) y al
@@ -62,17 +62,38 @@ Este método reemplaza a `deploy/install.sh` (que compilaba en el servidor) y al
 
 ### En CI (lo normal)
 
-Cada **tag `v*`** dispara `.github/workflows/release.yml`: compila, corre los
-tests, arma el bundle y lo publica como **GitHub Release** con su `.sha256`.
+**Cada push a `master` publica una versión nueva automáticamente.**
+`.github/workflows/release.yml` toma el tag `vX.Y.Z` más alto, calcula el
+siguiente, corre los tests, arma el bundle y crea el tag + el **GitHub Release**
+con el tar.gz, su `.sha256` y la lista de commits desde la versión anterior.
+
+El mensaje del commit (el último del push) decide cuánto sube:
+
+| En el mensaje del commit | Ejemplo | Resultado |
+|---|---|---|
+| *(nada especial)* | `fix: corrige el toast de DHCP` | patch: `v0.6.0` → `v0.6.1` |
+| `[minor]` | `feat: VLANs en la UI [minor]` | minor: `v0.6.1` → `v0.7.0` |
+| `[major]` | `feat!: nuevo esquema de reglas [major]` | major: `v0.7.0` → `v1.0.0` |
+| `[skip release]` | `docs: typo en el README [skip release]` | sin release; el bundle queda como *artifact* 14 días |
+
+También puedes fijar una versión exacta con un tag manual; el workflow publica
+ese número tal cual:
 
 ```bash
-git tag v1.4.0
-git push origin v1.4.0
-# → Releases: netfirewall-1.4.0.tar.gz + netfirewall-1.4.0.tar.gz.sha256
+git tag v1.0.0-rc1 && git push origin v1.0.0-rc1
 ```
 
-Cada push a `master` también arma un bundle y lo deja como *artifact* del run
-(versión tipo `1.4.0-3-g97f88aa`), útil para probar antes de etiquetar.
+Notas:
+
+- Los tags que crea el workflow no disparan otra corrida, así que cada push
+  publica una sola vez. Si los tests fallan, no se crea ni tag ni release.
+- Si llegan varios pushes seguidos mientras uno se publica, GitHub deja en cola
+  solo el más reciente: puede saltarse un número intermedio, pero el release
+  siguiente incluye todos los commits.
+- Volver a correr el workflow de un commit que ya tiene su tag re-publica esa
+  misma versión (reemplaza los assets), no crea otra.
+- `[skip ci]` en el mensaje (convención de GitHub) se salta **todos** los
+  workflows, incluido CI; para solo no publicar usa `[skip release]`.
 
 ### Local
 
@@ -90,7 +111,7 @@ Sin `--version` sale de `git describe --tags --always --dirty`:
 
 | Estado del repo | Versión |
 |---|---|
-| Justo en el tag `v1.4.0` | `1.4.0` |
+| Release de CI / justo en el tag `v1.4.0` | `1.4.0` |
 | 3 commits después del tag | `1.4.0-3-g97f88aa` |
 | Con cambios sin commitear | `1.4.0-3-g97f88aa-dirty` |
 | Sin ningún tag | `97f88aa` |

@@ -1,14 +1,19 @@
 name: Release bundle
 
 # Builds the release bundle (deploy/build-bundle.sh): every binary published
-# self-contained for linux-x64 + migrations + units + setup.sh, in one tar.gz.
+# self-contained for linux-x64 + migrations + units + setup.sh, in one tar.gz,
+# and publishes it as a GitHub Release.
 #
-#   tag v*          -> tests, bundle, GitHub Release with the tar.gz + .sha256
-#   push to master  -> tests, bundle uploaded as a workflow artifact (14 days)
-#   manual          -> same as a master push, from any ref
+#   push to master  -> next version from the latest vX.Y.Z tag, tagged and released:
+#                        patch by default · "[minor]" / "[major]" in the commit
+#                        message bumps that part · "[skip release]" only uploads
+#                        the bundle as a 14-day artifact
+#   tag v* (manual) -> released with exactly that version
+#   manual dispatch -> artifact only, version from git describe
 #
-# The version comes from `git describe` (v1.4.0 → 1.4.0, later commits →
-# 1.4.0-3-g97f88aa), so the checkout must carry the full history and tags.
+# The checkout carries the full history and tags: the next version and
+# `git describe` both read them. Tags created here use GITHUB_TOKEN, which does
+# not trigger another run, so a master push releases exactly once.
 on:
   push:
     branches: [master]
@@ -16,7 +21,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # create the Release on tag builds
+  contents: write   # create tags and Releases
 
 concurrency:
   group: release-${{ github.ref }}
@@ -36,17 +41,53 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0        # git describe needs history + tags
+          fetch-depth: 0        # history + tags
 
       # Before anything builds: the Web build regenerates the tracked
       # wwwroot/css/site.css, and describing the tree after that would stamp
       # every CI bundle "-dirty".
       - name: Resolve version
         id: version
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          v=$(git describe --tags --always --dirty)
-          echo "version=${v#v}" >> "$GITHUB_OUTPUT"
-          echo "Version: ${v#v}"
+          set -eu
+          semver='^v[0-9]+\.[0-9]+\.[0-9]+$'
+          release=false; create_tag=false; tag=""
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="$GITHUB_REF_NAME"; release=true
+          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/master ]] \
+               && ! grep -qiF '[skip release]' <<< "${HEAD_MESSAGE:-}"; then
+            release=true
+            # Re-run of a commit that already got its tag: release that one again.
+            tag=$(git tag --points-at HEAD | grep -E "$semver" | sort -V | tail -1 || true)
+            if [[ -z "$tag" ]]; then
+              last=$(git tag --list | grep -E "$semver" | sort -V | tail -1 || true)
+              IFS=. read -r major minor patch <<< "${last:-v0.0.0}"
+              major=${major#v}
+              if grep -qiF '[major]' <<< "${HEAD_MESSAGE:-}"; then
+                major=$((major + 1)); minor=0; patch=0
+              elif grep -qiF '[minor]' <<< "${HEAD_MESSAGE:-}"; then
+                minor=$((minor + 1)); patch=0
+              else
+                patch=$((patch + 1))
+              fi
+              tag="v$major.$minor.$patch"; create_tag=true
+              echo "Bump: ${last:-none} -> $tag"
+            fi
+          fi
+          if [[ -n "$tag" ]]; then
+            version="${tag#v}"
+          else
+            version=$(git describe --tags --always --dirty); version="${version#v}"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "release=$release"
+            echo "create_tag=$create_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version: $version  release=$release  new tag=$create_tag"
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -68,11 +109,8 @@ jobs:
         run: dotnet test -c Release --filter "$KNOWN_FAILING"
 
       - name: Build bundle
-        id: bundle
         run: |
-          version='${{ steps.version.outputs.version }}'
-          deploy/build-bundle.sh --version "$version" --output dist
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          deploy/build-bundle.sh --version '${{ steps.version.outputs.version }}' --output dist
           ls -lh dist/
 
       # The tarball must install from scratch: setup.sh, every binary the units
@@ -80,7 +118,7 @@ jobs:
       - name: Verify bundle
         run: |
           set -eu
-          v='${{ steps.bundle.outputs.version }}'
+          v='${{ steps.version.outputs.version }}'
           tmp=$(mktemp -d)
           tar xzf "dist/netfirewall-$v.tar.gz" -C "$tmp"
           root="$tmp/netfirewall-$v"
@@ -97,31 +135,42 @@ jobs:
           (cd dist && sha256sum -c "netfirewall-$v.tar.gz.sha256")
 
       - name: Upload artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: steps.version.outputs.release != 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: netfirewall-${{ steps.bundle.outputs.version }}
+          name: netfirewall-${{ steps.version.outputs.version }}
           path: dist/netfirewall-*
           retention-days: 14
           compression-level: 0   # already gzipped
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          CREATE_TAG: ${{ steps.version.outputs.create_tag }}
         run: |
-          v='${{ steps.bundle.outputs.version }}'
+          set -eu
           notes=$(cat <<NOTES
-          NetFirewall $v — commit ${GITHUB_SHA:0:12}
+          NetFirewall $VERSION — commit ${GITHUB_SHA:0:12}
 
           Install or upgrade on the firewall (as root):
 
-              tar xzf netfirewall-$v.tar.gz && cd netfirewall-$v
+              tar xzf netfirewall-$VERSION.tar.gz && cd netfirewall-$VERSION
               ./setup.sh --preflight
               ./setup.sh
 
           Rollback: ./setup.sh --rollback · Full reference: docs/setup.md
           NOTES
           )
-          gh release create "$GITHUB_REF_NAME" dist/netfirewall-* \
-            --title "NetFirewall $v" --notes "$notes" --verify-tag
+          if [[ "$CREATE_TAG" == true ]]; then
+            # Creates the tag on this exact commit along with the Release.
+            gh release create "$TAG" dist/netfirewall-* --target "$GITHUB_SHA" \
+              --title "NetFirewall $VERSION" --notes "$notes" --generate-notes
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/netfirewall-* --clobber
+          else
+            gh release create "$TAG" dist/netfirewall-* --verify-tag \
+              --title "NetFirewall $VERSION" --notes "$notes" --generate-notes
+          fi

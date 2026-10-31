@@ -138,17 +138,18 @@ NetFirewall/
 NetFirewall ships as a **release bundle** — one `tar.gz` with every binary
 published self-contained (the .NET runtime travels inside it), the SQL
 migrations, the systemd units and `setup.sh`, which **installs a new firewall
-and upgrades a running one**. Every `v*` tag publishes a bundle to
-[GitHub Releases](https://github.com/mchinchilla/NetFirewall/releases); the
-version and the exact commit are tracked automatically.
+and upgrades a running one**. **Every push to `master` publishes the next
+version** to [GitHub Releases](https://github.com/mchinchilla/NetFirewall/releases)
+automatically — patch by default, `[minor]` / `[major]` in the commit message to
+bump more, `[skip release]` to skip — and every bundle records its exact commit.
 
 ```mermaid
 flowchart LR
-    A[git tag v1.4.0] --> B[release.yml<br/>tests + build-bundle.sh]
-    B --> C[GitHub Release<br/>netfirewall-1.4.0.tar.gz]
+    A[git push master] --> B[release.yml<br/>v1.4.0 → v1.4.1<br/>tests + build-bundle.sh]
+    B --> C[GitHub Release<br/>netfirewall-1.4.1.tar.gz]
     C -->|scp| D[firewall]
     D --> E[./setup.sh]
-    E --> F["/opt/tekium/current → releases/1.4.0"]
+    E --> F["/opt/tekium/current → releases/1.4.1"]
 ```
 
 ### Requirements (on the firewall)

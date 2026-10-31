@@ -69,9 +69,14 @@ that turns it into display text (Web *System info*, daemon `/health`). The build
 fails if an env template lost its placeholder or a real master key slipped in.
 
 **CI**: `.github/workflows/ci.yml` (build + tests on every push/PR) and
-`release.yml` (tag `v*` → tests + bundle + GitHub Release with `.sha256`; push to
-`master` → bundle as a 14-day artifact). Both exclude the one known-failing test
-via `KNOWN_FAILING` — remove it there once fixed.
+`release.yml`: **every push to `master` auto-releases** — next version from the
+highest `vX.Y.Z` tag (patch; `[minor]`/`[major]` in the head commit message bump
+more; `[skip release]` → 14-day artifact only), then tests + bundle + tag +
+GitHub Release (`.sha256` + generated changelog). A manual `v*` tag releases that
+exact version. Tags made by the workflow use GITHUB_TOKEN, so they don't trigger a
+second run. Version is resolved right after checkout (the Web build dirties the
+tracked `site.css`). Both workflows exclude the one known-failing test via
+`KNOWN_FAILING` — remove it there once fixed.
 
 **On the host** (`setup.sh`, as root, from the extracted bundle):
 
