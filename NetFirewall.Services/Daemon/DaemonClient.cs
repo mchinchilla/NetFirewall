@@ -369,6 +369,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default)
         => GetAsync<AlertsDto>($"/v1/system/alerts?limit={limit}", ct);
 
+    public Task<ServiceResponse<bool>> DismissAlertAsync(long alertId, CancellationToken ct = default)
+        => PostAsync<bool>($"/v1/system/alerts/{alertId}/dismiss", ct);
+
     public Task<ServiceResponse<NetFirewall.Models.Wol.WolWakeResult>> WakeOnLanAsync(NetFirewall.Models.Wol.WolWakeRequest request, CancellationToken ct = default)
         => PostJsonAsync<NetFirewall.Models.Wol.WolWakeRequest, NetFirewall.Models.Wol.WolWakeResult>("/v1/wol/wake", request, ct);
 

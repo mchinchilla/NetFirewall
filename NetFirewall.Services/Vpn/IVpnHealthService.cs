@@ -35,7 +35,23 @@ public interface IVpnHealthService
     /// <summary>Resolve the alert with this dedupe key, if one is active. No-op otherwise.</summary>
     Task ResolveAlertAsync(string dedupeKey, CancellationToken ct = default);
 
-    /// <summary>All currently-active alerts (unresolved), newest first. Read by the Web's banner.</summary>
+    /// <summary>
+    /// Resolve every active alert whose dedupe key starts with <paramref name="keyPrefix"/>.
+    /// For point-in-time notices that carry a unique key per event (e.g.
+    /// <c>wan:failover:…</c>) and therefore can't be resolved by exact key once
+    /// the condition they announced is over.
+    /// </summary>
+    Task ResolveAlertsByPrefixAsync(string keyPrefix, CancellationToken ct = default);
+
+    /// <summary>
+    /// Hide an active alert from the banner at an operator's request. It stays
+    /// hidden while this occurrence lasts (a monitor re-raising it does not bring
+    /// it back) and shows again only if the condition resolves and re-fires.
+    /// Returns false when there is no active, undismissed alert with that id.
+    /// </summary>
+    Task<bool> DismissAlertAsync(long alertId, string? dismissedBy, CancellationToken ct = default);
+
+    /// <summary>All currently-active alerts (unresolved and not dismissed), newest first. Read by the Web's banner.</summary>
     Task<IReadOnlyList<SystemAlert>> ActiveAlertsAsync(CancellationToken ct = default);
 
     /// <summary>

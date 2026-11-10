@@ -57,4 +57,8 @@ public sealed class SystemAlert
     public string? Body         { get; set; }
     public DateTime RaisedAt    { get; set; }
     public DateTime? ResolvedAt { get; set; }
+
+    /// <summary>Set when an operator dismissed it from the banner. The condition
+    /// may still be active — it is only hidden until it resolves and fires again.</summary>
+    public DateTime? DismissedAt { get; set; }
 }

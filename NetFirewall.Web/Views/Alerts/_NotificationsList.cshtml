@@ -58,7 +58,7 @@ else
                         <p class="text-xs mt-1 text-surface-fg-muted">
                             <span class="uppercase tracking-wide">@n.Source</span>
                             · @Ago(n.RaisedAt)
-                            @if (!n.IsActive) { <span>· resolved</span> }
+                            @if (!n.IsActive) { <span>· @n.InactiveLabel</span> }
                         </p>
                     </div>
                 </div>

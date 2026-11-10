@@ -5,6 +5,9 @@
     so it appears within one poll of the daemon detecting a tunnel down and clears
     itself within one poll of recovery.
 
+    Admin / Operator get an "x" per alert (POST /Alerts/{id}/dismiss) to hide it
+    by hand; a dismissed alert returns only if its condition resolves and re-fires.
+
     Renders nothing when there are no active alerts. Colours come from the
     feedback tokens (rule #9) keyed off each alert's severity.
 *@
@@ -41,5 +44,21 @@
             }
         </div>
         <span class="shrink-0 text-xs opacity-75 whitespace-nowrap">@AgoText(a.RaisedAt)</span>
+        @if (Model.CanDismiss && a.Id > 0)
+        {
+            @* Dismiss: hides this alert from the banner (it stays in the activity
+               feed). The response is the refreshed banner, swapped in place. *@
+            <button type="button"
+                    hx-post="/Alerts/@a.Id/dismiss"
+                    hx-target="#alerts-banner"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this"
+                    class="shrink-0 -m-1 p-1 rounded hover:opacity-70 disabled:opacity-40"
+                    title="Dismiss" aria-label="Dismiss alert: @a.Title">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+            </button>
+        }
     </div>
 }

@@ -30,7 +30,8 @@ public sealed class AlertsController : Controller
     [HttpGet("banner")]
     public async Task<IActionResult> Banner(CancellationToken ct)
     {
-        var model = new AlertsBannerViewModel();
+        var canDismiss = User.IsInRole(UserRoles.Admin) || User.IsInRole(UserRoles.Operator);
+        var model = new AlertsBannerViewModel { CanDismiss = canDismiss };
         try
         {
             var env = await _daemon.GetVpnHealthAsync(ct);
@@ -38,8 +39,9 @@ public sealed class AlertsController : Controller
             {
                 model = new AlertsBannerViewModel
                 {
+                    CanDismiss = canDismiss,
                     Alerts = env.Data.ActiveAlerts
-                        .Select(a => new ActiveAlertViewModel(a.Severity, a.Title, a.Body, a.RaisedAt, a.DedupeKey, a.Source))
+                        .Select(a => new ActiveAlertViewModel(a.Severity, a.Title, a.Body, a.RaisedAt, a.DedupeKey, a.Source, a.Id))
                         .ToList(),
                 };
             }
@@ -66,6 +68,22 @@ public sealed class AlertsController : Controller
         });
 
         return PartialView("_AlertsBanner", model);
+    }
+
+    // POST /Alerts/{id}/dismiss — the banner's "x". Hides that alert (it stays in
+    // the activity feed) and answers with the refreshed banner, so the row is
+    // gone in the same swap. Failure → toast, banner left as it was.
+    [HttpPost("{id:long}/dismiss"), ValidateAntiForgeryToken]
+    [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
+    public async Task<IActionResult> Dismiss(long id, CancellationToken ct)
+    {
+        var envelope = id > 0
+            ? await _daemon.DismissAlertAsync(id, ct)
+            : NetFirewall.Models.ServiceResponse<bool>.Fail("Invalid alert id.");
+        if (!envelope.Success) return this.ToHtmxResponse(envelope);
+
+        this.AttachToastTrigger(envelope);
+        return await Banner(ct);
     }
 
     // GET /Alerts/feed — compact dashboard/monitoring panel (shared _RecentAlerts).
@@ -103,7 +121,7 @@ public sealed class AlertsController : Controller
                 return new NotificationsViewModel
                 {
                     Items = env.Data.Alerts
-                        .Select(a => new NotificationItemViewModel(a.Severity, a.Source, a.Title, a.Body, a.RaisedAt, a.ResolvedAt))
+                        .Select(a => new NotificationItemViewModel(a.Severity, a.Source, a.Title, a.Body, a.RaisedAt, a.ResolvedAt, a.DismissedAt))
                         .ToList(),
                 };
             }

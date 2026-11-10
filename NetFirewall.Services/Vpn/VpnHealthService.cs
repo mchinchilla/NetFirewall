@@ -182,6 +182,12 @@ public sealed class VpnHealthService : IVpnHealthService
                 title       = EXCLUDED.title,
                 body        = EXCLUDED.body,
                 resolved_at = NULL,
+                -- A dismissal covers one occurrence: kept while still active,
+                -- dropped when this raise re-arms a resolved row.
+                dismissed_at = CASE WHEN system_alerts.resolved_at IS NULL
+                                    THEN system_alerts.dismissed_at ELSE NULL END,
+                dismissed_by = CASE WHEN system_alerts.resolved_at IS NULL
+                                    THEN system_alerts.dismissed_by ELSE NULL END,
                 raised_at   = CASE WHEN system_alerts.resolved_at IS NULL
                                    THEN system_alerts.raised_at ELSE now() END";
         await using var conn = await _ds.OpenConnectionAsync(ct);
@@ -208,15 +214,52 @@ public sealed class VpnHealthService : IVpnHealthService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public Task ResolveAlertsByPrefixAsync(string keyPrefix, CancellationToken ct = default)
+    {
+        // An empty prefix would resolve every alert of every subsystem.
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyPrefix);
+        return MissingTableGuard.WriteAsync(() => ResolveAlertsByPrefixCoreAsync(keyPrefix, ct), _logger, nameof(ResolveAlertsByPrefixAsync));
+    }
+
+    private async Task ResolveAlertsByPrefixCoreAsync(string keyPrefix, CancellationToken ct)
+    {
+        // starts_with (not LIKE) so the prefix needs no wildcard escaping.
+        const string sql = @"
+            UPDATE system_alerts SET resolved_at = now()
+            WHERE resolved_at IS NULL AND starts_with(dedupe_key, @prefix)";
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("prefix", keyPrefix);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> DismissAlertAsync(long alertId, string? dismissedBy, CancellationToken ct = default)
+    {
+        if (alertId <= 0) return false;
+        var dismissed = false;
+        await MissingTableGuard.WriteAsync(async () =>
+        {
+            const string sql = @"
+                UPDATE system_alerts SET dismissed_at = now(), dismissed_by = @by
+                WHERE id = @id AND resolved_at IS NULL AND dismissed_at IS NULL";
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("id", alertId);
+            cmd.Parameters.AddWithValue("by", (object?)dismissedBy ?? DBNull.Value);
+            dismissed = await cmd.ExecuteNonQueryAsync(ct) > 0;
+        }, _logger, nameof(DismissAlertAsync));
+        return dismissed;
+    }
+
     public Task<IReadOnlyList<SystemAlert>> ActiveAlertsAsync(CancellationToken ct = default) =>
         MissingTableGuard.ReadListAsync(() => ActiveAlertsCoreAsync(ct), _logger, nameof(ActiveAlertsAsync));
 
     private async Task<IReadOnlyList<SystemAlert>> ActiveAlertsCoreAsync(CancellationToken ct)
     {
         const string sql = @"
-            SELECT id, source, severity, dedupe_key, title, body, raised_at, resolved_at
+            SELECT id, source, severity, dedupe_key, title, body, raised_at, resolved_at, dismissed_at
             FROM system_alerts
-            WHERE resolved_at IS NULL
+            WHERE resolved_at IS NULL AND dismissed_at IS NULL
             ORDER BY raised_at DESC";
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -234,6 +277,7 @@ public sealed class VpnHealthService : IVpnHealthService
                 Body       = r.IsDBNull(5) ? null : r.GetString(5),
                 RaisedAt   = r.GetDateTime(6),
                 ResolvedAt = r.IsDBNull(7) ? null : r.GetDateTime(7),
+                DismissedAt = r.IsDBNull(8) ? null : r.GetDateTime(8),
             });
         }
         return list;
@@ -247,9 +291,9 @@ public sealed class VpnHealthService : IVpnHealthService
         // Active first (still unresolved), then most-recently-raised. Includes
         // resolved rows so the dropdown/history shows the full activity stream.
         const string sql = @"
-            SELECT id, source, severity, dedupe_key, title, body, raised_at, resolved_at
+            SELECT id, source, severity, dedupe_key, title, body, raised_at, resolved_at, dismissed_at
             FROM system_alerts
-            ORDER BY (resolved_at IS NULL) DESC, raised_at DESC
+            ORDER BY (resolved_at IS NULL AND dismissed_at IS NULL) DESC, raised_at DESC
             LIMIT @lim";
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -268,6 +312,7 @@ public sealed class VpnHealthService : IVpnHealthService
                 Body       = r.IsDBNull(5) ? null : r.GetString(5),
                 RaisedAt   = r.GetDateTime(6),
                 ResolvedAt = r.IsDBNull(7) ? null : r.GetDateTime(7),
+                DismissedAt = r.IsDBNull(8) ? null : r.GetDateTime(8),
             });
         }
         return list;

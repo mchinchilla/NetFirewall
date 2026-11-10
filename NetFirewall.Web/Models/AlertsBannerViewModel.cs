@@ -13,7 +13,8 @@ public sealed record ActiveAlertViewModel(
     string? Body,
     DateTime RaisedAt,
     string Key = "",     // stable dedupe key, e.g. "wan:down:<id>"
-    string Source = ""); // vpn | wan | …
+    string Source = "",  // vpn | wan | …
+    long Id = 0);        // system_alerts id — what the dismiss button posts
 
 /// <summary>
 /// Model for the <c>_AlertsBanner</c> partial — the currently-active system
@@ -22,6 +23,9 @@ public sealed record ActiveAlertViewModel(
 public sealed class AlertsBannerViewModel
 {
     public IReadOnlyList<ActiveAlertViewModel> Alerts { get; init; } = Array.Empty<ActiveAlertViewModel>();
+
+    /// <summary>Whether to render the dismiss button (Admin / Operator only).</summary>
+    public bool CanDismiss { get; init; }
 }
 
 /// <summary>
@@ -34,9 +38,13 @@ public sealed record NotificationItemViewModel(
     string Title,
     string? Body,
     DateTime RaisedAt,
-    DateTime? ResolvedAt)
+    DateTime? ResolvedAt,
+    DateTime? DismissedAt = null)
 {
-    public bool IsActive => ResolvedAt is null;
+    public bool IsActive => ResolvedAt is null && DismissedAt is null;
+
+    /// <summary>Why it is no longer active, for the feed's status label.</summary>
+    public string InactiveLabel => ResolvedAt is null ? "dismissed" : "resolved";
 }
 
 /// <summary>

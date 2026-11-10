@@ -51,6 +51,15 @@ public sealed partial class WanHealthMonitorService : BackgroundService
     // route when the verdict actually changes.
     private Guid? _activeInterfaceId;
 
+    // Failover notices carry a unique key per event, so nothing resolves them
+    // by key. They are cleared here instead: once the active WAN is back to the
+    // one the config wants (see TickAsync). Starts false so the first nominal
+    // tick after a daemon start also clears notices left by an earlier run.
+    private bool _failoverNoticesCleared;
+
+    // The last route swap failed — keep its Danger notice up until a swap succeeds.
+    private bool _routeSwapFailed;
+
     public WanHealthMonitorService(
         NpgsqlDataSource ds,
         IWanHealthService health,
@@ -175,12 +184,14 @@ public sealed partial class WanHealthMonitorService : BackgroundService
         // pin.
         var control = await _health.GetControlAsync(ct);
         var winner = healthy[0];
+        var pinnedWins = false;
         if (control.OverrideInterfaceId is { } pinned)
         {
             var pinnedHealthy = healthy.FirstOrDefault(c => c.InterfaceId == pinned);
             if (pinnedHealthy is not null)
             {
                 winner = pinnedHealthy;
+                pinnedWins = true;
             }
             else
             {
@@ -188,14 +199,19 @@ public sealed partial class WanHealthMonitorService : BackgroundService
                 await _health.SetOverrideAsync(null, "auto (pinned WAN down)", ct);
                 if (byId.TryGetValue(pinned, out var pinnedIface))
                 {
+                    // Point-in-time notice: raise then resolve, so it reaches
+                    // email + the notifications feed without sticking as a
+                    // banner (the "WAN is down" banner already covers the cause).
+                    var clearedKey = $"{OverrideClearedKeyPrefix}{pinned}:{DateTime.UtcNow:O}";
                     await _notify.DispatchAsync(new NotificationMessage(
                         Source: "wan",
                         Level: NotificationLevel.Warning,
-                        DedupeKey: $"wan:override-cleared:{pinned}:{DateTime.UtcNow:O}",
+                        DedupeKey: clearedKey,
                         Title: "WAN override cleared",
                         Body: $"The pinned WAN {pinnedIface.Name} went down; reverting to automatic "
                               + $"priority-based failover ({winner.InterfaceName} is next).",
                         Resolved: false), ct);
+                    await _alerts.ResolveAlertAsync(clearedKey, ct);
                 }
             }
         }
@@ -204,6 +220,24 @@ public sealed partial class WanHealthMonitorService : BackgroundService
         {
             await ApplyFailoverAsync(winner, byId, ct);
             _activeInterfaceId = winner.InterfaceId;
+        }
+
+        // Nominal = traffic is on the WAN the config asks for: the operator's
+        // pin, or the top-priority WAN. A failover notice only describes a
+        // condition while we are running on a fallback; once nominal again
+        // (the preferred WAN recovered and we failed back, or the operator
+        // pinned the current one) it is history — resolve it so it leaves the
+        // banner and stays only in the notifications feed.
+        var nominal = pinnedWins || winner.InterfaceId == configs.MinBy(c => c.Priority)!.InterfaceId;
+        if (!nominal)
+        {
+            _failoverNoticesCleared = false;
+        }
+        else if (!_failoverNoticesCleared && !_routeSwapFailed)
+        {
+            await _alerts.ResolveAlertsByPrefixAsync(FailoverKeyPrefix, ct);
+            await _alerts.ResolveAlertsByPrefixAsync(OverrideClearedKeyPrefix, ct);
+            _failoverNoticesCleared = true;
         }
 
         // Persist the active WAN so the dashboard can show it and it survives a
@@ -444,12 +478,18 @@ public sealed partial class WanHealthMonitorService : BackgroundService
         await _applyHistory.RecordAsync("failover", ok, result.ExitCode, msg, "wan-monitor", ct);
 
         // Notify the operator the active WAN changed. Unique dedupe key per
-        // event (it's a point-in-time notice, not a sticky condition that
-        // recovers). Warning on success, Danger if the route swap itself failed.
+        // event, so each one is its own row in the notifications feed. Warning
+        // on success, Danger if the route swap itself failed. This switch
+        // supersedes any earlier failover notice, so those are resolved first
+        // (only the latest can be on the banner); TickAsync resolves this one
+        // too as soon as the active WAN is the preferred one again.
+        _routeSwapFailed = !ok;
+        _failoverNoticesCleared = false;
+        await _alerts.ResolveAlertsByPrefixAsync(FailoverKeyPrefix, ct);
         await _notify.DispatchAsync(new NotificationMessage(
             Source: "wan",
             Level: ok ? NotificationLevel.Warning : NotificationLevel.Danger,
-            DedupeKey: $"wan:failover:{winner.InterfaceId}:{result.ExitCode}:{(ok ? "ok" : "fail")}:{DateTime.UtcNow:O}",
+            DedupeKey: $"{FailoverKeyPrefix}{winner.InterfaceId}:{result.ExitCode}:{(ok ? "ok" : "fail")}:{DateTime.UtcNow:O}",
             Title: ok ? "WAN failover triggered" : "WAN failover FAILED",
             Body: ok
                 ? $"Default route switched from {fromName} to {iface.Name} (via {iface.Gateway})."
@@ -461,6 +501,10 @@ public sealed partial class WanHealthMonitorService : BackgroundService
     // One dedupe key per interface for the down↔recovery pair, so a recovery
     // upserts/clears the same banner row a "down" raised.
     private static string DownAlertKey(Guid interfaceId) => $"wan:down:{interfaceId}";
+
+    // Prefixes of the per-event (unique-key) notices, resolved in bulk by prefix.
+    private const string FailoverKeyPrefix = "wan:failover:";
+    private const string OverrideClearedKeyPrefix = "wan:override-cleared:";
 
     [GeneratedRegex(@"time=([\d.]+)\s*ms", RegexOptions.IgnoreCase)] private static partial Regex TimeRx();
     [GeneratedRegex(@"\bdev\s+(\S+)")]                                 private static partial Regex DevRx();

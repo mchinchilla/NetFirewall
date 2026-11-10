@@ -273,6 +273,10 @@ public interface IDaemonClient
     /// the unified activity feed. Powers the notifications dropdown + history page.</summary>
     Task<ServiceResponse<AlertsDto>> GetRecentAlertsAsync(int limit = 50, CancellationToken ct = default);
 
+    /// <summary><c>POST /v1/system/alerts/{id}/dismiss</c> — hide one active alert from
+    /// the banner. It stays in the activity feed and returns if the condition re-fires.</summary>
+    Task<ServiceResponse<bool>> DismissAlertAsync(long alertId, CancellationToken ct = default);
+
     /// <summary><c>POST /v1/wol/wake</c> — broadcast a magic packet on a LAN link (by
     /// name, or the link whose subnet holds the request's IP hint).</summary>
     Task<ServiceResponse<NetFirewall.Models.Wol.WolWakeResult>> WakeOnLanAsync(NetFirewall.Models.Wol.WolWakeRequest request, CancellationToken ct = default);

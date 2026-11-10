@@ -186,6 +186,9 @@ public sealed class NullDaemonClient : IDaemonClient
         => Task.FromResult(ServiceResponse<AlertsDto>.Ok(
             new AlertsDto(Array.Empty<NetFirewall.Models.Vpn.SystemAlert>()), "Daemon disabled."));
 
+    public Task<ServiceResponse<bool>> DismissAlertAsync(long alertId, CancellationToken ct = default)
+        => Task.FromResult(Disabled<bool>());
+
     public Task<ServiceResponse<NetFirewall.Models.Wol.WolWakeResult>> WakeOnLanAsync(NetFirewall.Models.Wol.WolWakeRequest request, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Models.Wol.WolWakeResult>());
 

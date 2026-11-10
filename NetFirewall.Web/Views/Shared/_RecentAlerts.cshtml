@@ -48,7 +48,7 @@
                             <p class="text-[11px] text-surface-fg-muted mt-0.5">
                                 <span class="uppercase tracking-wide">@n.Source</span>
                                 · @Ago(n.RaisedAt)
-                                @if (!n.IsActive) { <span>· resolved</span> }
+                                @if (!n.IsActive) { <span>· @n.InactiveLabel</span> }
                             </p>
                         </div>
                         <span class="badge @badge shrink-0">@n.Severity</span>

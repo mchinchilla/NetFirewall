@@ -109,6 +109,23 @@ public static class SystemEndpoints
             return Results.Json(ServiceResponse<AlertsDto>.Ok(new AlertsDto(alerts), "OK"));
         });
 
+        // POST /v1/system/alerts/{id}/dismiss — hide one active alert from the
+        // banner (operator acknowledged it). Not elevated: it changes nothing but
+        // what the UI shows, and the alert stays in the activity feed.
+        grp.MapPost("/alerts/{id:long}/dismiss", async (
+                long id,
+                NetFirewall.Services.Vpn.IVpnHealthService vpn,
+                System.Security.Claims.ClaimsPrincipal user,
+                CancellationToken ct) =>
+        {
+            if (id <= 0)
+                return Results.Json(ServiceResponse<bool>.Fail("Invalid alert id."), statusCode: 400);
+            var done = await vpn.DismissAlertAsync(id, user.Identity?.Name, ct);
+            return Results.Json(done
+                ? ServiceResponse<bool>.Ok(true, "Alert dismissed.")
+                : ServiceResponse<bool>.Fail("That alert is no longer active."));
+        });
+
         // GET /v1/system/top-talkers?hours=24&limit=5 — top hosts + services.
         grp.MapGet("/top-talkers", async (
                 ITopTalkersService svc,
