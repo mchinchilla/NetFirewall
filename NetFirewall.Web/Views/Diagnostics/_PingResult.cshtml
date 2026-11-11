@@ -5,6 +5,9 @@
 @{
     var r = Model.Result;
     var summary = r is null ? null : r.Error ?? $"{r.Received}/{r.Sent} replies via {r.Via}";
+    var rttAvg = r?.RttAvgMs?.ToString("0.#") ?? "—";
+    var rttMin = r?.RttMinMs?.ToString("0.#") ?? "—";
+    var rttMax = r?.RttMaxMs?.ToString("0.#") ?? "—";
 }
 @await Html.PartialAsync("_DiagRunMeta", DiagRunMetaViewModel.From(Model, DiagTools.Ping, summary))
 @if (r is null)
@@ -16,8 +19,8 @@ else
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         @await Html.PartialAsync("_StatTile", new StatTileViewModel("Received / sent", $"{r.Received}/{r.Sent}"))
         @await Html.PartialAsync("_StatTile", new StatTileViewModel("Loss", $"{r.LossPct:0.#}%", Tone: r.LossPct > 0 ? StatTone.Danger : StatTone.Normal))
-        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Avg RTT", r.RttAvgMs is { } a ? $"{a:0.#}" : "—", "ms"))
-        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Min / max", $"{(r.RttMinMs is { } mn ? $"{mn:0.#}" : "—")} / {(r.RttMaxMs is { } mx ? $"{mx:0.#}" : "—")}", "ms"))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Avg RTT", rttAvg, "ms"))
+        @await Html.PartialAsync("_StatTile", new StatTileViewModel("Min / max", $"{rttMin} / {rttMax}", "ms"))
     </div>
     <p class="text-xs font-mono text-surface-fg-muted mb-3">target @r.Target → @r.ResolvedIp · @r.Via</p>
     @if (r.Error is not null)
