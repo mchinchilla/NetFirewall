@@ -79,4 +79,58 @@ public sealed class LeaseCachePersistenceTests : IAsyncLifetime
         await _cache.ReleaseLeaseAsync(other);
         Assert.Null(await EventuallyAsync(() => RowAsync(other), r => r is null));
     }
+
+    // ── Set-based flush: one statement per kind, coalesced per MAC ──
+
+    private static LeaseWriteOperation Up(string mac, string ip, string? host = null) => new()
+    {
+        Type = LeaseWriteType.Upsert, MacAddress = mac, IpAddress = IPAddress.Parse(ip), Hostname = host,
+        StartTime = DateTime.UtcNow, EndTime = DateTime.UtcNow.AddHours(1),
+    };
+
+    private static LeaseWriteOperation Del(string mac) => new()
+        { Type = LeaseWriteType.Delete, MacAddress = mac, IpAddress = IPAddress.Any };
+
+    private async Task FlushAsync(params LeaseWriteOperation[] ops)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var batch = new NpgsqlBatch(conn);
+        foreach (var c in LeaseCache.SetBasedCommands(ops)) batch.BatchCommands.Add(c);
+        await batch.ExecuteNonQueryAsync();
+    }
+
+    [Fact]
+    public async Task OneFlush_WithTheSameMacSeveralTimes_LastOperationWins_AndDoesNotFail()
+    {
+        // In ONE statement ON CONFLICT can't touch a row twice — without coalescing this threw
+        // "ON CONFLICT DO UPDATE command cannot affect row a second time".
+        await FlushAsync(
+            Up("aa:bb:cc:dd:ee:10", "10.60.0.20", "first"),
+            Up("aa:bb:cc:dd:ee:10", "10.60.0.21", "renewed"),   // two renewals → the later one
+            Up("aa:bb:cc:dd:ee:11", "10.60.0.22"),
+            Del("AA:BB:CC:DD:EE:11"),                            // upsert then release → gone (any MAC case)
+            Del("aa:bb:cc:dd:ee:12"),
+            Up("aa:bb:cc:dd:ee:12", "10.60.0.23", "back"));      // release then renew → present
+
+        Assert.Equal(("10.60.0.21", (string?)"renewed"), await RowAsync("aa:bb:cc:dd:ee:10"));
+        Assert.Null(await RowAsync("aa:bb:cc:dd:ee:11"));
+        Assert.Equal(("10.60.0.23", (string?)"back"), await RowAsync("aa:bb:cc:dd:ee:12"));
+    }
+
+    [Fact]
+    public async Task OneFlush_OfAHundredLeases_PersistsThemAll_AsTwoCommandsAtMost()
+    {
+        var ops = Enumerable.Range(0, 100)
+            .Select(i => Up($"02:00:00:00:00:{i:x2}", $"10.61.0.{i + 1}", i % 2 == 0 ? null : $"h{i}"))
+            .ToArray();
+        Assert.Single(LeaseCache.SetBasedCommands(ops));        // one INSERT … unnest, not 100
+
+        await FlushAsync(ops);
+
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand("SELECT count(*) FROM dhcp_leases WHERE host(ip_address) LIKE '10.61.0.%'", conn);
+        Assert.Equal(100L, await cmd.ExecuteScalarAsync());
+        Assert.Equal(("10.61.0.2", (string?)"h1"), await RowAsync("02:00:00:00:00:01"));
+        Assert.Equal(("10.61.0.1", (string?)null), await RowAsync("02:00:00:00:00:00"));
+    }
 }

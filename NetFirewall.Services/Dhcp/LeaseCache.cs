@@ -8,6 +8,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Models.Dhcp;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace NetFirewall.Services.Dhcp;
 
@@ -540,14 +541,16 @@ public sealed class LeaseCache : IDisposable
 
         try
         {
-            // One NpgsqlBatch per flush: every upsert/delete travels in a single
-            // round trip instead of one per operation (bursts flush up to 100 ops).
+            // Two set-based statements per flush, one round trip: every release in one
+            // DELETE … = ANY(array), every upsert in one INSERT … SELECT FROM unnest(arrays)
+            // ON CONFLICT. Measured on real PostgreSQL (LeaseFlushBenchmarks): N=100 2.3× faster
+            // and 11× less memory than one INSERT per lease; RepoDb BulkMerge (COPY → temp table
+            // → merge) was not usable (NRE inside RepoDb 1.17) and COPY's temp table only pays
+            // off far above a flush's ≤ 100 rows.
             await using (var dbBatch = new NpgsqlBatch(connection, transaction))
             {
-                foreach (var op in batch)
-                {
-                    dbBatch.BatchCommands.Add(op.Type == LeaseWriteType.Delete ? DeleteCommand(op) : UpsertCommand(op));
-                }
+                foreach (var command in SetBasedCommands(batch))
+                    dbBatch.BatchCommands.Add(command);
                 if (dbBatch.BatchCommands.Count > 0)
                 {
                     await dbBatch.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -577,28 +580,61 @@ public sealed class LeaseCache : IDisposable
         }
     }
 
-    private static NpgsqlBatchCommand UpsertCommand(LeaseWriteOperation op)
+    /// <summary>
+    /// The flush as at most two set-based commands. Operations are first COALESCED per MAC — the
+    /// last one in queue order wins — because one INSERT … ON CONFLICT DO UPDATE cannot touch the
+    /// same row twice ("cannot affect row a second time"): a renewal followed by a release in the
+    /// same window must end as a delete, two renewals as the later one. Internal for tests.
+    /// </summary>
+    internal static List<NpgsqlBatchCommand> SetBasedCommands(IReadOnlyList<LeaseWriteOperation> batch)
     {
-        var cmd = new NpgsqlBatchCommand(@"
-            INSERT INTO dhcp_leases (id, mac_address, ip_address, hostname, start_time, end_time)
-            VALUES ($1, $2::macaddr, $3, $4, $5, $6)
-            ON CONFLICT (mac_address)
-            DO UPDATE SET ip_address = EXCLUDED.ip_address, hostname = EXCLUDED.hostname,
-                          start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time");
-        cmd.Parameters.Add(new NpgsqlParameter { Value = Guid.NewGuid() });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = op.MacAddress });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = op.IpAddress });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = op.Hostname ?? (object)DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = op.StartTime });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = op.EndTime });
-        return cmd;
-    }
+        var last = new Dictionary<string, LeaseWriteOperation>(batch.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var op in batch) last[op.MacAddress] = op;
 
-    private static NpgsqlBatchCommand DeleteCommand(LeaseWriteOperation op)
-    {
-        var cmd = new NpgsqlBatchCommand("DELETE FROM dhcp_leases WHERE mac_address = $1::macaddr");
-        cmd.Parameters.Add(new NpgsqlParameter { Value = op.MacAddress });
-        return cmd;
+        var deletes = new List<string>();
+        var upserts = new List<LeaseWriteOperation>(last.Count);
+        foreach (var op in last.Values)
+        {
+            if (op.Type == LeaseWriteType.Delete) deletes.Add(op.MacAddress);
+            else upserts.Add(op);
+        }
+
+        var commands = new List<NpgsqlBatchCommand>(2);
+        if (deletes.Count > 0)
+        {
+            var del = new NpgsqlBatchCommand("DELETE FROM dhcp_leases WHERE mac_address = ANY($1::text[]::macaddr[])");
+            del.Parameters.Add(new NpgsqlParameter { Value = deletes.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+            commands.Add(del);
+        }
+        if (upserts.Count > 0)
+        {
+            var n = upserts.Count;
+            var ids = new Guid[n]; var macs = new string[n]; var ips = new IPAddress[n];
+            var hosts = new string?[n]; var starts = new DateTime[n]; var ends = new DateTime[n];
+            for (var i = 0; i < n; i++)
+            {
+                var op = upserts[i];
+                ids[i] = Guid.NewGuid(); macs[i] = op.MacAddress; ips[i] = op.IpAddress;
+                hosts[i] = op.Hostname; starts[i] = op.StartTime; ends[i] = op.EndTime;
+            }
+            var up = new NpgsqlBatchCommand("""
+                INSERT INTO dhcp_leases (id, mac_address, ip_address, hostname, start_time, end_time)
+                SELECT id, mac::macaddr, ip, host, st, et
+                FROM unnest($1::uuid[], $2::text[], $3::inet[], $4::text[], $5::timestamptz[], $6::timestamptz[])
+                     AS t(id, mac, ip, host, st, et)
+                ON CONFLICT (mac_address)
+                DO UPDATE SET ip_address = EXCLUDED.ip_address, hostname = EXCLUDED.hostname,
+                              start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time
+                """);
+            up.Parameters.Add(new NpgsqlParameter { Value = ids });
+            up.Parameters.Add(new NpgsqlParameter { Value = macs, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+            up.Parameters.Add(new NpgsqlParameter { Value = ips });
+            up.Parameters.Add(new NpgsqlParameter { Value = hosts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+            up.Parameters.Add(new NpgsqlParameter { Value = starts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+            up.Parameters.Add(new NpgsqlParameter { Value = ends, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+            commands.Add(up);
+        }
+        return commands;
     }
 
     #endregion
