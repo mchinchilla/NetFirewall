@@ -68,6 +68,56 @@ public sealed class VpnRoutingServiceTests
         routing.Verify(x => x.EnsurePolicyRuleAsync(It.IsAny<long>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // ── Egress: steered devices are masqueraded out of the tunnel ──
+
+    private static (VpnRoutingService svc, Mock<IFirewallService> fw) AdoptedScaffold(IReadOnlyList<FwNatRule> nat, out Guid ifaceId)
+    {
+        var fw = new Mock<IFirewallService>();
+        var routing = new Mock<IPolicyRoutingService>();
+        var id = Guid.NewGuid(); var tableId = Guid.NewGuid(); var markId = Guid.NewGuid();
+        fw.Setup(x => x.GetInterfaceByNameAsync("wg0", It.IsAny<CancellationToken>())).ReturnsAsync(new FwInterface { Id = id, Name = "wg0", Type = "VPN" });
+        routing.Setup(x => x.GetRouteTableByNameAsync("wg0", It.IsAny<CancellationToken>())).ReturnsAsync(new FwRouteTable { Id = tableId, TableId = 202, Name = "wg0" });
+        routing.Setup(x => x.GetPolicyRuleByTableNameAsync("wg0", It.IsAny<CancellationToken>())).ReturnsAsync(new FwPolicyRule { Fwmark = 1280, TableName = "wg0" });
+        fw.Setup(x => x.GetTrafficMarksAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { new FwTrafficMark { Id = markId, MarkValue = 1280, RouteTable = "wg0" } });
+        fw.Setup(x => x.GetStaticRoutesAsync(null, It.IsAny<CancellationToken>()))
+          .ReturnsAsync(new[] { new FwStaticRoute { TableId = tableId, Destination = "0.0.0.0/0", InterfaceId = id } });
+        fw.Setup(x => x.GetMangleRulesAsync("prerouting", It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FwMangleRule>());
+        fw.Setup(x => x.GetNatRulesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(nat);
+        ifaceId = id;
+        return (new VpnRoutingService(fw.Object, routing.Object, NullLogger<VpnRoutingService>.Instance), fw);
+    }
+
+    [Fact]
+    public async Task SetEgressSources_MasqueradesEachSource_OutOfThisTunnelOnly()
+    {
+        var (svc, fw) = AdoptedScaffold(Array.Empty<FwNatRule>(), out var ifaceId);
+
+        await svc.SetEgressSourcesAsync(Wg0, ["192.168.1.50/32", "192.168.2.0/24"]);
+
+        foreach (var src in new[] { "192.168.1.50/32", "192.168.2.0/24" })
+            fw.Verify(x => x.CreateNatRuleAsync(It.Is<FwNatRule>(n => n.Type == "masquerade" && n.SourceNetwork == src
+                && n.OutputInterfaceId == ifaceId && n.Description!.EndsWith(" via wg0")), It.IsAny<CancellationToken>()), Times.Once);
+        fw.Verify(x => x.CreateNatRuleAsync(It.Is<FwNatRule>(n => n.SourceNetwork == null), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetEgressSources_RemovesOnlyItsOwnStaleMasquerade_AndRespectsHandRows()
+    {
+        Guid ifaceId = Guid.Empty;
+        var nat = new List<FwNatRule>();
+        var (svc, fw) = AdoptedScaffold(nat, out ifaceId);
+        var stale = new FwNatRule { Id = Guid.NewGuid(), Type = "masquerade", SourceNetwork = "192.168.9.9/32", OutputInterfaceId = ifaceId, Description = "[vpn-egress] masquerade 192.168.9.9/32 via wg0" };
+        var hand = new FwNatRule { Id = Guid.NewGuid(), Type = "masquerade", SourceNetwork = "192.168.99.0/24", OutputInterfaceId = ifaceId, Description = "tekium hand rule" };
+        nat.AddRange([stale, hand]);
+
+        await svc.SetEgressSourcesAsync(Wg0, ["192.168.99.0/24"]);
+
+        fw.Verify(x => x.DeleteNatRuleAsync(stale.Id, It.IsAny<CancellationToken>()), Times.Once);
+        fw.Verify(x => x.DeleteNatRuleAsync(hand.Id, It.IsAny<CancellationToken>()), Times.Never);
+        // Already NATed by the hand row → no duplicate.
+        fw.Verify(x => x.CreateNatRuleAsync(It.IsAny<FwNatRule>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task EnsureScaffold_clean_db_allocates_noncolliding_mark_and_creates_rows()
     {

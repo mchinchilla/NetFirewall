@@ -104,21 +104,24 @@ public sealed class NullDaemonClient : IDaemonClient
     public Task<ServiceResponse<WireGuardPskDto>> GenerateWireGuardPskAsync(CancellationToken ct = default)
         => Task.FromResult(Disabled<WireGuardPskDto>());
 
-    public Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(CancellationToken ct = default)
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(string? interfaceName = null, CancellationToken ct = default)
         => Task.FromResult(Disabled<NftApplyResultDto>());
 
-    public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default)
+    public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(string? interfaceName = null, CancellationToken ct = default)
         => Task.FromResult(Disabled<NftApplyResultDto>());
 
     public Task<ServiceResponse<NetworkApplyResult>> ApplyDnsAsync(DnsForwarderConfig config, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetworkApplyResult>());
 
-    public Task<ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
+    public Task<ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>> GetWireGuardStatusAsync(string? interfaceName = null, CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<IReadOnlyList<WgPeerLiveStatus>>.Ok(
             Array.Empty<WgPeerLiveStatus>(), "Daemon disabled — no live status available."));
 
     public Task<ServiceResponse<IReadOnlyList<string>>> ListWireGuardImportablesAsync(CancellationToken ct = default)
         => Task.FromResult(ServiceResponse<IReadOnlyList<string>>.Ok(Array.Empty<string>(), "Daemon disabled."));
+
+    public Task<ServiceResponse<WgOutboundCreatedDto>> CreateWireGuardOutboundAsync(WgOutboundCreateRequest request, CancellationToken ct = default)
+        => Task.FromResult(Disabled<WgOutboundCreatedDto>());
 
     public Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default)
         => Task.FromResult(Disabled<NetFirewall.Services.Vpn.WireGuardImportResult>());

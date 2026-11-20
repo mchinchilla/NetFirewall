@@ -1,0 +1,63 @@
+@model NetFirewall.Web.Models.Vpn.OutboundConnectionsPageViewModel
+@using NetFirewall.Web.Models.Vpn
+@{
+    ViewData["Title"] = "VPN — Outbound connections";
+    Layout = "_Layout";
+}
+@await Html.PartialAsync("_InterfaceOutcomeStrip", new InterfaceOutcomeStripModel(Model.DeletedName, Deleted: true, Model.DeleteApplyWarn))
+@await Html.PartialAsync("_InterfaceOutcomeStrip", new InterfaceOutcomeStripModel(Model.CreatedName, Deleted: false))
+
+<div class="flex flex-wrap items-end justify-between gap-3 mb-4" style="animation: var(--animate-slide-up);">
+    <div>
+        <p class="page-kicker">VPN</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Outbound connections</h1>
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+            Tunnels this firewall dials: a VPN provider that chosen devices browse through, or another site whose network
+            becomes reachable from yours. Each connection is its own interface, so it can be applied, stopped or deleted
+            without touching the remote-access server.
+        </p>
+    </div>
+    <div class="flex items-center gap-2">
+        <a href="/Vpn/WireGuard" class="btn btn-ghost">VPN server</a>
+        <button type="button" class="btn btn-primary"
+                hx-get="/Vpn/Outbound/new" hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('New outbound connection')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            New connection
+        </button>
+    </div>
+</div>
+
+@if (Model.Connections.Count == 0 && Model.Shared is null)
+{
+    @await Html.PartialAsync("_OutboundEmpty")
+}
+else
+{
+    <div class="grid gap-4 grid-cols-1 2xl:grid-cols-2">
+        @foreach (var card in Model.Connections)
+        {
+            @await Html.PartialAsync("_OutboundCard", card)
+        }
+    </div>
+    @if (Model.Shared is not null)
+    {
+        @await Html.PartialAsync("_SharedTunnels", Model.Shared)
+    }
+}
+
+@* Every tunnel on every interface (incl. sites that dial into the server), for search and detail. *@
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
+    <header class="mb-4">
+        <h2 class="text-base font-semibold">All tunnels</h2>
+        <p class="text-xs text-surface-fg-muted">Every link this firewall keeps up, on every interface. Health-monitored: a stale handshake raises an alert.</p>
+    </header>
+    @await Html.PartialAsync("_Grid", new GridFrameViewModel
+    {
+        GridId = NetFirewall.Web.Grids.Vpn.WireGuardPeersGrid.TunnelsId,
+        Title = "WireGuard tunnels",
+        DefaultQuery = NetFirewall.Web.Grids.Vpn.WireGuardPeersGrid.DefaultQuery,
+        RefreshOn = ["refreshWireGuardPeers", "refreshWireGuard"],
+        ForwardQuery = false
+    })
+</section>

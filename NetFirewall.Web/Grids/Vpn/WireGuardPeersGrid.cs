@@ -19,11 +19,14 @@ public sealed record WgPeerGridRow(
     string AllowedIpsText,
     string Access,
     string PublicKey,
-    bool Enabled)
+    bool Enabled,
+    string Interface = "")
 {
     public bool IsTunnel => WireGuardPeersGrid.IsTunnelRole(Role);
 
-    public static WgPeerGridRow From(WgPeer p)
+    public static WgPeerGridRow From(WgPeer p) => From(p, string.Empty);
+
+    public static WgPeerGridRow From(WgPeer p, string interfaceName)
     {
         var role = string.IsNullOrEmpty(p.Role) ? "client" : p.Role.ToLowerInvariant();
         return new WgPeerGridRow(
@@ -34,7 +37,8 @@ public sealed record WgPeerGridRow(
             string.Join(' ', p.AllowedIps),
             AccessLabel(p),
             p.PublicKey,
-            p.Enabled);
+            p.Enabled,
+            interfaceName);
     }
 
     /// <summary>Same wording as the old _PeersTable "Access" column.</summary>
@@ -75,7 +79,7 @@ public static class WireGuardPeersGrid
             Roles,
             o => o
                 .WithTitle("Tunnels")
-                .WithEmptyMessage("No tunnels yet. Click Add tunnel to dial an upstream VPN server or link another site.")
+                .WithEmptyMessage("No tunnels yet. Add a connection to dial a VPN provider or link another site.")
                 .WithRowKey(r => r.Id.ToString("D"))
                 .WithRowDetail(Detail)
                 .AddView("By role", "groupby=role&sort=name:asc")
@@ -89,6 +93,11 @@ public static class WireGuardPeersGrid
                     .Header("Role")
                     .WidthCss("7rem")
                     .RawCellHtml(r => GridCell.Badge(BadgeTone.Accent, r.Role)))
+                .AddColumn("interface", r => r.Interface, c => c
+                    .Header("Interface")
+                    .WidthCss("7rem")
+                    .Searchable()
+                    .RawCellHtml(r => GridCell.Mono(r.Interface)))
                 .AddColumn("endpoint", r => r.Endpoint, c => c
                     .Header("Endpoint")
                     .Searchable()
@@ -162,10 +171,18 @@ public static class WireGuardPeersGrid
 
     private static async Task<IReadOnlyList<WgPeerGridRow>> LoadAsync(IWireGuardService wg, bool tunnels, CancellationToken ct)
     {
-        var server = await wg.GetServerAsync(ct);
-        if (server is null) return [];
-        var peers = await wg.GetPeersAsync(server.Id, ct);
-        return peers.Where(p => IsTunnelRole(p.Role ?? string.Empty) == tunnels).Select(WgPeerGridRow.From).ToArray();
+        // Tunnels: the links this firewall keeps up, on EVERY interface (an outbound connection's
+        // peer, a site dialing into the server, a legacy upstream still on wg0). Clients: the
+        // road warriors of the remote-access server only.
+        var rows = new List<WgPeerGridRow>();
+        foreach (var server in await wg.ListServersAsync(ct))
+        {
+            if (!tunnels && !string.Equals(server.Mode, "server", StringComparison.OrdinalIgnoreCase)) continue;
+            rows.AddRange((await wg.GetPeersAsync(server.Id, ct))
+                .Where(p => IsTunnelRole(p.Role ?? string.Empty) == tunnels)
+                .Select(p => WgPeerGridRow.From(p, server.Name)));
+        }
+        return rows;
     }
 
     private static string Detail(WgPeerGridRow r) => $"/Vpn/WireGuard/Peers/detail/{r.Id:D}";

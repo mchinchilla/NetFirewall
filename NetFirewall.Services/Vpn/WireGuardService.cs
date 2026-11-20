@@ -15,11 +15,31 @@ public sealed class WireGuardService : IWireGuardService
         _logger = logger;
     }
 
-    public async Task<WgServer?> GetServerAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<WgServer>> ListServersAsync(CancellationToken ct = default)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
-            "SELECT * FROM wg_servers ORDER BY created_at LIMIT 1", conn);
+            "SELECT * FROM wg_servers ORDER BY (mode = 'server') DESC, created_at, name", conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var list = new List<WgServer>();
+        while (await reader.ReadAsync(ct)) list.Add(ReadServer(reader));
+        return list;
+    }
+
+    public async Task<WgServer?> GetServerByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("SELECT * FROM wg_servers WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadServer(reader) : null;
+    }
+
+    public async Task<WgServer?> GetServerByNameAsync(string name, CancellationToken ct = default)
+    {
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("SELECT * FROM wg_servers WHERE name = @name", conn);
+        cmd.Parameters.AddWithValue("name", name);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadServer(reader) : null;
     }

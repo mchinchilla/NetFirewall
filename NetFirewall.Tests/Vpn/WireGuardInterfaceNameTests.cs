@@ -18,7 +18,7 @@ namespace NetFirewall.Tests.Vpn;
 /// config, the policy-routing table, and the live interface, so a rename —
 /// UI accident or tampered POST — must never reach the database. Two doors
 /// are guarded: the Web's server Save (ignores posted names on update) and
-/// the importer (refuses a .conf whose name differs from the managed one).
+/// the importer (accepts only link-name-safe names).
 /// </summary>
 public sealed class WireGuardInterfaceNameTests
 {
@@ -35,7 +35,7 @@ public sealed class WireGuardInterfaceNameTests
         };
 
         var wg = new Mock<IWireGuardService>();
-        wg.Setup(x => x.GetServerAsync(It.IsAny<CancellationToken>())).ReturnsAsync(existing);
+        wg.Setup(x => x.GetServerByIdAsync(existing.Id, It.IsAny<CancellationToken>())).ReturnsAsync(existing);
         wg.Setup(x => x.GetPeersAsync(existing.Id, It.IsAny<CancellationToken>()))
           .ReturnsAsync(Array.Empty<WgPeer>());
         wg.Setup(x => x.SaveServerAsync(It.IsAny<WgServer>(), It.IsAny<CancellationToken>()))
@@ -63,39 +63,33 @@ public sealed class WireGuardInterfaceNameTests
             It.Is<WgServer>(s => s.Name == "wg0"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // ── Importer: a conf under a different name is refused, not half-imported ──
+    // ── Importer: only link-name-safe names reach wg-quick ──
+
+    [Theory]
+    [InlineData("wg0;reboot")]
+    [InlineData("../etc/passwd")]
+    [InlineData("wg 0")]
+    [InlineData("averyveryverylongname")]
+    public async Task Import_UnsafeInterfaceName_IsRefused_BeforeAnyWrite(string name)
+    {
+        var wg = new Mock<IWireGuardService>();
+        var importer = new WireGuardImporter(
+            wg.Object,
+            new Mock<IWireGuardApplyService>().Object,
+            NpgsqlDataSource.Create("Host=localhost;Username=unused"),
+            NullLogger<WireGuardImporter>.Instance,
+            Options.Create(new WireGuardApplyOptions { ConfigDir = Path.GetTempPath() }));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => importer.ImportAsync(name, CancellationToken.None));
+        wg.Verify(x => x.SaveServerAsync(It.IsAny<WgServer>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Generated names for outbound connections ──
 
     [Fact]
-    public async Task Import_DifferentInterfaceName_WhenServerExists_Throws()
+    public void NextClientName_TakesFirstFreeSlot()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"wgimport-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            await File.WriteAllTextAsync(Path.Combine(dir, "wg1.conf"),
-                "[Interface]\nPrivateKey = PRIV\nAddress = 10.0.0.2/32\n");
-
-            var wg = new Mock<IWireGuardService>();
-            wg.Setup(x => x.GetServerAsync(It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new WgServer { Id = Guid.NewGuid(), Name = "wg0" });
-
-            var importer = new WireGuardImporter(
-                wg.Object,
-                new Mock<IWireGuardApplyService>().Object,
-                NpgsqlDataSource.Create("Host=localhost;Username=unused"),
-                NullLogger<WireGuardImporter>.Instance,
-                Options.Create(new WireGuardApplyOptions { ConfigDir = dir }));
-
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => importer.ImportAsync("wg1", CancellationToken.None));
-            Assert.Contains("wg0", ex.Message);
-
-            // Nothing was written: no server upsert, no peer churn.
-            wg.Verify(x => x.SaveServerAsync(It.IsAny<WgServer>(), It.IsAny<CancellationToken>()), Times.Never);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.Equal("wgc1", WgInterfaceName.NextClientName(["wg0"]));
+        Assert.Equal("wgc2", WgInterfaceName.NextClientName(["wg0", "wgc1", "wgc3"]));
     }
 }

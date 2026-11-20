@@ -36,6 +36,15 @@ public interface IWireGuardImporter
     /// admin sent them).
     /// </summary>
     NetFirewall.Models.Vpn.WgQuickConfig Parse(string text);
+
+    /// <summary>
+    /// A NEW outbound client interface (wgcN) from the wg-quick config a VPN provider or a
+    /// remote site handed out. Exactly one [Peer] with an Endpoint; any script hook
+    /// (PreUp/PostUp/PreDown/PostDown) or SaveConfig is refused — pasted text must never
+    /// become a root command. Always Table=off (traffic enters by policy routing only).
+    /// DB only: the operator applies afterwards. The private key is stored, never logged.
+    /// </summary>
+    Task<WireGuardImportResult> CreateOutboundAsync(string configText, string? label, CancellationToken ct = default);
 }
 
 public sealed record WireGuardImportResult(

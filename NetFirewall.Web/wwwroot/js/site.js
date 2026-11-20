@@ -1489,6 +1489,36 @@ document.addEventListener("alpine:init", () => {
      * that matches how the kernel walks the chains. The others regroup for
      * answering a question and the table banners say so.
      */
+    /* ---------- wgOutboundPaste ---------- client-side check of a pasted
+     * provider / remote-site config before it is posted. The daemon re-validates
+     * everything; this only gives the operator the reason inline, early.
+     */
+    Alpine.data("wgOutboundPaste", () => ({
+        text: "",
+        label: "",
+        get error() {
+            const t = this.text.trim();
+            if (t.length === 0) return "";
+            const hook = t.match(/^\s*(PreUp|PostUp|PreDown|PostDown|SaveConfig)\s*=/im);
+            if (hook) return `'${hook[1]}' is not accepted: pasted configurations cannot run commands on the firewall. Remove that line.`;
+            if (!/^\s*\[Interface\]/im.test(t)) return "Missing the [Interface] section.";
+            const peers = (t.match(/^\s*\[Peer\]/gim) || []).length;
+            if (peers !== 1) return `An outbound connection has exactly one [Peer] (found ${peers}).`;
+            if (!/^\s*PrivateKey\s*=/im.test(t)) return "[Interface] needs the PrivateKey you were issued.";
+            if (!/^\s*Endpoint\s*=/im.test(t)) return "[Peer] needs an Endpoint (host:port) to dial.";
+            if (t.length > 16384) return "That configuration is too large (16 KB max).";
+            return "";
+        },
+        get kind() {
+            const m = this.text.match(/^\s*AllowedIPs\s*=\s*(.+)$/im);
+            if (!m) return "";
+            const a = m[1].split(",").map((s) => s.trim());
+            const full = a.includes("0.0.0.0/0") || (a.includes("0.0.0.0/1") && a.includes("128.0.0.0/1"));
+            return full ? "provider" : "site";
+        },
+        get ready() { return this.text.trim().length > 0 && this.error === ""; },
+    }));
+
     /* ---------- wgEgressPicker ---------- LAN devices/subnets that exit via
      * the tunnel. Extra CIDRs are Alpine-owned (no innerHTML). Search filters
      * the lease list client-side.

@@ -62,6 +62,8 @@ public sealed class WgPeerAccessTests
           .ReturnsAsync(Array.Empty<FwNatRule>());
         fw.Setup(x => x.GetFilterRulesAsync("forward", It.IsAny<CancellationToken>()))
           .ReturnsAsync(existingForward ?? Array.Empty<FwFilterRule>());
+        fw.Setup(x => x.GetStaticRoutesAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+          .ReturnsAsync(Array.Empty<FwStaticRoute>());
 
         var routing = new Mock<IPolicyRoutingService>();
         var svc = new VpnRoutingService(fw.Object, routing.Object, NullLogger<VpnRoutingService>.Instance);
@@ -184,7 +186,7 @@ public sealed class WgPeerAccessTests
     {
         var server = Server();
         var wg = new Mock<IWireGuardService>();
-        wg.Setup(x => x.GetServerAsync(It.IsAny<CancellationToken>())).ReturnsAsync(server);
+        wg.Setup(x => x.GetServerByIdAsync(server.Id, It.IsAny<CancellationToken>())).ReturnsAsync(server);
         var daemon = new Mock<NetFirewall.Services.Daemon.IDaemonClient>();
 
         var controller = new NetFirewall.Web.Controllers.WireGuardPeersController(
@@ -211,6 +213,42 @@ public sealed class WgPeerAccessTests
     }
 
     // ───────────── site-to-site peers ─────────────
+
+    [Fact]
+    public async Task SitePeer_OnTableOffInterface_GetsAMainTableRouteIntoTheTunnel()
+    {
+        // wg-quick installs no routes with Table=off, so LAN → remote LAN would leave by the WAN.
+        var server = Server(); server.TableOff = true;
+        var (svc, fw) = Make();
+
+        await svc.EnsurePeerForwardingAsync(server, Site(["0.0.0.0/0"], remoteSubnets: ["192.168.1.0/24"]));
+
+        fw.Verify(x => x.CreateStaticRouteAsync(
+            It.Is<FwStaticRoute>(r => r.InterfaceId == WgIfaceId && r.Destination == "192.168.1.0/24"
+                                      && r.TableId == null && r.Description!.StartsWith("[vpn-auto] peer ")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SitePeer_OnTableAutoInterface_StillGetsItsRoute()
+    {
+        // A hot reload (wg syncconf) adds no route for a NEW peer even with Table=auto.
+        var (svc, fw) = Make();
+        await svc.EnsurePeerForwardingAsync(Server(), Site(["10.10.0.2/32"], remoteSubnets: ["192.168.1.0/24"]));
+        fw.Verify(x => x.CreateStaticRouteAsync(It.Is<FwStaticRoute>(r => r.Destination == "192.168.1.0/24" && r.Metric == 0),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("0.0.0.0/1")]
+    [InlineData("10.0.0.0/7")]
+    [InlineData("fd00::/64")]
+    public async Task SitePeer_CoveringOrV6Subnets_NeverBecomeMainTableRoutes(string subnet)
+    {
+        var (svc, fw) = Make();
+        await svc.EnsurePeerForwardingAsync(Server(), Site(["10.10.0.2/32"], remoteSubnets: [subnet]));
+        fw.Verify(x => x.CreateStaticRouteAsync(It.IsAny<FwStaticRoute>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 
     [Fact]
     public async Task SitePeer_ForwardRules_RunBothWays_ScopedToTheRemoteSubnets()

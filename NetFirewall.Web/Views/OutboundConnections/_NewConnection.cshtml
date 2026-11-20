@@ -1,0 +1,43 @@
+@model NetFirewall.Web.Models.Vpn.OutboundConnectionFormViewModel
+@*
+    New outbound connection: paste what the provider / remote firewall issued. Validated here
+    (wgOutboundPaste, inline reason) and again by the daemon, which also refuses script hooks.
+    The text carries a private key: it is posted once and stored by the daemon, never echoed.
+*@
+<form hx-post="/Vpn/Outbound/create" hx-swap="none" class="space-y-4" x-data="wgOutboundPaste()" autocomplete="off">
+    @Html.AntiForgeryToken()
+
+    <p class="text-sm text-surface-fg-muted">
+        Paste the WireGuard configuration you were given: the file a VPN provider generates for a device, or the one
+        the remote firewall issued for this site. It becomes its own interface; nothing changes until you apply.
+    </p>
+
+    <div class="space-y-1.5">
+        <label for="f-ConfigText" class="block text-xs font-medium text-surface-fg">Configuration <span class="text-feedback-danger-fg">*</span></label>
+        <textarea id="f-ConfigText" name="ConfigText" x-model="text" required minlength="40" maxlength="16384" rows="12"
+                  spellcheck="false" class="input font-mono text-xs leading-relaxed"
+                  :class="error ? 'input-error' : ''" :aria-invalid="(error !== '').toString()"
+                  aria-describedby="f-ConfigText-help f-ConfigText-error"
+                  placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 10.64.12.7/32&#10;&#10;[Peer]&#10;PublicKey = …&#10;AllowedIPs = 0.0.0.0/0&#10;Endpoint = vpn.example.net:51820"></textarea>
+        <p id="f-ConfigText-error" class="text-xs text-feedback-danger-fg" x-show="error" x-text="error" x-cloak></p>
+        <p id="f-ConfigText-help" class="text-xs text-surface-fg-muted" x-show="!error">
+            Script lines (PostUp, PreUp, PostDown, PreDown) are refused. The provider's DNS setting is ignored so the firewall keeps its own resolver.
+        </p>
+    </div>
+
+    <div class="rounded-md px-3 py-2 text-xs bg-feedback-info-bg text-feedback-info-fg border border-feedback-info-bd" x-show="ready" x-cloak>
+        <span x-show="kind === 'provider'">This routes all traffic: it will be a <span class="font-semibold">VPN provider</span> connection. After applying, choose which devices use it.</span>
+        <span x-show="kind === 'site'">This routes specific networks: it will be a <span class="font-semibold">site-to-site</span> link. Those networks become reachable from your LAN.</span>
+    </div>
+
+    @await Html.PartialAsync("_FormField", new NetFirewall.Web.Models.FormFieldViewModel {
+        Name = nameof(Model.Label), Label = "Name (optional)", Value = Model.Label, MaxLength = 64,
+        Placeholder = "Mullvad New York, Branch office…", AlpineModel = "label",
+        Help = "How this connection is listed. Defaults to the kind of connection."
+    })
+
+    <div class="flex justify-end gap-2 pt-2 border-t border-surface-border">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="!ready">Create connection</button>
+    </div>
+</form>

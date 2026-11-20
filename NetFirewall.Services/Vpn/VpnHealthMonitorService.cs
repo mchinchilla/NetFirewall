@@ -86,17 +86,20 @@ public sealed class VpnHealthMonitorService : BackgroundService
     private async Task TickAsync(CancellationToken ct)
     {
         var states = await _health.GetStateAsync(ct);
+        var servers = await _wg.ListServersAsync(ct);
+        var monitoredServers = servers.Where(s => s.Enabled).Select(s => s.Id).ToHashSet();
 
-        var server = await _wg.GetServerAsync(ct);
-        if (server is null || !server.Enabled)
-        {
-            // Monitoring is off entirely — nothing can ever emit the "up" that
-            // would clear a standing alert, so retire everything now instead of
-            // leaving banners orphaned.
-            foreach (var s in states) await RetireAsync(s.ServerId, s.PublicKey, ct);
-            return;
-        }
+        // State of an interface that is gone or disabled can never receive the "up" that would
+        // clear its alert — retire it. Only THAT interface's: the others keep being monitored.
+        foreach (var s in states.Where(s => !monitoredServers.Contains(s.ServerId)))
+            await RetireAsync(s.ServerId, s.PublicKey, ct);
 
+        foreach (var server in servers.Where(s => s.Enabled))
+            await TickServerAsync(server, states, ct);
+    }
+
+    private async Task TickServerAsync(WgServer server, IReadOnlyList<VpnHealthState> states, CancellationToken ct)
+    {
         var peers = await _wg.GetPeersAsync(server.Id, ct);
         var live = await _apply.GetStatusAsync(server.Name, ct);
         var liveByKey = live.ToDictionary(s => s.PublicKey);

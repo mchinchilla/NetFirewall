@@ -21,7 +21,7 @@
         <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
         <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
         <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
-        <PackageReference Include="Npgsql" Version="10.0.3" />
+        <PackageReference Include="Npgsql" Version="11.0.0" />
         <PackageReference Include="RepoDb.PostgreSql" Version="1.17.0" />
     </ItemGroup>
 

@@ -285,7 +285,9 @@ public static class DiagnosticsEndpoints
             var mode = (req.Mode ?? "both").Trim().ToLowerInvariant();
             if (mode is not ("mark" or "bind" or "both")) return Bad<VpnProbeResult>("Mode must be mark, bind or both.");
 
-            var clean = new VpnProbeRequest(target, mode);
+            if (req.Interface is { Length: > 0 } wgName && !NetFirewall.Models.Vpn.WgInterfaceName.IsValid(wgName))
+                return Bad<VpnProbeResult>("Invalid WireGuard interface name.");
+            var clean = new VpnProbeRequest(target, mode, req.Interface);
             var env = await runner.RunAsync(DiagTools.VpnProbe, DiagFamilies.Probe, target, user.Identity?.Name, clean, TimeSpan.FromSeconds(20),
                 async token =>
                 {
@@ -320,10 +322,10 @@ public static class DiagnosticsEndpoints
             // Redact before the text can reach diag_runs.params.
             var redacted = v.RedactWgConfig(text);
             var env = await runner.RunAsync(DiagTools.VpnCompare, DiagFamilies.Doctor, null, user.Identity?.Name,
-                new VpnCompareRequest(redacted), TimeSpan.FromSeconds(10),
+                new VpnCompareRequest(redacted, req.Interface), TimeSpan.FromSeconds(10),
                 async token =>
                 {
-                    var r = await doctor.CompareIssuedConfigAsync(redacted, token);
+                    var r = await doctor.CompareIssuedConfigAsync(redacted, req.Interface, token);
                     var status = r.Overall switch
                     {
                         DiagCheckStatus.Fail => DiagRunStatus.Fail,

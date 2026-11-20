@@ -3,15 +3,20 @@ using NetFirewall.Models.Vpn;
 namespace NetFirewall.Services.Vpn;
 
 /// <summary>
-/// CRUD over <c>wg_servers</c> + <c>wg_peers</c>. Single-server design — there
-/// is at most one row in <c>wg_servers</c> by convention. Multi-server is a
-/// future iteration; the schema already keys peers by server_id so adding it
-/// is additive.
+/// CRUD over <c>wg_servers</c> (one row per WireGuard interface) + <c>wg_peers</c>.
+/// An interface is either the remote-access SERVER (<c>mode='server'</c>: listens, accepts
+/// road-warrior clients and inbound sites) or an outbound CLIENT connection
+/// (<c>mode='client'</c>: dials one provider or remote site). Callers always say WHICH
+/// interface they mean — there is no "the" interface.
 /// </summary>
 public interface IWireGuardService
 {
-    /// <summary>Returns the configured server, or null if none exists yet.</summary>
-    Task<WgServer?> GetServerAsync(CancellationToken ct = default);
+    /// <summary>Every interface, server kind first, then by creation.</summary>
+    Task<IReadOnlyList<WgServer>> ListServersAsync(CancellationToken ct = default);
+
+    Task<WgServer?> GetServerByIdAsync(Guid id, CancellationToken ct = default);
+
+    Task<WgServer?> GetServerByNameAsync(string name, CancellationToken ct = default);
 
     /// <summary>Insert or update — keyed by Id; if Id is empty we create.</summary>
     Task<WgServer> SaveServerAsync(WgServer server, CancellationToken ct = default);

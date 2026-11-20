@@ -42,6 +42,33 @@ public sealed class WireGuardTeardownService : IWireGuardTeardownService
         && (description.StartsWith(VpnRoutingService.AutoTag, StringComparison.Ordinal)
             || description.StartsWith(VpnRoutingService.EgressTag, StringComparison.Ordinal));
 
+    /// <summary>
+    /// Which [vpn-auto]/[vpn-egress] rows belong to ONE interface. Teardown used to delete every
+    /// VPN-managed row in the system — with several interfaces, deleting one would have wiped
+    /// the others' forward/NAT/egress rules. A row is this interface's when it is one of its
+    /// peers' rows ("[vpn-auto] peer {id}"), references its fw_interfaces row, carries its
+    /// tunnel mark, or names it ("… via {name}").
+    /// </summary>
+    private sealed class Scope(WgServer server, IReadOnlyList<WgPeer> peers, Guid? ifaceId, IReadOnlyCollection<Guid> markIds)
+    {
+        private readonly string[] _peerTags = peers.Select(p => $"{VpnRoutingService.AutoTag} peer {p.Id}").ToArray();
+
+        private bool Named(string? d) =>
+            d is not null && (_peerTags.Any(t => d.StartsWith(t, StringComparison.Ordinal))
+                              || d.EndsWith($" via {server.Name}", StringComparison.Ordinal)
+                              || d.EndsWith($"→ {server.Name}", StringComparison.Ordinal));
+
+        public bool Owns(FwNatRule n) =>
+            IsVpnManaged(n.Description) && (Named(n.Description) || (ifaceId is { } id && n.OutputInterfaceId == id));
+
+        public bool Owns(FwFilterRule f) =>
+            IsVpnManaged(f.Description) && (Named(f.Description)
+                || (ifaceId is { } id && (f.InterfaceInId == id || f.InterfaceOutId == id)));
+
+        public bool Owns(FwMangleRule m) =>
+            IsVpnManaged(m.Description) && (Named(m.Description) || (m.MarkId is { } mk && markIds.Contains(mk)));
+    }
+
     private static bool IsTunnelRole(string role) =>
         role.Equals("upstream", StringComparison.OrdinalIgnoreCase)
         || role.Equals("site", StringComparison.OrdinalIgnoreCase);
@@ -83,16 +110,19 @@ public sealed class WireGuardTeardownService : IWireGuardTeardownService
                 .Select(p => new WgOrphanRule("port-forward", p.Description ?? p.Id.ToString())));
         }
 
-        var activeVpnAlerts = (await _health.ActiveAlertsAsync(ct)).Count(a => a.Source == "vpn");
+        var scope = new Scope(server, peers, iface?.Id, marks.Select(m => m.Id).ToArray());
+        var alertPrefix = $"vpn:{server.Id}:";
+        var activeVpnAlerts = (await _health.ActiveAlertsAsync(ct))
+            .Count(a => a.Source == "vpn" && a.DedupeKey.StartsWith(alertPrefix, StringComparison.Ordinal));
 
         return new WgTeardownImpact
         {
             InterfaceName = server.Name,
             TunnelNames = peers.Where(p => IsTunnelRole(p.Role)).Select(p => p.Name).ToArray(),
             ClientNames = peers.Where(p => !IsTunnelRole(p.Role)).Select(p => p.Name).ToArray(),
-            AutoNatRuleCount = natRules.Count(n => IsVpnManaged(n.Description)),
-            AutoForwardRuleCount = filterRules.Count(f => IsVpnManaged(f.Description)),
-            EgressMangleRuleCount = mangleRules.Count(m => IsVpnManaged(m.Description)),
+            AutoNatRuleCount = natRules.Count(scope.Owns),
+            AutoForwardRuleCount = filterRules.Count(scope.Owns),
+            EgressMangleRuleCount = mangleRules.Count(scope.Owns),
             EgressSources = (await _vpnRouting.GetEgressSourcesAsync(server, ct)).ToArray(),
             HasInterfaceRow = iface is not null,
             HasRouteTable = table is not null,
@@ -110,13 +140,17 @@ public sealed class WireGuardTeardownService : IWireGuardTeardownService
         var iface = await _fw.GetInterfaceByNameAsync(server.Name, ct);
         var table = await _routing.GetRouteTableByNameAsync(server.Name, ct);
         var orphanBreadcrumb = $" [orphaned: interface '{server.Name}' deleted]";
+        var markIds = (await _fw.GetTrafficMarksAsync(ct))
+            .Where(m => string.Equals(m.RouteTable, server.Name, StringComparison.OrdinalIgnoreCase))
+            .Select(m => m.Id).ToArray();
+        var scope = new Scope(server, await _wg.GetPeersAsync(server.Id, ct), iface?.Id, markIds);
 
-        // 1) Our own NAT/forward/mangle rows go first ([vpn-auto]/[vpn-egress]).
-        foreach (var n in (await _fw.GetNatRulesAsync(ct)).Where(n => IsVpnManaged(n.Description)))
+        // 1) THIS interface's own NAT/forward/mangle rows go first — never another interface's.
+        foreach (var n in (await _fw.GetNatRulesAsync(ct)).Where(scope.Owns))
             await _fw.DeleteNatRuleAsync(n.Id, ct);
-        foreach (var f in (await _fw.GetFilterRulesAsync(null, ct)).Where(f => IsVpnManaged(f.Description)))
+        foreach (var f in (await _fw.GetFilterRulesAsync(null, ct)).Where(scope.Owns))
             await _fw.DeleteFilterRuleAsync(f.Id, ct);
-        foreach (var m in (await _fw.GetMangleRulesAsync(null, ct)).Where(m => IsVpnManaged(m.Description)))
+        foreach (var m in (await _fw.GetMangleRulesAsync(null, ct)).Where(scope.Owns))
             await _fw.DeleteMangleRuleAsync(m.Id, ct);
 
         // 2) Disable (never delete) hand-authored rules referencing the interface.

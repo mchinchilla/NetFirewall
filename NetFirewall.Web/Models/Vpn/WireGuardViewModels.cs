@@ -43,8 +43,7 @@ public sealed class WgServerFormViewModel
 
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Pre-existing keys (re-displayed on edit). Empty on first save → server generates.</summary>
-    public string? PrivateKey { get; set; }
+    /// <summary>The interface's public key (shown on edit). The private key never enters a view model.</summary>
     public string? PublicKey  { get; set; }
 }
 

@@ -15,7 +15,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="11.0.0" />
-    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Npgsql" Version="11.0.0" />
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
   </ItemGroup>
 

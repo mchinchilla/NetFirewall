@@ -40,10 +40,11 @@ public sealed record DropLogRequest(
     int Lines = 500,
     string Filter = "drops");
 
-public sealed record VpnDoctorRequest(bool IncludeJournal = true);
+/// <summary><see cref="Interface"/>: which WireGuard interface (null = the first, server kind first).</summary>
+public sealed record VpnDoctorRequest(bool IncludeJournal = true, string? Interface = null);
 
 /// <summary><see cref="Mode"/> ∈ mark | bind | both — how to steer the probe pings.</summary>
-public sealed record VpnProbeRequest(string? Target = null, string Mode = "both");
+public sealed record VpnProbeRequest(string? Target = null, string Mode = "both", string? Interface = null);
 
 /// <summary>A wg-quick client config pasted by the operator. Private/preshared keys are stripped before it leaves the browser's request handler.</summary>
-public sealed record VpnCompareRequest(string ConfigText);
+public sealed record VpnCompareRequest(string ConfigText, string? Interface = null);

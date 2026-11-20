@@ -675,20 +675,25 @@ public class SetupWizardService : ISetupWizardService
             // editing an existing server happens via the dedicated VPN page later.
             var addressCidr = NormalizeWireGuardServerAddress(config.WireGuardSubnet);
 
-            var keypair = await _daemon.GenerateWireGuardKeyPairAsync(ct);
-            if (!keypair.Success || keypair.Data is null)
-                throw new InvalidOperationException($"WireGuard keypair generation failed: {keypair.Message}");
-
-            var server = await _wireguard.GetServerAsync(ct) ?? new WgServer { Name = "wg0", Mode = "server" };
+            // The remote-access SERVER interface (wg0). A re-run keeps its keypair: rotating it
+            // would silently invalidate every client config already handed out.
+            var server = (await _wireguard.ListServersAsync(ct)).FirstOrDefault(s => s.Mode == "server")
+                         ?? new WgServer { Name = WgInterfaceName.ServerDefault, Mode = "server" };
+            if (string.IsNullOrEmpty(server.PrivateKey))
+            {
+                var keypair = await _daemon.GenerateWireGuardKeyPairAsync(ct);
+                if (!keypair.Success || keypair.Data is null)
+                    throw new InvalidOperationException($"WireGuard keypair generation failed: {keypair.Message}");
+                server.PrivateKey = keypair.Data.PrivateKey;
+                server.PublicKey  = keypair.Data.PublicKey;
+            }
             server.Mode = "server";
-            server.PrivateKey = keypair.Data.PrivateKey;
-            server.PublicKey  = keypair.Data.PublicKey;
             server.AddressCidr = addressCidr;
             server.ListenPort = config.WireGuardPort;
             server.Enabled = true;
             await _wireguard.SaveServerAsync(server, ct);
 
-            var wgResp = await _daemon.ApplyWireGuardAsync(ct);
+            var wgResp = await _daemon.ApplyWireGuardAsync(server.Name, ct);
             if (!wgResp.Success)
                 throw new InvalidOperationException($"WireGuard apply failed: {wgResp.Message}");
 

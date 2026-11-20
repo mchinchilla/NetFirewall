@@ -12,6 +12,7 @@
 <form hx-post="/Vpn/WireGuard/Egress/save" hx-swap="none"
       x-data="wgEgressPicker(@Html.Raw(extrasJson))">
     @Html.AntiForgeryToken()
+    <input type="hidden" name="iface" value="@Model.TunnelName" />
 
     <p class="text-sm mb-3 text-surface-fg-muted">
         Pick the LAN devices and subnets that should egress through

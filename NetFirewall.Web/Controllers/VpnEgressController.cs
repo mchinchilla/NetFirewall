@@ -25,25 +25,28 @@ public sealed class VpnEgressController : Controller
     private readonly IFirewallService _fw;
     private readonly IDhcpAdminService _dhcp;
     private readonly ILogger<VpnEgressController> _logger;
+    private readonly IWireGuardInterfaceResolver _ifaces;
 
     public VpnEgressController(
         IWireGuardService wg,
         IVpnRoutingService vpnRouting,
         IFirewallService fw,
         IDhcpAdminService dhcp,
-        ILogger<VpnEgressController> logger)
+        ILogger<VpnEgressController> logger,
+        IWireGuardInterfaceResolver ifaces)
     {
         _wg = wg;
         _vpnRouting = vpnRouting;
         _fw = fw;
         _dhcp = dhcp;
         _logger = logger;
+        _ifaces = ifaces;
     }
 
     [HttpGet("panel")]
-    public async Task<IActionResult> Panel(CancellationToken ct)
+    public async Task<IActionResult> Panel([FromQuery] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        var server = await _ifaces.ForPageAsync(iface, ct);
         // Full path: this view lives with the WireGuard page, not under /Views/VpnEgress.
         if (server is null) return PartialView("~/Views/WireGuard/_EgressPanel.cshtml", EmptyVm("wg0", false));
 
@@ -67,9 +70,9 @@ public sealed class VpnEgressController : Controller
     }
 
     [HttpPost("save"), ValidateAntiForgeryToken]
-    public async Task<IActionResult> Save([FromForm] string[]? sources, CancellationToken ct)
+    public async Task<IActionResult> Save([FromForm] string[]? sources, [FromForm] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        var server = await _ifaces.RequireAsync(iface, ct);
         if (server is null)
             return this.ToHtmxResponse(ServiceResponse<object>.Fail("No WireGuard tunnel configured."));
 
@@ -88,6 +91,7 @@ public sealed class VpnEgressController : Controller
     }
 
     // ----- helpers -----
+
 
     private static VpnEgressViewModel EmptyVm(string name, bool ready) => new()
     {

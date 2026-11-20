@@ -34,6 +34,13 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
     private const string RtTablesPath = "/etc/iproute2/rt_tables";
     private const string NetFirewallTag = "# netfirewall";
 
+    /// <summary>
+    /// Route protocol id stamped on the MAIN-table routes NetFirewall installs for a device
+    /// (site-to-site remote LANs). It is how we find our own routes again to prune the ones
+    /// whose row was deleted — `ip route replace` alone never removes anything.
+    /// </summary>
+    internal const int MainTableRouteProto = 186;
+
     private readonly NpgsqlDataSource _ds;
     private readonly IProcessRunner _runner;
     private readonly ILogger<PolicyRoutingApplyService> _logger;
@@ -83,19 +90,25 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
         try
         {
             await using var conn = await _ds.OpenConnectionAsync(ct);
-            var routes = (await LoadTaggedRoutesAsync(conn, ct))
+            // Also the device's MAIN-table routes (a site link's remote LAN on a Table=off
+            // interface): they die with the link exactly like the per-table ones.
+            var routes = (await LoadTaggedRoutesAsync(conn, ct, mainTableDevice: device))
                 .Where(r => RouteRidesOnDevice(r.DeviceName, r.TableName, device))
                 .ToList();
 
             if (routes.Count == 0)
             {
                 steps.Add(new RoutingStep("ip-route-noop", $"# no per-table routes ride on {device}", true, true, null));
-                return new PolicyRoutingApplyResult(true, false, steps, null);
+                await PruneMainTableRoutesAsync(device, routes, steps, ct);
+                var pruneFailures = steps.Count(s => s.Executed && !s.Success);
+                return new PolicyRoutingApplyResult(pruneFailures == 0, false, steps,
+                    pruneFailures == 0 ? null : $"{pruneFailures} stale route(s) could not be removed");
             }
 
             // Phase 3 only. `ip route replace` is idempotent, so calling this on a
             // hot reload (routes still present) costs nothing and changes nothing.
             await ReconcileRoutesAsync(routes, false, steps, ct);
+            await PruneMainTableRoutesAsync(device, routes, steps, ct);
 
             var failures = steps.Count(s => s.Executed && !s.Success);
             return new PolicyRoutingApplyResult(
@@ -152,7 +165,11 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
         return list;
     }
 
-    private static async Task<List<RouteRow>> LoadTaggedRoutesAsync(NpgsqlConnection conn, CancellationToken ct)
+    /// <param name="mainTableDevice">
+    /// When set, routes with no table (= <c>main</c>) bound to THIS device are included too. Only
+    /// the per-device re-apply asks for them; the full apply keeps managing per-table routes only.
+    /// </param>
+    private static async Task<List<RouteRow>> LoadTaggedRoutesAsync(NpgsqlConnection conn, CancellationToken ct, string? mainTableDevice = null)
     {
         var list = new List<RouteRow>();
         await using var cmd = new NpgsqlCommand(@"
@@ -164,13 +181,16 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
             SELECT sr.destination::text,
                    CASE WHEN sr.gateway IS NULL THEN NULL ELSE host(sr.gateway) END,
                    sr.metric,
-                   rt.table_name,
+                   COALESCE(rt.table_name, 'main'),
                    iface.name
             FROM fw_static_routes sr
-            JOIN fw_route_tables  rt    ON rt.id = sr.table_id
-            LEFT JOIN fw_interfaces iface ON iface.id = sr.interface_id
-            WHERE sr.enabled = true AND rt.enabled = true
-            ORDER BY rt.table_name, sr.metric", conn);
+            LEFT JOIN fw_route_tables rt    ON rt.id = sr.table_id
+            LEFT JOIN fw_interfaces   iface ON iface.id = sr.interface_id
+            WHERE sr.enabled = true
+              AND ((sr.table_id IS NOT NULL AND rt.enabled = true)
+                   OR (sr.table_id IS NULL AND @dev::text IS NOT NULL AND iface.name = @dev))
+            ORDER BY 4, sr.metric", conn);
+        cmd.Parameters.AddWithValue("dev", (object?)mainTableDevice ?? DBNull.Value);
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
             list.Add(new RouteRow(
@@ -376,12 +396,57 @@ public sealed partial class PolicyRoutingApplyService : IPolicyRoutingApplyServi
             // Build the `ip route replace` args. `replace` is idempotent: adds if
             // missing, overwrites if present.
             var args = BuildRouteArgs(route);
+            if (route.TableName == "main") args += $" proto {MainTableRouteProto}";
             var cmd = $"ip route replace {args} table {route.TableName}";
             if (dryRun) { steps.Add(new RoutingStep("ip-route", cmd, false, false, "dry-run")); continue; }
 
             var run = await _runner.RunAsync("ip", $"route replace {args} table {route.TableName}", TimeSpan.FromSeconds(5), ct);
             steps.Add(new RoutingStep("ip-route", cmd, true, run.Success, run.Success ? null : run.Error));
         }
+    }
+
+    /// <summary>
+    /// Remove the main-table routes WE installed on <paramref name="device"/> (our proto id) that
+    /// no longer have a row — a deleted site peer or subnet would otherwise keep black-holing that
+    /// network into the tunnel. Never touches a route with any other proto (wg-quick's, the
+    /// kernel's, the operator's).
+    /// </summary>
+    private async Task PruneMainTableRoutesAsync(string device, IReadOnlyList<RouteRow> wanted, List<RoutingStep> steps, CancellationToken ct)
+    {
+        var show = await _runner.RunAsync("ip",
+            ["-j", "route", "show", "table", "main", "dev", device, "proto", MainTableRouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+            TimeSpan.FromSeconds(5), ct);
+        if (!show.Success) return; // device gone or old iproute2: nothing we can prune now
+
+        var keep = wanted.Where(r => r.TableName == "main")
+            .Select(r => r.Destination == "0.0.0.0/0" ? "default" : r.Destination)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var dst in ParseRouteDestinations(show.Output))
+        {
+            if (keep.Contains(dst)) continue;
+            var proto = MainTableRouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var del = await _runner.RunAsync("ip", ["route", "del", dst, "dev", device, "table", "main", "proto", proto], TimeSpan.FromSeconds(5), ct);
+            steps.Add(new RoutingStep("ip-route-prune", $"ip route del {dst} dev {device} table main proto {proto}", true, del.Success, del.Success ? null : del.Error));
+        }
+    }
+
+    /// <summary>Pure: the <c>dst</c> of each route in <c>ip -j route show</c> output (hosts get /32 back).</summary>
+    internal static IReadOnlyList<string> ParseRouteDestinations(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return [];
+            var list = new List<string>();
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                if (!e.TryGetProperty("dst", out var d) || d.GetString() is not { Length: > 0 } dst) continue;
+                list.Add(dst == "default" || dst.Contains('/') ? dst : dst + "/32");
+            }
+            return list;
+        }
+        catch (System.Text.Json.JsonException) { return []; }
     }
 
     private static string BuildRouteArgs(RouteRow r)

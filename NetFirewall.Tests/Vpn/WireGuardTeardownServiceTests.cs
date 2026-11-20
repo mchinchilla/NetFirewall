@@ -33,13 +33,24 @@ public sealed class WireGuardTeardownServiceTests
         public Mock<IVpnRoutingService> VpnRouting { get; } = new();
         public Mock<IVpnHealthService> Health { get; } = new();
 
+        public static readonly Guid UpstreamPeerId = Guid.NewGuid();
+        public static readonly Guid ClientPeerId = Guid.NewGuid();
+        public static readonly Guid OtherIfacePeerId = Guid.NewGuid();
+
         public FwNatRule AutoNat { get; } = new()
-            { Id = Guid.NewGuid(), Type = "masquerade", Description = "[vpn-auto] peer x → wan", Enabled = true };
+            { Id = Guid.NewGuid(), Type = "masquerade", Description = $"[vpn-auto] peer {ClientPeerId} → wan", Enabled = true };
+        // Another WireGuard interface's rows: teardown of wg0 must leave them alone.
+        public FwNatRule OtherIfaceNat { get; } = new()
+            { Id = Guid.NewGuid(), Type = "masquerade", Description = $"[vpn-auto] peer {OtherIfacePeerId} → wan", Enabled = true };
+        public FwFilterRule OtherIfaceFwd { get; } = new()
+            { Id = Guid.NewGuid(), Description = $"[vpn-auto] peer {OtherIfacePeerId} wg→lan", InterfaceInId = Guid.NewGuid(), Enabled = true };
+        public FwMangleRule OtherIfaceEgress { get; } = new()
+            { Id = Guid.NewGuid(), Description = "[vpn-egress] devices routed via wgc1", Enabled = true };
         public FwNatRule HandNat { get; } = new()
             { Id = Guid.NewGuid(), Type = "masquerade", Description = "my hand nat via wg0",
               OutputInterfaceId = IfaceId, Enabled = true };
         public FwFilterRule AutoFwd { get; } = new()
-            { Id = Guid.NewGuid(), Description = "[vpn-auto] peer x wg→lan", Enabled = true };
+            { Id = Guid.NewGuid(), Description = $"[vpn-auto] peer {ClientPeerId} wg→lan", Enabled = true };
         public FwFilterRule HandFilter { get; } = new()
             { Id = Guid.NewGuid(), Description = "block guests to wg0", InterfaceOutId = IfaceId, Enabled = true };
         public FwFilterRule UnrelatedFilter { get; } = new()
@@ -54,11 +65,11 @@ public sealed class WireGuardTeardownServiceTests
             Fw.Setup(x => x.GetInterfaceByNameAsync("wg0", It.IsAny<CancellationToken>()))
               .ReturnsAsync(new FwInterface { Id = IfaceId, Name = "wg0", Type = "VPN" });
             Fw.Setup(x => x.GetNatRulesAsync(It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new[] { AutoNat, HandNat });
+              .ReturnsAsync(new[] { AutoNat, HandNat, OtherIfaceNat });
             Fw.Setup(x => x.GetFilterRulesAsync(null, It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new[] { AutoFwd, HandFilter, UnrelatedFilter });
+              .ReturnsAsync(new[] { AutoFwd, HandFilter, UnrelatedFilter, OtherIfaceFwd });
             Fw.Setup(x => x.GetMangleRulesAsync(null, It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new[] { EgressMangle });
+              .ReturnsAsync(new[] { EgressMangle, OtherIfaceEgress });
             Fw.Setup(x => x.GetPortForwardsAsync(It.IsAny<CancellationToken>()))
               .ReturnsAsync(Array.Empty<FwPortForward>());
             Fw.Setup(x => x.GetStaticRoutesAsync(null, It.IsAny<CancellationToken>()))
@@ -77,12 +88,16 @@ public sealed class WireGuardTeardownServiceTests
             Wg.Setup(x => x.GetPeersAsync(server.Id, It.IsAny<CancellationToken>()))
               .ReturnsAsync(new[]
               {
-                  new WgPeer { Id = Guid.NewGuid(), ServerId = server.Id, Name = "us-vpn", PublicKey = "UP", Role = "upstream", Enabled = true },
-                  new WgPeer { Id = Guid.NewGuid(), ServerId = server.Id, Name = "laptop", PublicKey = "LP", Role = "client", Enabled = true },
+                  new WgPeer { Id = UpstreamPeerId, ServerId = server.Id, Name = "us-vpn", PublicKey = "UP", Role = "upstream", Enabled = true },
+                  new WgPeer { Id = ClientPeerId, ServerId = server.Id, Name = "laptop", PublicKey = "LP", Role = "client", Enabled = true },
               });
 
             Health.Setup(x => x.ActiveAlertsAsync(It.IsAny<CancellationToken>()))
-                  .ReturnsAsync(new[] { new SystemAlert { Source = "vpn", Severity = "danger", DedupeKey = $"vpn:{server.Id}:UP", Title = "t" } });
+                  .ReturnsAsync(new[]
+                  {
+                      new SystemAlert { Source = "vpn", Severity = "danger", DedupeKey = $"vpn:{server.Id}:UP", Title = "t" },
+                      new SystemAlert { Source = "vpn", Severity = "danger", DedupeKey = $"vpn:{Guid.NewGuid()}:OTHER", Title = "other iface" },
+                  });
             Health.Setup(x => x.GetStateAsync(It.IsAny<CancellationToken>()))
                   .ReturnsAsync(new[] { new VpnHealthState { ServerId = server.Id, PublicKey = "UP" } });
 
@@ -144,6 +159,19 @@ public sealed class WireGuardTeardownServiceTests
             It.Is<FwFilterRule>(f => f.Id == fx.UnrelatedFilter.Id), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task Teardown_LeavesAnotherInterfacesRulesAlone()
+    {
+        // Teardown used to delete EVERY [vpn-auto]/[vpn-egress] row in the system.
+        var server = Server();
+        var fx = new Fixture();
+        await fx.Make(server).TeardownAsync(server);
+
+        fx.Fw.Verify(x => x.DeleteNatRuleAsync(fx.OtherIfaceNat.Id, It.IsAny<CancellationToken>()), Times.Never);
+        fx.Fw.Verify(x => x.DeleteFilterRuleAsync(fx.OtherIfaceFwd.Id, It.IsAny<CancellationToken>()), Times.Never);
+        fx.Fw.Verify(x => x.DeleteMangleRuleAsync(fx.OtherIfaceEgress.Id, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // ── Controller gate: the confirmation must hold server-side too ──
 
     [Fact]
@@ -151,7 +179,7 @@ public sealed class WireGuardTeardownServiceTests
     {
         var server = Server();
         var wg = new Mock<IWireGuardService>();
-        wg.Setup(x => x.GetServerAsync(It.IsAny<CancellationToken>())).ReturnsAsync(server);
+        wg.Setup(x => x.GetServerByNameAsync(server.Name, It.IsAny<CancellationToken>())).ReturnsAsync(server);
         var teardown = new Mock<IWireGuardTeardownService>();
         var daemon = new Mock<NetFirewall.Services.Daemon.IDaemonClient>();
 
@@ -165,9 +193,9 @@ public sealed class WireGuardTeardownServiceTests
             }
         };
 
-        await controller.Delete("wg9", CancellationToken.None);
+        await controller.Delete("wg9", "wg0", CancellationToken.None);
 
-        daemon.Verify(x => x.StopWireGuardAsync(It.IsAny<CancellationToken>()), Times.Never);
+        daemon.Verify(x => x.StopWireGuardAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         teardown.Verify(x => x.TeardownAsync(It.IsAny<WgServer>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -176,10 +204,10 @@ public sealed class WireGuardTeardownServiceTests
     {
         var server = Server();
         var wg = new Mock<IWireGuardService>();
-        wg.Setup(x => x.GetServerAsync(It.IsAny<CancellationToken>())).ReturnsAsync(server);
+        wg.Setup(x => x.GetServerByNameAsync(server.Name, It.IsAny<CancellationToken>())).ReturnsAsync(server);
         var teardown = new Mock<IWireGuardTeardownService>();
         var daemon = new Mock<NetFirewall.Services.Daemon.IDaemonClient>();
-        daemon.Setup(x => x.StopWireGuardAsync(It.IsAny<CancellationToken>()))
+        daemon.Setup(x => x.StopWireGuardAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
               .ReturnsAsync(NetFirewall.Models.ServiceResponse<NetFirewall.Services.Daemon.NftApplyResultDto>.Fail("daemon unreachable"));
 
         var controller = new NetFirewall.Web.Controllers.WireGuardController(
@@ -192,7 +220,7 @@ public sealed class WireGuardTeardownServiceTests
             }
         };
 
-        await controller.Delete("wg0", CancellationToken.None);
+        await controller.Delete("wg0", null, CancellationToken.None);
 
         teardown.Verify(x => x.TeardownAsync(It.IsAny<WgServer>(), It.IsAny<CancellationToken>()), Times.Never);
     }

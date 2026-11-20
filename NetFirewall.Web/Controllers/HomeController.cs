@@ -294,18 +294,20 @@ public class HomeController : Controller
         // wg_servers may not exist (no migration yet) or daemon may be down.
         try
         {
-            var server = await _wg.GetServerAsync(ct);
-            if (server is null)
+            // Every interface: the remote-access server and each outbound connection.
+            var servers = await _wg.ListServersAsync(ct);
+            if (servers.Count == 0)
                 return WireGuardSnapshot.Empty;
 
-            var peers = await _wg.GetPeersAsync(server.Id, ct);
+            var peerCount = 0;
+            foreach (var s in servers) peerCount += (await _wg.GetPeersAsync(s.Id, ct)).Count;
             // Try live status; if daemon is unreachable we still report configured peers.
-            var statusEnvelope = await _daemon.GetWireGuardStatusAsync(ct);
+            var statusEnvelope = await _daemon.GetWireGuardStatusAsync(null, ct);
             var threshold = DateTime.UtcNow - TimeSpan.FromMinutes(3);
             var active = statusEnvelope.Success && statusEnvelope.Data is not null
                 ? statusEnvelope.Data.Count(s => s.LastHandshakeAt is { } h && h >= threshold)
                 : 0;
-            return new WireGuardSnapshot(Configured: true, PeerCount: peers.Count, ActivePeerCount: active);
+            return new WireGuardSnapshot(Configured: true, PeerCount: peerCount, ActivePeerCount: active);
         }
         catch (Exception ex)
         {

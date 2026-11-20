@@ -1,5 +1,6 @@
 using NetFirewall.Daemon.Endpoints;
 using NetFirewall.Services.Daemon;
+using System.Runtime.Versioning;
 using Xunit;
 
 namespace NetFirewall.Tests.Daemon;
@@ -9,6 +10,8 @@ namespace NetFirewall.Tests.Daemon;
 /// before one exists), so the caller gate is the only gate: the TOTP cipher is served only when
 /// PeerCredentialMiddleware actually filters peers.
 /// </summary>
+// Pure option logic; [SupportedOSPlatform] only silences CA1416 — the tests run everywhere.
+[SupportedOSPlatform("linux")]
 public class CryptoEndpointGateTests
 {
     [Fact]

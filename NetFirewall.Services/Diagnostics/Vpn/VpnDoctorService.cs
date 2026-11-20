@@ -44,6 +44,15 @@ public sealed class VpnDoctorService : IVpnDoctorService
         _opts = opts.Value; _logger = logger;
     }
 
+    /// <summary>
+    /// The interface to diagnose: the named one (looked up in wg_servers — the name that
+    /// reaches commands is always the stored one, never the request text), else the first.
+    /// </summary>
+    private async Task<WgServer?> ResolveServerAsync(string? name, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(name)
+            ? (await _wg.ListServersAsync(ct)).FirstOrDefault()
+            : await _wg.GetServerByNameAsync(name, ct);
+
     // ───────────────────────── doctor ─────────────────────────
 
     public async Task<DiagReport> RunAsync(VpnDoctorRequest request, CancellationToken ct = default)
@@ -51,7 +60,7 @@ public sealed class VpnDoctorService : IVpnDoctorService
         var started = DateTime.UtcNow;
         var sw = Stopwatch.StartNew();
 
-        var server = await _wg.GetServerAsync(ct);
+        var server = await ResolveServerAsync(request.Interface, ct);
         if (server is null)
         {
             return new DiagReport(DiagTools.VpnDoctor, "(no tunnel)", started, (int)sw.ElapsedMilliseconds,
@@ -85,8 +94,8 @@ public sealed class VpnDoctorService : IVpnDoctorService
 
     public async Task<VpnProbeResult> ProbeAsync(VpnProbeRequest request, CancellationToken ct = default)
     {
-        var server = await _wg.GetServerAsync(ct)
-            ?? throw new InvalidOperationException("No WireGuard interface is configured.");
+        var server = await ResolveServerAsync(request.Interface, ct)
+            ?? throw new InvalidOperationException("No such WireGuard interface is configured.");
         var iface = server.Name;
 
         var before = await _live.DumpAsync(iface, ct);
@@ -144,12 +153,12 @@ public sealed class VpnDoctorService : IVpnDoctorService
 
     // ───────────────────────── compare with issued config ─────────────────────────
 
-    public async Task<VpnCompareResult> CompareIssuedConfigAsync(string redactedConfigText, CancellationToken ct = default)
+    public async Task<VpnCompareResult> CompareIssuedConfigAsync(string redactedConfigText, string? interfaceName = null, CancellationToken ct = default)
     {
         // Redact again — never trust that the edge did it.
         var issued = _importer.Parse(_validator.RedactWgConfig(redactedConfigText ?? string.Empty));
-        var server = await _wg.GetServerAsync(ct)
-            ?? throw new InvalidOperationException("No WireGuard interface is configured.");
+        var server = await ResolveServerAsync(interfaceName, ct)
+            ?? throw new InvalidOperationException("No such WireGuard interface is configured.");
         var peers = await _wg.GetPeersAsync(server.Id, ct);
         return Compare(issued, server, peers);
     }

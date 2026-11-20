@@ -1,0 +1,30 @@
+@model NetFirewall.Web.Models.Vpn.InterfaceOutcomeStripModel
+@*
+    One-shot strip after an action that ends in a full-page redirect (create / delete of a
+    WireGuard interface), where the usual toast can't survive the reload.
+*@
+@if (!string.IsNullOrEmpty(Model.Name))
+{
+    <div class="flex items-start gap-3 rounded-lg p-3 mb-4 bg-feedback-success-bg text-feedback-success-fg border border-feedback-success-bd"
+         style="animation: var(--animate-slide-up);" role="status">
+        <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/>
+        </svg>
+        <p class="text-sm">
+            @if (Model.Deleted)
+            {
+                <text>Interface <span class="font-semibold font-mono">@Model.Name</span> was deleted: tunnel stopped,
+                auto-generated rules removed, orphaned hand-made rules disabled. The on-disk config was left in place for re-import.</text>
+                @if (Model.ApplyWarn)
+                {
+                    <span class="font-medium"> The nftables re-apply failed: re-apply from the Firewall page so the removed rules leave the live ruleset.</span>
+                }
+            }
+            else
+            {
+                <text>Connection <span class="font-semibold font-mono">@Model.Name</span> created with its routing prepared.
+                Apply it to bring the tunnel up.</text>
+            }
+        </p>
+    </div>
+}

@@ -123,6 +123,11 @@ public static class NetworkEndpoints
             var iface = await firewall.GetInterfaceByIdAsync(id, ct);
             if (iface is null)
                 return Results.Json(ServiceResponse<object>.Fail("Interface not found."), statusCode: 404);
+            // VPN links (wg0, wgc1…) are created and owned by wg-quick; writing them into
+            // netplan / /etc/network/interfaces would fight it (and persist its [vpn-auto] routes).
+            if (string.Equals(iface.Type, "VPN", StringComparison.OrdinalIgnoreCase))
+                return Results.Json(ServiceResponse<object>.Fail(
+                    $"{iface.Name} is a VPN interface — it is configured from the VPN page (Apply VPN), not here."), statusCode: 400);
 
             var routes = (await firewall.GetStaticRoutesAsync(id, ct)).Where(r => r.Enabled).ToList();
             var writer = await resolver.ResolveAsync(ct);

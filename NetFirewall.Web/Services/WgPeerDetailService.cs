@@ -16,7 +16,11 @@ public sealed class WgPeerDetailService(IWireGuardService wg, IDaemonClient daem
         var p = await wg.GetPeerByIdAsync(peerId, ct);
         if (p is null) return null;
 
-        var status = await daemon.GetWireGuardStatusAsync(ct);
+        // Live status of the peer's OWN interface (keys are only unique per interface).
+        var server = await wg.GetServerByIdAsync(p.ServerId, ct);
+        var status = server is null
+            ? NetFirewall.Models.ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>.Ok([], "No interface.")
+            : await daemon.GetWireGuardStatusAsync(server.Name, ct);
         var live = status.Success
             ? status.Data?.FirstOrDefault(s => string.Equals(s.PublicKey, p.PublicKey, StringComparison.Ordinal))
             : null;

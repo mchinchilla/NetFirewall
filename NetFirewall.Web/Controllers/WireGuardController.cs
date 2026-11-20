@@ -23,6 +23,7 @@ public sealed class WireGuardController : Controller
     private readonly IVpnRoutingService _vpnRouting;
     private readonly IWireGuardTeardownService _teardown;
     private readonly IDaemonClient _daemon;
+    private readonly IWireGuardInterfaceResolver _ifaces;
     private readonly ILogger<WireGuardController> _logger;
 
     public WireGuardController(
@@ -30,9 +31,11 @@ public sealed class WireGuardController : Controller
         IVpnRoutingService vpnRouting,
         IWireGuardTeardownService teardown,
         IDaemonClient daemon,
-        ILogger<WireGuardController> logger)
+        ILogger<WireGuardController> logger,
+        IWireGuardInterfaceResolver? ifaces = null)
     {
         _wg = wg;
+        _ifaces = ifaces ?? new WireGuardInterfaceResolver(wg);
         _vpnRouting = vpnRouting;
         _teardown = teardown;
         _daemon = daemon;
@@ -40,9 +43,14 @@ public sealed class WireGuardController : Controller
     }
 
     [HttpGet("")]
-    public async Task<IActionResult> Index(CancellationToken ct)
+    public async Task<IActionResult> Index([FromQuery] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        // This page is the remote-access SERVER; outbound connections have their own page.
+        var server = string.IsNullOrWhiteSpace(iface)
+            ? (await _wg.ListServersAsync(ct)).FirstOrDefault(s => string.Equals(s.Mode, "server", StringComparison.OrdinalIgnoreCase))
+            : await _ifaces.RequireAsync(iface, ct);
+        if (server is not null && string.Equals(server.Mode, "client", StringComparison.OrdinalIgnoreCase))
+            return Redirect($"/Vpn/Outbound#conn-{Uri.EscapeDataString(server.Name)}");
         ViewBag.Server = server;
         ViewBag.Form = server is null ? new WgServerFormViewModel() : ToForm(server);
         // Post-teardown feedback: /Vpn/WireGuard?deleted=wg0 (set by Delete via
@@ -53,9 +61,9 @@ public sealed class WireGuardController : Controller
     }
 
     [HttpGet("status")]
-    public async Task<IActionResult> Status(bool compact = false, CancellationToken ct = default)
+    public async Task<IActionResult> Status(bool compact = false, [FromQuery] string? iface = null, CancellationToken ct = default)
     {
-        var server = await _wg.GetServerAsync(ct);
+        var server = await _ifaces.ForPageAsync(iface, ct);
         WgStatusViewModel vm;
         if (server is null)
         {
@@ -69,7 +77,7 @@ public sealed class WireGuardController : Controller
         else
         {
             var peers = await _wg.GetPeersAsync(server.Id, ct);
-            var statusEnvelope = await _daemon.GetWireGuardStatusAsync(ct);
+            var statusEnvelope = await _daemon.GetWireGuardStatusAsync(server.Name, ct);
             var status = statusEnvelope.Success && statusEnvelope.Data is not null
                 ? statusEnvelope.Data
                 : Array.Empty<WgPeerLiveStatus>();
@@ -93,7 +101,8 @@ public sealed class WireGuardController : Controller
 
         try
         {
-            var existing = await _wg.GetServerAsync(ct);
+            // Id posted = edit that interface; no Id = a new one.
+            var existing = form.Id is { } fid && fid != Guid.Empty ? await _wg.GetServerByIdAsync(fid, ct) : null;
             var entity = existing ?? new WgServer();
             // `entity` IS `existing` on edit — capture before the form overwrites it.
             var previousAddress = existing?.AddressCidr;
@@ -125,7 +134,12 @@ public sealed class WireGuardController : Controller
             {
                 if (string.IsNullOrWhiteSpace(form.Name))
                     return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Interface name is required."));
-                entity.Name = form.Name.Trim();
+                var name = form.Name.Trim();
+                if (!WgInterfaceName.IsValid(name))
+                    return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail("Interface name: 1–15 letters, digits, '_', '.', '-'."));
+                if (await _wg.GetServerByNameAsync(name, ct) is not null)
+                    return this.ToHtmxResponse(ServiceResponse<WgServer>.Fail($"An interface named '{name}' already exists."));
+                entity.Name = name;
             }
 
             // Mode is legacy (roles live on the peers now, migration 00036) — keep
@@ -146,7 +160,9 @@ public sealed class WireGuardController : Controller
             // (interface + route table + mark + policy rule + default route). Adopts
             // existing rows (tekium's live wg0) — never clobbers. Best-effort: a
             // scaffold hiccup shouldn't fail the save.
-            if (saved.Enabled)
+            // Only an interface that carries egress needs a route table + mark: an outbound
+            // connection, or a legacy server that still has an upstream tunnel.
+            if (saved.Enabled && (hasUpstream || string.Equals(saved.Mode, "client", StringComparison.OrdinalIgnoreCase)))
             {
                 try { await _vpnRouting.EnsureRoutingScaffoldAsync(saved, ct); }
                 catch (Exception ex) { _logger.LogWarning(ex, "VPN routing scaffold ensure failed (non-fatal)"); }
@@ -157,7 +173,8 @@ public sealed class WireGuardController : Controller
             // allow the new source or it will silently drop everything.
             var addressChanged = previousAddress is not null
                 && !string.Equals(previousAddress, saved.AddressCidr, StringComparison.OrdinalIgnoreCase);
-            var envelope = ServiceResponse<WgServer>.Ok(saved, addressChanged
+            // The response goes to the browser: identify the interface, never echo the row (private key).
+            var envelope = ServiceResponse<object>.Ok(new { saved.Id, saved.Name }, addressChanged
                 ? $"WireGuard configuration saved. Address changed {previousAddress} → {saved.AddressCidr}: " +
                   $"Apply VPN will restart {saved.Name} to move it, and the remote side must allow the new address."
                 : "WireGuard configuration saved.");
@@ -176,20 +193,21 @@ public sealed class WireGuardController : Controller
     // Everything the teardown will touch, computed server-side so the operator
     // confirms against facts, not a generic "are you sure?".
     [HttpGet("delete-confirm")]
-    public async Task<IActionResult> DeleteConfirm(CancellationToken ct)
+    public async Task<IActionResult> DeleteConfirm([FromQuery] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        var server = await _ifaces.RequireAsync(iface, ct);
         if (server is null) return NotFound();
         var impact = await _teardown.ComputeImpactAsync(server, ct);
         return PartialView("_DeleteInterfaceConfirm", impact);
     }
 
     [HttpPost("delete"), ValidateAntiForgeryToken, RequireElevated]
-    public async Task<IActionResult> Delete(string? confirmName, CancellationToken ct)
+    public async Task<IActionResult> Delete(string? confirmName, [FromForm] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        // The target is the posted interface; the typed name must then match it (both sides).
+        var server = await _ifaces.RequireAsync(iface, ct);
         if (server is null)
-            return this.ToHtmxResponse(ServiceResponse<object>.Fail("No interface configured."));
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Pick the interface to delete."));
 
         // Typed-name gate, validated on BOTH sides (the drawer disables the
         // button until it matches; this is the backstop).
@@ -200,7 +218,7 @@ public sealed class WireGuardController : Controller
         // 1) Bring the live interface down FIRST. If the daemon can't, abort
         // before touching the DB — otherwise we'd leave a live tunnel running
         // with no owner. StopAsync is idempotent (already-down counts as OK).
-        var stop = await _daemon.StopWireGuardAsync(ct);
+        var stop = await _daemon.StopWireGuardAsync(server.Name, ct);
         if (!stop.Success)
             return this.ToHtmxResponse(ServiceResponse<object>.Fail(
                 $"Could not stop {server.Name}: {stop.Message}. Nothing was deleted."));
@@ -220,16 +238,17 @@ public sealed class WireGuardController : Controller
             server.Name, impact.TunnelNames.Length, impact.ClientNames.Length);
 
         // Full page reload: the whole VPN page (form, tables, egress) is gone.
+        var page = string.Equals(server.Mode, "client", StringComparison.OrdinalIgnoreCase) ? "/Vpn/Outbound" : "/Vpn/WireGuard";
         Response.Headers["HX-Redirect"] =
-            $"/Vpn/WireGuard?deleted={Uri.EscapeDataString(server.Name)}{(nft.Success ? "" : "&applyWarn=1")}";
+            $"{page}?deleted={Uri.EscapeDataString(server.Name)}{(nft.Success ? "" : "&applyWarn=1")}";
         return Json(ServiceResponse<object>.Ok(new { }, $"Interface {server.Name} deleted."));
     }
 
     [HttpPost("regenerate-keys"), ValidateAntiForgeryToken, RequireElevated]
-    public async Task<IActionResult> RegenerateKeys(CancellationToken ct)
+    public async Task<IActionResult> RegenerateKeys([FromForm] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
-        if (server is null) return this.ToHtmxResponse(ServiceResponse<object>.Fail("No server configured."));
+        var server = await _ifaces.RequireAsync(iface, ct);
+        if (server is null) return this.ToHtmxResponse(ServiceResponse<object>.Fail("Pick the interface whose keys to rotate."));
 
         var keys = await _daemon.GenerateWireGuardKeyPairAsync(ct);
         if (!keys.Success || keys.Data is null)
@@ -247,9 +266,11 @@ public sealed class WireGuardController : Controller
     }
 
     [HttpPost("apply"), ValidateAntiForgeryToken, RequireElevated]
-    public async Task<IActionResult> Apply(CancellationToken ct)
+    public async Task<IActionResult> Apply([FromForm] string? iface, CancellationToken ct)
     {
-        var envelope = await _daemon.ApplyWireGuardAsync(ct);
+        if (iface is { Length: > 0 } && !WgInterfaceName.IsValid(iface))
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Invalid WireGuard interface name."));
+        var envelope = await _daemon.ApplyWireGuardAsync(string.IsNullOrEmpty(iface) ? null : iface, ct);
         this.AttachHxEvent("refreshWireGuard", new { });
         return this.ToHtmxResponse(envelope);
     }
@@ -267,7 +288,7 @@ public sealed class WireGuardController : Controller
         if (!nft.Success)
             return this.ToHtmxResponse(ServiceResponse<object>.Fail($"nftables apply failed: {nft.Message}"));
 
-        var wg = await _daemon.ApplyWireGuardAsync(ct);
+        var wg = await _daemon.ApplyWireGuardAsync(null, ct);   // every enabled interface
         if (!wg.Success)
             return this.ToHtmxResponse(ServiceResponse<object>.Fail($"WireGuard apply failed: {wg.Message}"));
 
@@ -276,13 +297,16 @@ public sealed class WireGuardController : Controller
             return this.ToHtmxResponse(ServiceResponse<object>.Fail($"Policy routing apply failed: {pr.Message}"));
 
         return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { },
-            "Applied: firewall rules → WireGuard tunnel → policy routing."));
+            "Applied: firewall rules → WireGuard interfaces → policy routing."));
     }
 
     [HttpPost("stop"), ValidateAntiForgeryToken, RequireElevated]
-    public async Task<IActionResult> Stop(CancellationToken ct)
+    public async Task<IActionResult> Stop([FromForm] string? iface, CancellationToken ct)
     {
-        var envelope = await _daemon.StopWireGuardAsync(ct);
+        // Stop ONE named interface — never "all", never a default.
+        var server = await _ifaces.RequireAsync(iface, ct);
+        if (server is null) return this.ToHtmxResponse(ServiceResponse<object>.Fail("Pick the interface to stop."));
+        var envelope = await _daemon.StopWireGuardAsync(server.Name, ct);
         this.AttachHxEvent("refreshWireGuard", new { });
         return this.ToHtmxResponse(envelope);
     }
@@ -317,6 +341,6 @@ public sealed class WireGuardController : Controller
         Id = s.Id, Name = s.Name, ListenPort = s.ListenPort, AddressCidr = s.AddressCidr,
         Dns = s.Dns, Mtu = s.Mtu, TableOff = s.TableOff,
         PostUp = s.PostUp, PostDown = s.PostDown, Enabled = s.Enabled,
-        PrivateKey = s.PrivateKey, PublicKey = s.PublicKey,
+        PublicKey = s.PublicKey,   // never the private key: the form is rendered to the browser
     };
 }

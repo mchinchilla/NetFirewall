@@ -23,5 +23,5 @@ public interface IVpnDoctorService
     Task<VpnProbeResult> ProbeAsync(VpnProbeRequest request, CancellationToken ct = default);
 
     /// <summary>Diff a pasted (already redacted) wg-quick client config against what this firewall runs.</summary>
-    Task<VpnCompareResult> CompareIssuedConfigAsync(string redactedConfigText, CancellationToken ct = default);
+    Task<VpnCompareResult> CompareIssuedConfigAsync(string redactedConfigText, string? interfaceName = null, CancellationToken ct = default);
 }

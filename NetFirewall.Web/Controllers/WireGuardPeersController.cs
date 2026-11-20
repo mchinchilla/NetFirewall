@@ -56,22 +56,26 @@ public sealed class WireGuardPeersController : Controller
     }
 
     [HttpGet("edit/{id:guid?}")]
-    public async Task<IActionResult> Edit(Guid? id, string? family, CancellationToken ct)
+    public async Task<IActionResult> Edit(Guid? id, string? family, string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        // A new peer joins the named interface (default: the first, the remote-access server).
+        var servers = await _wg.ListServersAsync(ct);
+        var server = servers.FirstOrDefault(s => s.Name == iface) ?? servers.FirstOrDefault();
         if (server is null) return NotFound();
 
         if (id is null)
         {
-            var tunnel = string.Equals(family, "tunnels", StringComparison.OrdinalIgnoreCase);
+            // "sites" = another firewall that dials INTO this server (site-to-site, inbound).
+            var site = string.Equals(family, "sites", StringComparison.OrdinalIgnoreCase);
+            var tunnel = site || string.Equals(family, "tunnels", StringComparison.OrdinalIgnoreCase);
             // Clients get the next free .X/32 inside the tunnel subnet; upstream
             // tunnels default to routing everything into the tunnel.
             var suggested = SuggestNextPeerCidr(server, await _wg.GetPeersAsync(server.Id, ct));
             return PartialView("_PeerForm", new WgPeerFormViewModel
             {
                 ServerId = server.Id,
-                Role = tunnel ? "upstream" : "client",
-                AllowedIpsRaw = tunnel ? "0.0.0.0/0" : suggested,
+                Role = site ? "site" : tunnel ? "upstream" : "client",
+                AllowedIpsRaw = site ? suggested : tunnel ? "0.0.0.0/0" : suggested,
                 PersistentKeepalive = 25,
             });
         }
@@ -89,8 +93,9 @@ public sealed class WireGuardPeersController : Controller
 
         try
         {
-            var server = await _wg.GetServerAsync(ct);
-            if (server is null) return this.ToHtmxResponse(ServiceResponse<object>.Fail("No WireGuard server configured."));
+            // The peer belongs to the interface the form was opened for (never "the first").
+            var server = await _wg.GetServerByIdAsync(form.ServerId, ct);
+            if (server is null) return this.ToHtmxResponse(ServiceResponse<object>.Fail("That WireGuard interface no longer exists."));
 
             var allowedIps = form.AllowedIpsRaw
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -99,6 +104,26 @@ public sealed class WireGuardPeersController : Controller
                 return this.ToHtmxResponse(ServiceResponse<object>.Fail("Allowed IPs cannot be empty."));
 
             var isTunnel = IsTunnelRole(form.Role);
+
+            // One interface, one role. The server accepts clients and sites that dial in; a new
+            // VPN provider gets its own outbound interface. An outbound interface has exactly one
+            // remote peer. Legacy upstreams already on the server stay editable.
+            var role = form.Role.ToLowerInvariant();
+            var serverPeers = await _wg.GetPeersAsync(server.Id, ct);
+            var existingRole = form.Id is { } eid ? serverPeers.FirstOrDefault(p => p.Id == eid)?.Role : null;
+            if (string.Equals(server.Mode, "server", StringComparison.OrdinalIgnoreCase)
+                && role == "upstream" && existingRole != "upstream")
+                return this.ToHtmxResponse(ServiceResponse<object>.Fail(
+                    "VPN providers are added under Outbound connections, as a connection of their own."));
+            if (string.Equals(server.Mode, "client", StringComparison.OrdinalIgnoreCase))
+            {
+                if (role == "client")
+                    return this.ToHtmxResponse(ServiceResponse<object>.Fail(
+                        $"{server.Name} is an outbound connection: road-warrior clients connect to the VPN server instead."));
+                if (form.Id is null && serverPeers.Count > 0)
+                    return this.ToHtmxResponse(ServiceResponse<object>.Fail(
+                        $"{server.Name} already has its remote peer. Create another outbound connection instead."));
+            }
 
             // Guards the DataAnnotations can't express. Tunnels use the REMOTE
             // side's pasted public key — generating a keypair here (the old
@@ -239,8 +264,8 @@ public sealed class WireGuardPeersController : Controller
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         // Remove this peer's [vpn-auto] NAT/forward rows before deleting it.
-        var server = await _wg.GetServerAsync(ct);
         var peer = await _wg.GetPeerByIdAsync(id, ct);
+        var server = peer is null ? null : await _wg.GetServerByIdAsync(peer.ServerId, ct);
         if (server is not null && peer is not null)
         {
             try { await _vpnRouting.RemovePeerForwardingAsync(server, peer, ct); }

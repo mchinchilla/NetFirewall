@@ -116,10 +116,10 @@ public interface IDaemonClient
     Task<ServiceResponse<WireGuardPskDto>> GenerateWireGuardPskAsync(CancellationToken ct = default);
 
     /// <summary><c>POST /v1/wireguard/apply</c> — write wg0.conf and bring it up (or hot-reload via wg syncconf).</summary>
-    Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(CancellationToken ct = default);
+    Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(string? interfaceName = null, CancellationToken ct = default);
 
     /// <summary><c>POST /v1/wireguard/stop</c> — wg-quick down.</summary>
-    Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default);
+    Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(string? interfaceName = null, CancellationToken ct = default);
 
     /// <summary>
     /// <c>POST /v1/dns/apply</c> — render <c>/etc/unbound/unbound.conf.d/netfirewall.conf</c>
@@ -128,7 +128,7 @@ public interface IDaemonClient
     Task<ServiceResponse<NetworkApplyResult>> ApplyDnsAsync(DnsForwarderConfig config, CancellationToken ct = default);
 
     /// <summary><c>GET /v1/wireguard/status</c> — wg show dump parsed into per-peer stats.</summary>
-    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default);
+    Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(string? interfaceName = null, CancellationToken ct = default);
 
     /// <summary><c>GET /v1/wireguard/import</c> — list wg-quick .conf files on disk.</summary>
     Task<ServiceResponse<IReadOnlyList<string>>> ListWireGuardImportablesAsync(CancellationToken ct = default);
@@ -138,6 +138,9 @@ public interface IDaemonClient
     /// and upsert into wg_servers + wg_peers. Idempotent. Elevation required.
     /// </summary>
     Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default);
+
+    /// <summary>New outbound client interface from a pasted provider / remote-site config (daemon validates + derives the key).</summary>
+    Task<ServiceResponse<WgOutboundCreatedDto>> CreateWireGuardOutboundAsync(WgOutboundCreateRequest request, CancellationToken ct = default);
 
     /// <summary><c>GET /v1/system/services</c> — systemd unit status for the dashboard.</summary>
     Task<ServiceResponse<IReadOnlyList<NetFirewall.Services.Monitoring.ServiceHealth>>> GetSystemServicesAsync(CancellationToken ct = default);
@@ -285,6 +288,12 @@ public interface IDaemonClient
 public sealed record TerminalTicketDto(string Ticket);
 
 public sealed record WireGuardKeyPairDto(string PrivateKey, string PublicKey);
+
+/// <summary>The pasted wg-quick text + an optional display name for the remote side.</summary>
+public sealed record WgOutboundCreateRequest(string ConfigText, string? Label);
+
+/// <summary>What was created — deliberately no key material.</summary>
+public sealed record WgOutboundCreatedDto(Guid ServerId, string Interface, string Role, string PeerName, string? Endpoint);
 public sealed record WireGuardPskDto(string PresharedKey);
 
 public sealed record NftApplyResultDto(int ExitCode, string? BackupPath, string? Output, string? Error);

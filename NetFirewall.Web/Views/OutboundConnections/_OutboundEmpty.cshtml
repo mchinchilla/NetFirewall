@@ -1,0 +1,24 @@
+@* No outbound connection yet: say what the two kinds are for and how to start. *@
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    <div class="grid gap-6 md:grid-cols-2 py-2">
+        <div>
+            <h2 class="text-base font-semibold">Browse through a VPN provider</h2>
+            <p class="text-sm mt-1 text-surface-fg-muted">
+                Paste the WireGuard file your provider generated for you. Then pick which devices leave through it;
+                everything else keeps using your normal internet connection.
+            </p>
+        </div>
+        <div>
+            <h2 class="text-base font-semibold">Link another site</h2>
+            <p class="text-sm mt-1 text-surface-fg-muted">
+                Paste the config the remote firewall issued for this one. Its networks become reachable from your LAN and
+                the other way round; your internet traffic is not affected.
+            </p>
+        </div>
+    </div>
+    <div class="pt-4 mt-2 border-t border-surface-border flex justify-end">
+        <button type="button" class="btn btn-primary"
+                hx-get="/Vpn/Outbound/new" hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('New outbound connection')">Paste a configuration</button>
+    </div>
+</section>

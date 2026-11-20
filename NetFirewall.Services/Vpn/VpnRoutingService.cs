@@ -215,6 +215,30 @@ public sealed class VpnRoutingService : IVpnRoutingService
             managed.Enabled = managedSources.Length > 0;
             await _fw.UpdateMangleRuleAsync(managed, ct);
         }
+
+        await ReconcileEgressMasqueradeAsync(server, scaffold.InterfaceId, clean, ct);
+    }
+
+    /// <summary>
+    /// Devices steered into an outbound tunnel leave with their LAN address, which the far end
+    /// (a VPN provider, or a site that doesn't route our LAN) drops: it only accepts the tunnel
+    /// address it assigned us. One masquerade per steered source, out of THIS interface only —
+    /// never a source-less `oif` masquerade, which would also hide our LAN from site-to-site
+    /// peers on a dual-role interface. A hand-written row for the same (source, oif) wins.
+    /// </summary>
+    private async Task ReconcileEgressMasqueradeAsync(WgServer server, Guid ifaceId, IReadOnlyCollection<string> sources, CancellationToken ct)
+    {
+        var suffix = $" via {server.Name}";
+        var nat = await _fw.GetNatRulesAsync(ct);
+        var ours = nat.Where(n => n.Type == "masquerade" && n.OutputInterfaceId == ifaceId
+                                  && (n.Description?.StartsWith(EgressTag, StringComparison.Ordinal) ?? false)
+                                  && n.Description.EndsWith(suffix, StringComparison.Ordinal)).ToList();
+
+        foreach (var stale in ours.Where(n => !sources.Contains(n.SourceNetwork ?? "", StringComparer.OrdinalIgnoreCase)))
+            await _fw.DeleteNatRuleAsync(stale.Id, ct);
+
+        foreach (var src in sources)
+            await EnsureMasqueradeAsync(nat, src, ifaceId, $"{EgressTag} masquerade {src}{suffix}", ct);
     }
 
     private async Task<int?> ResolveTunnelMarkValueAsync(WgServer server, CancellationToken ct)
@@ -295,6 +319,28 @@ public sealed class VpnRoutingService : IVpnRoutingService
                     await EnsureForwardRuleAsync(existingFilter, wg.Id, lan.Id, remote, null, tag + $" wg→{lan.Name}", ct);
                     await EnsureForwardRuleAsync(existingFilter, lan.Id, wg.Id, null, remote, tag + $" {lan.Name}→wg", ct);
                 }
+
+                // Our LAN → remote LAN needs a route into the tunnel. Ours, in every mode: with
+                // Table=off wg-quick adds none, and with Table=auto a hot reload (syncconf) adds none
+                // for a NEW peer. It is a `dev {name}` route, so it dies with the link and is
+                // re-installed after wg-quick up (never before — no clash with wg-quick's own add);
+                // metric 0 so it takes over wg-quick's identical route and a later prune removes both.
+                // IPv4 only (the forward generator is v4), and never a covering prefix (< /8) that
+                // would pull the firewall's own outbound into the tunnel.
+                if (ScopeCidrs(peer.AllowedSubnets)?.Where(IsRoutableSiteSubnet).ToArray() is { Length: > 0 } subnets)
+                {
+                    var routes = await _fw.GetStaticRoutesAsync(wg.Id, ct);
+                    foreach (var cidr in subnets)
+                    {
+                        if (routes.Any(r => r.TableId is null && string.Equals(r.Destination, cidr, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                        await _fw.CreateStaticRouteAsync(new FwStaticRoute
+                        {
+                            InterfaceId = wg.Id, Destination = cidr, Metric = 0, Enabled = true,
+                            Description = tag + " route",
+                        }, ct);
+                    }
+                }
             }
         }
         else if (mode != "none")
@@ -332,6 +378,17 @@ public sealed class VpnRoutingService : IVpnRoutingService
             await _fw.DeleteNatRuleAsync(n.Id, ct);
         foreach (var f in (await _fw.GetFilterRulesAsync("forward", ct)).Where(f => f.Description?.StartsWith(tag, StringComparison.Ordinal) ?? false))
             await _fw.DeleteFilterRuleAsync(f.Id, ct);
+        foreach (var r in (await _fw.GetStaticRoutesAsync(null, ct)).Where(r => r.Description?.StartsWith(tag, StringComparison.Ordinal) ?? false))
+            await _fw.DeleteStaticRouteAsync(r.Id, ct);
+    }
+
+    /// <summary>A remote LAN we may route into a tunnel: IPv4, prefix /8 or longer.</summary>
+    internal static bool IsRoutableSiteSubnet(string cidr)
+    {
+        var slash = cidr.IndexOf('/');
+        var addr = slash < 0 ? cidr : cidr[..slash];
+        if (!IPAddress.TryParse(addr, out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+        return slash < 0 || (int.TryParse(cidr[(slash + 1)..], out var len) && len is >= 8 and <= 32);
     }
 
     private async Task EnsureMasqueradeAsync(

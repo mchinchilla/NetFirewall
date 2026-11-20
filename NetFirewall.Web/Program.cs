@@ -209,6 +209,9 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnHealthService,
                            NetFirewall.Services.Vpn.VpnHealthService>();
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardTeardownService,
                            NetFirewall.Services.Vpn.WireGuardTeardownService>();
+// Which wg interface a request means (pages default; mutations must name it).
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardInterfaceResolver,
+                           NetFirewall.Services.Vpn.WireGuardInterfaceResolver>();
 
 // Network objects — alias-style address objects. Filter / NAT / mangle
 // generators resolve names → flat CIDRs through INetworkObjectResolver.

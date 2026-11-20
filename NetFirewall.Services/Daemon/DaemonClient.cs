@@ -182,18 +182,25 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
     public Task<ServiceResponse<WireGuardPskDto>> GenerateWireGuardPskAsync(CancellationToken ct = default)
         => PostAsync<WireGuardPskDto>("/v1/wireguard/genpsk", ct);
 
-    public Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(CancellationToken ct = default)
-        => PostAsync<NftApplyResultDto>("/v1/wireguard/apply", ct);
+    // null interface = every interface (daemon side). The name travels as a query value; the
+    // daemon only ever uses it to look the interface up in wg_servers.
+    private static string WgPath(string action, string? interfaceName) =>
+        string.IsNullOrWhiteSpace(interfaceName)
+            ? $"/v1/wireguard/{action}"
+            : $"/v1/wireguard/{action}?name={Uri.EscapeDataString(interfaceName)}";
 
-    public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(CancellationToken ct = default)
-        => PostAsync<NftApplyResultDto>("/v1/wireguard/stop", ct);
+    public Task<ServiceResponse<NftApplyResultDto>> ApplyWireGuardAsync(string? interfaceName = null, CancellationToken ct = default)
+        => PostAsync<NftApplyResultDto>(WgPath("apply", interfaceName), ct);
+
+    public Task<ServiceResponse<NftApplyResultDto>> StopWireGuardAsync(string? interfaceName = null, CancellationToken ct = default)
+        => PostAsync<NftApplyResultDto>(WgPath("stop", interfaceName), ct);
 
     public Task<ServiceResponse<NetworkApplyResult>> ApplyDnsAsync(DnsForwarderConfig config, CancellationToken ct = default)
         => PostJsonAsync<DnsForwarderConfig, NetworkApplyResult>("/v1/dns/apply", config, ct);
 
-    public async Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(CancellationToken ct = default)
+    public async Task<ServiceResponse<IReadOnlyList<NetFirewall.Models.Vpn.WgPeerLiveStatus>>> GetWireGuardStatusAsync(string? interfaceName = null, CancellationToken ct = default)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, "/v1/wireguard/status");
+        using var req = new HttpRequestMessage(HttpMethod.Get, WgPath("status", interfaceName));
         AttachSessionHeader(req);
         try
         {
@@ -209,6 +216,9 @@ public sealed class DaemonClient : IDaemonClient, IDisposable
 
     public Task<ServiceResponse<IReadOnlyList<string>>> ListWireGuardImportablesAsync(CancellationToken ct = default)
         => GetAsync<IReadOnlyList<string>>("/v1/wireguard/import", ct);
+
+    public Task<ServiceResponse<WgOutboundCreatedDto>> CreateWireGuardOutboundAsync(WgOutboundCreateRequest request, CancellationToken ct = default)
+        => PostJsonAsync<WgOutboundCreateRequest, WgOutboundCreatedDto>("/v1/wireguard/outbound", request, ct);
 
     public Task<ServiceResponse<NetFirewall.Services.Vpn.WireGuardImportResult>> ImportWireGuardConfigAsync(string interfaceName, CancellationToken ct = default)
         => PostAsync<NetFirewall.Services.Vpn.WireGuardImportResult>($"/v1/wireguard/import/{Uri.EscapeDataString(interfaceName)}", ct);

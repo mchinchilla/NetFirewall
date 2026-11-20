@@ -23,7 +23,10 @@ public sealed class WireGuardConfigService : IWireGuardConfigService
             sb.AppendLine($"DNS        = {server.Dns}");
         if (server.Mtu is { } mtu && mtu > 0)
             sb.AppendLine($"MTU        = {mtu}");
-        if (server.TableOff)
+        // An outbound CLIENT interface never lets wg-quick touch routing: its peer's
+        // AllowedIPs is typically 0.0.0.0/0, which would hijack the firewall's own
+        // outbound. Traffic reaches it through policy routing (mark → its table) only.
+        if (RendersTableOff(server))
             sb.AppendLine("Table      = off");
         if (!string.IsNullOrWhiteSpace(server.PostUp))
             sb.AppendLine($"PostUp     = {server.PostUp}");
@@ -41,7 +44,7 @@ public sealed class WireGuardConfigService : IWireGuardConfigService
             sb.AppendLine($"PublicKey  = {p.PublicKey}");
             if (!string.IsNullOrEmpty(p.PresharedKey))
                 sb.AppendLine($"PresharedKey = {p.PresharedKey}");
-            sb.AppendLine($"AllowedIPs = {string.Join(", ", p.AllowedIps)}");
+            sb.AppendLine($"AllowedIPs = {string.Join(", ", PeerAllowedIps(p))}");
             // Endpoint matters most in client mode (we need to know where to
             // send packets). In server mode it's optional but valid for
             // site-to-site keepalive.
@@ -52,6 +55,27 @@ public sealed class WireGuardConfigService : IWireGuardConfigService
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>Whether wg-quick leaves routing alone for this interface (then NetFirewall owns its routes).</summary>
+    public static bool RendersTableOff(WgServer s) => s.TableOff || IsClientKind(s);
+
+    internal static bool IsClientKind(WgServer s) =>
+        string.Equals(s.Mode, "client", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A site link's remote LAN subnets must be in its AllowedIPs too: cryptokey routing drops
+    /// every packet whose source (inbound) or destination (outbound) is outside them. They are
+    /// appended after the stored list, de-duplicated, so a hand-config that already lists them
+    /// renders unchanged.
+    /// </summary>
+    internal static IEnumerable<string> PeerAllowedIps(WgPeer p)
+    {
+        var isSite = string.Equals(p.Role, "site", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(p.RouteMode, "site", StringComparison.OrdinalIgnoreCase);
+        if (!isSite || p.AllowedSubnets.Length == 0) return p.AllowedIps;
+        var seen = new HashSet<string>(p.AllowedIps, StringComparer.OrdinalIgnoreCase);
+        return p.AllowedIps.Concat(p.AllowedSubnets.Where(s => !string.IsNullOrWhiteSpace(s) && seen.Add(s.Trim())).Select(s => s.Trim()));
     }
 
     public string GenerateClientConfig(

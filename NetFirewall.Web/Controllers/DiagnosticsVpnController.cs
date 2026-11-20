@@ -33,19 +33,23 @@ public sealed class DiagnosticsVpnController : Controller
     }
 
     [HttpGet("")]
-    public async Task<IActionResult> Index(CancellationToken ct)
+    public async Task<IActionResult> Index([FromQuery] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        // Which interface to diagnose: ?iface= (server or an outbound connection), else the first.
+        var servers = await _wg.ListServersAsync(ct);
+        var server = servers.FirstOrDefault(s => s.Name == iface) ?? servers.FirstOrDefault();
         ViewBag.ServerName = server?.Name;
+        ViewBag.Interfaces = servers.Select(s => s.Name).ToArray();
         ViewBag.DaemonEnabled = _daemon is not NullDaemonClient;
         return View();
     }
 
     /// <summary>Compact live status, reusing the WireGuard page's own partial.</summary>
     [HttpGet("status")]
-    public async Task<IActionResult> Status(CancellationToken ct)
+    public async Task<IActionResult> Status([FromQuery] string? iface, CancellationToken ct)
     {
-        var server = await _wg.GetServerAsync(ct);
+        var servers = await _wg.ListServersAsync(ct);
+        var server = servers.FirstOrDefault(s => s.Name == iface) ?? servers.FirstOrDefault();
         if (server is null)
             return PartialView("~/Views/WireGuard/_Status.cshtml", new WgStatusViewModel
             {
@@ -54,7 +58,7 @@ public sealed class DiagnosticsVpnController : Controller
                 Status = Array.Empty<NetFirewall.Models.Vpn.WgPeerLiveStatus>(),
             });
 
-        var status = await _daemon.GetWireGuardStatusAsync(ct);
+        var status = await _daemon.GetWireGuardStatusAsync(server.Name, ct);
         return PartialView("~/Views/WireGuard/_Status.cshtml", new WgStatusViewModel
         {
             Server = server,
@@ -64,9 +68,11 @@ public sealed class DiagnosticsVpnController : Controller
     }
 
     [HttpPost("run"), ValidateAntiForgeryToken]
-    public async Task<IActionResult> Run(CancellationToken ct)
+    public async Task<IActionResult> Run([FromForm] string? iface, CancellationToken ct)
     {
-        var env = await _daemon.RunVpnDoctorAsync(new VpnDoctorRequest(), ct);
+        if (iface is { Length: > 0 } && !NetFirewall.Models.Vpn.WgInterfaceName.IsValid(iface))
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Invalid WireGuard interface name."));
+        var env = await _daemon.RunVpnDoctorAsync(new VpnDoctorRequest(Interface: iface), ct);
         if (env.Data?.Result is null)
         {
             this.AttachToastTrigger(ServiceResponse<object>.Fail(env.Message ?? "The doctor could not run."));
@@ -86,8 +92,12 @@ public sealed class DiagnosticsVpnController : Controller
             return this.ToHtmxResponse(ServiceResponse<object>.Fail("Form validation failed: " +
                 string.Join(" ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))));
 
+        var iface = Request.HasFormContentType ? Request.Form["iface"].ToString() : null;
+        if (iface is { Length: > 0 } && !NetFirewall.Models.Vpn.WgInterfaceName.IsValid(iface))
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Invalid WireGuard interface name."));
         var env = await _daemon.RunVpnProbeAsync(new VpnProbeRequest(
-            string.IsNullOrWhiteSpace(form.Target) ? null : form.Target.Trim(), form.Mode), ct);
+            string.IsNullOrWhiteSpace(form.Target) ? null : form.Target.Trim(), form.Mode,
+            string.IsNullOrEmpty(iface) ? null : iface), ct);
         if (env.Data?.Result is null)
         {
             this.AttachToastTrigger(ServiceResponse<object>.Fail(env.Message ?? "The probe could not run."));
@@ -109,7 +119,10 @@ public sealed class DiagnosticsVpnController : Controller
 
         // Strip the keys here, at the edge, so a private key never leaves the browser's request.
         var redacted = _validator.RedactWgConfig(form.ConfigText ?? string.Empty);
-        var env = await _daemon.RunVpnCompareAsync(new VpnCompareRequest(redacted), ct);
+        var iface = Request.HasFormContentType ? Request.Form["iface"].ToString() : null;
+        if (iface is { Length: > 0 } && !NetFirewall.Models.Vpn.WgInterfaceName.IsValid(iface))
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Invalid WireGuard interface name."));
+        var env = await _daemon.RunVpnCompareAsync(new VpnCompareRequest(redacted, string.IsNullOrEmpty(iface) ? null : iface), ct);
         if (env.Data?.Result is null)
         {
             this.AttachToastTrigger(ServiceResponse<object>.Fail(env.Message ?? "The comparison could not run."));

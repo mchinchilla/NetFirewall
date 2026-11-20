@@ -42,7 +42,7 @@ public sealed class WireGuardServiceTests : IAsyncLifetime
         var saved = await _svc.SaveServerAsync(NewServer());
 
         Assert.NotEqual(Guid.Empty, saved.Id);
-        var fetched = await _svc.GetServerAsync();
+        var fetched = await _svc.GetServerByIdAsync(saved.Id);
         Assert.NotNull(fetched);
         Assert.Equal(saved.Id, fetched!.Id);
         Assert.Equal("PRIV_KEY", fetched.PrivateKey);
@@ -58,15 +58,28 @@ public sealed class WireGuardServiceTests : IAsyncLifetime
         var second = await _svc.SaveServerAsync(s);
         Assert.Equal(s.Id, second.Id);
 
-        var fetched = await _svc.GetServerAsync();
+        var fetched = await _svc.GetServerByIdAsync(s.Id);
         Assert.Equal(51900, fetched!.ListenPort);
         Assert.Equal("iptables ...", fetched.PostUp);
     }
 
     [Fact]
-    public async Task GetServerAsync_NoRows_ReturnsNull()
+    public async Task ListServersAsync_NoRows_ReturnsEmpty()
     {
-        Assert.Null(await _svc.GetServerAsync());
+        Assert.Empty(await _svc.ListServersAsync());
+        Assert.Null(await _svc.GetServerByNameAsync("wg0"));
+    }
+
+    [Fact]
+    public async Task ListServersAsync_ServerKindFirst_AndLookupsByName()
+    {
+        var client = NewServer(); client.Name = "wgc1"; client.Mode = "client";
+        await _svc.SaveServerAsync(client);
+        var server = await _svc.SaveServerAsync(NewServer());
+
+        var all = await _svc.ListServersAsync();
+        Assert.Equal(["wg0", "wgc1"], all.Select(s => s.Name));
+        Assert.Equal(server.Id, (await _svc.GetServerByNameAsync("wg0"))!.Id);
     }
 
     [Fact]
@@ -74,7 +87,7 @@ public sealed class WireGuardServiceTests : IAsyncLifetime
     {
         var s = await _svc.SaveServerAsync(NewServer());
         Assert.True(await _svc.DeleteServerAsync(s.Id));
-        Assert.Null(await _svc.GetServerAsync());
+        Assert.Null(await _svc.GetServerByIdAsync(s.Id));
 
         Assert.False(await _svc.DeleteServerAsync(Guid.NewGuid()));
     }

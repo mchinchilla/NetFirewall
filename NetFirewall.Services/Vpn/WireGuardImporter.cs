@@ -49,8 +49,8 @@ public sealed class WireGuardImporter : IWireGuardImporter
         if (string.IsNullOrWhiteSpace(interfaceName))
             throw new ArgumentException("Interface name is required.", nameof(interfaceName));
 
-        // wg-quick rejects names with '/' or '..' — be conservative.
-        if (interfaceName.Contains('/') || interfaceName.Contains("..", StringComparison.Ordinal))
+        // The name reaches wg-quick and a bash script: only the strict link-name charset.
+        if (!WgInterfaceName.IsValid(interfaceName))
             throw new ArgumentException("Illegal interface name.", nameof(interfaceName));
 
         var path = Path.Combine(_configDir, interfaceName + ".conf");
@@ -64,14 +64,9 @@ public sealed class WireGuardImporter : IWireGuardImporter
         // (or there's exactly one peer with Endpoint set) → 'client'.
         var mode = parsed.Interface.ListenPort.HasValue ? "server" : "client";
 
-        // Single-interface design: importing a conf under a DIFFERENT name would
-        // insert a second wg_servers row that the whole stack (first-by-created_at)
-        // silently shadows — refuse loudly instead of half-importing.
-        var existing = await _wg.GetServerAsync(ct);
-        if (existing is not null && !existing.Name.Equals(interfaceName, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"This firewall manages a single WireGuard interface ('{existing.Name}'). " +
-                $"Importing '{interfaceName}' would create a second, hidden interface — delete '{existing.Name}' first.");
+        // One wg_servers row per interface: re-importing a name updates that interface,
+        // a new name adds one (server kind when it listens, an outbound client otherwise).
+        var existing = await _wg.GetServerByNameAsync(interfaceName, ct);
 
         // Public key must be derived from private — wg-quick configs don't store it.
         var pubkey = await _apply.DerivePublicKeyAsync(parsed.Interface.PrivateKey, ct);
@@ -137,6 +132,117 @@ public sealed class WireGuardImporter : IWireGuardImporter
         return new WireGuardImportResult(server, imported, mode, path);
     }
 
+    // ─────────────────────────────────── outbound (pasted)
+
+    /// <summary>Keys that run commands as root, or let wg-quick rewrite the file — never accepted from pasted text.</summary>
+    private static readonly HashSet<string> ForbiddenKeys =
+        new(["preup", "postup", "predown", "postdown", "saveconfig"], StringComparer.OrdinalIgnoreCase);
+
+    internal const int MaxOutboundConfigBytes = 16 * 1024;
+
+    /// <summary>
+    /// Pure validation of a pasted outbound config. Returns the parsed config or a message that
+    /// names the problem (never echoes key material).
+    /// </summary>
+    internal static OutboundValidation ValidateOutbound(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return new OutboundRejected("Paste the WireGuard configuration you were given.");
+        if (text.Length > MaxOutboundConfigBytes) return new OutboundRejected("That configuration is too large (16 KB max).");
+
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim();
+            var eq = line.IndexOf('=');
+            if (line.StartsWith('#') || eq <= 0) continue;
+            var key = line[..eq].Trim();
+            if (ForbiddenKeys.Contains(key))
+                return new OutboundRejected($"'{key}' is not accepted: pasted configurations cannot run commands on the firewall. Remove that line and paste again.");
+        }
+
+        var cfg = ParseWgQuick(text);
+        if (string.IsNullOrWhiteSpace(cfg.Interface.PrivateKey) || !LooksLikeWgKey(cfg.Interface.PrivateKey))
+            return new OutboundRejected("[Interface] needs the PrivateKey you were issued.");
+        if (string.IsNullOrWhiteSpace(cfg.Interface.Address))
+            return new OutboundRejected("[Interface] needs the Address the provider assigned you.");
+        if (cfg.Peers.Count != 1)
+            return new OutboundRejected($"An outbound connection has exactly one [Peer] (found {cfg.Peers.Count}).");
+        var peer = cfg.Peers[0];
+        if (!LooksLikeWgKey(peer.PublicKey)) return new OutboundRejected("[Peer] needs the remote side's PublicKey.");
+        if (string.IsNullOrWhiteSpace(peer.Endpoint)) return new OutboundRejected("[Peer] needs an Endpoint (host:port) to dial.");
+        if (peer.AllowedIPs.Length == 0) return new OutboundRejected("[Peer] needs AllowedIPs.");
+        if (peer.PresharedKey is { } psk && !LooksLikeWgKey(psk)) return new OutboundRejected("[Peer] PresharedKey is not a WireGuard key.");
+        return new ParsedOutbound(cfg);
+    }
+
+    private static bool LooksLikeWgKey(string? k) =>
+        k is { Length: 44 } && k.EndsWith('=') && Convert.TryFromBase64String(k, new byte[32], out var n) && n == 32;
+
+    /// <summary>A pasted outbound config is either usable or refused with a reason — never both, never neither.</summary>
+    internal union OutboundValidation(ParsedOutbound, OutboundRejected);
+
+    /// <summary>Why a pasted config was refused (operator-facing; never contains key material).</summary>
+    internal sealed record OutboundRejected(string Reason);
+
+    internal sealed class ParsedOutbound(ParsedConfig cfg)
+    {
+        internal ParsedConfig Config { get; } = cfg;
+        public string Address => Config.Interface.Address!;
+        public string PeerEndpoint => Config.Peers[0].Endpoint!;
+        public IReadOnlyList<string> PeerAllowedIps => Config.Peers[0].AllowedIPs;
+    }
+
+    public async Task<WireGuardImportResult> CreateOutboundAsync(string configText, string? label, CancellationToken ct = default)
+    {
+        var cfg = ValidateOutbound(configText) switch
+        {
+            ParsedOutbound ok => ok.Config,
+            OutboundRejected no => throw new ArgumentException(no.Reason),
+        };
+        var p = cfg.Peers[0];
+
+        var existing = await _wg.ListServersAsync(ct);
+        foreach (var s in existing)
+            if ((await _wg.GetPeersAsync(s.Id, ct)).Any(x => x.PublicKey == p.PublicKey))
+                throw new InvalidOperationException($"That remote key is already a peer of {s.Name}.");
+
+        var name = WgInterfaceName.NextClientName(existing.Select(s => s.Name));
+        var server = new WgServer
+        {
+            Name = name,
+            Mode = "client",
+            PrivateKey = cfg.Interface.PrivateKey,
+            PublicKey = await _apply.DerivePublicKeyAsync(cfg.Interface.PrivateKey, ct),
+            ListenPort = 0,                  // dial-only
+            AddressCidr = cfg.Interface.Address!,
+            Dns = null,                      // the provider's DNS would hijack the firewall's resolver
+            Mtu = cfg.Interface.Mtu,
+            TableOff = true,
+            Enabled = true,
+        };
+        await _wg.SaveServerAsync(server, ct);
+
+        var role = InferRole(p);
+        var peer = new WgPeer
+        {
+            ServerId = server.Id,
+            Name = string.IsNullOrWhiteSpace(label) ? (role == "upstream" ? "VPN provider" : "Remote site") : label.Trim(),
+            PublicKey = p.PublicKey,
+            PresharedKey = p.PresharedKey,
+            AllowedIps = p.AllowedIPs,
+            Endpoint = p.Endpoint,
+            PersistentKeepalive = p.PersistentKeepalive ?? 25,
+            Role = role,
+            RouteMode = role == "site" ? "site" : "none",
+            // The remote LAN(s): IPv4 networks only — the tunnel host (/32) and v6 ranges are not a LAN we forward to.
+            AllowedSubnets = role == "site" ? p.AllowedIPs.Where(a => !a.EndsWith("/32", StringComparison.Ordinal) && !a.Contains(':')).ToArray() : [],
+            Enabled = true,
+        };
+        await _wg.CreatePeerAsync(peer, ct);
+
+        _logger.LogInformation("Created outbound WireGuard connection {Name} ({Role}) to {Endpoint}", name, role, p.Endpoint);
+        return new WireGuardImportResult(server, [peer], "client", "(pasted)");
+    }
+
     /// <summary>
     /// Same inference as migration 00036's backfill: a peer we dial (Endpoint)
     /// that routes everything is the upstream; a dialed peer with narrower
@@ -146,13 +252,24 @@ public sealed class WireGuardImporter : IWireGuardImporter
     private static string InferRole(PeerSection p)
     {
         if (string.IsNullOrEmpty(p.Endpoint)) return "client";
-        var routesEverything = p.AllowedIPs.Any(ip => ip is "0.0.0.0/0" or "::/0");
-        return routesEverything ? "upstream" : "site";
+        return RoutesEverything(p.AllowedIPs) ? "upstream" : "site";
+    }
+
+    /// <summary>
+    /// A full tunnel: 0.0.0.0/0 (or ::/0), or the split-default pair 0.0.0.0/1 + 128.0.0.0/1
+    /// (and ::/1 + 8000::/1) many providers ship to beat the default route without replacing it.
+    /// </summary>
+    internal static bool RoutesEverything(IReadOnlyCollection<string> allowed)
+    {
+        var set = allowed.Select(a => a.Trim().ToLowerInvariant()).ToHashSet();
+        return set.Contains("0.0.0.0/0") || set.Contains("::/0")
+               || (set.Contains("0.0.0.0/1") && set.Contains("128.0.0.0/1"))
+               || (set.Contains("::/1") && set.Contains("8000::/1"));
     }
 
     // ─────────────────────────────────── parser
 
-    private sealed class InterfaceSection
+    internal sealed class InterfaceSection
     {
         public string PrivateKey { get; set; } = string.Empty;
         public string? Address   { get; set; }
@@ -164,7 +281,7 @@ public sealed class WireGuardImporter : IWireGuardImporter
         public string? PostDown  { get; set; }
     }
 
-    private sealed class PeerSection
+    internal sealed class PeerSection
     {
         public string PublicKey = string.Empty;
         public string? PresharedKey;
@@ -174,7 +291,7 @@ public sealed class WireGuardImporter : IWireGuardImporter
         public string? Name;          // From "# Name = foo" comment, if present
     }
 
-    private sealed class ParsedConfig
+    internal sealed class ParsedConfig
     {
         public InterfaceSection Interface { get; } = new();
         public List<PeerSection> Peers { get; } = new();

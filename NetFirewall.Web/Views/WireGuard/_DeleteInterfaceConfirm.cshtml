@@ -80,6 +80,7 @@
 
     <form hx-post="/Vpn/WireGuard/delete" hx-swap="none" class="space-y-3 pt-2 border-t border-surface-border">
         @Html.AntiForgeryToken()
+        <input type="hidden" name="iface" value="@Model.InterfaceName" />
         <div class="space-y-1.5">
             <label for="f-ConfirmName" class="block text-xs font-medium text-surface-fg">
                 Type <span class="font-mono font-semibold">@Model.InterfaceName</span> to confirm

@@ -1,0 +1,38 @@
+@model NetFirewall.Models.Vpn.WgServer
+@*
+    Per-interface controls shared by the VPN server page and every outbound connection card.
+    Every mutation names its interface (iface) — the controller refuses a POST without one.
+*@
+@{
+    var name = Model.Name;
+    var vals = System.Text.Json.JsonSerializer.Serialize(new { iface = name });
+}
+<div class="flex flex-wrap items-center gap-1">
+    <a href="/Diagnostics/Vpn?iface=@Uri.EscapeDataString(name)" class="btn btn-ghost text-xs"
+       title="Run the VPN doctor on @name: config, interface, handshake, routing, firewall, kernel.">Diagnose</a>
+    <button type="button" class="btn btn-ghost text-xs"
+            hx-post="/Vpn/WireGuard/stop" hx-vals="@vals" hx-trigger="confirmed-stop"
+            @@click.prevent="(async () => {
+                const ok = await $store.confirm.ask({
+                    title: 'Stop @name?',
+                    message: 'Brings down @name only. Traffic that uses it stops until you apply again.',
+                    confirmLabel: 'Stop', level: 'warning'
+                });
+                if (ok) htmx.trigger($el, 'confirmed-stop');
+            })()">Stop</button>
+    <button type="button" class="btn btn-ghost text-xs text-feedback-danger-fg"
+            hx-get="/Vpn/WireGuard/delete-confirm?iface=@Uri.EscapeDataString(name)"
+            hx-target="#drawer-body" hx-swap="innerHTML"
+            @@click="$store.drawer.openRaw('Delete @name')">Delete</button>
+    <button type="button" class="btn btn-primary text-xs"
+            hx-post="/Vpn/WireGuard/apply-all" hx-trigger="confirmed-apply"
+            title="Firewall rules → WireGuard interfaces → policy routing."
+            @@click.prevent="(async () => {
+                const ok = await $store.confirm.ask({
+                    title: 'Apply VPN?',
+                    message: 'Applies in order: firewall rules → every WireGuard interface → policy routing.',
+                    confirmLabel: 'Apply VPN', level: 'default'
+                });
+                if (ok) htmx.trigger($el, 'confirmed-apply');
+            })()">Apply</button>
+</div>
