@@ -1,9 +1,18 @@
 # Vendored client libraries (no npm). Pin exact versions; bump by replacing
-# the minified file from jsDelivr. Do not jump major versions without a
+# the minified file from the npm package tarball (see Source below). Do not jump major versions without a
 # migration (HTMX 4 changes event names and attribute inheritance).
 #
-# htmx     2.0.9   https://cdn.jsdelivr.net/npm/htmx.org@2.0.9/dist/htmx.min.js
-# alpine   3.17.1  https://cdn.jsdelivr.net/npm/alpinejs@3.17.1/dist/cdn.min.js
-# chart.js 4.5.1   https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js
+# htmx     2.0.11  npm htmx.org@2.0.11 package/dist/htmx.min.js
+#                  sha256 d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717
+# alpine   3.17.5  npm alpinejs@3.17.5 package/dist/cdn.min.js
+#                  sha256 b4036e9e9ac22fa6f6ae1ba292e015e1f3e9c85d0d79e73e4c8eb9bb139b522e
+# chart.js 4.6.1   npm chart.js@4.6.1 package/dist/chart.umd.min.js
+#                  sha256 87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2
+#
+# Source: the npm registry TARBALL (registry.npmjs.org/<pkg>/-/<pkg>-<ver>.tgz), verified
+# against its published dist.integrity (sha512) before the one file above was extracted.
+# The firewall itself never fetches anything: these files are served from wwwroot/lib.
+# (2026-11-20; the NetOpenGrid grids embed their own htmx 4 / Alpine under /_netgrid/vendor.)
+#
 # geist    1.7.2   npm geist@1.7.2 dist/fonts/geist-{sans,mono}/*-Variable.woff2 (OFL-1.1, LICENSE.txt alongside)
 #                  copied from TekiumCallAccounting's vendored set; sha256 a369fcf5628ea2aa… / fba8f577f38a2bbc…
