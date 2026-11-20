@@ -25,6 +25,9 @@ public sealed class ReleaseLayoutTests : IDisposable
     [InlineData("v0.6.1-3-g97f88aa-dirty+97f88aa1c2d3", "0.6.1-3-g97f88aa-dirty", "97f88aa", false, true)]
     [InlineData("97f88aa", "97f88aa", "97f88aa", false, false)]                                     // no tag yet
     [InlineData("1.0.0+97F88AA1C2D3E4F5", "1.0.0", "97f88aa", true, false)]                          // plain dotnet build
+    [InlineData("0.6.3-dev.1-dirty+f441d64c2fb9fd51", "0.6.3-dev.1-dirty", "f441d64", false, true)]   // dev build (Directory.Build.targets)
+    [InlineData("0.6.3-dev.4+f441d64c2fb9fd51", "0.6.3-dev.4", "f441d64", false, false)]
+    [InlineData("0.0.0-dev+f441d64c2fb9fd51", "0.0.0-dev", "f441d64", false, false)]                   // no tag reachable
     [InlineData("0.6.1+unknown", "0.6.1", null, true, false)]                                         // no git on the build box
     [InlineData("vlan-build", "vlan-build", null, false, false)]                                      // 'v' only stripped before a digit
     public void Parse_splits_version_and_commit(string informational, string version, string? commit, bool release, bool dirty)
@@ -35,6 +38,7 @@ public sealed class ReleaseLayoutTests : IDisposable
     [InlineData("0.6.1-3-g97f88aa", "0.6.1+3")]
     [InlineData("0.6.1-3-g97f88aa-dirty", "0.6.1+3")]
     [InlineData("97f88aa-dirty", "97f88aa")]
+    [InlineData("0.6.3-dev.1-dirty", "0.6.3-dev.1")]
     public void Badge_prints_a_short_version(string version, string display)
     {
         var badge = new VersionBadgeViewModel { Build = BuildVersionText.Parse(version), Environment = "Production" };

@@ -33,14 +33,18 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(5);
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
 
+    private readonly IDhcpReservationCache? _reservations;
+
     public DhcpSubnetService(
         NpgsqlDataSource dataSource,
         ILogger<DhcpSubnetService> logger,
-        LeaseCache? leaseCache = null)
+        LeaseCache? leaseCache = null,
+        IDhcpReservationCache? reservations = null)
     {
         _dataSource = dataSource;
         _logger = logger;
         _leaseCache = leaseCache;
+        _reservations = reservations;
     }
 
     #region Subnet Selection
@@ -562,6 +566,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         string macAddress,
         CancellationToken cancellationToken)
     {
+        if (_reservations is not null) return await _reservations.GetReservedIpAsync(macAddress, cancellationToken).ConfigureAwait(false);
+
         // PostgreSQL macaddr type comparison is case-insensitive
         // Cast input to macaddr for proper comparison
         const string sql = "SELECT reserved_ip FROM dhcp_mac_reservations WHERE mac_address = @mac::macaddr LIMIT 1";
@@ -675,7 +681,12 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                    s.interface_mtu, s.tftp_server, s.boot_filename, s.boot_filename_uefi,
                    s.interface_id, s.enabled, s.created_at, s.updated_at,
                    -- fw_interfaces fields (for navigation property)
-                   fi.id as fi_id, fi.name as fi_name, fi.type as fi_type, fi.enabled as fi_enabled
+                   fi.id as fi_id, fi.name as fi_name, fi.type as fi_type, fi.enabled as fi_enabled,
+                   -- option 2 (time offset) / option 100 (POSIX TZ): ConstructDhcpPacket emits
+                   -- them, but the cache never loaded them, so they were never sent.
+                   s.time_offset, s.posix_timezone,
+                   -- option 119 (domain search) / option 121 (classless static routes)
+                   s.domain_search, s.static_routes::text
             FROM dhcp_subnets s
             LEFT JOIN fw_interfaces fi ON s.interface_id = fi.id
             WHERE s.enabled = true
@@ -771,7 +782,11 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             InterfaceId = reader.IsDBNull(16) ? null : reader.GetGuid(16),
             Enabled = reader.GetBoolean(17),
             CreatedAt = reader.GetDateTime(18),
-            UpdatedAt = reader.GetDateTime(19)
+            UpdatedAt = reader.GetDateTime(19),
+            TimeOffset = reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetInt32(24) : null,
+            PosixTimezone = reader.FieldCount > 25 && !reader.IsDBNull(25) ? reader.GetString(25) : null,
+            DomainSearchList = reader.FieldCount > 26 && !reader.IsDBNull(26) ? reader.GetString(26) : null,
+            StaticRoutesJson = reader.FieldCount > 27 && !reader.IsDBNull(27) ? reader.GetString(27) : null,
         };
 
         // Populate FwInterface navigation property if interface_id is set

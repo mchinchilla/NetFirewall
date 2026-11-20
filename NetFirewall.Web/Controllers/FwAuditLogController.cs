@@ -9,50 +9,26 @@ namespace NetFirewall.Web.Controllers;
 [Route("/Firewall/AuditLog")]
 public sealed class FwAuditLogController : Controller
 {
-    private const int PageSize = 50;
 
     private readonly IFirewallService _firewall;
 
     public FwAuditLogController(IFirewallService firewall) => _firewall = firewall;
 
+    /// <summary>The page hosts the <c>fw-audit-log</c> grid; its rows are queried in PostgreSQL by the grid itself.</summary>
     [HttpGet("")]
-    public async Task<IActionResult> Index(CancellationToken ct)
+    public IActionResult Index() => View();
+
+    /// <summary>
+    /// Expanded row of the Audit log grid: the entry's before/after JSON, fetched once per row on
+    /// first expand. The source comes from the action so existing constructor callers stay valid.
+    /// </summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> Detail(Guid id, [FromServices] IAuditLogGridSource audit, CancellationToken ct)
     {
-        ViewBag.TableNames = await _firewall.GetAuditTableNamesAsync(ct);
-        return View();
+        var entry = await audit.GetEntryAsync(id, ct);
+        return entry is null
+            ? Content("<p class=\"text-sm text-surface-fg-muted\">This audit entry no longer exists. Refresh the grid.</p>", "text/html")
+            : PartialView("_AuditLogDetail", entry);
     }
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(string? table, string? op, string? since, int page, CancellationToken ct)
-    {
-        // `op` is INSERT/UPDATE/DELETE. Do not name this parameter `action`:
-        // MVC already binds `action` to the method name ("Table"), which made
-        // every search `WHERE action = 'Table'` and the log always looked empty.
-        var p = page < 1 ? 1 : page;
-        var sinceDt = ParseSince(since);
-        var rows = await _firewall.SearchAuditLogsAsync(
-            tableName: string.IsNullOrWhiteSpace(table) ? null : table,
-            action: string.IsNullOrWhiteSpace(op) ? null : op,
-            since: sinceDt,
-            limit: PageSize,
-            offset: (p - 1) * PageSize,
-            ct: ct);
-
-        ViewBag.Page = p;
-        ViewBag.HasNext = rows.Count == PageSize;
-        ViewBag.Table = table;
-        ViewBag.Action = op;
-        ViewBag.Since = since;
-        return PartialView("_AuditLogTable", rows);
-    }
-
-    private static DateTime? ParseSince(string? s) => s switch
-    {
-        null or ""    => null,
-        "1h"          => DateTime.UtcNow.AddHours(-1),
-        "24h"         => DateTime.UtcNow.AddHours(-24),
-        "7d"          => DateTime.UtcNow.AddDays(-7),
-        "30d"         => DateTime.UtcNow.AddDays(-30),
-        _             => DateTime.TryParse(s, out var dt) ? dt.ToUniversalTime() : null
-    };
 }

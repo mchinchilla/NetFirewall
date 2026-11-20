@@ -1,20 +1,18 @@
 <!DOCTYPE html>
-@inject NetFirewall.Services.Settings.IAppSettingsService AppSettings
+@inject NetFirewall.Web.Theming.IAppearanceProvider AppearanceProvider
 @*
     Dashboard shell — composes partials only. Each visual concern lives in
     its own _Partial under Views/Shared/ per project rule #7.
 
-    data-theme/data-mode reflect the configured appearance.* defaults; the
-    pre-paint hydrator in site.js overrides them with the user's localStorage
-    preference when present.
+    The <html> attributes carry the appearance (nf_ui cookie over the Settings →
+    Appearance defaults), so the first paint is already right; site.js only
+    resolves data-mode-pref="system" against prefers-color-scheme.
 *@
 @{
-    var defaultTheme = await AppSettings.GetStringAsync("appearance.default_theme");
-    var defaultMode  = await AppSettings.GetStringAsync("appearance.default_mode");
-    if (string.IsNullOrEmpty(defaultTheme)) defaultTheme = "boulder";
-    if (string.IsNullOrEmpty(defaultMode))  defaultMode  = "light";
+    var ui = await AppearanceProvider.GetAsync();
 }
-<html lang="en" class="h-full" data-theme="@defaultTheme" data-mode="@defaultMode">
+<html lang="en" class="h-full" data-preset="@ui.Preset" data-mode="@ui.ResolvedModeGuess" data-mode-pref="@ui.Mode"
+      data-density="@ui.Density" data-sidebar-collapsed="@(ui.Sidebar == "collapsed" ? "true" : "false")">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

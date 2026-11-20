@@ -3,11 +3,11 @@
     Layout = "_Layout";
 }
 
-<div x-data="{ hideDisabled: false }">
+<div>
     <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
          style="animation: var(--animate-slide-up);">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
+            <p class="page-kicker">Network</p>
             <h1 class="text-2xl font-semibold tracking-tight">Static routes</h1>
             <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
                 Routes are bound to interfaces. Applying a route regenerates the iface's persistent config and live-adds the route via <code class="text-xs">ip route</code>.
@@ -25,22 +25,13 @@
         </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2 mb-4"
-         style="animation: var(--animate-slide-up); animation-delay: 40ms;">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "routes-table", Placeholder = "Filter by destination, gateway, interface…", ClientSide = true })
-        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-            <input type="checkbox" class="rounded" x-model="hideDisabled" />
-            Hide disabled
-        </label>
-    </div>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-        <div id="routes-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Network/Routes/table"
-             hx-trigger="load, refreshRoutes from:body"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder, Label = "Loading routes…" })
-        </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Network.StaticRoutesGrid.Id,
+            Title = "Static routes",
+            DefaultQuery = NetFirewall.Web.Grids.Network.StaticRoutesGrid.DefaultQuery,
+            RefreshOn = ["refreshRoutes"]
+        })
     </section>
 </div>

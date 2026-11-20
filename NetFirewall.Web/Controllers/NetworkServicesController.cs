@@ -28,33 +28,7 @@ public sealed class NetworkServicesController : Controller
     }
 
     [HttpGet("")]
-    public async Task<IActionResult> Index(CancellationToken ct)
-    {
-        ViewBag.Categories = (await _services.GetAllAsync(false, ct))
-            .Select(s => s.Category)
-            .Where(c => !string.IsNullOrWhiteSpace(c))
-            .Select(c => c!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        return View();
-    }
-
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(string? category, CancellationToken ct)
-    {
-        var rows = await _services.GetAllAsync(includeMembers: true, ct);
-        if (!string.IsNullOrWhiteSpace(category))
-            rows = rows.Where(s => string.Equals(s.Category, category, StringComparison.OrdinalIgnoreCase)).ToList();
-        ViewBag.Categories = (await _services.GetAllAsync(false, ct))
-            .Select(s => s.Category)
-            .Where(c => !string.IsNullOrEmpty(c))
-            .Distinct()
-            .OrderBy(c => c)
-            .ToList();
-        ViewBag.SelectedCategory = category;
-        return PartialView("_ServicesTable", rows);
-    }
+    public IActionResult Index() => View();
 
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)

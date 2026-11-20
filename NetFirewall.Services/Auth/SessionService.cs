@@ -67,31 +67,48 @@ public sealed class SessionService : ISessionService
         var hash = HashToken(token);
         var now = DateTimeOffset.UtcNow;
 
-        // Fetch + sliding-update in one round-trip when still valid.
-        // @basic <= 0 means "validate but don't slide" — used by the daemon
-        // so a Web→daemon call doesn't clobber the Web's expires_at to "now"
-        // (which would log the operator out on their next click).
+        // Validate + (throttled) slide in ONE round-trip. Revocation and expiry are checked on
+        // every request (CTE `s`), so a revoked session is refused immediately. The WRITE only
+        // happens when last_seen_at is older than SlideThrottle: every page, poll and Web→daemon
+        // call used to UPDATE the row (a dashboard tab ≈ one write a second), which churned
+        // user_sessions and autovacuum for a sliding window that moves by seconds.
+        // @basic <= 0 means "validate but don't slide" — used by the daemon so a Web→daemon
+        // call never moves the Web's expires_at (and never writes).
         const string sql = @"
-            UPDATE user_sessions
-               SET last_seen_at = @now,
-                   expires_at = CASE
-                     -- Sliding window for basic; elevated keeps its hard cap.
-                     WHEN auth_level = 'basic' AND @basic > interval '0' THEN @now + @basic
-                     ELSE expires_at
-                   END
-             WHERE token_hash = @hash
-               AND revoked_at IS NULL
-               AND expires_at > @now
-            RETURNING *";
+            WITH s AS (
+                SELECT * FROM user_sessions
+                 WHERE token_hash = @hash
+                   AND revoked_at IS NULL
+                   AND expires_at > @now),
+            u AS (
+                UPDATE user_sessions t
+                   SET last_seen_at = @now,
+                       expires_at = CASE
+                         -- Sliding window for basic; elevated keeps its hard cap.
+                         WHEN t.auth_level = 'basic' THEN @now + @basic
+                         ELSE t.expires_at
+                       END
+                  FROM s
+                 WHERE t.id = s.id
+                   AND @basic > interval '0'
+                   AND s.last_seen_at < @now - @throttle
+                RETURNING t.*)
+            SELECT * FROM u
+            UNION ALL
+            SELECT * FROM s WHERE NOT EXISTS (SELECT 1 FROM u)";
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("hash", hash);
         cmd.Parameters.AddWithValue("now", now);
         cmd.Parameters.AddWithValue("basic", basicLifetime);
+        cmd.Parameters.AddWithValue("throttle", SlideThrottle);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? Hydrate(reader) : null;
     }
+
+    /// <summary>Minimum age of last_seen_at before a validation writes the slide back.</summary>
+    public static readonly TimeSpan SlideThrottle = TimeSpan.FromSeconds(60);
 
     public async Task ElevateAsync(Guid sessionId, TimeSpan duration, CancellationToken ct = default)
     {

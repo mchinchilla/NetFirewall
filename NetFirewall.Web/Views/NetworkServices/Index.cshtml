@@ -1,13 +1,12 @@
 @{
     ViewData["Title"] = "Network — Services";
     Layout = "_Layout";
-    var cats = (IReadOnlyList<string>)(ViewBag.Categories ?? Array.Empty<string>());
 }
-<div x-data="{ category: '' }">
+<div>
     <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
          style="animation: var(--animate-slide-up);">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
+            <p class="page-kicker">Network</p>
             <h1 class="text-2xl font-semibold tracking-tight">Services</h1>
             <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
                 Named L4 catalog (port + protocol). Reference these by name in firewall rule destination ports — change the port once, every rule that uses the service picks it up at next apply.
@@ -24,38 +23,13 @@
         </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2 mb-4"
-         style="animation: var(--animate-slide-up); animation-delay: 40ms;"
-         hx-target="#services-table"
-         hx-swap="innerHTML"
-         hx-sync="#services-table:replace">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "services-table", Placeholder = "Filter by name, protocol, port…", ClientSide = true })
-
-        <div class="seg" role="group" aria-label="Category">
-            <button type="button" class="seg-btn" :class="category === '' ? 'is-on' : ''"
-                    :aria-pressed="(category === '').toString()"
-                    hx-get="/Network/Services/table"
-                    :hx-vals="JSON.stringify({ category: '' })"
-                    @@click="category = ''">All</button>
-            @foreach (var c in cats)
-            {
-                <button type="button" class="seg-btn" :class="category === '@c' ? 'is-on' : ''"
-                        :aria-pressed="(category === '@c').toString()"
-                        hx-get="/Network/Services/table"
-                        :hx-vals="JSON.stringify({ category: '@c' })"
-                        @@click="category = '@c'">@c</button>
-            }
-        </div>
-    </div>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-        <div id="services-table"
-             hx-get="/Network/Services/table"
-             :hx-vals="JSON.stringify({ category })"
-             hx-trigger="load, refreshNetworkServices from:body"
-             hx-sync="this:replace"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-        </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Network.NetworkServicesGrid.Id,
+            Title = "Network services",
+            DefaultQuery = NetFirewall.Web.Grids.Network.NetworkServicesGrid.DefaultQuery,
+            RefreshOn = ["refreshNetworkServices"]
+        })
     </section>
 </div>

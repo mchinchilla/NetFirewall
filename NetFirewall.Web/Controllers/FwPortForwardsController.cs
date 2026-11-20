@@ -26,16 +26,6 @@ public sealed class FwPortForwardsController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
-    {
-        var rows = await _firewall.GetPortForwardsAsync(ct);
-        var ifaces = await _firewall.GetInterfacesAsync(ct);
-        ViewBag.InterfaceNames = ifaces.ToDictionary(i => i.Id, i => i.Name);
-        ViewBag.InterfaceTypes = ifaces.ToDictionary(i => i.Id, i => i.Type);
-        return PartialView("_PortForwardsTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {

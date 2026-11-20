@@ -516,19 +516,17 @@ public sealed class LeaseCache : IDisposable
 
         try
         {
-            foreach (var op in batch)
+            // One NpgsqlBatch per flush: every upsert/delete travels in a single
+            // round trip instead of one per operation (bursts flush up to 100 ops).
+            await using (var dbBatch = new NpgsqlBatch(connection, transaction))
             {
-                switch (op.Type)
+                foreach (var op in batch)
                 {
-                    case LeaseWriteType.Upsert:
-                        await UpsertLeaseAsync(connection, transaction, op, cancellationToken)
-                            .ConfigureAwait(false);
-                        break;
-
-                    case LeaseWriteType.Delete:
-                        await DeleteLeaseAsync(connection, transaction, op, cancellationToken)
-                            .ConfigureAwait(false);
-                        break;
+                    dbBatch.BatchCommands.Add(op.Type == LeaseWriteType.Delete ? DeleteCommand(op) : UpsertCommand(op));
+                }
+                if (dbBatch.BatchCommands.Count > 0)
+                {
+                    await dbBatch.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -555,41 +553,28 @@ public sealed class LeaseCache : IDisposable
         }
     }
 
-    private static async Task UpsertLeaseAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        LeaseWriteOperation op,
-        CancellationToken cancellationToken)
+    private static NpgsqlBatchCommand UpsertCommand(LeaseWriteOperation op)
     {
-        const string sql = @"
+        var cmd = new NpgsqlBatchCommand(@"
             INSERT INTO dhcp_leases (id, mac_address, ip_address, hostname, start_time, end_time)
-            VALUES (@id, @mac::macaddr, @ip, @hostname, @start, @end)
+            VALUES ($1, $2::macaddr, $3, $4, $5, $6)
             ON CONFLICT (mac_address)
-            DO UPDATE SET ip_address = @ip, hostname = @hostname, start_time = @start, end_time = @end";
-
-        await using var cmd = new NpgsqlCommand(sql, connection, transaction);
-        cmd.Parameters.AddWithValue("id", Guid.NewGuid());
-        cmd.Parameters.AddWithValue("mac", op.MacAddress);
-        cmd.Parameters.AddWithValue("ip", op.IpAddress);
-        cmd.Parameters.AddWithValue("hostname", op.Hostname ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("start", op.StartTime);
-        cmd.Parameters.AddWithValue("end", op.EndTime);
-
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            DO UPDATE SET ip_address = EXCLUDED.ip_address, hostname = EXCLUDED.hostname,
+                          start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time");
+        cmd.Parameters.Add(new NpgsqlParameter { Value = Guid.NewGuid() });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = op.MacAddress });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = op.IpAddress });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = op.Hostname ?? (object)DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = op.StartTime });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = op.EndTime });
+        return cmd;
     }
 
-    private static async Task DeleteLeaseAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        LeaseWriteOperation op,
-        CancellationToken cancellationToken)
+    private static NpgsqlBatchCommand DeleteCommand(LeaseWriteOperation op)
     {
-        const string sql = "DELETE FROM dhcp_leases WHERE mac_address = @mac::macaddr";
-
-        await using var cmd = new NpgsqlCommand(sql, connection, transaction);
-        cmd.Parameters.AddWithValue("mac", op.MacAddress);
-
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        var cmd = new NpgsqlBatchCommand("DELETE FROM dhcp_leases WHERE mac_address = $1::macaddr");
+        cmd.Parameters.Add(new NpgsqlParameter { Value = op.MacAddress });
+        return cmd;
     }
 
     #endregion

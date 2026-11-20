@@ -38,7 +38,7 @@
 
         <section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
             <h2 class="text-base font-semibold mb-3">Live status</h2>
-            <div id="vpn-status" class="loading-host" hx-get="/Diagnostics/Vpn/status" hx-trigger="load, every 15s" hx-swap="innerHTML">
+            <div id="vpn-status" class="loading-host" hx-get="/Diagnostics/Vpn/status" hx-trigger="load, every 15s [document.visibilityState === 'visible']" hx-swap="innerHTML">
                 @await Html.PartialAsync("_LoadingOverlay", new NetFirewall.Web.Models.Shared.LoadingOverlayModel { Variant = NetFirewall.Web.Models.Shared.LoadingOverlayVariant.Placeholder })
             </div>
         </section>

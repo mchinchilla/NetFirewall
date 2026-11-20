@@ -13,6 +13,15 @@ namespace NetFirewall.Services.Dhcp;
 /// </summary>
 public sealed class DhcpServerService : IDhcpServerService
 {
+    // Options 119 / 121 are encoded from the CACHED subnet's text (option 121 through a JSON
+    // parse). Memoize by string instance: the subnet cache hands every packet the same string
+    // until the next refresh, so each value is encoded once and dropped with the old cache.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<string, byte[]> DomainSearchEncoded = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<string, byte[]> StaticRoutesEncoded = new();
+
+    private static byte[] EncodedOnce(System.Runtime.CompilerServices.ConditionalWeakTable<string, byte[]> memo, string text, Func<string, byte[]> encode) =>
+        memo.GetValue(text, s => encode(s));
+
     private readonly IDhcpLeasesService _dhcpLeasesService;
     private readonly IDhcpSubnetService _dhcpSubnetService;
     private readonly IFailoverService? _failoverService;
@@ -613,7 +622,7 @@ public sealed class DhcpServerService : IDhcpServerService
         // Domain Search List (Option 119) - RFC 1035 encoded
         if (!string.IsNullOrEmpty(subnet?.DomainSearchList))
         {
-            var domainSearchBytes = DhcpOptionExtensions.EncodeDomainSearchList(subnet.DomainSearchList);
+            var domainSearchBytes = EncodedOnce(DomainSearchEncoded, subnet.DomainSearchList, DhcpOptionExtensions.EncodeDomainSearchList);
             if (domainSearchBytes.Length > 0)
             {
                 offset = WriteOption(buffer, offset, DhcpOptionCode.DomainSearch, domainSearchBytes);
@@ -623,7 +632,7 @@ public sealed class DhcpServerService : IDhcpServerService
         // Classless Static Routes (Option 121) - RFC 3442 encoded
         if (!string.IsNullOrEmpty(subnet?.StaticRoutesJson))
         {
-            var routesBytes = DhcpOptionExtensions.EncodeClasslessStaticRoutes(subnet.StaticRoutesJson);
+            var routesBytes = EncodedOnce(StaticRoutesEncoded, subnet.StaticRoutesJson, DhcpOptionExtensions.EncodeClasslessStaticRoutes);
             if (routesBytes.Length > 0)
             {
                 offset = WriteOption(buffer, offset, DhcpOptionCode.ClasslessStaticRoute, routesBytes);

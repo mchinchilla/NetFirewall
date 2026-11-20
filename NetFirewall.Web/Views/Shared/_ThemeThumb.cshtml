@@ -1,0 +1,22 @@
+@model NetFirewall.Web.Models.Shared.ThemeThumbModel
+@* Miniature app window painted with the live semantic tokens (.theme-scope re-declares them). *@
+<span class="theme-scope pointer-events-none flex h-full w-full overflow-hidden rounded-md border @Model.Scheme"
+      style="background: var(--surface-bg); border-color: var(--surface-border);"
+      data-preset="@Model.Preset" aria-hidden="true">
+    <span class="flex w-1/4 flex-col gap-1 border-r p-1.5" style="background: var(--sidebar-bg); border-color: var(--sidebar-border);">
+        <span class="h-1.5 rounded-sm" style="background: var(--accent);"></span>
+        <span class="h-1.5 rounded-sm" style="background: var(--surface-muted);"></span>
+        <span class="h-1.5 rounded-sm" style="background: var(--surface-muted);"></span>
+    </span>
+    <span class="flex flex-1 flex-col p-1.5">
+        <span class="mb-1.5 h-1.5 border-b" style="border-color: var(--surface-border);"></span>
+        <span class="grid grid-cols-3 gap-1">
+            <span class="h-3 rounded-sm border" style="background: var(--surface-elevated); border-color: var(--surface-border);"></span>
+            <span class="h-3 rounded-sm border" style="background: var(--surface-elevated); border-color: var(--surface-border);"></span>
+            <span class="h-3 rounded-sm border" style="background: var(--surface-elevated); border-color: var(--surface-border);"></span>
+        </span>
+        <svg class="mt-1.5 h-4 w-full" style="color: var(--accent);" viewBox="0 0 60 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" preserveAspectRatio="none">
+            <path d="M1 13 C10 12 12 4 20 6 S30 14 40 8 S52 1 59 4" />
+        </svg>
+    </span>
+</span>

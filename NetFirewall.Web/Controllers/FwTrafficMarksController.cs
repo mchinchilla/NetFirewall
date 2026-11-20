@@ -25,13 +25,6 @@ public sealed class FwTrafficMarksController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
-    {
-        var rows = await _firewall.GetTrafficMarksAsync(ct);
-        return PartialView("_TrafficMarksTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {

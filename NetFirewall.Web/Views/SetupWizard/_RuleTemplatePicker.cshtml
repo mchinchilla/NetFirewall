@@ -86,12 +86,15 @@
                 :disabled="busy"
                 hx-post="/setup/wizard/apply-template"
                 hx-include="closest section"
-                hx-vals='js:{
+                @* Alpine renders the values into hx-vals; htmx reads the attribute when it sends.
+                   A `js:` hx-vals is evaluated by htmx OUTSIDE Alpine's scope, where `base`,
+                   `nat`, … don't exist: it threw a ReferenceError and the button never posted. *@
+                :hx-vals="JSON.stringify({
                     Base: base, EnableNat: nat, EnableMultiWan: multiWan,
                     AllowManagement: mgmt, WebInterfacePort: webPort,
                     AllowIcmp: icmp, AllowDhcp: dhcp, AllowDns: dns,
                     SeedPortForwardExample: examplePf
-                }'
+                })"
                 @@htmx:before-request="busy = true"
                 @@htmx:after-request="busy = false; if ($event.detail.successful) $store.tpl.markApplied()">
             <span x-show="!busy">Generate rule set</span>

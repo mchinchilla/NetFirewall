@@ -1,0 +1,46 @@
+@model NetFirewall.Models.Firewall.FwAuditLog
+@using System.Globalization
+@using System.Text.Json
+@*
+    Expanded row of the Audit log grid (WithRowDetail): the before/after JSON the old table
+    showed under "Diff". Rendered inside the grid's frame, so it may only use classes compiled
+    into site.css (ng-detail-* come from the grid theme).
+*@
+@{
+    static string Pretty(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "—";
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+    }
+    var e = Model;
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Entry</h3>
+        <dl class="ng-detail-fields">
+            <dt>Time (UTC)</dt><dd class="ng-mono">@e.CreatedAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</dd>
+            <dt>Table</dt><dd class="ng-mono">@e.TableName</dd>
+            <dt>Action</dt><dd>@e.Action</dd>
+            <dt>Record</dt><dd class="ng-mono">@e.RecordId.ToString("D")</dd>
+            <dt>User</dt><dd>@(e.UserId ?? "—")</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title text-feedback-danger-fg">Old</h3>
+        <pre class="text-xs p-3 rounded overflow-x-auto bg-surface-muted text-surface-fg">@Pretty(e.OldValues)</pre>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title text-feedback-success-fg">New</h3>
+        <pre class="text-xs p-3 rounded overflow-x-auto bg-surface-muted text-surface-fg">@Pretty(e.NewValues)</pre>
+    </section>
+</div>

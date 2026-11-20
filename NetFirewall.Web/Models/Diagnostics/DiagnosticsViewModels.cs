@@ -155,11 +155,6 @@ public sealed class HistoryFilterViewModel
     public Guid? Run { get; set; }
 }
 
-public sealed record RunsTableViewModel(IReadOnlyList<DiagRun> Rows, int Total, int Page, int PageSize, HistoryFilterViewModel Filter, string? Error = null)
-{
-    public int Pages => Math.Max(1, (int)Math.Ceiling(Total / (double)PageSize));
-}
-
 public sealed record RunDetailViewModel(DiagRun Run, string? Partial, object? Model, string PrettyParams, string? PrettyResult);
 
 // ─────────────────────────── pure helpers ───────────────────────────

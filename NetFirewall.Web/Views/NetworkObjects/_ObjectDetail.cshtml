@@ -1,0 +1,94 @@
+@model NetFirewall.Web.Models.Network.NetworkObjectDetailViewModel
+@using NetFirewall.Models.Network
+@*
+    Expanded row of the Objects grid (WithRowDetail). Rendered inside the grid's frame:
+    no host Alpine/site.js, only classes compiled into site.css; links leave the frame (_top).
+*@
+@{
+    var o = Model.Object;
+    var u = Model.Usages;
+    var isGroup = o.Type == NetworkObjectTypes.Group;
+    var values = isGroup ? Array.Empty<string>() : NetworkObjectValues.Split(o.Value);
+    var sections = new (string Title, IReadOnlyList<NetFirewall.Services.Network.UsageEntry> Entries, string ListUrl)[]
+    {
+        ("Filter rules",  u.FilterRules,  "/Firewall/FilterRules"),
+        ("Port forwards", u.PortForwards, "/Firewall/PortForwards"),
+        ("NAT rules",     u.NatRules,     "/Firewall/NatRules"),
+        ("Mangle rules",  u.MangleRules,  "/Firewall/MangleRules"),
+        ("Parent groups", u.ParentGroups, "/Network/Objects"),
+    };
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">@(isGroup ? $"Members ({o.Members?.Count ?? 0})" : $"Addresses ({values.Length})")</h3>
+        @if (isGroup)
+        {
+            @if (o.Members is { Count: > 0 } members)
+            {
+                <table class="ng-detail-table">
+                    <thead><tr><th>Name</th><th>Type</th><th>Value</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in members.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+                        {
+                            <tr><td class="ng-mono">@m.Name</td><td>@m.Type</td><td class="ng-mono">@(string.IsNullOrWhiteSpace(m.Value) ? "—" : m.Value)</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <p class="text-xs text-surface-fg-muted">This group has no members yet.</p>
+            }
+        }
+        else if (values.Length > 0)
+        {
+            <ul class="space-y-0.5">
+                @foreach (var v in values)
+                {
+                    <li class="ng-mono text-xs">@v</li>
+                }
+            </ul>
+        }
+        else
+        {
+            <p class="text-xs text-surface-fg-muted">No value set.</p>
+        }
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Where used (@u.TotalCount)</h3>
+        @if (u.TotalCount == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">
+                <span class="font-medium text-surface-fg">@o.Name</span> is not referenced by any rule or group. Safe to edit or delete.
+            </p>
+        }
+        else
+        {
+            <p class="text-xs text-surface-fg-muted mb-2">
+                Rules keep the name and pick up new addresses at next apply. Deleting this object leaves them pointing at a missing name.
+            </p>
+            @foreach (var (title, entries, listUrl) in sections.Where(s => s.Entries.Count > 0))
+            {
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-surface-fg-muted mt-2">@title (@entries.Count)</p>
+                <ul class="space-y-0.5 mt-1">
+                    @foreach (var e in entries)
+                    {
+                        <li class="text-xs text-surface-fg-muted">
+                            <a class="hover:underline text-accent" href="@listUrl" target="_top">@e.Description</a>
+                            <span class="font-mono"> · @e.Field</span>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(o.Description))
+    {
+        <section class="ng-detail-card">
+            <h3 class="ng-detail-title">Description</h3>
+            <p class="text-xs">@o.Description</p>
+        </section>
+    }
+</div>

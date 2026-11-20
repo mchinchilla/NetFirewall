@@ -1,0 +1,41 @@
+@model NetFirewall.Models.Dhcp.FailoverPeer
+@using NetFirewall.Web.Grids
+@*
+    Expanded row of the Failover grid (WithRowDetail). Rendered inside the grid's frame, so it
+    may only use classes compiled into site.css. Persisted config only: the runtime state
+    fields of FailoverPeer are not loaded from the DB (see the page's "Current state" card),
+    and the shared secret is never rendered — only whether one is set.
+*@
+@{
+    var p = Model;
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Endpoints</h3>
+        <dl class="ng-detail-fields">
+            <dt>Role</dt><dd><span class="badge badge-accent uppercase tracking-wide">@p.Role</span></dd>
+            <dt>Peer</dt><dd>@p.PeerAddress:@p.PeerPort</dd>
+            <dt>Local</dt><dd>@(p.LocalAddress?.ToString() ?? "any"):@p.LocalPort</dd>
+            <dt>Shared secret</dt><dd>@if (string.IsNullOrEmpty(p.SharedSecret)) { <span class="text-surface-fg-muted">Not set</span> } else { <span class="badge badge-accent">Set</span> }</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Load balancing</h3>
+        <dl class="ng-detail-fields">
+            <dt>Split</dt><dd>@p.Split / 256</dd>
+            <dt>Load balance max</dt><dd>@p.LoadBalanceMax s</dd>
+            <dt>MCLT</dt><dd>@GridCell.Humanize(TimeSpan.FromSeconds(p.Mclt))</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Protocol</h3>
+        <dl class="ng-detail-fields">
+            <dt>Max response delay</dt><dd>@p.MaxResponseDelay s</dd>
+            <dt>Max unacked updates</dt><dd>@p.MaxUnackedUpdates</dd>
+            <dt>Auto partner-down</dt><dd>@(p.AutoPartnerDown > 0 ? GridCell.Humanize(TimeSpan.FromSeconds(p.AutoPartnerDown)) : "Off")</dd>
+            <dt>Created</dt><dd>@p.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)</dd>
+        </dl>
+    </section>
+</div>

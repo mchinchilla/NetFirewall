@@ -97,7 +97,7 @@ Notas:
 
 ### Local
 
-Necesita el .NET 10 SDK y el binario standalone `tailwindcss` en el `PATH`.
+Necesita el .NET 11 SDK y el binario standalone `tailwindcss` en el `PATH`.
 
 ```bash
 deploy/build-bundle.sh                      # versión = git describe

@@ -87,7 +87,11 @@ public sealed class SetupWizardController : Controller
     public async Task<IActionResult> SaveStep3([FromForm] Step3ViewModel form, CancellationToken ct)
     {
         if (!ModelState.IsValid) return await RenderAtAsync(3, ct, step3: form);
-        await _wizard.SaveStep3FirewallAsync(form.ToServiceModel(), ct);
+        // The form doesn't carry the template choices: keep the ones the template step saved.
+        var saved = await _wizard.GetStep3FirewallAsync(ct);
+        var step3Model = form.ToServiceModel();
+        if (step3Model.UsedTemplate) step3Model.TemplateSelection = saved?.TemplateSelection;
+        await _wizard.SaveStep3FirewallAsync(step3Model, ct);
         return RedirectToStep(4);
     }
 
@@ -114,18 +118,28 @@ public sealed class SetupWizardController : Controller
             return this.ToHtmxResponse(ServiceResponse<object>.Fail("Invalid template selection."));
         try
         {
-            var result = await _templates.ApplyTemplateAsync(form.ToSelection(), ct);
+            var selection = form.ToSelection();
+            var result = await _templates.ApplyTemplateAsync(selection, ct);
 
             // Record that a template was used so wizard completion skips the manual
             // firewall generator (avoids a second overlapping rule set).
             var step3 = await _wizard.GetStep3FirewallAsync(ct) ?? new();
             step3.UsedTemplate = true;
+            step3.TemplateSelection = selection;
             await _wizard.SaveStep3FirewallAsync(step3, ct);
 
             var msg = $"Template '{NetFirewall.Models.Setup.RuleTemplateBases.Label(result.Base)}' generated: " +
                       $"{result.TotalRules} rules, {result.NetworkObjectsCreated} network objects. " +
                       "Review in Firewall, then Apply.";
-            if (result.Notes.Count > 0) msg += " — " + string.Join("; ", result.Notes);
+            // During the wizard the interfaces from step 1 are only written in step 5, so the
+            // template can't see them yet. Say what will happen instead of "rules were skipped".
+            var step1 = await _wizard.GetStep1InterfacesAsync(ct);
+            var pendingInterfaces = step1?.Any(i => i.Role != "disabled") == true
+                && result.Notes.Any(n => n.StartsWith("No LAN", StringComparison.Ordinal) || n.StartsWith("No WAN", StringComparison.Ordinal));
+            if (pendingInterfaces)
+                msg += " — The interfaces from step 1 are written when you Apply in step 5, which rebuilds this rule set for them.";
+            else if (result.Notes.Count > 0)
+                msg += " — " + string.Join("; ", result.Notes);
             return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, msg));
         }
         catch (Exception ex)
@@ -184,6 +198,9 @@ public sealed class SetupWizardController : Controller
             // second overlapping (CIDR-based) rule set on top.
             if (!step3.UsedTemplate)
                 await _wizard.ApplyFirewallConfigAsync(step3, step1, ct);
+            else if (step3.TemplateSelection is { } selection)
+                // Rebuild now that fw_interfaces exist: the step-3 run saw no LAN/WAN yet.
+                await _templates.ApplyTemplateAsync(selection, ct);
             await _wizard.ApplyServicesConfigAsync(step4, ct);
             await _wizard.CompleteWizardAsync(ct);
 

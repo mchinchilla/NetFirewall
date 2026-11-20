@@ -106,13 +106,15 @@ public sealed class HostMetricsSampler : IHostMonitor, IHostMetricsSampler, IDis
 
         lock (_gate)
         {
-            var samples = new List<HostSample>(_count);
+            // The ring is chronological: walk back from the newest sample to find how
+            // many fall inside the window, then copy exactly those. A 5-minute poll no
+            // longer allocates room for the whole hour (a ~430 KB LOH list per poll).
             var first = (_next - _count + HistorySeconds) % HistorySeconds;
-            for (var i = 0; i < _count; i++)
-            {
-                var sample = _ring[(first + i) % HistorySeconds];
-                if (sample.Time >= since) samples.Add(sample);
-            }
+            var take = 0;
+            while (take < _count && _ring[(first + _count - 1 - take) % HistorySeconds].Time >= since) take++;
+            var samples = new HostSample[take];
+            for (var i = 0; i < take; i++)
+                samples[i] = _ring[(first + _count - take + i) % HistorySeconds];
 
             return new HostMonitorState(
                 new HostIdentity(_hostName, _operatingSystem, _kernel, _cpuModel, _cores, _memoryTotal, _swapTotal, _bootedOn),
@@ -133,7 +135,11 @@ public sealed class HostMetricsSampler : IHostMonitor, IHostMetricsSampler, IDis
             return;
         }
 
-        await ReadIdentityAsync(cancellationToken);
+        try { await ReadIdentityAsync(cancellationToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Host monitor could not read the host identity from {ProcRoot}", _root);
+        }
         _logger.LogInformation("Host monitor reading {ProcRoot} on {HostName} ({Cores} cores)", _root, _hostName, _cores);
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(SampleSeconds), _time);
@@ -157,8 +163,11 @@ public sealed class HostMetricsSampler : IHostMonitor, IHostMetricsSampler, IDis
                         _logger.LogInformation("Host monitor reading {ProcRoot} again", _root);
                     }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    // Any failure (unreadable /proc, an unexpected format) skips this tick.
+                    // .NET 11 stops the host on an exception escaping ExecuteAsync, and this
+                    // runs inside the Web: a parse error here must never take the UI down.
                     // Once per streak: an unreadable /proc must not flood the journal.
                     if (!_failing)
                     {

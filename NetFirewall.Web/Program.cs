@@ -1,3 +1,4 @@
+using NetFirewall.Web.Grids;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -124,6 +125,22 @@ builder.Services.AddSingleton<NetFirewall.Services.Diagnostics.IDiagnosticInputV
 // through IDaemonClient (needs CAP_NET_ADMIN) — not this service.
 builder.Services.AddScoped<NetFirewall.Services.WanMonitor.IWanHealthService,
                            NetFirewall.Services.WanMonitor.WanHealthService>();
+// NetOpenGrid data grids (Grids/): keyed singleton runtimes, rows read through the
+// feature services in a per-load scope; per-grid roles enforced on /netgrid/*.
+builder.Services.AddNetFirewallGrids();
+builder.Services.AddScoped<NetFirewall.Web.Services.IDhcpLeaseDetailService,
+    NetFirewall.Web.Services.DhcpLeaseDetailService>();
+builder.Services.AddScoped<NetFirewall.Web.Services.IDhcpSubnetOverviewService,
+    NetFirewall.Web.Services.DhcpSubnetOverviewService>();
+// Audit-log grid: SQL push-down (NetOpenGrid.Persistence.Npgsql); singleton because
+// the grid runtime resolves it from the root provider.
+builder.Services.AddScoped<NetFirewall.Web.Services.IWolDeviceListService,
+    NetFirewall.Web.Services.WolDeviceListService>();
+builder.Services.AddScoped<NetFirewall.Web.Services.IWgPeerDetailService,
+    NetFirewall.Web.Services.WgPeerDetailService>();
+builder.Services.AddSingleton<NetFirewall.Services.Firewall.IAuditLogGridSource,
+    NetFirewall.Services.Firewall.AuditLogGridSource>();
+
 // Builds the one shared WAN-health card model used by the failover page, the
 // Monitoring pod, and the Home dashboard (single daemon→DTO→VM mapping + fallback).
 builder.Services.AddScoped<NetFirewall.Web.Services.IWanHealthCardBuilder,
@@ -147,6 +164,8 @@ builder.Services.AddSingleton<NetworkConfigResolver>();
 
 // ----- Daemon client + DI swap -----
 builder.Services.AddHttpContextAccessor();
+// Theme picker: nf_ui cookie (mode|preset|sidebar|density) over Settings → Appearance defaults.
+builder.Services.AddScoped<NetFirewall.Web.Theming.IAppearanceProvider, NetFirewall.Web.Theming.AppearanceProvider>();
 builder.Services.Configure<DaemonClientOptions>(builder.Configuration.GetSection(DaemonClientOptions.SectionName));
 var daemonOpts = builder.Configuration.GetSection(DaemonClientOptions.SectionName).Get<DaemonClientOptions>() ?? new DaemonClientOptions();
 
@@ -257,12 +276,6 @@ builder.Services.AddSingleton<NetFirewall.Services.Monitoring.IGeoIpLookupServic
 builder.Services.AddSingleton<NetFirewall.Web.Services.ITerminalProxyService,
                               NetFirewall.Web.Services.TerminalProxyService>();
 
-// Read-only catalog of /Bash reference scripts (nftables conf, rt_tables, etc).
-builder.Services.Configure<NetFirewall.Web.Services.BashScriptCatalogOptions>(
-    builder.Configuration.GetSection("BashCatalog"));
-builder.Services.AddSingleton<NetFirewall.Web.Services.IBashScriptCatalog,
-                              NetFirewall.Web.Services.BashScriptCatalog>();
-
 // Runtime-tunable settings (key/value backed by app_settings, in-memory cached).
 builder.Services.AddSingleton<NetFirewall.Services.Settings.IAppSettingsService,
                               NetFirewall.Services.Settings.AppSettingsService>();
@@ -328,6 +341,13 @@ var app = builder.Build();
         typeof(NetFirewall.Services.Monitoring.Host.IHostMonitorQueryService),
         typeof(NetFirewall.Web.Services.ITerminalProxyService),
         typeof(NetFirewall.Services.Diagnostics.IDiagnosticRunStore),
+        // Grid data sources / row-detail composers (Grids/, NetOpenGrid).
+        typeof(NetFirewall.Web.Grids.IGridAccessPolicy),
+        typeof(NetFirewall.Web.Services.IDhcpLeaseDetailService),
+        typeof(NetFirewall.Web.Services.IDhcpSubnetOverviewService),
+        typeof(NetFirewall.Web.Services.IWolDeviceListService),
+        typeof(NetFirewall.Web.Services.IWgPeerDetailService),
+        typeof(NetFirewall.Services.Firewall.IAuditLogGridSource),
     };
     var missing = new List<string>();
     foreach (var t in mustResolve)
@@ -370,6 +390,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();
+
+app.MapNetFirewallGrids();
 
 app.MapControllerRoute(
         name: "default",

@@ -34,6 +34,7 @@ var checks = new ICheck[]
     new MasterKeySyncCheck(),
     new PathsCheck(),
     new ReleaseCheck(),
+    new NginxFramingCheck(),
     new DhcpPathsCheck(),
     new SystemdUnitsCheck(),
     new DaemonSocketCheck(),

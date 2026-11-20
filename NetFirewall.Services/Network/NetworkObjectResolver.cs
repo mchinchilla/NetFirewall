@@ -104,7 +104,15 @@ public sealed class NetworkObjectResolver : INetworkObjectResolver
             case NetworkObjectTypes.Group:
                 if (obj.Members is { } members)
                     foreach (var child in members)
-                        await ExpandObjectAsync(child, catalog, sink, visited, ct);
+                    {
+                        // Members arrive one level deep: a nested group comes WITHOUT its own
+                        // members, so expanding it as-is yielded nothing. The template's
+                        // MGMT_SOURCES (a group of LAN_NETWORKS) therefore resolved empty and
+                        // its SSH/web-UI rules were SKIPped — a lockout on Apply. Use the
+                        // catalog's fully-loaded object instead.
+                        var full = catalog.TryGetValue(child.Name, out var loaded) ? loaded : child;
+                        await ExpandObjectAsync(full, catalog, sink, visited, ct);
+                    }
                 break;
         }
     }

@@ -1,0 +1,31 @@
+@model NetFirewall.Web.Models.Shared.GridFrameViewModel
+@*
+    One NetOpenGrid, embedded. The grid is its own document (htmx 4 + Alpine inside the
+    frame, the host keeps htmx 2); site.js NetFw.grids wires frame ↔ host: height, theme,
+    row actions (drawer / confirm / elevation / toast) and refresh-on-HX-Trigger.
+    The src is built in code: in markup, "embed=1@query" would parse as an e-mail address.
+*@
+@{
+    var hostQuery = Model.ForwardQuery && Context.Request.QueryString.HasValue
+        ? Context.Request.QueryString.Value![1..]
+        : Model.DefaultQuery;
+    var src = $"{NetFirewall.Web.Grids.NetFirewallGrids.Prefix}/{Uri.EscapeDataString(Model.GridId)}?embed=1"
+        + (string.IsNullOrEmpty(hostQuery) ? "" : "&" + hostQuery);
+}
+<div class="nf-grid-host">
+    <div class="nf-grid-skeleton" aria-hidden="true">
+        @for (var i = 0; i < 6; i++)
+        {
+            <div class="nf-grid-skeleton-row"></div>
+        }
+    </div>
+    <iframe class="nf-grid-frame"
+            data-netgrid
+            data-grid-id="@Model.GridId"
+            data-refresh-on="@string.Join(' ', Model.RefreshOn)"
+            data-refresh-every="@Model.RefreshEverySeconds"
+            data-bulk-actions="@(Model.BulkActions.Count == 0 ? "" : System.Text.Json.JsonSerializer.Serialize(Model.BulkActions, NetFirewall.Web.Models.Shared.GridFrameJson.Options))"
+            src="@src"
+            title="@Model.Title"
+            loading="eager"></iframe>
+</div>

@@ -4,7 +4,7 @@
 
 # 🛡️ NetFirewall
 
-**Firewall moderno, autohospedado y single-pane construido desde cero en C# / .NET 10**
+**Firewall moderno, autohospedado y single-pane construido desde cero en C# / .NET 11**
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18%2B-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
@@ -225,7 +225,7 @@ deploy/build-bundle.sh                    # → dist/netfirewall-<git describe>.
 deploy/build-bundle.sh --version 1.5.0-rc1
 ```
 
-Necesita el .NET 10 SDK y el binario standalone `tailwindcss` en el `PATH`. La
+Necesita el .NET 11 SDK y el binario standalone `tailwindcss` en el `PATH`. La
 versión sale de `git describe --tags --always --dirty` (`1.4.0`,
 `1.4.0-3-g97f88aa`, `…-dirty`) y queda en los ensamblados (tarjeta *System info*
 del login, `/health` del daemon), en `VERSION` y en `BUILD_INFO`.
@@ -496,6 +496,6 @@ MIT — ver [LICENSE.txt](LICENSE.txt).
 
 <div align="center">
 
-**Construido con ❤️ en C# / .NET 10 · Powered by PostgreSQL + RepoDB + nftables**
+**Construido con ❤️ en C# / .NET 11 · Powered by PostgreSQL + RepoDB + nftables**
 
 </div>

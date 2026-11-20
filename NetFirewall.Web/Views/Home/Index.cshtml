@@ -93,7 +93,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Overview</p>
+        <p class="page-kicker">Overview</p>
         <h1 class="text-2xl font-semibold tracking-tight">Network at a glance</h1>
     </div>
     <div class="flex items-center gap-3 flex-wrap justify-end">
@@ -229,7 +229,7 @@
             </header>
             <div class="loading-host"
                  hx-get="/Vpn/WireGuard/status?compact=true"
-                 hx-trigger="load, every 15s"
+                 hx-trigger="load, every 15s [document.visibilityState === 'visible']"
                  hx-swap="innerHTML">
                 @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
             </div>
@@ -346,7 +346,7 @@
     @await Html.PartialAsync("_RecentAudit", Model.RecentAudit)
     <div class="loading-host"
          hx-get="/Alerts/feed"
-         hx-trigger="load, every 30s"
+         hx-trigger="load, every 30s [document.visibilityState === 'visible']"
          hx-swap="innerHTML">
         @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
     </div>

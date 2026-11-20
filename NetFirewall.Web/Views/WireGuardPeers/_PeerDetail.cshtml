@@ -1,0 +1,111 @@
+@model NetFirewall.Web.Models.Vpn.WgPeerDetailViewModel
+@using System.Globalization
+@using NetFirewall.Web.Grids
+@using NetFirewall.Web.Models.Diagnostics
+@*
+    Expanded row of the Tunnels / VPN clients grids (WithRowDetail). Rendered inside the
+    grid's frame: no host Alpine/site.js, only classes compiled into site.css.
+    Never renders a private or preshared key — the model does not carry them.
+*@
+@{
+    var p = Model;
+    var tunnel = p.Role is "upstream" or "site";
+    string Local(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    var lan = (p.RouteMode ?? "split") switch { "restricted" => "restricted LAN", "none" => "no LAN", _ => "whole LAN" };
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Config</h3>
+        <dl class="ng-detail-fields">
+            <dt>Role</dt><dd>@(p.Role switch { "upstream" => "Upstream tunnel", "site" => "Site-to-site", _ => "Client" })</dd>
+            <dt>Status</dt><dd>@if (p.Enabled) { <span class="badge badge-success">Active</span> } else { <span class="badge badge-muted">Off</span> }</dd>
+            @if (tunnel)
+            {
+                <dt>Endpoint</dt><dd>@(string.IsNullOrEmpty(p.Endpoint) ? "—" : p.Endpoint)</dd>
+            }
+            <dt>Keepalive</dt><dd>@(p.PersistentKeepalive is > 0 ? $"{p.PersistentKeepalive} s" : "off")</dd>
+            <dt>Preshared key</dt><dd>@(p.HasPresharedKey ? "set" : "not set")</dd>
+            @if (!tunnel)
+            {
+                <dt>LAN access</dt><dd>@lan</dd>
+                <dt>Internet</dt><dd>@(p.AllowInternet ? "yes" : "no")</dd>
+            }
+            <dt>Created</dt><dd>@Local(p.CreatedAt)</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">@(tunnel ? "Routed into the tunnel" : "Allowed IPs") (@p.AllowedIps.Count)</h3>
+        @if (p.AllowedIps.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">None.</p>
+        }
+        else
+        {
+            <ul class="space-y-0.5">
+                @foreach (var ip in p.AllowedIps)
+                {
+                    <li class="ng-mono text-xs">@ip</li>
+                }
+            </ul>
+        }
+        @if (!tunnel && p.RouteMode == "restricted")
+        {
+            <p class="ng-detail-title mt-3">Reachable subnets (@p.AllowedSubnets.Count)</p>
+            @if (p.AllowedSubnets.Count == 0)
+            {
+                <p class="text-xs text-surface-fg-muted">None listed — falls back to the LAN subnets.</p>
+            }
+            else
+            {
+                <ul class="space-y-0.5">
+                    @foreach (var s in p.AllowedSubnets)
+                    {
+                        <li class="ng-mono text-xs">@s</li>
+                    }
+                </ul>
+            }
+        }
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Live (wg show)</h3>
+        @if (p.LiveError is not null)
+        {
+            <p class="text-xs text-feedback-warning-fg">Live status unavailable: @p.LiveError</p>
+        }
+        else if (p.Live is null)
+        {
+            <p class="text-xs text-surface-fg-muted">Not on the running interface (disabled, or not applied yet).</p>
+        }
+        else
+        {
+            var live = p.Live;
+            <dl class="ng-detail-fields">
+                <dt>Last handshake</dt>
+                <dd>
+                    @if (live.LastHandshakeAt is { } hs)
+                    {
+                        <span title="@Local(hs)">@GridCell.Humanize((p.NowUtc - hs).Duration()) ago</span>
+                    }
+                    else
+                    {
+                        <span class="text-surface-fg-muted">never</span>
+                    }
+                </dd>
+                <dt>Seen from</dt><dd>@(string.IsNullOrEmpty(live.Endpoint) ? "—" : live.Endpoint)</dd>
+                <dt>Received</dt><dd>@DiagUi.Bytes(live.RxBytes)</dd>
+                <dt>Sent</dt><dd>@DiagUi.Bytes(live.TxBytes)</dd>
+            </dl>
+        }
+    </section>
+
+    <section class="ng-detail-card ng-detail-wide">
+        <h3 class="ng-detail-title">Public key</h3>
+        <p class="ng-mono text-xs break-all">@p.PublicKey</p>
+        @if (!string.IsNullOrWhiteSpace(p.Description))
+        {
+            <p class="text-xs text-surface-fg-muted mt-2">@p.Description</p>
+        }
+    </section>
+</div>

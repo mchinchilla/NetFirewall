@@ -16,6 +16,9 @@ public sealed class SystemMonitorService : ISystemMonitorService
 
     // CPU state tracking for percentage calculation
     private readonly ConcurrentDictionary<string, CpuSample> _lastCpuSamples = new();
+    private CpuBreakdown? _lastBreakdown;
+
+    private sealed record CpuBreakdown(long Total, long User, long System, long Idle, long IoWait);
 
     // Network state tracking for rate calculation
     private readonly ConcurrentDictionary<string, NetworkSample> _lastNetworkSamples = new();
@@ -122,17 +125,18 @@ public sealed class SystemMonitorService : ISystemMonitorService
 
                 if (cpuName == "cpu")
                 {
-                    var deltaTotalMain = total;
-                    if (_lastCpuSamples.TryGetValue("cpu_prev", out var prev))
+                    // Breakdown over the interval since the previous read: every
+                    // /proc/stat field is a monotonic jiffy counter, so each share
+                    // is (Δfield / Δtotal). The first read has no interval → zeros.
+                    var now = new CpuBreakdown(total, user + nice, system + irq + softirq, idle, iowait);
+                    var prev = Interlocked.Exchange(ref _lastBreakdown, now);
+                    if (prev is not null && now.Total - prev.Total > 0)
                     {
-                        deltaTotalMain = total - prev.Total;
-                        if (deltaTotalMain > 0)
-                        {
-                            totalUser = (double)(user + nice - (prev.Active > 0 ? 0 : 0)) / deltaTotalMain * 100;
-                            totalSystem = (double)(system + irq + softirq) / deltaTotalMain * 100;
-                            totalIdle = (double)idle / deltaTotalMain * 100;
-                            totalIoWait = (double)iowait / deltaTotalMain * 100;
-                        }
+                        double dt = now.Total - prev.Total;
+                        totalUser = (now.User - prev.User) / dt * 100;
+                        totalSystem = (now.System - prev.System) / dt * 100;
+                        totalIdle = (now.Idle - prev.Idle) / dt * 100;
+                        totalIoWait = (now.IoWait - prev.IoWait) / dt * 100;
                     }
                     totalUsage = usage;
                 }

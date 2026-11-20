@@ -6,7 +6,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+        <p class="page-kicker">Firewall</p>
         <h1 class="text-2xl font-semibold tracking-tight">Apply nftables ruleset</h1>
         <p class="text-sm mt-1 text-surface-fg-muted">
             Generates <span class="font-mono">/etc/nftables.conf</span> from the rules in the database and reloads via <span class="font-mono">nft -f</span> through the daemon.
@@ -67,7 +67,7 @@
 <div class="mt-6 flex flex-wrap items-end justify-between gap-3"
      style="animation: var(--animate-slide-up); animation-delay: 180ms;">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall · QoS</p>
+        <p class="page-kicker">Firewall · QoS</p>
         <h2 class="text-xl font-semibold tracking-tight">Apply tc / HTB hierarchy</h2>
         <p class="text-sm mt-1 text-surface-fg-muted">
             QoS classes don't apply via nftables — they need <span class="font-mono">iproute2's tc</span>. This rebuilds the HTB tree on every interface that has an enabled QoS config.
@@ -111,7 +111,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mt-10 mb-4"
      style="animation: var(--animate-slide-up); animation-delay: 300ms;">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall · Policy routing</p>
+        <p class="page-kicker">Firewall · Policy routing</p>
         <h2 class="text-xl font-semibold tracking-tight">Apply ip rule / ip route</h2>
         <p class="text-sm mt-1 text-surface-fg-muted">
             Reconciles <span class="font-mono">/etc/iproute2/rt_tables</span>,

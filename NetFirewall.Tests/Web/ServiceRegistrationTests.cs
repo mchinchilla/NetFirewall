@@ -105,6 +105,10 @@ public class ServiceRegistrationTests
 
             foreach (var p in ctor.GetParameters())
             {
+                // MS.DI passes the default for an optional parameter it can't resolve
+                // (e.g. `IDhcpReservationCache? reservations = null`: only the DHCP server
+                // registers that hot-path cache) — opt-in by design, not unbuildable.
+                if (p.HasDefaultValue) continue;
                 var t = p.ParameterType;
                 // IEnumerable<IFoo> is satisfied by zero registrations, but a doctor with
                 // no checks is a bug too — so unwrap and demand at least one.

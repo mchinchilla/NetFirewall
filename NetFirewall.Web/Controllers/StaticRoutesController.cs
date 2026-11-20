@@ -1,3 +1,5 @@
+using NetFirewall.Models.Auth;
+using Microsoft.AspNetCore.Authorization;
 using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models;
@@ -32,14 +34,8 @@ public sealed class StaticRoutesController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
-    {
-        var rows = await BuildRowsAsync(ct);
-        return PartialView("_RoutesTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
+    [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {
         var ifaces = await _firewall.GetInterfacesAsync(ct);
@@ -57,6 +53,7 @@ public sealed class StaticRoutesController : Controller
     }
 
     [HttpPost("save")]
+    [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Save(StaticRouteFormViewModel form, CancellationToken ct)
     {
@@ -92,6 +89,7 @@ public sealed class StaticRoutesController : Controller
     }
 
     [HttpPost("apply/{id:guid}")]
+    [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
     [ValidateAntiForgeryToken]
     [NetFirewall.Web.Filters.RequireElevated]
     public async Task<IActionResult> Apply(Guid id, CancellationToken ct)
@@ -102,6 +100,7 @@ public sealed class StaticRoutesController : Controller
     }
 
     [HttpPost("delete/{id:guid}")]
+    [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
     [ValidateAntiForgeryToken]
     [NetFirewall.Web.Filters.RequireElevated]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)

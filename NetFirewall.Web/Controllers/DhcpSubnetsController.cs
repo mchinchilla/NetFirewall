@@ -9,6 +9,7 @@ using NetFirewall.Services.Firewall;
 using NetFirewall.Services.Settings;
 using NetFirewall.Web.Helpers;
 using NetFirewall.Web.Models.Dhcp;
+using NetFirewall.Web.Services;
 
 namespace NetFirewall.Web.Controllers;
 
@@ -24,44 +25,34 @@ public sealed class DhcpSubnetsController : Controller
     private readonly IDhcpAdminService _admin;
     private readonly IFirewallService _firewall;
     private readonly IAppSettingsService _settings;
+    private readonly IDhcpSubnetOverviewService _overview;
     private readonly ILogger<DhcpSubnetsController> _logger;
 
     public DhcpSubnetsController(
         IDhcpAdminService admin,
         IFirewallService firewall,
         IAppSettingsService settings,
+        IDhcpSubnetOverviewService overview,
         ILogger<DhcpSubnetsController> logger)
     {
         _admin = admin;
         _firewall = firewall;
         _settings = settings;
+        _overview = overview;
         _logger = logger;
     }
 
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
+    /// <summary>Expanded row of the Subnets grid (fetched once per row, on first expand).</summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> Detail(Guid id, CancellationToken ct)
     {
-        var subnetsTask    = _admin.GetSubnetsAsync(ct);
-        var exclusionsTask = _admin.GetExclusionsAsync(null, ct);
-        var poolsTask      = _admin.GetPoolsAsync(null, ct);
-        await Task.WhenAll(subnetsTask, exclusionsTask, poolsTask);
-
-        ViewBag.ExclusionCounts = exclusionsTask.Result
-            .GroupBy(e => e.SubnetId)
-            .ToDictionary(g => g.Key, g => g.Count());
-        ViewBag.PoolCounts = poolsTask.Result
-            .Where(p => p.SubnetId.HasValue)
-            .GroupBy(p => p.SubnetId!.Value)
-            .ToDictionary(g => g.Key, g => g.Count());
-
-        var ifaces = await _firewall.GetInterfacesAsync(ct);
-        ViewBag.InterfaceNames = ifaces.ToDictionary(i => i.Id, i => i.Name);
-        ViewBag.InterfaceTypes = ifaces.ToDictionary(i => i.Id, i => i.Type);
-
-        return PartialView("_SubnetsTable", subnetsTask.Result);
+        var model = await _overview.GetDetailAsync(id, ct);
+        return model is null
+            ? Content("<p class=\"text-sm text-surface-fg-muted\">This subnet is gone. Refresh the grid.</p>", "text/html")
+            : PartialView("_SubnetDetail", model);
     }
 
     [HttpGet("edit/{id:guid?}")]

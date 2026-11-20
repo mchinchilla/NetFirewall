@@ -16,6 +16,10 @@
     var lans  = Model.Step2.Lans.Where(l => l.EnableDhcp).ToList();
 
     var fwToggles = new List<string>();
+    // A generated template replaces the manual toggles below (they aren't applied), so the
+    // review must not list them — it showed "Web admin:5000" while the template opened 443.
+    if (Model.Step3.UsedTemplate)         fwToggles.Add("Template rule set — rebuilt for these interfaces on Apply");
+    else {
     if (Model.Step3.EnableNat)            fwToggles.Add("NAT");
     if (Model.Step3.ForwardLanToWan)      fwToggles.Add("Forward LAN→WAN");
     if (Model.Step3.AllowSsh)             fwToggles.Add("SSH");
@@ -24,6 +28,7 @@
     if (Model.Step3.AllowDns)             fwToggles.Add("DNS");
     if (Model.Step3.AllowWebInterface)    fwToggles.Add($"Web admin:{Model.Step3.WebInterfacePort}");
     if (Model.Step3.BlockInvalidPackets)  fwToggles.Add("Drop invalid");
+    }
 
     var svcToggles = new List<string>();
     if (Model.Step4.EnableDnsForwarder)   svcToggles.Add("DNS forwarder");

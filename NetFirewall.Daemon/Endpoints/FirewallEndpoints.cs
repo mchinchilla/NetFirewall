@@ -20,12 +20,31 @@ public static class FirewallEndpoints
 
         grp.MapPost("/apply", async (
                 INftApplyService nft,
+                IFirewallService firewall,
                 IAuthAuditService audit,
                 IApplyHistoryService history,
                 ClaimsPrincipal user,
                 HttpContext ctx,
-                CancellationToken ct) =>
+                CancellationToken ct,
+                bool onlyIfConfigured = false) =>
         {
+            // Boot-time apply (netfirewall-bootstrap) passes onlyIfConfigured=true. A fresh
+            // install has no filter rules yet, and the generated ruleset would be `policy drop`
+            // with only `iif lo accept`: the box would lock the operator out of the Web UI and
+            // SSH before the setup wizard ever ran (found by the Debian 13 end-to-end install).
+            // An explicit Apply from the UI/TUI is unaffected.
+            if (onlyIfConfigured)
+            {
+                var rules = await firewall.GetFilterRulesAsync("input", ct);
+                if (!rules.Any(r => r.Enabled))
+                {
+                    const string skipped = "Skipped: no input filter rules yet (fresh install) — the host keeps its current ruleset until the firewall is configured.";
+                    // Not recorded in apply-history: nothing was applied, so the dashboard must
+                    // keep showing the firewall as never applied / pending.
+                    return Results.Json(ServiceResponse<NftApplyDto?>.Ok(null, skipped));
+                }
+            }
+
             var result = await nft.ApplyConfigurationAsync(ct);
             var msg = SummariseResult(result);
 

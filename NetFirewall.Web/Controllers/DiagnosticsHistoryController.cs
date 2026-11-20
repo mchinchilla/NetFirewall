@@ -20,7 +20,6 @@ namespace NetFirewall.Web.Controllers;
 [Route("/Diagnostics/History")]
 public sealed class DiagnosticsHistoryController : Controller
 {
-    private const int PageSize = 25;
 
     private readonly IDiagnosticRunStore _runs;
     private readonly IAuthAuditService _audit;
@@ -36,27 +35,6 @@ public sealed class DiagnosticsHistoryController : Controller
     [HttpGet("")]
     public IActionResult Index([FromQuery] HistoryFilterViewModel filter) => View(filter);
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table([FromQuery] HistoryFilterViewModel filter, CancellationToken ct)
-    {
-        var f = new DiagRunFilter(
-            Tool: Blank(filter.Tool),
-            Status: Blank(filter.Status),
-            From: filter.From,
-            To: filter.To,
-            RequestedBy: filter.Mine ? User.Identity?.Name : null);
-        try
-        {
-            var (rows, total) = await _runs.ListAsync(f, filter.Page, PageSize, ct);
-            return PartialView("_RunsTable", new RunsTableViewModel(rows, total, filter.Page, PageSize, filter));
-        }
-        catch (PostgresException ex) when (ex.SqlState == "42P01")
-        {
-            return PartialView("_RunsTable", new RunsTableViewModel(Array.Empty<DiagRun>(), 0, 1, PageSize, filter,
-                "History table missing — apply migration 00041."));
-        }
-    }
-
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Detail(Guid id, CancellationToken ct)
     {
@@ -64,6 +42,20 @@ public sealed class DiagnosticsHistoryController : Controller
         if (run is null) return NotFound();
         var (partial, model) = DiagRunPartials.Resolve(run);
         return PartialView("_RunDetail", new RunDetailViewModel(run, partial, model,
+            DiagRunPartials.Pretty(run.ParamsJson), DiagRunPartials.Pretty(run.ResultJson)));
+    }
+
+    /// <summary>
+    /// Expanded row of the History grid: meta, params and raw result. Lean on purpose (it renders
+    /// inside the grid frame); the rich report stays in <see cref="Detail"/>, opened in the drawer.
+    /// </summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> RowDetail(Guid id, CancellationToken ct)
+    {
+        var run = await _runs.GetAsync(id, ct);
+        if (run is null)
+            return Content("<p class=\"text-sm text-surface-fg-muted\">This run is gone (purged). Refresh the grid.</p>", "text/html");
+        return PartialView("_RunRowDetail", new RunDetailViewModel(run, null, null,
             DiagRunPartials.Pretty(run.ParamsJson), DiagRunPartials.Pretty(run.ResultJson)));
     }
 

@@ -2,13 +2,13 @@
     ViewData["Title"] = "Firewall — NAT rules";
     Layout = "_Layout";
 }
-<div x-data="{ hideDisabled: false }">
+<div>
     <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
          style="animation: var(--animate-slide-up);">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <p class="page-kicker">Firewall</p>
             <h1 class="text-2xl font-semibold tracking-tight">NAT rules</h1>
-            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">Source NAT (SNAT) and masquerade. Outgoing packets get rewritten on the WAN side.</p>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">Source NAT (SNAT) and masquerade. Outgoing packets get rewritten on the WAN side. Rules are evaluated top to bottom by priority.</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
             <button type="button" class="btn btn-primary"
@@ -21,22 +21,13 @@
         </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2 mb-4"
-         style="animation: var(--animate-slide-up); animation-delay: 40ms;">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "nat-rules-table", Placeholder = "Filter by type, network, address…", ClientSide = true })
-        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-            <input type="checkbox" class="rounded" x-model="hideDisabled" />
-            Hide disabled
-        </label>
-    </div>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-        <div id="nat-rules-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Firewall/NatRules/table"
-             hx-trigger="load, refreshNatRules from:body"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-        </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Firewall.FwNatRulesGrid.Id,
+            Title = "NAT rules",
+            DefaultQuery = NetFirewall.Web.Grids.Firewall.FwNatRulesGrid.DefaultQuery,
+            RefreshOn = ["refreshNatRules"]
+        })
     </section>
 </div>

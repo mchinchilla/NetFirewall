@@ -5,3 +5,5 @@
 # htmx     2.0.9   https://cdn.jsdelivr.net/npm/htmx.org@2.0.9/dist/htmx.min.js
 # alpine   3.17.1  https://cdn.jsdelivr.net/npm/alpinejs@3.17.1/dist/cdn.min.js
 # chart.js 4.5.1   https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js
+# geist    1.7.2   npm geist@1.7.2 dist/fonts/geist-{sans,mono}/*-Variable.woff2 (OFL-1.1, LICENSE.txt alongside)
+#                  copied from TekiumCallAccounting's vendored set; sha256 a369fcf5628ea2aa… / fba8f577f38a2bbc…

@@ -23,12 +23,18 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
     // Thread-safe cache for parsed MAC addresses - no locks needed
     private static readonly ConcurrentDictionary<string, PhysicalAddress> MacCache = new(StringComparer.OrdinalIgnoreCase);
 
+    // Reservation lookups on every DISCOVER/REQUEST come from memory when the DHCP server
+    // registers the cache (null in tools/tests → the original SQL path).
+    private readonly IDhcpReservationCache? _reservations;
+
     public DhcpLeasesService(
         NpgsqlDataSource dataSource,
         ILogger<DhcpLeasesService> logger,
         LeaseCache? leaseCache = null,
-        IDdnsService? ddnsService = null)
+        IDdnsService? ddnsService = null,
+        IDhcpReservationCache? reservations = null)
     {
+        _reservations = reservations;
         _logger = logger;
         _dataSource = dataSource;
         _leaseCache = leaseCache;
@@ -471,6 +477,8 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
     /// </summary>
     private async Task<string?> GetReservationOwnerAsync(NpgsqlConnection connection, IPAddress ipAddress)
     {
+        if (_reservations is not null) return await _reservations.GetOwnerMacAsync(ipAddress).ConfigureAwait(false);
+
         const string sql = "SELECT mac_address::text FROM dhcp_mac_reservations WHERE reserved_ip = @ip LIMIT 1";
 
         await using var cmd = new NpgsqlCommand(sql, connection);
@@ -529,6 +537,7 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
         string macAddress,
         NpgsqlTransaction? transaction)
     {
+        if (_reservations is not null) return await _reservations.GetReservedIpAsync(macAddress).ConfigureAwait(false);
         try
         {
             var parsedMac = ParseMacAddress(macAddress);

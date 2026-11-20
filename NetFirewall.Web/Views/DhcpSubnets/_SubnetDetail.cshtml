@@ -1,0 +1,98 @@
+@model NetFirewall.Web.Models.Dhcp.SubnetDetailViewModel
+@using NetFirewall.Web.Grids
+@*
+    Expanded row of the Subnets grid (WithRowDetail). Rendered inside the grid's frame, so it
+    may only use classes compiled into site.css (ng-detail-* come from the grid theme).
+*@
+@{
+    var s = Model.Subnet;
+    string Ips(System.Net.IPAddress[]? arr) => arr is { Length: > 0 } ? string.Join(", ", arr.Select(a => a.ToString())) : "—";
+    string Or(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Addressing</h3>
+        <dl class="ng-detail-fields">
+            <dt>Network</dt><dd>@s.Network</dd>
+            <dt>Mask</dt><dd>@(s.SubnetMask?.ToString() ?? "—")</dd>
+            <dt>Router</dt><dd>@(s.Router?.ToString() ?? "—")</dd>
+            <dt>Broadcast</dt><dd>@(s.Broadcast?.ToString() ?? "—")</dd>
+            <dt>Interface</dt><dd>@Or(Model.InterfaceName)</dd>
+            <dt>MTU</dt><dd>@(s.InterfaceMtu?.ToString() ?? "—")</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Options</h3>
+        <dl class="ng-detail-fields">
+            <dt>Domain</dt><dd>@Or(s.DomainName)</dd>
+            <dt>Search list</dt><dd>@Or(s.DomainSearchList)</dd>
+            <dt>DNS</dt><dd>@Ips(s.DnsServers)</dd>
+            <dt>NTP</dt><dd>@Ips(s.NtpServers)</dd>
+            <dt>WINS</dt><dd>@Ips(s.WinsServers)</dd>
+            @if (!string.IsNullOrWhiteSpace(s.PosixTimezone))
+            {
+                <dt>Timezone</dt><dd>@s.PosixTimezone</dd>
+            }
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Leases &amp; boot</h3>
+        <dl class="ng-detail-fields">
+            <dt>Default lease</dt><dd>@GridCell.Humanize(TimeSpan.FromSeconds(s.DefaultLeaseTime))</dd>
+            <dt>Max lease</dt><dd>@GridCell.Humanize(TimeSpan.FromSeconds(s.MaxLeaseTime))</dd>
+            <dt>TFTP server</dt><dd>@Or(s.TftpServer)</dd>
+            <dt>Boot file (BIOS)</dt><dd>@Or(s.BootFilename)</dd>
+            <dt>Boot file (UEFI)</dt><dd>@Or(s.BootFilenameUefi)</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Pools (@Model.Pools.Count)</h3>
+        @if (Model.Pools.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">No pools — this scope hands out reservations only.</p>
+        }
+        else
+        {
+            <table class="ng-detail-table">
+                <thead><tr><th>Name</th><th>Range</th><th class="ng-num">Pri</th><th>Status</th></tr></thead>
+                <tbody>
+                    @foreach (var p in Model.Pools.OrderBy(p => p.Priority))
+                    {
+                        <tr>
+                            <td>@Or(p.Name)</td>
+                            <td class="ng-mono">@p.RangeStart – @p.RangeEnd</td>
+                            <td class="ng-num">@p.Priority</td>
+                            <td>@if (p.Enabled) { <span class="badge badge-success">Active</span> } else { <span class="badge badge-muted">Off</span> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Exclusions (@Model.Exclusions.Count)</h3>
+        @if (Model.Exclusions.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">No excluded addresses.</p>
+        }
+        else
+        {
+            <table class="ng-detail-table">
+                <thead><tr><th>Addresses</th><th>Reason</th></tr></thead>
+                <tbody>
+                    @foreach (var e in Model.Exclusions)
+                    {
+                        <tr>
+                            <td class="ng-mono">@e.IpStart@(e.IpEnd is { } end && !end.Equals(e.IpStart) ? $" – {end}" : "")</td>
+                            <td>@Or(e.Reason)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+</div>

@@ -26,13 +26,6 @@ public sealed class DhcpClassesController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
-    {
-        var rows = await _admin.GetClassesAsync(ct);
-        return PartialView("_ClassesTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {

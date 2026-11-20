@@ -35,19 +35,50 @@ public class ScheduleWatcherServiceTests
         return (watcher, nft, schedSvc, fw);
     }
 
+    private static readonly Guid ScheduleId = Guid.NewGuid();
+
+    private static FwFilterRule[] OneScheduledRule() =>
+    [
+        new FwFilterRule { Id = Guid.NewGuid(), Chain = "input", Action = "accept", Enabled = true, Priority = 1 },
+        new FwFilterRule { Id = Guid.NewGuid(), Chain = "forward", Action = "drop", Enabled = true, Priority = 2, ScheduleId = ScheduleId },
+    ];
+
     [Fact]
-    public async Task Tick_ForceApplyOnStart_AlwaysApplies()
+    public async Task Tick_ForceApplyOnStart_WithScheduledRules_Applies()
     {
-        var (watcher, nft, _, _) = Build();
+        var (watcher, nft, _, _) = Build(rules: OneScheduledRule());
         var applied = await watcher.TickAsync(forceApply: true, CancellationToken.None);
         Assert.True(applied);
         nft.Verify(n => n.ApplyConfigurationAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
+    public async Task Tick_ForceApplyOnStart_ConfiguredWithoutSchedules_StillApplies()
+    {
+        // Boot-apply may be off: a configured box must keep getting its ruleset at daemon start.
+        var (watcher, nft, _, _) = Build(rules:
+        [
+            new FwFilterRule { Id = Guid.NewGuid(), Chain = "input", Action = "accept", Enabled = true, Priority = 1 },
+        ]);
+        Assert.True(await watcher.TickAsync(forceApply: true, CancellationToken.None));
+        nft.Verify(n => n.ApplyConfigurationAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Tick_ForceApplyOnStart_WithNoScheduledRule_LeavesTheKernelAlone()
+    {
+        // A fresh install has no rules at all: the generated ruleset would be a bare
+        // `policy drop` and lock the operator out before the setup wizard.
+        var (watcher, nft, _, _) = Build();
+        var applied = await watcher.TickAsync(forceApply: true, CancellationToken.None);
+        Assert.False(applied);
+        nft.Verify(n => n.ApplyConfigurationAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Tick_UnchangedFingerprint_DoesNotReapply()
     {
-        var (watcher, nft, _, _) = Build();
+        var (watcher, nft, _, _) = Build(rules: OneScheduledRule());
         await watcher.TickAsync(forceApply: true, CancellationToken.None);
         var again = await watcher.TickAsync(forceApply: false, CancellationToken.None);
         Assert.False(again);
@@ -105,6 +136,7 @@ public class ScheduleWatcherServiceTests
 
         var applied = await watcher.TickAsync(forceApply: false, CancellationToken.None);
         Assert.True(applied);
-        nft.Verify(n => n.ApplyConfigurationAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
+        // Startup had nothing scheduled (no apply); the new scheduled rule is the first apply.
+        nft.Verify(n => n.ApplyConfigurationAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

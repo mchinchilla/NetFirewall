@@ -468,10 +468,17 @@ check_host() {   # → number of blocking problems
     else
         warn "systemd is not running — this installer targets systemd hosts"; errors=$((errors + 1))
     fi
-    if [[ "$(uname -m)" == "x86_64" ]]; then
-        ok "architecture x86_64, kernel $(uname -r)"
+    # The bundle is self-contained for one runtime (BUILD_INFO runtime=…); the host must match it.
+    local bundle_rid want_arch
+    bundle_rid="$(sed -n 's/^runtime=\([^ ]*\).*/\1/p' "$SCRIPT_DIR/BUILD_INFO" 2>/dev/null)"
+    case "${bundle_rid:-linux-x64}" in
+        linux-arm64) want_arch=aarch64 ;;
+        *)           want_arch=x86_64 ;;
+    esac
+    if [[ "$(uname -m)" == "$want_arch" ]]; then
+        ok "architecture $want_arch, kernel $(uname -r)"
     else
-        warn "architecture $(uname -m): the bundle is linux-x64"; errors=$((errors + 1))
+        warn "architecture $(uname -m): the bundle is ${bundle_rid:-linux-x64}"; errors=$((errors + 1))
     fi
     if [[ -r /etc/os-release ]]; then
         local os_id os_like os_name
@@ -1103,6 +1110,15 @@ switch_and_restart() {
             warn "daemon reports version $v, expected $BUNDLE_VERSION"
         elif [[ -n "$v" ]]; then
             ok "daemon /health reports $v"
+        fi
+        # The Web (netfirewall-web, group $GROUP_NAME) reaches the daemon only through
+        # this group: a root:root socket makes every Web → daemon call fail with EACCES.
+        local sock_group
+        sock_group=$(stat -c %G "$SOCKET" 2>/dev/null || true)
+        if [[ -n "$sock_group" && "$sock_group" != "$GROUP_NAME" ]]; then
+            warn "daemon socket group is '$sock_group', expected '$GROUP_NAME' — the Web cannot reach the daemon (Daemon__SocketGroup in daemon.env)"
+        elif [[ -n "$sock_group" ]]; then
+            ok "daemon socket $SOCKET is group $GROUP_NAME"
         fi
         if [[ -n "${OLD_SAME:-}" ]]; then rm -rf "$OLD_SAME"; fi
         return 0

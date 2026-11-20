@@ -39,11 +39,11 @@ class Program
 
         try
         {
+            // CreateDefaultBuilder already loads appsettings.json, appsettings.{env}.json and
+            // THEN the environment. Adding appsettings.json again here put the JSON after the
+            // environment, so dhcp.env (DHCP__Interface, …) was silently ignored and the server
+            // bound the baked-in default interface (found by the Debian 13 end-to-end install).
             var host = Host.CreateDefaultBuilder(args)
-                .ConfigureAppConfiguration((context, config) =>
-                {
-                    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
-                })
                 .UseSystemd()
                 .ConfigureServices((hostContext, services) =>
                 {
@@ -62,6 +62,8 @@ class Program
                      * Reduces DB roundtrips by ~90% for read operations
                      * Write-through ensures durability with PostgreSQL */
                     services.AddSingleton<LeaseCache>();
+                    // Reservations from memory on the hot path; dropped by the reservation.changed NOTIFY.
+                    services.AddSingleton<IDhcpReservationCache, DhcpReservationCache>();
 
                     /* Services */
                     services.AddScoped<IDhcpServerService, DhcpServerService>();
@@ -98,6 +100,9 @@ class Program
         catch (Exception ex)
         {
             Log.Fatal(ex, "A fatal error occurred starting the DHCP server");
+            // Non-zero so systemd treats it as a failure (Restart=on-failure, `systemctl status`
+            // shows it red) instead of "Deactivated successfully".
+            Environment.ExitCode = 1;
         }
         finally
         {

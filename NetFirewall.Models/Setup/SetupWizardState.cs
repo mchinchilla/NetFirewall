@@ -117,6 +117,15 @@ public class WizardFirewallConfig
     /// (CIDR-based) rule set on top.
     /// </summary>
     public bool UsedTemplate { get; set; }
+
+    /// <summary>
+    /// The template choices, kept so wizard completion can REBUILD the template once the
+    /// interfaces exist. Step 3 runs before step 5 writes fw_interfaces, so the first run
+    /// sees no LAN/WAN: LAN_NETWORKS/MGMT_SOURCES come out empty and the management, LAN
+    /// forward and NAT rules are skipped — applying that ruleset locked the operator out
+    /// (found by the Debian 13 end-to-end install).
+    /// </summary>
+    public RuleTemplateSelection? TemplateSelection { get; set; }
 }
 
 /// <summary>

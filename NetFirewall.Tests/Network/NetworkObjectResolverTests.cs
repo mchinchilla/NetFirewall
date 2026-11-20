@@ -235,4 +235,21 @@ public class NetworkObjectResolverTests
             s => s.GetIntAsync("network_objects.fqdn_ttl_seconds", It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    [Fact]
+    public async Task Resolve_GroupOfAGroup_ExpandsTheInnerGroupFromTheCatalog()
+    {
+        // As loaded from the DB: the outer group's member is a SHALLOW copy of the inner
+        // group (no Members). The rule template's MGMT_SOURCES = group(LAN_NETWORKS) looked
+        // exactly like this and resolved to nothing, so its SSH/web-UI rules were skipped.
+        var lan = Network("LAN_ETH0", "172.17.0.0/16");
+        var lanNetworks = Group("LAN_NETWORKS", lan);
+        var shallowLanNetworks = new NetworkObject { Id = lanNetworks.Id, Name = "LAN_NETWORKS", Type = NetworkObjectTypes.Group, Value = "" };
+        var mgmt = Group("MGMT_SOURCES", shallowLanNetworks);
+        StubCatalog(lan, lanNetworks, mgmt);
+
+        var result = await CreateResolver().ResolveAsync(["MGMT_SOURCES"]);
+
+        Assert.Equal(["172.17.0.0/16"], result);
+    }
 }

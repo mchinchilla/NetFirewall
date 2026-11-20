@@ -25,6 +25,7 @@
   "Daemon": {
     "SocketPath": "/run/netfirewall/control.sock",
     "SocketMode": "0660",
+    "SocketGroup": "netfirewall",
     "ExpectedPeerUid": null,
     "SessionHeader": "X-NetFw-Session"
   }

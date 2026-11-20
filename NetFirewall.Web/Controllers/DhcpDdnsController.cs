@@ -26,13 +26,17 @@ public sealed class DhcpDdnsController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
+    /// <summary>Expanded row of the DDNS grid (fetched once per row, on first expand).</summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> Detail(Guid id, CancellationToken ct)
     {
-        var rows = await _admin.GetDdnsConfigsAsync(ct);
-        var subnets = await _admin.GetSubnetsAsync(ct);
-        ViewBag.SubnetNames = subnets.ToDictionary(s => s.Id, s => s.Name);
-        return PartialView("_DdnsTable", rows);
+        var config = await _admin.GetDdnsConfigByIdAsync(id, ct);
+        if (config is null)
+            return Content("<p class=\"text-sm text-surface-fg-muted\">This DDNS config is gone. Refresh the grid.</p>", "text/html");
+
+        var subnet = config.SubnetId is { } sid ? await _admin.GetSubnetByIdAsync(sid, ct) : null;
+        var scope = config.SubnetId is null ? "Global" : subnet?.Name ?? "(unknown subnet)";
+        return PartialView("_DdnsDetail", new DdnsDetailViewModel { Config = config, Scope = scope });
     }
 
     [HttpGet("edit/{id:guid?}")]

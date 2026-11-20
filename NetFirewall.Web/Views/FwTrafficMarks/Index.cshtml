@@ -5,7 +5,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+        <p class="page-kicker">Firewall</p>
         <h1 class="text-2xl font-semibold tracking-tight">Traffic marks</h1>
         <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">Named fwmark values — used by mangle rules, QoS classes, and policy routing.</p>
     </div>
@@ -20,16 +20,12 @@
     </div>
 </div>
 
-<div class="flex flex-wrap items-center gap-2 mb-4"
-     style="animation: var(--animate-slide-up); animation-delay: 40ms;">
-    @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "traffic-marks-table", Placeholder = "Filter by name, value, route table…", ClientSide = true })
-</div>
-
-<section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-    <div id="traffic-marks-table"
-         hx-get="/Firewall/TrafficMarks/table"
-         hx-trigger="load, refreshTrafficMarks from:body"
-         hx-swap="innerHTML">
-        @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-    </div>
+<section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+    @await Html.PartialAsync("_Grid", new GridFrameViewModel
+    {
+        GridId = NetFirewall.Web.Grids.Firewall.FwTrafficMarksGrid.Id,
+        Title = "Traffic marks",
+        DefaultQuery = NetFirewall.Web.Grids.Firewall.FwTrafficMarksGrid.DefaultQuery,
+        RefreshOn = ["refreshTrafficMarks"]
+    })
 </section>

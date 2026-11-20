@@ -6,63 +6,70 @@
  *   - Toasts are the canonical UI feedback channel for backend ops.
  * ===================================================================== */
 
-const STORAGE_KEY = "netfw.ui";
+const STORAGE_KEY = "netfw.ui"; // per-browser conveniences only (alert sounds)
 
-const PALETTES = [
-    { id: "boulder",     label: "Boulder",     hex: "#767574" },
-    { id: "jordy-blue",  label: "Jordy Blue",  hex: "#5a9bd7" },
-    { id: "magic-mint",  label: "Magic Mint",  hex: "#70ad8e" },
-    { id: "taupe-gray",  label: "Taupe Gray",  hex: "#999883" },
-    { id: "twilight",    label: "Twilight",    hex: "#b889bc" },
-    { id: "pearl-bush",  label: "Pearl Bush",  hex: "#a99a8a" },
-    { id: "woodsmoke",   label: "Woodsmoke",   hex: "#2e2a2a" }
-];
+/* ---------- Appearance (mode × preset × sidebar × density) ----------
+ * The server renders the axes onto <html> from the nf_ui cookie (Theming/Appearance.cs),
+ * so the first paint is right without JS. The picker applies a change optimistically here
+ * and persists it with hx-post /preferences/appearance. data-mode is always the RESOLVED
+ * scheme (light|dark): the "system" choice lives in data-mode-pref and is resolved against
+ * prefers-color-scheme (and follows it live). */
+const APPEARANCE_DEFAULTS = Object.freeze({ mode: "light", preset: "teal", sidebar: "expanded", density: "comfortable" });
+const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
-const DEFAULT_STATE = Object.freeze({
-    theme: "boulder",     // palette id
-    mode: "light",        // "light" | "dark"
-    sidebar: "auto",      // "auto" | "dark" | "light"
-    sidebarCollapsed: false,
-    soundAlerts: true     // audible cue on danger alerts (WAN/VPN down) + recovery
+function resolvedMode(pref) {
+    return pref === "system" ? (darkQuery.matches ? "dark" : "light") : (pref === "dark" ? "dark" : "light");
+}
+
+function applyAppearance(axis, value) {
+    const html = document.documentElement;
+    switch (axis) {
+        case "mode":
+            html.dataset.modePref = value;
+            html.dataset.mode = resolvedMode(value);
+            break;
+        case "preset": html.dataset.preset = value; break;
+        case "density": html.dataset.density = value; break;
+        case "sidebar": html.dataset.sidebarCollapsed = value === "collapsed" ? "true" : "false"; break;
+    }
+    document.body?.dispatchEvent(new CustomEvent("appearance-changed", { bubbles: true, detail: { axis, value } }));
+}
+
+darkQuery.addEventListener("change", () => {
+    if (document.documentElement.dataset.modePref === "system") applyAppearance("mode", "system");
 });
 
-/* ---------- localStorage helpers (async to honor rule #2) ---------- */
-async function loadState() {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { ...DEFAULT_STATE };
-        const parsed = JSON.parse(raw);
-        return { ...DEFAULT_STATE, ...parsed };
-    } catch {
-        return { ...DEFAULT_STATE };
-    }
+async function loadLocalPrefs() {
+    try { return { soundAlerts: true, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") }; }
+    catch { return { soundAlerts: true }; }
 }
 
-async function saveState(state) {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-        /* quota or private mode — ignore silently */
-    }
+async function saveLocalPrefs(prefs) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch { /* private mode */ }
 }
 
-function applyDom(state) {
-    const html = document.documentElement;
-    html.dataset.theme = state.theme;
-    html.dataset.mode = state.mode;
-    if (state.sidebar === "auto") {
-        delete html.dataset.sidebar;
-    } else {
-        html.dataset.sidebar = state.sidebar;
-    }
-    html.dataset.sidebarCollapsed = state.sidebarCollapsed ? "true" : "false";
+/* Theme tokens are OKLCH, and getComputedStyle reports them as oklch(...)/color(...),
+ * which Chart.js (and the xterm theme) cannot parse. Paint the colour on a 1×1
+ * canvas and read the pixel back: always rgb()/rgba(). */
+const rgbProbe = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+function toRgb(color) {
+    if (!color || color.startsWith("rgb")) return color;
+    if (!rgbProbe) return color;
+    rgbProbe.clearRect(0, 0, 1, 1);
+    rgbProbe.fillStyle = "#000";
+    rgbProbe.fillStyle = color;
+    rgbProbe.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = rgbProbe.getImageData(0, 0, 1, 1).data;
+    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
 }
+window.NetFw = window.NetFw || {};
+window.NetFw.toRgb = toRgb;
 
 /* ---------- Pre-paint hydration (called from <head>, before Alpine boots) ---------- */
 window.NetFw = window.NetFw || {};
 window.NetFw.hydrateBeforePaint = async function () {
-    const state = await loadState();
-    applyDom(state);
+    const pref = document.documentElement.dataset.modePref;
+    if (pref === "system") document.documentElement.dataset.mode = resolvedMode(pref);
 };
 
 /**
@@ -461,7 +468,7 @@ window.NetFw.charts = {
         document.body.appendChild(probe);
         const c = getComputedStyle(probe).color;
         probe.remove();
-        return c;
+        return toRgb(c);
     },
 
     _withAlpha(rgbString, alpha) {
@@ -1071,49 +1078,6 @@ document.addEventListener("alpine:init", () => {
         },
         stop() { this._abort?.abort(); },
         destroy() { this._abort?.abort(); }
-    }));
-
-    /* ---------- wolSelection ---------- Wake-on-LAN device list: a checkbox per
-     * row and ONE button that wakes the ticked devices, or all of them when
-     * nothing is ticked. The scope travels explicitly (hx-vals) so the server can
-     * refuse "selected" with no ids instead of widening it to everything.
-     *   wrapper: x-data="wolSelection(<device count>)"
-     *   rows:    <input type="checkbox" name="ids" value="<id>" x-model="selected" data-wol-select>
-     *   button:  hx-post=… hx-trigger="confirmed-wake" hx-include="[data-wol-select]"
-     *            :hx-vals="JSON.stringify({ scope })" @click.prevent="confirmWake($el)"
-     * "Select all" only touches rows the table filter left visible. */
-    Alpine.data("wolSelection", (total) => ({
-        total,
-        selected: [],
-        get count() { return this.selected.length; },
-        get scope() { return this.count > 0 ? "selected" : "all"; },
-        get label() { return this.count > 0 ? `Wake selected (${this.count})` : `Wake all (${this.total})`; },
-        _visibleIds() {
-            return Array.from(this.$root.querySelectorAll("input[data-wol-select]"))
-                .filter((cb) => !cb.closest("tr")?.classList.contains("hidden"))
-                .map((cb) => cb.value);
-        },
-        allVisibleSelected() {
-            const ids = this._visibleIds();
-            return ids.length > 0 && ids.every((id) => this.selected.includes(id));
-        },
-        toggleVisible(on) {
-            const ids = this._visibleIds();
-            this.selected = on
-                ? Array.from(new Set([...this.selected, ...ids]))
-                : this.selected.filter((id) => !ids.includes(id));
-        },
-        async confirmWake(el) {
-            const n = this.count > 0 ? this.count : this.total;
-            const plural = n === 1 ? "" : "s";
-            const ok = await Alpine.store("confirm").ask({
-                title: this.count > 0 ? `Wake ${n} selected device${plural}?` : `Wake all ${n} device${plural}?`,
-                message: "A magic packet goes out on each device's own interface. Machines that are already on ignore it.",
-                confirmLabel: "Send wake",
-                level: "default"
-            });
-            if (ok) htmx.trigger(el, "confirmed-wake");
-        }
     }));
 
     /* ---------- copyButton ---------- Copies the textContent of a selector.
@@ -2167,8 +2131,9 @@ document.addEventListener("alpine:init", () => {
         _theme() {
             // Read the live semantic tokens so the terminal matches the active
             // theme/mode (rule #9 — no hardcoded hex).
-            const css = getComputedStyle(document.documentElement);
-            const v = (name, fallback) => (css.getPropertyValue(name).trim() || fallback);
+            // Resolved through a probe element + NetFw.toRgb: the tokens are OKLCH
+            // with calc()/var() inside, which xterm cannot parse as raw strings.
+            const v = (name, fallback) => window.NetFw.charts?.readColor?.(name.replace(/^--/, "")) || fallback;
             return {
                 background: v("--surface-bg", "#0b0f14"),
                 foreground: v("--surface-fg", "#e6e6e6"),
@@ -2209,64 +2174,55 @@ document.addEventListener("alpine:init", () => {
     }));
 
     Alpine.store("ui", {
-        ...DEFAULT_STATE,
-        palettes: PALETTES,
+        mode: APPEARANCE_DEFAULTS.mode,
+        preset: APPEARANCE_DEFAULTS.preset,
+        density: APPEARANCE_DEFAULTS.density,
+        sidebarCollapsed: false,
+        soundAlerts: true,
 
         async init() {
-            const persisted = await loadState();
-            Object.assign(this, persisted);
-            applyDom(this);
+            const html = document.documentElement;
+            this.mode = html.dataset.modePref || APPEARANCE_DEFAULTS.mode;
+            this.preset = html.dataset.preset || APPEARANCE_DEFAULTS.preset;
+            this.density = html.dataset.density || APPEARANCE_DEFAULTS.density;
+            this.sidebarCollapsed = html.dataset.sidebarCollapsed === "true";
+            this.soundAlerts = (await loadLocalPrefs()).soundAlerts !== false;
         },
 
-        async setTheme(theme) {
-            this.theme = theme;
-            applyDom(this);
-            await saveState(this.snapshot());
+        /** Optimistic apply of one axis; the caller's hx-post persists it. */
+        set(axis, value) {
+            if (axis === "mode") this.mode = value;
+            else if (axis === "preset") this.preset = value;
+            else if (axis === "density") this.density = value;
+            else if (axis === "sidebar") this.sidebarCollapsed = value === "collapsed";
+            applyAppearance(axis, value);
         },
 
-        async setMode(mode) {
-            this.mode = mode;
-            applyDom(this);
-            await saveState(this.snapshot());
+        /** Back to the site defaults (Settings → Appearance); the server answers with the cookie. */
+        async reset(defaults) {
+            for (const [axis, value] of Object.entries(defaults || APPEARANCE_DEFAULTS)) this.set(axis, value);
         },
 
-        async setSidebarVariant(variant) {
-            this.sidebar = variant;
-            applyDom(this);
-            await saveState(this.snapshot());
-        },
-
+        /** Header / rail collapse button: apply now, persist through htmx (antiforgery + toast on error). */
         async toggleSidebar() {
-            this.sidebarCollapsed = !this.sidebarCollapsed;
-            applyDom(this);
-            await saveState(this.snapshot());
+            const value = this.sidebarCollapsed ? "expanded" : "collapsed";
+            this.set("sidebar", value);
+            await window.htmx?.ajax("POST", "/preferences/appearance", { values: { sidebar: value }, swap: "none", source: document.body });
         },
 
         async toggleSoundAlerts() {
             this.soundAlerts = !this.soundAlerts;
-            await saveState(this.snapshot());
+            await saveLocalPrefs({ soundAlerts: this.soundAlerts });
             // Confirm the new state audibly when turning it ON (and unlock audio
             // via this user gesture); silent when turning OFF.
             if (this.soundAlerts) { NetFw.alarm.unlock(); NetFw.alarm.play("test"); }
-        },
-
-        snapshot() {
-            return {
-                theme: this.theme,
-                mode: this.mode,
-                sidebar: this.sidebar,
-                sidebarCollapsed: this.sidebarCollapsed,
-                soundAlerts: this.soundAlerts
-            };
         }
     });
 
-    // Re-tint all live charts whenever theme, mode or sidebar variant changes.
+    // Re-tint all live charts whenever the scheme or accent changes.
     Alpine.effect(() => {
         const ui = Alpine.store("ui");
-        // Touch the reactive props so the effect tracks them:
-        void ui.theme; void ui.mode; void ui.sidebar;
-        // Defer one frame so the CSS variables have been recomputed.
+        void ui.mode; void ui.preset;
         requestAnimationFrame(() => window.NetFw.charts.retintAll());
     });
 
@@ -2705,3 +2661,201 @@ document.addEventListener("htmx:afterSwap", (event) => {
         window.NetFw._applyTableFilter(target.id);
     }
 });
+
+/* ---------- NetOpenGrid frames (NetFw.grids) ----------
+ * Data grids are NetOpenGrid documents in same-origin iframes (Views/Shared/_Grid.cshtml).
+ * The frame keeps the grid's own htmx 4 + Alpine away from this page's htmx 2 + Alpine;
+ * this module is the only bridge between the two documents:
+ *   - theme:   data-preset / data-mode / data-density / .dark mirrored into the frame (site.css maps the
+ *              grid's palette onto the semantic tokens under html[data-nf-grid]);
+ *   - size:    the frame follows its content, so the PAGE scrolls, never the frame;
+ *   - actions: clicks on [data-nf-action] buttons (rendered by Grids/GridCell.cs) are
+ *              replayed here, where the drawer, confirm dialog, elevation modal and toasts
+ *              live. POSTs go through a hidden htmx proxy element, so antiforgery,
+ *              RequireElevated replay and HX-Trigger toasts behave like any other button;
+ *   - refresh: HX-Trigger events listed in data-refresh-on (and an optional poll) send
+ *              netgrid:refresh to the grid, which keeps selection and open details. */
+(function () {
+    const wired = new WeakSet();     // frames
+    const docs = new WeakSet();      // frame documents already hooked (one per load)
+    const refreshEvents = new Set(); // body events we already listen to
+
+    const mode = () => (document.documentElement.dataset.mode === "dark" ? "dark" : "light");
+
+    // The grid's own anti-flash script reads this key before first paint.
+    const rememberMode = () => {
+        try { localStorage.setItem("netgrid:theme", mode()); } catch { /* private mode */ }
+    };
+
+    function syncTheme(frame) {
+        const root = frame.contentDocument?.documentElement;
+        if (!root) return;
+        const host = document.documentElement;
+        root.setAttribute("data-nf-grid", "");
+        if (host.dataset.preset) root.dataset.preset = host.dataset.preset;
+        if (host.dataset.density) root.dataset.density = host.dataset.density;
+        root.dataset.mode = mode();
+        root.classList.toggle("dark", mode() === "dark");
+    }
+
+    function fit(frame) {
+        const root = frame.contentDocument?.documentElement;
+        if (!root) return;
+        // Measure <html>, not <body>: the grid's last margin collapses out of <body>.
+        const h = Math.ceil(root.getBoundingClientRect().height);
+        if (h > 0) frame.style.height = `${h}px`;
+    }
+
+    function proxyFor(frame) {
+        let proxy = frame.parentElement.querySelector(":scope > .nf-grid-proxy");
+        if (!proxy) {
+            proxy = document.createElement("button");
+            proxy.type = "button";
+            proxy.className = "nf-grid-proxy";
+            proxy.hidden = true;
+            proxy.setAttribute("hx-trigger", "nf-run");
+            proxy.setAttribute("hx-swap", "none");
+            frame.parentElement.appendChild(proxy);
+        }
+        return proxy;
+    }
+
+    async function runAction(frame, btn) {
+        const d = btn.dataset;
+        if (!d.url || !window.htmx) return;
+
+        if (d.nfAction === "drawer") {
+            window.Alpine?.store("drawer")?.openRaw(d.title || "");
+            await window.htmx.ajax("GET", d.url, { target: "#drawer-body", swap: "innerHTML" });
+            return;
+        }
+
+        if (d.confirmMessage) {
+            const ok = await window.Alpine?.store("confirm")?.ask({
+                title: d.confirmTitle || "Are you sure?",
+                message: d.confirmMessage,
+                confirmLabel: d.confirmLabel || "Confirm",
+                level: d.confirmLevel || "danger"
+            });
+            if (!ok) return;
+        }
+
+        const proxy = proxyFor(frame);
+        proxy.setAttribute("hx-post", d.url);
+        if (d.vals) proxy.setAttribute("hx-vals", d.vals); else proxy.removeAttribute("hx-vals");
+        window.htmx.process(proxy);
+        window.htmx.trigger(proxy, "nf-run");
+    }
+
+    function refresh(frame) {
+        frame.contentWindow?.postMessage({ type: "netgrid:refresh", grid: frame.dataset.gridId }, location.origin);
+    }
+
+    function hookDocument(frame) {
+        const doc = frame.contentDocument;
+        if (!doc?.documentElement || doc.URL === "about:blank" || docs.has(doc)) return;
+        docs.add(doc);
+
+        syncTheme(frame);
+        new ResizeObserver(() => fit(frame)).observe(doc.documentElement);
+        fit(frame);
+        frame.closest(".nf-grid-host")?.classList.add("is-ready");
+
+        // Capture phase: our buttons win over the grid's row click (detail toggle).
+        doc.addEventListener("click", async (event) => {
+            const btn = event.target?.closest?.("[data-nf-action]");
+            if (!btn) return;
+            event.preventDefault();
+            event.stopPropagation();
+            await runAction(frame, btn);
+        }, true);
+    }
+
+    function wire(frame) {
+        if (wired.has(frame)) return;
+        wired.add(frame);
+
+        frame.addEventListener("load", () => hookDocument(frame));
+        if (frame.contentDocument?.readyState === "complete") hookDocument(frame);
+
+        for (const name of (frame.dataset.refreshOn || "").split(" ").filter(Boolean)) {
+            if (refreshEvents.has(name)) continue;
+            refreshEvents.add(name);
+            document.body.addEventListener(name, () => {
+                for (const f of document.querySelectorAll(`iframe[data-netgrid][data-refresh-on~="${name}"]`)) refresh(f);
+            });
+        }
+
+        const every = parseInt(frame.dataset.refreshEvery || "0", 10);
+        if (every > 0) {
+            const timer = setInterval(() => {
+                if (!frame.isConnected) { clearInterval(timer); return; }
+                if (document.visibilityState === "visible") refresh(frame);
+            }, every * 1000);
+        }
+    }
+
+    function scan(root) {
+        for (const frame of (root || document).querySelectorAll("iframe[data-netgrid]")) wire(frame);
+    }
+
+    const post = (frame, type, extra) =>
+        frame.contentWindow?.postMessage({ type, grid: frame.dataset.gridId, ...extra }, location.origin);
+
+    // Bulk actions: the grid only reports the selected keys; the host page decides.
+    window.addEventListener("message", async (event) => {
+        if (event.origin !== location.origin || event.data?.type !== "netgrid:bulk-action") return;
+        const { grid, action, keys, count } = event.data;
+        const frame = [...document.querySelectorAll("iframe[data-netgrid]")].find(f => f.dataset.gridId === grid);
+        if (!frame || !Array.isArray(keys) || keys.length === 0) return;
+
+        let config;
+        try { config = JSON.parse(frame.dataset.bulkActions || "{}")[action]; } catch { config = null; }
+        if (!config?.url || !window.htmx) return;
+
+        const fill = (text) => (text || "").replaceAll("{count}", String(count)).replaceAll("{s}", count === 1 ? "" : "s");
+        if (config.confirmMessage) {
+            const ok = await window.Alpine?.store("confirm")?.ask({
+                title: fill(config.confirmTitle) || "Are you sure?",
+                message: fill(config.confirmMessage),
+                confirmLabel: config.confirmLabel || "Confirm",
+                level: config.confirmLevel || "default"
+            });
+            if (!ok) return;
+        }
+
+        const proxy = proxyFor(frame);
+        proxy.setAttribute("hx-post", config.url);
+        proxy.setAttribute("hx-vals", JSON.stringify({ ...(config.values || {}), [config.keysField || "ids"]: keys }));
+        window.htmx.process(proxy);
+
+        post(frame, "netgrid:busy", { busy: true });
+        try {
+            await new Promise((resolve) => {
+                proxy.addEventListener("htmx:afterRequest", resolve, { once: true });
+                window.htmx.trigger(proxy, "nf-run");
+            });
+        } finally {
+            post(frame, "netgrid:busy", { busy: false });
+            post(frame, "netgrid:clear-selection");
+            refresh(frame);
+        }
+    });
+
+    rememberMode();
+    new MutationObserver(() => {
+        rememberMode();
+        for (const frame of document.querySelectorAll("iframe[data-netgrid]")) syncTheme(frame);
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-preset", "data-mode", "data-density"] });
+
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => scan());
+    else scan();
+    document.addEventListener("htmx:afterSwap", (event) => scan(event.detail?.target));
+
+    window.NetFw = window.NetFw || {};
+    window.NetFw.grids = {
+        refresh(gridId) {
+            for (const f of document.querySelectorAll(`iframe[data-netgrid][data-grid-id="${CSS.escape(gridId)}"]`)) refresh(f);
+        }
+    };
+})();

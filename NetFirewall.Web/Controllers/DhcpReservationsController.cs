@@ -27,14 +27,6 @@ public sealed class DhcpReservationsController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table([FromQuery] string? q, CancellationToken ct)
-    {
-        var rows = await _admin.GetReservationsAsync(filter: q, ct: ct);
-        ViewBag.Query = q;
-        return PartialView("_ReservationsTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {

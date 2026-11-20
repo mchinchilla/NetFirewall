@@ -241,7 +241,17 @@ public class SetupWizardService : ISetupWizardService
     /// IVpnRoutingService) owns wg*; Docker owns docker*/br-/veth*; tun/tap are
     /// app-managed point-to-point devices.
     /// </summary>
-    private static bool IsServiceManagedInterface(string name) =>
+    // Fallback devices the kernel creates on its own when a tunnel module loads (ip_gre,
+    // ip6_tunnel, sit, ip_vti, …). Always DOWN, never configurable — offering them as LAN with
+    // a static IP (found on a Debian 13 install) would write config for devices that aren't NICs.
+    // Exact names: a user-created gre1/sit1 is a real tunnel and stays listed.
+    private static readonly HashSet<string> KernelFallbackTunnels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "gre0", "gretap0", "erspan0", "ip_vti0", "ip6_vti0", "sit0", "ip6tnl0", "ip6gre0", "ip6gretap0", "ip6erspan0",
+    };
+
+    internal static bool IsServiceManagedInterface(string name) =>
+        KernelFallbackTunnels.Contains(name) ||
         name.StartsWith("wg",     StringComparison.OrdinalIgnoreCase) ||   // WireGuard (wg0, wg1, …)
         name.StartsWith("tun",    StringComparison.OrdinalIgnoreCase) ||   // OpenVPN / generic tunnels
         name.StartsWith("tap",    StringComparison.OrdinalIgnoreCase) ||   // L2 tap devices

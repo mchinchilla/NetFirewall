@@ -1,0 +1,41 @@
+@model NetFirewall.Web.Models.Dhcp.DdnsDetailViewModel
+@*
+    Expanded row of the DDNS grid (WithRowDetail). Rendered inside the grid's frame, so it may
+    only use classes compiled into site.css. The TSIG secret is never rendered — only "set".
+*@
+@{
+    var d = Model.Config;
+    string Or(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Zones</h3>
+        <dl class="ng-detail-fields">
+            <dt>Scope</dt><dd>@Model.Scope</dd>
+            <dt>Forward</dt><dd>@if (d.EnableForward) { <span class="badge badge-success">On</span> } else { <span class="badge badge-muted">Off</span> } @Or(d.ForwardZone)</dd>
+            <dt>Reverse</dt><dd>@if (d.EnableReverse) { <span class="badge badge-success">On</span> } else { <span class="badge badge-muted">Off</span> } @Or(d.ReverseZone)</dd>
+            <dt>TTL</dt><dd>@d.Ttl s</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Server &amp; TSIG</h3>
+        <dl class="ng-detail-fields">
+            <dt>DNS server</dt><dd>@(d.DnsServer is null ? "—" : $"{d.DnsServer}:{d.DnsPort}")</dd>
+            <dt>Key name</dt><dd>@Or(d.TsigKeyName)</dd>
+            <dt>Algorithm</dt><dd>@d.TsigAlgorithm</dd>
+            <dt>Secret</dt><dd>@if (string.IsNullOrEmpty(d.TsigKeySecret)) { <span class="text-surface-fg-muted">Not set</span> } else { <span class="badge badge-accent">Set</span> }</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Update policy</h3>
+        <dl class="ng-detail-fields">
+            <dt>Update style</dt><dd>@d.UpdateStyle</dd>
+            <dt>Conflict resolution</dt><dd>@d.ConflictResolution</dd>
+            <dt>Client updates</dt><dd>@(d.AllowClientUpdates ? "Allowed" : "Not allowed")</dd>
+            <dt>Override client</dt><dd>@(d.OverrideClientUpdate ? "Yes" : "No")</dd>
+            <dt>Updated</dt><dd>@d.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)</dd>
+        </dl>
+    </section>
+</div>

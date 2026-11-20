@@ -25,13 +25,6 @@ public sealed class FwSchedulesController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
-    {
-        var rows = await _schedules.GetAllAsync(ct);
-        return PartialView("_SchedulesTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {

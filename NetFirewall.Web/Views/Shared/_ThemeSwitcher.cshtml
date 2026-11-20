@@ -1,75 +1,127 @@
+@using NetFirewall.Web.Theming
+@inject IAppearanceProvider AppearanceProvider
 @*
-    Theme switcher — palette grid in 2 columns, with mode (light/dark/mixed) row.
-    Backed by Alpine.store('ui'). Each tile is a live miniature of the theme.
+    Theme picker — Mode (light / dark / system), Accent (8 presets) and Layout (sidebar, density).
+    Each option applies optimistically through $store.ui.set(axis, value) and persists with
+    hx-post /preferences/appearance (nf_ui cookie, validated server-side). Thumbnails are drawn
+    with the live tokens (_ThemeThumb), so what you see is what you get.
 *@
-<div class="relative" x-data="{ open: false }">
+@{
+    var defaults = await AppearanceProvider.GetDefaultsAsync();
+    var defaultsJson = System.Text.Json.JsonSerializer.Serialize(new { mode = defaults.Mode, preset = defaults.Preset, sidebar = defaults.Sidebar, density = defaults.Density });
+    var light = new ThemeThumbModel(Scheme: "scheme-light");
+    var dark = new ThemeThumbModel(Scheme: "scheme-dark");
+    (string Value, string Label)[] modes = [("light", "Light"), ("dark", "Dark"), ("system", "System")];
+}
+<div class="relative" x-data="{ open: false }" @@keydown.escape.window="open = false">
     <button type="button"
             class="h-9 w-9 inline-flex items-center justify-center rounded-md btn-ghost"
-            @@click="open = !open"
-            aria-label="Change theme">
+            @@click="open = !open" :aria-expanded="open" aria-haspopup="dialog"
+            aria-label="Appearance">
         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.098 19.902a3.75 3.75 0 0 0 5.304 0l6.401-6.402M6.75 21A3.75 3.75 0 0 1 3 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 0 0 3.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008Z" />
         </svg>
     </button>
 
     <div x-cloak x-show="open" @@click.outside="open = false"
          x-transition.opacity.duration.150ms
-         class="absolute right-0 mt-2 w-[420px] origin-top-right rounded-xl border shadow-lg overflow-hidden bg-surface-elevated border-surface-border">
+         role="dialog" aria-label="Appearance"
+         class="absolute right-0 mt-2 w-[22rem] origin-top-right rounded-xl border shadow-lg p-4 space-y-4 z-50 bg-surface-elevated border-surface-border">
 
-        @* Mode row *@
-        <div class="px-4 pt-4">
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Mode</p>
-            <div class="mt-2 grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-surface-muted">
-                <template x-for="m in ['light', 'dark']" :key="m">
-                    <button type="button"
-                            class="px-3 py-1.5 rounded-md text-xs font-medium capitalize transition"
-                            :class="$store.ui.mode === m ? 'shadow-sm' : 'opacity-70 hover:opacity-100'"
-                            :style="$store.ui.mode === m
-                                ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
-                                : 'color: var(--surface-fg-muted);'"
-                            @@click="$store.ui.setMode(m)"
-                            x-text="m"></button>
-                </template>
-                <button type="button"
-                        class="px-3 py-1.5 rounded-md text-xs font-medium transition"
-                        :class="$store.ui.sidebar === 'dark' ? 'shadow-sm' : 'opacity-70 hover:opacity-100'"
-                        :style="$store.ui.sidebar === 'dark'
-                            ? 'background-color: var(--surface-elevated); color: var(--surface-fg);'
-                            : 'color: var(--surface-fg-muted);'"
-                        @@click="$store.ui.setSidebarVariant($store.ui.sidebar === 'dark' ? 'auto' : 'dark')">
-                    Mixed
-                </button>
-            </div>
-        </div>
-
-        @* Palette grid *@
-        <div class="px-4 pt-4 pb-4">
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Palette</p>
-            <div class="mt-2 grid grid-cols-2 gap-2">
-                <template x-for="p in $store.ui.palettes" :key="p.id">
-                    <button type="button"
-                            class="group relative rounded-lg border p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md"
-                            :class="$store.ui.theme === p.id ? 'ring-2' : ''"
-                            :style="$store.ui.theme === p.id
-                                ? `border-color: ${p.hex}; --tw-ring-color: ${p.hex};`
-                                : 'border-color: var(--surface-border);'"
-                            @@click="$store.ui.setTheme(p.id)">
-
-                        @* Mini preview: top header bar + sidebar + content using palette swatches *@
-                        <div class="flex h-12 overflow-hidden rounded-md border border-surface-border">
-                            <div class="w-3" :style="`background-color: var(--${p.id}-1500);`"></div>
-                            <div class="flex-1 flex flex-col">
-                                <div class="h-2.5" :style="`background-color: var(--${p.id}-200);`"></div>
-                                <div class="flex-1" :style="`background-color: var(--${p.id}-50);`"></div>
-                            </div>
-                        </div>
-                        <div class="mt-2 flex items-center justify-between">
-                            <span class="text-xs font-medium truncate" x-text="p.label"></span>
-                            <span class="h-3 w-3 rounded-full ring-1" :style="`background-color: ${p.hex}; --tw-ring-color: var(--surface-border);`"></span>
-                        </div>
+        <section>
+            <h3 class="mb-2 text-xs font-medium text-surface-fg-muted">Mode</h3>
+            <div role="radiogroup" aria-label="Mode" class="grid grid-cols-3 gap-2">
+                @foreach (var (value, label) in modes)
+                {
+                    <button type="button" role="radio" class="theme-option"
+                            :aria-checked="$store.ui.mode === '@value'"
+                            @@click="$store.ui.set('mode', '@value')"
+                            hx-post="/preferences/appearance" hx-vals='{"mode":"@value"}' hx-swap="none">
+                        <span class="block h-[4.5rem] w-full">
+                            @if (value == "system")
+                            {
+                                <span class="relative block h-full w-full">
+                                    @await Html.PartialAsync("_ThemeThumb", light)
+                                    <span class="clip-diagonal absolute inset-0 block">@await Html.PartialAsync("_ThemeThumb", dark)</span>
+                                </span>
+                            }
+                            else
+                            {
+                                @await Html.PartialAsync("_ThemeThumb", value == "dark" ? dark : light)
+                            }
+                        </span>
+                        <span class="mt-1.5 flex items-center justify-center gap-1 text-xs">
+                            @if (value == "light")
+                            {
+                                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/></svg>
+                            }
+                            else if (value == "dark")
+                            {
+                                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg>
+                            }
+                            else
+                            {
+                                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/></svg>
+                            }
+                            @label
+                        </span>
                     </button>
-                </template>
+                }
             </div>
-        </div>
+        </section>
+
+        <section>
+            <h3 class="mb-2 text-xs font-medium text-surface-fg-muted">Accent color</h3>
+            <div role="radiogroup" aria-label="Accent color" class="grid grid-cols-4 gap-2">
+                @foreach (var preset in Appearance.Presets)
+                {
+                    <button type="button" role="radio" class="theme-option"
+                            :aria-checked="$store.ui.preset === '@preset'"
+                            @@click="$store.ui.set('preset', '@preset')"
+                            hx-post="/preferences/appearance" hx-vals='{"preset":"@preset"}' hx-swap="none">
+                        <span class="block h-[3.25rem] w-full">@await Html.PartialAsync("_ThemeThumb", new ThemeThumbModel(Preset: preset))</span>
+                        <span class="mt-1 block truncate text-center text-[11px] capitalize">@preset</span>
+                    </button>
+                }
+            </div>
+        </section>
+
+        <section>
+            <h3 class="mb-2 text-xs font-medium text-surface-fg-muted">Layout</h3>
+            <div class="grid grid-cols-2 gap-2">
+                <div role="radiogroup" aria-label="Sidebar" class="segmented">
+                    <button type="button" role="radio" class="segmented-option" title="Expanded sidebar"
+                            :aria-checked="!$store.ui.sidebarCollapsed"
+                            @@click="$store.ui.set('sidebar', 'expanded')"
+                            hx-post="/preferences/appearance" hx-vals='{"sidebar":"expanded"}' hx-swap="none">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M13 10l2 2-2 2"/></svg>
+                    </button>
+                    <button type="button" role="radio" class="segmented-option" title="Collapsed sidebar"
+                            :aria-checked="$store.ui.sidebarCollapsed"
+                            @@click="$store.ui.set('sidebar', 'collapsed')"
+                            hx-post="/preferences/appearance" hx-vals='{"sidebar":"collapsed"}' hx-swap="none">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M15 10l-2 2 2 2"/></svg>
+                    </button>
+                </div>
+                <div role="radiogroup" aria-label="Density" class="segmented flex-col">
+                    <button type="button" role="radio" class="segmented-option w-full"
+                            :aria-checked="$store.ui.density === 'comfortable'"
+                            @@click="$store.ui.set('density', 'comfortable')"
+                            hx-post="/preferences/appearance" hx-vals='{"density":"comfortable"}' hx-swap="none">Comfortable</button>
+                    <button type="button" role="radio" class="segmented-option w-full"
+                            :aria-checked="$store.ui.density === 'compact'"
+                            @@click="$store.ui.set('density', 'compact')"
+                            hx-post="/preferences/appearance" hx-vals='{"density":"compact"}' hx-swap="none">Compact</button>
+                </div>
+            </div>
+        </section>
+
+        <button type="button" class="btn btn-ghost w-full text-sm"
+                data-defaults="@defaultsJson"
+                @@click="$store.ui.reset(JSON.parse($el.dataset.defaults))"
+                hx-post="/preferences/appearance" hx-vals='{"reset":"true"}' hx-swap="none">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+            Reset
+        </button>
     </div>
 </div>

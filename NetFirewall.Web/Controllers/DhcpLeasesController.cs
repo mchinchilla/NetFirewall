@@ -4,6 +4,7 @@ using NetFirewall.Models;
 using NetFirewall.Models.Auth;
 using NetFirewall.Services.Dhcp;
 using NetFirewall.Web.Helpers;
+using NetFirewall.Web.Services;
 
 namespace NetFirewall.Web.Controllers;
 
@@ -17,26 +18,27 @@ namespace NetFirewall.Web.Controllers;
 public sealed class DhcpLeasesController : Controller
 {
     private readonly IDhcpAdminService _admin;
+    private readonly IDhcpLeaseDetailService _detail;
     private readonly ILogger<DhcpLeasesController> _logger;
 
-    public DhcpLeasesController(IDhcpAdminService admin, ILogger<DhcpLeasesController> logger)
+    public DhcpLeasesController(IDhcpAdminService admin, IDhcpLeaseDetailService detail, ILogger<DhcpLeasesController> logger)
     {
         _admin = admin;
+        _detail = detail;
         _logger = logger;
     }
 
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table([FromQuery] bool includeExpired = false, [FromQuery] string? q = null, CancellationToken ct = default)
+    /// <summary>Expanded row of the Leases grid (fetched once per row, on first expand).</summary>
+    [HttpGet("detail/{mac}")]
+    public async Task<IActionResult> Detail(string mac, CancellationToken ct)
     {
-        var leases = includeExpired
-            ? await _admin.GetAllLeasesAsync(includeExpired: true, filter: q, ct: ct)
-            : await _admin.GetActiveLeasesAsync(filter: q, ct: ct);
-        ViewBag.IncludeExpired = includeExpired;
-        ViewBag.Query = q;
-        return PartialView("_LeasesTable", leases);
+        var model = await _detail.GetAsync(mac, ct);
+        return model is null
+            ? Content("<p class=\"text-sm text-surface-fg-muted\">This lease is gone (released or purged). Refresh the grid.</p>", "text/html")
+            : PartialView("_LeaseDetail", model);
     }
 
     [HttpPost("release/{id:guid}"), ValidateAntiForgeryToken]

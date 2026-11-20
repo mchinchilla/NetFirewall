@@ -2,11 +2,11 @@
     ViewData["Title"] = "Firewall — QoS";
     Layout = "_Layout";
 }
-<div x-data="{ hideDisabled: false }">
+<div>
     <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
          style="animation: var(--animate-slide-up);">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <p class="page-kicker">Firewall</p>
             <h1 class="text-2xl font-semibold tracking-tight">QoS configurations</h1>
             <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">One HTB shaper per interface — drill in to define classes that split the bandwidth budget.</p>
         </div>
@@ -21,22 +21,13 @@
         </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2 mb-4"
-         style="animation: var(--animate-slide-up); animation-delay: 40ms;">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "qos-configs-table", Placeholder = "Filter by interface, bandwidth…", ClientSide = true })
-        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-            <input type="checkbox" class="rounded" x-model="hideDisabled" />
-            Hide disabled
-        </label>
-    </div>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-        <div id="qos-configs-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Firewall/Qos/table"
-             hx-trigger="load, refreshQosConfigs from:body"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-        </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Firewall.FwQosConfigsGrid.Id,
+            Title = "QoS configurations",
+            DefaultQuery = NetFirewall.Web.Grids.Firewall.FwQosConfigsGrid.DefaultQuery,
+            RefreshOn = ["refreshQosConfigs"]
+        })
     </section>
 </div>

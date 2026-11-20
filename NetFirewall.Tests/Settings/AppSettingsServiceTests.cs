@@ -20,7 +20,7 @@ public sealed class AppSettingsServiceTests : IAsyncLifetime
 
     // Pick stable real keys from the descriptor catalog.
     private const string IntKey = "dhcp.default_lease_seconds";   // Int, default "86400"
-    private const string EnumKey = "appearance.default_theme";    // Enum, default "boulder"
+    private const string EnumKey = "appearance.default_theme";    // Enum, default "teal"
     private const string StringKey = "vpn.public_endpoint";       // String, default ""
 
     public AppSettingsServiceTests(PostgresFixture pg) => _pg = pg;
@@ -59,7 +59,7 @@ public sealed class AppSettingsServiceTests : IAsyncLifetime
     [Fact]
     public async Task GetStringAsync_KeyUnsetInDb_FallsBackToDescriptorDefault()
     {
-        Assert.Equal("boulder", await _svc.GetStringAsync(EnumKey));
+        Assert.Equal("teal", await _svc.GetStringAsync(EnumKey));
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public sealed class AppSettingsServiceTests : IAsyncLifetime
         // We don't hardcode them here — we look them up via the descriptor.
         var allowed = AppSettingDescriptors.Find(EnumKey)!.AllowedValues!;
         Assert.True(allowed.Length > 1);
-        var newVal = allowed.First(v => v != "boulder"); // pick a non-default option
+        var newVal = allowed.First(v => v != "teal"); // pick a non-default option
 
         await _svc.SetAsync(EnumKey, newVal, updatedBy: null);
 
@@ -173,6 +173,6 @@ public sealed class AppSettingsServiceTests : IAsyncLifetime
         var freshSvc = new AppSettingsService(_pg.DataSource, NullLogger<AppSettingsService>.Instance);
         var v = await freshSvc.GetStringAsync(EnumKey);
 
-        Assert.Equal("boulder", v); // descriptor default still served
+        Assert.Equal("teal", v); // descriptor default still served
     }
 }

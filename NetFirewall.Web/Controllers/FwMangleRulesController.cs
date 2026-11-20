@@ -25,16 +25,6 @@ public sealed class FwMangleRulesController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table([FromQuery] string? chain, CancellationToken ct)
-    {
-        var rows = await _firewall.GetMangleRulesAsync(chain, ct);
-        var marks = await _firewall.GetTrafficMarksAsync(ct);
-        ViewBag.MarkNames = marks.ToDictionary(m => m.Id, m => $"{m.Name} (0x{m.MarkValue:X})");
-        ViewBag.ChainFilter = chain;
-        return PartialView("_MangleRulesTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {

@@ -1,10 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Sdk Name="Aspire.AppHost.Sdk" Version="9.0.0" />
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAspireHost>true</IsAspireHost>
@@ -13,14 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\NetFirewall.ApiService\NetFirewall.ApiService.csproj" />
-    <ProjectReference Include="..\NetFirewall.DhcpServer\NetFirewall.DhcpServer.csproj" />
-    <ProjectReference Include="..\NetFirewall.Web\NetFirewall.Web.csproj" />
-    <ProjectReference Include="..\NetFirewall.Daemon\NetFirewall.Daemon.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.6.4" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="17.0.0" />
+    <PackageReference Include="Aspire.Hosting.Dotnet" Version="17.0.0" />
   </ItemGroup>
 
 </Project>

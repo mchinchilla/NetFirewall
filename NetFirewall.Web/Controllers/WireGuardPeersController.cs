@@ -45,19 +45,14 @@ public sealed class WireGuardPeersController : Controller
         role.Equals("upstream", StringComparison.OrdinalIgnoreCase)
         || role.Equals("site", StringComparison.OrdinalIgnoreCase);
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(string family = "clients", CancellationToken ct = default)
+    /// <summary>Expanded row of the Tunnels / VPN clients grids: config summary + live handshake. No secrets.</summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> RowDetail(Guid id, [FromServices] NetFirewall.Web.Services.IWgPeerDetailService detail, CancellationToken ct)
     {
-        var tunnels = string.Equals(family, "tunnels", StringComparison.OrdinalIgnoreCase);
-        var server = await _wg.GetServerAsync(ct);
-        var peers = server is null
-            ? (IReadOnlyList<WgPeer>)Array.Empty<WgPeer>()
-            : await _wg.GetPeersAsync(server.Id, ct);
-        return PartialView("_PeersTable", new WgPeerTableViewModel
-        {
-            Family = tunnels ? "tunnels" : "clients",
-            Peers = peers.Where(p => IsTunnelRole(p.Role) == tunnels).ToArray(),
-        });
+        var model = await detail.GetAsync(id, ct);
+        return model is null
+            ? Content("<p class=\"text-sm text-surface-fg-muted\">This peer is gone (deleted). Refresh the grid.</p>", "text/html")
+            : PartialView("_PeerDetail", model);
     }
 
     [HttpGet("edit/{id:guid?}")]

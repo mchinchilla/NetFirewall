@@ -52,8 +52,11 @@ public sealed class Step1RowViewModel : IValidatableObject
     [IPv4(AllowEmpty = true)] public string? SubnetMask { get; set; }
     [IPv4(AllowEmpty = true)] public string? Gateway { get; set; }
 
-    [Range(576, 9216, ErrorMessage = "MTU must be between 576 and 9216.")]
+    [Range(MinMtu, MaxMtu, ErrorMessage = "MTU must be between 576 and 9216.")]
     public int? Mtu { get; set; }
+
+    public const int MinMtu = 576;
+    public const int MaxMtu = 9216;
 
     /// <summary>
     /// Operator-supplied MAC override (clone/spoof). Empty → keep the NIC's
@@ -310,7 +313,10 @@ public static class WizardMappers
                 IpAddress = s?.IpAddress ?? d.CurrentIpAddress,
                 SubnetMask = s?.SubnetMask ?? d.CurrentSubnetMask,
                 Gateway = s?.Gateway ?? d.CurrentGateway,
-                Mtu = s?.Mtu ?? d.Mtu,
+                // Prefill only an MTU the form accepts: some virtual NICs report 65535, and a
+                // detected value outside 576–9216 blocked Continue with an error on a field the
+                // operator never touched. Empty = keep the kernel's current MTU.
+                Mtu = s?.Mtu ?? (d.Mtu is int m && m >= Step1RowViewModel.MinMtu && m <= Step1RowViewModel.MaxMtu ? m : null),
                 SpoofMacAddress = s?.MacAddress   // round-trip a saved override
             };
         }).ToList();

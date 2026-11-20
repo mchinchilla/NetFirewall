@@ -1,10 +1,11 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
+// Aspire 17 project resources are path-based (AddDotnetProject); paths are
+// relative to this AppHost directory.
+builder.AddDotnetProject("apiservice", "../NetFirewall.ApiService/NetFirewall.ApiService.csproj");
 
-var apiService = builder.AddProject<Projects.NetFirewall_ApiService>("apiservice");
+builder.AddDotnetProject("netfirewall-web", "../NetFirewall.Web/NetFirewall.Web.csproj");
 
-builder.AddProject<Projects.NetFirewall_Web>("netfirewall-web");
-
-builder.AddProject<Projects.NetFirewall_DhcpServer>("netfirewall-dhcpserver");
+builder.AddDotnetProject("netfirewall-dhcpserver", "../NetFirewall.DhcpServer/NetFirewall.DhcpServer.csproj");
 
 builder.Build().Run();

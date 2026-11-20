@@ -2,15 +2,16 @@
     ViewData["Title"] = "Firewall — Mangle rules";
     Layout = "_Layout";
 }
-<div x-data="{ chain: '', hideDisabled: false }">
+<div>
     <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
          style="animation: var(--animate-slide-up);">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Firewall</p>
+            <p class="page-kicker">Firewall</p>
             <h1 class="text-2xl font-semibold tracking-tight">Mangle rules</h1>
             <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
                 Mark traffic for QoS classes and policy routing tables. Marks are managed under
                 <a href="/Firewall/TrafficMarks" class="hover:underline text-accent">Traffic marks</a>.
+                Rules are evaluated top to bottom by priority within each chain.
             </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -24,46 +25,13 @@
         </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2 mb-4"
-         style="animation: var(--animate-slide-up); animation-delay: 40ms;"
-         hx-target="#mangle-rules-table"
-         hx-swap="innerHTML"
-         hx-sync="#mangle-rules-table:replace">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "mangle-rules-table", Placeholder = "Filter by mark, address, port…", ClientSide = true })
-
-        <div class="seg" role="group" aria-label="Chain">
-            <button type="button" class="seg-btn" :class="chain === '' ? 'is-on' : ''"
-                    :aria-pressed="(chain === '').toString()"
-                    hx-get="/Firewall/MangleRules/table"
-                    :hx-vals="JSON.stringify({ chain: '' })"
-                    @@click="chain = ''">All</button>
-            <button type="button" class="seg-btn" :class="chain === 'prerouting' ? 'is-on' : ''"
-                    :aria-pressed="(chain === 'prerouting').toString()"
-                    hx-get="/Firewall/MangleRules/table"
-                    :hx-vals="JSON.stringify({ chain: 'prerouting' })"
-                    @@click="chain = 'prerouting'">Prerouting</button>
-            <button type="button" class="seg-btn" :class="chain === 'postrouting' ? 'is-on' : ''"
-                    :aria-pressed="(chain === 'postrouting').toString()"
-                    hx-get="/Firewall/MangleRules/table"
-                    :hx-vals="JSON.stringify({ chain: 'postrouting' })"
-                    @@click="chain = 'postrouting'">Postrouting</button>
-        </div>
-
-        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-            <input type="checkbox" class="rounded" x-model="hideDisabled" />
-            Hide disabled
-        </label>
-    </div>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-        <div id="mangle-rules-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Firewall/MangleRules/table"
-             hx-trigger="load, refreshMangleRules from:body"
-             hx-sync="this:replace"
-             hx-swap="innerHTML"
-             :hx-vals="JSON.stringify({ chain })">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-        </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Firewall.FwMangleRulesGrid.Id,
+            Title = "Mangle rules",
+            DefaultQuery = NetFirewall.Web.Grids.Firewall.FwMangleRulesGrid.DefaultQuery,
+            RefreshOn = ["refreshMangleRules"]
+        })
     </section>
 </div>

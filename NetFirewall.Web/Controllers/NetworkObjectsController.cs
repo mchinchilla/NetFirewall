@@ -29,13 +29,6 @@ public sealed class NetworkObjectsController : Controller
     [HttpGet("")]
     public IActionResult Index() => View();
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
-    {
-        var rows = await _objects.GetAllAsync(includeMembers: true, ct);
-        return PartialView("_ObjectsTable", rows);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {
@@ -90,6 +83,17 @@ public sealed class NetworkObjectsController : Controller
         var usages = await _objects.FindUsagesAsync(obj.Name, ct);
         ViewBag.ObjectName = obj.Name;
         return PartialView("_Usages", usages);
+    }
+
+    /// <summary>Expanded row of the Objects grid: full value / member list plus where-used.</summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> RowDetail(Guid id, CancellationToken ct)
+    {
+        var obj = await _objects.GetByIdAsync(id, includeMembers: true, ct);
+        if (obj is null)
+            return Content("<p class=\"text-sm text-surface-fg-muted\">This object is gone (deleted). Refresh the grid.</p>", "text/html");
+        var usages = await _objects.FindUsagesAsync(obj.Name, ct);
+        return PartialView("_ObjectDetail", new NetworkObjectDetailViewModel(obj, usages));
     }
 
     [HttpPost("save"), ValidateAntiForgeryToken]

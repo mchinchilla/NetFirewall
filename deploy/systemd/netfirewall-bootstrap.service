@@ -11,6 +11,9 @@ Before=netfirewall-web.service
 # Treat this as part of "the firewall is up" so if it fails on boot, dependent
 # units (the Web) get the dependency-failed signal too.
 PartOf=netfirewall-daemon.service
+# Start-rate limits are [Unit] settings; in [Service] systemd ignores them with a warning.
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=oneshot
@@ -25,8 +28,6 @@ ExecStart=@PREFIX@/current/bin/netfirewall-bootstrap
 RemainAfterExit=yes
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 # We only touch the network, no FS writes of our own. The daemon does the
 # actual work and runs with its own hardening.

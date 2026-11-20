@@ -299,7 +299,7 @@ public class DhcpWorker : BackgroundService
 
                     Interlocked.Increment(ref _packetsReceived);
 
-                    _logger.LogInformation("[RECV] Packet received on {Interface}: {Length} bytes from {RemoteEndPoint}",
+                    _logger.LogDebug("[RECV] Packet received on {Interface}: {Length} bytes from {RemoteEndPoint}",
                         interfaceName, receivedBytes, sourceEndPoint);
 
                     ProcessReceivedPacket(writer, receiveBuffer, receivedBytes, sourceEndPoint!, interfaceName);
@@ -561,16 +561,21 @@ public class DhcpWorker : BackgroundService
 
     private void LogDhcpRequest(DhcpRequest request)
     {
-        // Always log requests at Info level for visibility
-        _logger.LogInformation(
-            "[REQUEST] {MessageType,-10} | MAC: {Mac} | Hostname: {Hostname} | " +
-            "RequestedIP: {RequestedIp} | ClientIP: {CiAddr} | RelayIP: {GiAddr}",
-            request.MessageType,
-            request.ClientMac,
-            request.Hostname ?? "(none)",
-            request.RequestedIp?.ToString() ?? "(none)",
-            request.CiAddr?.ToString() ?? "0.0.0.0",
-            request.GiAddr?.ToString() ?? "0.0.0.0");
+        // Per-packet trace at Debug, guarded so the arguments (IPAddress.ToString)
+        // aren't evaluated on the single consumer when Debug is off (production).
+        // The outcome of each exchange ([DISCOVER]/[REQUEST] SUCCESS) stays at Info.
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(
+                "[REQUEST] {MessageType,-10} | MAC: {Mac} | Hostname: {Hostname} | " +
+                "RequestedIP: {RequestedIp} | ClientIP: {CiAddr} | RelayIP: {GiAddr}",
+                request.MessageType,
+                request.ClientMac,
+                request.Hostname ?? "(none)",
+                request.RequestedIp?.ToString() ?? "(none)",
+                request.CiAddr?.ToString() ?? "0.0.0.0",
+                request.GiAddr?.ToString() ?? "0.0.0.0");
+        }
 
         // Log additional details at Debug level
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -595,7 +600,7 @@ public class DhcpWorker : BackgroundService
 
     private void LogDhcpResponse(DhcpRequest request, DhcpMessageType responseType, IPEndPoint destination, string? interfaceName = null)
     {
-        _logger.LogInformation(
+        _logger.LogDebug(
             "[RESPONSE] {ResponseType,-10} | MAC: {Mac} | Destination: {Destination} | Interface: {Interface}",
             responseType,
             request.ClientMac,
@@ -728,9 +733,12 @@ public class DhcpWorker : BackgroundService
         request.IsBootp = request.MessageType == 0 && request.Op == 1;
         request.IsPxeRequest = request.VendorClassIdentifier?.Contains("PXEClient") == true;
 
-        _logger.LogDebug(
-            "[PARSE] Successfully parsed {MessageType} from {Mac} (XID: {Xid})",
-            request.MessageType, request.ClientMac, BitConverter.ToString(request.Xid));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(
+                "[PARSE] Successfully parsed {MessageType} from {Mac} (XID: {Xid})",
+                request.MessageType, request.ClientMac, Convert.ToHexString(request.Xid));
+        }
 
         return true;
     }

@@ -178,8 +178,13 @@ public sealed partial class SpeedTestService : ISpeedTestService
     private Transfer StartBurst(Guid id, SpeedTestPlan plan, HttpClient client, ThroughputMeter meter, Stopwatch clock, CancellationTokenSource stop)
     {
         var sink = plan.KeepFile ? new PayloadSink(_store.PartPathFor(id), preallocate: 0) : null;
+        // The byte cap ends the run through its own source, linked to `stop` (deadline /
+        // operator). The connection that owns the kept file reads its in-flight response on
+        // `stop` alone, so the cap can't cut the file short. Not disposed here: it is linked to
+        // `stop`, which MeasureAsync disposes when the run ends.
+        var capStop = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
         var workers = Enumerable.Range(0, plan.Streams)
-            .Select(_ => Task.Run(() => BurstWorkerAsync(client, plan.Url, meter, sink, clock, stop)))
+            .Select(_ => Task.Run(() => BurstWorkerAsync(client, plan.Url, meter, sink, clock, stop, capStop)))
             .ToArray();
         return new Transfer(workers, sink, null, () => sink?.Done ?? false, null);
     }
@@ -189,9 +194,10 @@ public sealed partial class SpeedTestService : ISpeedTestService
     /// Returns null when it ended because the test did, or why it gave up.
     /// </summary>
     private static async Task<string?> BurstWorkerAsync(
-        HttpClient client, Uri url, ThroughputMeter meter, PayloadSink? sink, Stopwatch clock, CancellationTokenSource stop)
+        HttpClient client, Uri url, ThroughputMeter meter, PayloadSink? sink, Stopwatch clock,
+        CancellationTokenSource stop, CancellationTokenSource capStop)
     {
-        var ct = stop.Token;
+        var ct = capStop.Token;   // cap, deadline or operator
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         var firstRequest = true;
         // The kept file belongs to whichever connection starts receiving first. Pinning it
@@ -209,15 +215,17 @@ public sealed partial class SpeedTestService : ISpeedTestService
                 await using var body = await resp.Content.ReadAsStreamAsync(ct);
                 long got = 0;
                 int n;
-                while ((n = await body.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
+                // While this connection is writing the kept file, only the deadline or the
+                // operator may interrupt it: the byte cap waits for the copy to be whole.
+                while ((n = await body.ReadAsync(buffer.AsMemory(0, BufferSize), ownsSink && !sink!.Done ? stop.Token : ct)) > 0)
                 {
                     if (got == 0 && firstRequest) meter.FirstByte(clock.Elapsed - sentAt);
                     // Claim only at the start of a response, so the file begins at its byte 0.
                     if (got == 0 && sink is not null && !ownsSink) ownsSink = sink.TryClaim();
                     got += n;
                     // One writer, in order: the kept file is the first response, byte for byte.
-                    if (ownsSink && !sink!.Done) await sink.WriteAsync(sink.Written, buffer.AsMemory(0, n), ct);
-                    if (meter.Add(n)) stop.Cancel();   // byte cap reached: end the whole test
+                    if (ownsSink && !sink!.Done) await sink.WriteAsync(sink.Written, buffer.AsMemory(0, n), stop.Token);
+                    if (meter.Add(n)) await capStop.CancelAsync();   // byte cap reached: end the whole test
                 }
                 firstRequest = false;
                 if (ownsSink) sink!.MarkComplete();

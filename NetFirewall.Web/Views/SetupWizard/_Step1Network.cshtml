@@ -49,7 +49,7 @@
                 <input type="hidden" name="Interfaces[@i].MacAddress" value="@row.MacAddress" />
                 <input type="hidden" name="Interfaces[@i].CurrentIp"  value="@row.CurrentIp" />
 
-                <div class="grid grid-cols-1 lg:grid-cols-[1fr,1.4fr] gap-5">
+                <div class="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-5">
 
                     <!-- LEFT: kernel-reported facts -->
                     <div class="space-y-2 min-w-0">
@@ -64,7 +64,7 @@
                             }
                         </div>
 
-                        <dl class="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+                        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                             @if (!string.IsNullOrEmpty(row.MacAddress))
                             {
                                 <dt class="text-surface-fg-muted">MAC</dt>

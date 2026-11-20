@@ -9,7 +9,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
+        <p class="page-kicker">Network</p>
         <h1 class="text-2xl font-semibold tracking-tight">Wake-on-LAN</h1>
         <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
             Power on sleeping machines from the firewall. The daemon broadcasts the magic packet out of the LAN interface the device is plugged into, so it works from anywhere you can reach this page, VPN included.
@@ -23,24 +23,50 @@
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
             Add device
         </button>
+        @* Wake every saved device. "Wake selected" is the grid's own bulk action (tick rows). *@
+        <button type="button" class="btn btn-ghost"
+                hx-post="/Network/WakeOnLan/wake-many"
+                hx-vals='{"scope": "all"}'
+                hx-trigger="confirmed-wake"
+                hx-swap="none"
+                hx-disabled-elt="this"
+                @@click.prevent="(async () => {
+                    const ok = await $store.confirm.ask({
+                        title: 'Wake all saved devices?',
+                        message: 'A magic packet goes out on each device’s own interface. Machines that are already on ignore it.',
+                        confirmLabel: 'Send wake',
+                        level: 'default'
+                    });
+                    if (ok) htmx.trigger($el, 'confirmed-wake');
+                })()">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9"/></svg>
+            Wake all
+        </button>
     </div>
 </div>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
     <div class="xl:col-span-2 space-y-4">
-        <div class="flex flex-wrap items-center gap-2" style="animation: var(--animate-slide-up); animation-delay: 40ms;">
-            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "wol-devices-table", Placeholder = "Filter by name, MAC, IP, interface…", ClientSide = true })
-        </div>
-
-        <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-            <div id="wol-devices-table"
-                 hx-get="/Network/WakeOnLan/table"
-                 hx-trigger="load, refreshWol from:body"
-                 hx-swap="innerHTML">
-                @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-            </div>
-            @* Presence comes from the ARP table: re-read it every 15 s so a machine that was just woken turns "online" on its own. Badges only (out-of-band), never the rows. *@
-            <div hx-get="/Network/WakeOnLan/presence" hx-trigger="every 15s" hx-swap="none" aria-hidden="true"></div>
+        <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+            @* Presence comes from the ARP table: the grid re-reads its rows every 15 s so a machine that was just woken turns "online" on its own. *@
+            @await Html.PartialAsync("_Grid", new GridFrameViewModel
+            {
+                GridId = NetFirewall.Web.Grids.Network.WakeOnLanGrid.Id,
+                Title = "Wake-on-LAN devices",
+                DefaultQuery = NetFirewall.Web.Grids.Network.WakeOnLanGrid.DefaultQuery,
+                RefreshOn = ["refreshWol"],
+                RefreshEverySeconds = 15,
+                BulkActions = new Dictionary<string, GridBulkActionHost>
+                {
+                    ["wake"] = new("/Network/WakeOnLan/wake-many")
+                    {
+                        Values = new Dictionary<string, string> { ["scope"] = "selected" },
+                        ConfirmTitle = "Wake {count} selected device{s}?",
+                        ConfirmMessage = "A magic packet goes out on each device's own interface. Machines that are already on ignore it.",
+                        ConfirmLabel = "Send wake",
+                    }
+                }
+            })
         </section>
     </div>
 

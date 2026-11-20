@@ -39,7 +39,7 @@
      x-data="{ more: false }"
      :class="{ 'relative z-30': more }">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">VPN</p>
+        <p class="page-kicker">VPN</p>
         <h1 class="text-2xl font-semibold tracking-tight">WireGuard</h1>
         <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
             One interface, two jobs: <span class="font-medium">tunnels</span> this firewall keeps up (upstream egress, site-to-site) and <span class="font-medium">clients</span> that connect in (laptops, phones). Client keys are generated on-device by the daemon and the private half is shown <span class="font-medium">once</span> — we never persist it.
@@ -267,8 +267,7 @@
 </div>
 
 @* ----- Tunnels (upstream / site-to-site — links this firewall keeps up) ----- *@
-<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;"
-         x-data="{ hideDisabled: false }">
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 180ms;">
     <header class="flex items-baseline justify-between mb-4">
         <div>
             <h2 class="text-base font-semibold">Tunnels</h2>
@@ -292,26 +291,21 @@
     }
     else
     {
-        <div class="flex flex-wrap items-center gap-2 mb-3">
-            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "wg-tunnels-table", Placeholder = "Filter by name, endpoint…", ClientSide = true })
-            <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-                <input type="checkbox" class="rounded" x-model="hideDisabled" />
-                Hide disabled
-            </label>
-        </div>
-        <div id="wg-tunnels-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Vpn/WireGuard/Peers/table?family=tunnels"
-             hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        <div>
+            @await Html.PartialAsync("_Grid", new GridFrameViewModel
+            {
+                GridId = NetFirewall.Web.Grids.Vpn.WireGuardPeersGrid.TunnelsId,
+                Title = "WireGuard tunnels",
+                DefaultQuery = NetFirewall.Web.Grids.Vpn.WireGuardPeersGrid.DefaultQuery,
+                RefreshOn = ["refreshWireGuardPeers", "refreshWireGuard"],
+                ForwardQuery = false
+            })
         </div>
     }
 </section>
 
 @* ----- VPN clients (road-warriors that connect in) ----- *@
-<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 200ms;"
-         x-data="{ hideDisabled: false }">
+<section class="card mt-4" style="animation: var(--animate-slide-up); animation-delay: 200ms;">
     <header class="flex items-baseline justify-between mb-4">
         <div>
             <h2 class="text-base font-semibold">VPN clients</h2>
@@ -335,19 +329,15 @@
     }
     else
     {
-        <div class="flex flex-wrap items-center gap-2 mb-3">
-            @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "wg-clients-table", Placeholder = "Filter by name, IP, access…", ClientSide = true })
-            <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-                <input type="checkbox" class="rounded" x-model="hideDisabled" />
-                Hide disabled
-            </label>
-        </div>
-        <div id="wg-clients-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Vpn/WireGuard/Peers/table?family=clients"
-             hx-trigger="load, refreshWireGuardPeers from:body, refreshWireGuard from:body"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
+        <div>
+            @await Html.PartialAsync("_Grid", new GridFrameViewModel
+            {
+                GridId = NetFirewall.Web.Grids.Vpn.WireGuardPeersGrid.ClientsId,
+                Title = "WireGuard VPN clients",
+                DefaultQuery = NetFirewall.Web.Grids.Vpn.WireGuardPeersGrid.DefaultQuery,
+                RefreshOn = ["refreshWireGuardPeers", "refreshWireGuard"],
+                ForwardQuery = false
+            })
         </div>
     }
 </section>

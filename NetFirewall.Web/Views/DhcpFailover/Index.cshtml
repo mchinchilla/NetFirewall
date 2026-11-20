@@ -4,11 +4,11 @@
     var status = ViewBag.Status as NetFirewall.Services.Dhcp.DhcpFailoverStatus;
 }
 
-<div x-data="{ hideDisabled: false }">
+<div>
     <div class="flex flex-wrap items-end justify-between gap-3 mb-4"
          style="animation: var(--animate-slide-up);">
         <div>
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">DHCP</p>
+            <p class="page-kicker">DHCP</p>
             <h1 class="text-2xl font-semibold tracking-tight">Failover</h1>
             <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
                 Active/passive HA with another NetFirewall (or any RFC-3074-style peer). Define the relationship below — the DHCP daemon picks it up on next start.
@@ -67,22 +67,13 @@
         </section>
     }
 
-    <div class="flex flex-wrap items-center gap-2 mb-4"
-         style="animation: var(--animate-slide-up); animation-delay: 60ms;">
-        @await Html.PartialAsync("_TableSearch", new TableSearchModel { TableId = "failover-table", Placeholder = "Filter by name, role, peer…", ClientSide = true })
-        <label class="text-xs flex items-center gap-2 cursor-pointer select-none text-surface-fg-muted">
-            <input type="checkbox" class="rounded" x-model="hideDisabled" />
-            Hide disabled
-        </label>
-    </div>
-
-    <section class="card" style="animation: var(--animate-slide-up); animation-delay: 80ms;">
-        <div id="failover-table"
-             :class="{ 'hide-disabled-rules': hideDisabled }"
-             hx-get="/Dhcp/Failover/table"
-             hx-trigger="load, refreshFailover from:body"
-             hx-swap="innerHTML">
-            @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })
-        </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Dhcp.DhcpFailoverGrid.Id,
+            Title = "DHCP failover peers",
+            DefaultQuery = NetFirewall.Web.Grids.Dhcp.DhcpFailoverGrid.DefaultQuery,
+            RefreshOn = ["refreshFailover"]
+        })
     </section>
 </div>

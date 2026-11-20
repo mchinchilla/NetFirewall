@@ -1,0 +1,51 @@
+<Project>
+  <!--
+    Version of a plain `dotnet build` / `dotnet run`, derived from git.
+
+    deploy/build-bundle.sh and the release workflow pass -p:InformationalVersion
+    explicitly; this target only runs when nobody did (the SDK default 1.0.0 is
+    still in place), so a dev build stops claiming "v1.0.0" in the footer, the
+    login card and the daemon's /health.
+
+      on a release tag, clean tree      v0.6.2              -> 0.6.2
+      N commits past it and/or dirty    v0.6.2-5-g<sha>     -> 0.6.3-dev.5[-dirty]
+      no reachable vX.Y.Z tag           (shallow CI clone)  -> 0.0.0-dev
+
+    The "next" version is the next PATCH, the same default the release workflow
+    uses ([minor]/[major] in the head commit message bump further at release time).
+    The SDK then appends +<sha> (SourceRevisionId), which BuildVersionText parses.
+    Set NetFwSkipGitVersion=true to opt out.
+  -->
+  <Target Name="NetFwStampGitVersion"
+          BeforeTargets="AddSourceRevisionToInformationalVersion;GetAssemblyVersion"
+          Condition="'$(NetFwSkipGitVersion)' != 'true' and '$(Version)' == '1.0.0' and '$(InformationalVersion)' == '$(Version)'">
+
+    <Exec Command="git describe --tags --long --dirty --match &quot;v[0-9]*.[0-9]*.[0-9]*&quot;"
+          WorkingDirectory="$(MSBuildThisFileDirectory)"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          IgnoreExitCode="true"
+          EchoOff="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_NfDescribe" />
+      <Output TaskParameter="ExitCode" PropertyName="_NfDescribeExit" />
+    </Exec>
+
+    <PropertyGroup>
+      <_NfPattern>^v(\d+)\.(\d+)\.(\d+)-(\d+)-g[0-9a-f]+(-dirty)?$</_NfPattern>
+      <_NfOk Condition="'$(_NfDescribeExit)' == '0' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(_NfDescribe)', '$(_NfPattern)'))">true</_NfOk>
+
+      <_NfMajor Condition="'$(_NfOk)' == 'true'">$([System.Text.RegularExpressions.Regex]::Replace('$(_NfDescribe)', '$(_NfPattern)', '$1'))</_NfMajor>
+      <_NfMinor Condition="'$(_NfOk)' == 'true'">$([System.Text.RegularExpressions.Regex]::Replace('$(_NfDescribe)', '$(_NfPattern)', '$2'))</_NfMinor>
+      <_NfPatch Condition="'$(_NfOk)' == 'true'">$([System.Text.RegularExpressions.Regex]::Replace('$(_NfDescribe)', '$(_NfPattern)', '$3'))</_NfPatch>
+      <_NfAhead Condition="'$(_NfOk)' == 'true'">$([System.Text.RegularExpressions.Regex]::Replace('$(_NfDescribe)', '$(_NfPattern)', '$4'))</_NfAhead>
+      <_NfDirty Condition="'$(_NfOk)' == 'true'">$([System.Text.RegularExpressions.Regex]::Replace('$(_NfDescribe)', '$(_NfPattern)', '$5'))</_NfDirty>
+
+      <_NfGitVersion Condition="'$(_NfOk)' != 'true'">0.0.0-dev</_NfGitVersion>
+      <_NfGitVersion Condition="'$(_NfOk)' == 'true' and '$(_NfAhead)' == '0' and '$(_NfDirty)' == ''">$(_NfMajor).$(_NfMinor).$(_NfPatch)</_NfGitVersion>
+      <_NfGitVersion Condition="'$(_NfOk)' == 'true' and '$(_NfGitVersion)' == ''">$(_NfMajor).$(_NfMinor).$([MSBuild]::Add($(_NfPatch), 1))-dev.$(_NfAhead)$(_NfDirty)</_NfGitVersion>
+
+      <InformationalVersion>$(_NfGitVersion)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+</Project>

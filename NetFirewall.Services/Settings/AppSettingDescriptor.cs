@@ -27,16 +27,16 @@ public static class AppSettingDescriptors
     {
         // ===== Appearance — defaults applied to anonymous / first-visit users =====
         new("appearance.default_theme", "Appearance",
-            "Default palette",
-            "Theme shown to anonymous users (login page) and as the default for new accounts.",
-            AppSettingType.Enum, "boulder",
-            ["boulder", "jordy-blue", "magic-mint", "taupe-gray", "twilight", "pearl-bush", "woodsmoke"]),
+            "Default accent",
+            "Accent preset shown to anonymous users (login page), for browsers without a saved choice, and by the picker's Reset.",
+            AppSettingType.Enum, "teal",
+            ["teal", "coral", "blue", "violet", "sage", "amber", "rose", "graphite"]),
 
         new("appearance.default_mode", "Appearance",
             "Default mode",
-            "Light or dark — applied before the user's local preference loads.",
+            "Light, dark or follow the OS (system) — for browsers without a saved choice.",
             AppSettingType.Enum, "light",
-            ["light", "dark"]),
+            ["light", "dark", "system"]),
 
         // ===== System identity =====
         new("system.firewall_name", "System",

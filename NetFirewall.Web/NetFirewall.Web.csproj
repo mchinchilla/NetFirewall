@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFramework>net11.0</TargetFramework>
+        <!-- Workstation (concurrent) GC: an appliance serves a handful of operators, not
+             high-throughput HTTP. Measured on Debian 13 after the same warm-up: Web 222→172 MB,
+             daemon 190→153 MB RSS vs Server GC (DATAS). Latency is unaffected at this load. -->
+        <ServerGarbageCollection>false</ServerGarbageCollection>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <TailwindInput>Styles/site.css</TailwindInput>
@@ -9,9 +13,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.14" />
-        <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
-        <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="11.0.0" />
+        <PackageReference Include="NetOpenGrid" Version="1.5.0" />
+        <PackageReference Include="Serilog.AspNetCore" Version="11.0.0" />
+        <PackageReference Include="Serilog.Settings.Configuration" Version="11.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
         <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
         <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
@@ -28,10 +33,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="..\NetFirewall.Services\sql\migrations\*.sql"
-              Link="sql\migrations\%(Filename)%(Extension)"
-              CopyToOutputDirectory="PreserveNewest"
-              CopyToPublishDirectory="PreserveNewest" />
+        <None Include="..\NetFirewall.Services\sql\migrations\*.sql" Link="sql\migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
 
     <ItemGroup>
@@ -43,12 +45,9 @@
         <InternalsVisibleTo Include="NetFirewall.Tests" />
     </ItemGroup>
 
-    <Target Name="BuildTailwindCss" BeforeTargets="BeforeBuild;AssignTargetPaths"
-            Inputs="$(TailwindInput);@(Content);@(None)"
-            Outputs="$(TailwindOutput)">
-        <Message Importance="high" Text="Compiling Tailwind CSS: $(TailwindInput) -> $(TailwindOutput)" />
-        <Exec Command="tailwindcss -i $(TailwindInput) -o $(TailwindOutput) --minify"
-              WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <Target Name="BuildTailwindCss" BeforeTargets="BeforeBuild;AssignTargetPaths" Inputs="$(TailwindInput);@(Content);@(None)" Outputs="$(TailwindOutput)">
+        <Message Importance="high" Text="Compiling Tailwind CSS: $(TailwindInput) -&gt; $(TailwindOutput)" />
+        <Exec Command="tailwindcss -i $(TailwindInput) -o $(TailwindOutput) --minify" WorkingDirectory="$(MSBuildProjectDirectory)" />
     </Target>
 
 </Project>

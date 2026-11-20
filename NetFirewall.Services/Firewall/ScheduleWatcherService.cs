@@ -86,6 +86,18 @@ public sealed class ScheduleWatcherService : BackgroundService
         if (!forceApply && fp == _lastFingerprint)
             return false;
 
+        // An UNCONFIGURED box (no enabled input rule yet: fresh install, wizard not run) must
+        // keep its current ruleset: the generated one would be a bare `policy drop` that locks
+        // the operator out of the Web UI before the setup wizard (found by the Debian 13
+        // end-to-end install). Same predicate as the boot-time apply (onlyIfConfigured).
+        // A configured box still re-applies at every daemon start, as before.
+        if (forceApply && _lastFingerprint is null && !rules.Any(r => r.Enabled && r.Chain == "input"))
+        {
+            _logger.LogInformation("Schedule watcher: no input rules configured yet — startup apply skipped");
+            _lastFingerprint = fp;
+            return false;
+        }
+
         _logger.LogInformation(
             "Schedule-triggered nft apply ({Reason}) — {Count} scheduled rule(s)",
             forceApply && _lastFingerprint is null ? "startup" : "transition",

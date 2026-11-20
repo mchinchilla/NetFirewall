@@ -9,7 +9,7 @@
 # tailwindcss binary on PATH), never on the firewall. The result is copied to the
 # host, extracted, and `./setup.sh` does the rest.
 #
-#   deploy/build-bundle.sh [--version 1.4.0] [--output dist/]
+#   deploy/build-bundle.sh [--version 1.4.0] [--output dist/] [--rid linux-x64|linux-arm64]
 #
 # Without --version the version comes from `git describe --tags --always --dirty`
 # (v1.4.0, v1.4.0-3-g97f88aa, 97f88aa-dirty), so every bundle names the exact
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly RID="linux-x64"
+RID="linux-x64"   # --rid linux-arm64 for ARM appliances (and native arm64 test hosts)
 
 VERSION=""
 OUTPUT_DIR="$REPO_ROOT/dist"
@@ -30,10 +30,17 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) VERSION="$2"; shift 2 ;;
         --output)  OUTPUT_DIR="$2"; shift 2 ;;
+        --rid)     RID="$2"; shift 2 ;;
         -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+case "$RID" in
+    linux-x64|linux-arm64) ;;
+    *) echo "unsupported --rid '$RID' (linux-x64 | linux-arm64)" >&2; exit 2 ;;
+esac
+readonly RID
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m✗\033[0m  %s\n' "$*" >&2; exit 1; }
@@ -57,7 +64,8 @@ if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
     NUMERIC_VERSION="${BASH_REMATCH[1]}"
 fi
 
-readonly NAME="netfirewall-$VERSION"
+# x64 keeps the historical name (CI and docs use it); other runtimes carry their RID.
+if [[ "$RID" == "linux-x64" ]]; then readonly NAME="netfirewall-$VERSION"; else readonly NAME="netfirewall-$VERSION-$RID"; fi
 readonly STAGE="$OUTPUT_DIR/$NAME"
 readonly APP="$STAGE/app"
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NetFirewall is a personal firewall system built with C# / .NET 10.0 and PostgreSQL. .NET Aspire orchestrates the dev-time topology. The WAN Monitor is production-ready; the DHCP Server is the active focus of development; the Web UI is currently a default MVC scaffold pending re-implementation.
+NetFirewall is a personal firewall system built with C# / .NET 11.0 and PostgreSQL. .NET Aspire orchestrates the dev-time topology. The WAN Monitor is production-ready; the DHCP Server is the active focus of development; the Web UI is currently a default MVC scaffold pending re-implementation.
 
 ## Project rules (non-negotiable)
 
@@ -36,6 +36,7 @@ dotnet run --project NetFirewall.AppHost
 # Release bundle for Linux deployment (self-contained linux-x64 tar.gz → dist/)
 deploy/build-bundle.sh                     # version = git describe --tags --always --dirty
 deploy/build-bundle.sh --version 1.5.0-rc1
+deploy/build-bundle.sh --rid linux-arm64   # ARM appliances / native arm64 test hosts (name gets -linux-arm64)
 ```
 
 ## Production deployment
@@ -65,7 +66,10 @@ through a file in a release dir: `rm` then create, and JSON is excluded from
 linking). Version = `git describe` (leading `v` stripped), stamped as
 `-p:InformationalVersion` and written to `VERSION`/`BUILD_INFO`;
 `BuildVersionText.Of(assembly)` (`NetFirewall.Models/System`) is the one place
-that turns it into display text (Web *System info*, daemon `/health`). The build
+that turns it into display text (Web *System info*, daemon `/health`). A plain
+`dotnet build`/`run` (no explicit version) is stamped by the root
+`Directory.Build.targets` from `git describe`: `0.6.2` on a clean tag, otherwise
+the predicted next patch `0.6.3-dev.<commits>[-dirty]`, `0.0.0-dev` with no tag. The build
 fails if an env template lost its placeholder or a real master key slipped in.
 
 **CI**: `.github/workflows/ci.yml` (build + tests on every push/PR) and
@@ -102,7 +106,9 @@ tracked `site.css`). Both workflows exclude the one known-failing test via
   **`docs/master-key.md`**. Daemon and Web MUST hold the identical key (both
   decrypt `user_totp_secrets`; drift silently rejects every TOTP code). With
   `Daemon:UseForTotp=true` (prod default) the Web proxies crypto to the daemon
-  (`POST /v1/crypto/{encrypt,decrypt}`, `DaemonTotpSecretCipher`); the daemon also
+  (`POST /v1/crypto/{encrypt,decrypt}`, `DaemonTotpSecretCipher`; no user session —
+  enrollment/login TOTP run pre-session — gated by socket perms + peer UID allow-list,
+  403 without one); the daemon also
   needs the key for the web terminal's TOTP gate (`/v1/terminal/open`). `false`
   (dev without daemon) keeps the key in the Web's `NETFIREWALL_MASTER_KEY`. If
   `UseForTotp=true` and the daemon is down, TOTP enrollment/verification fail
@@ -191,6 +197,11 @@ Note: `NetFirewall.WanMonitor` is **not** registered in `NetFirewall.AppHost/Pro
 - **NetFirewall.DhcpServer** — RFC 2131 server with PXE boot support. Standalone host (not ASP.NET) using `Host.CreateDefaultBuilder` + `UseSystemd`. See "DHCP Server internals" below.
 - **NetFirewall.Web** — ASP.NET Core MVC (`AddControllersWithViews`) using **Tailwind CSS 4** (compiled from `Styles/site.css`), **HTMX** and **Alpine.js** (vendored under `wwwroot/lib/{htmx,alpinejs}/`). Logging uses **Serilog** read from `appsettings.json` (`UseSerilog` + `UseSerilogRequestLogging`). Bootstrap and jQuery were removed; do not reintroduce them. The MSBuild target `BuildTailwindCss` invokes the **standalone `tailwindcss` CLI** (must be on `PATH`) during every `dotnet build`, producing `wwwroot/css/site.css` (gitignored). Manual rebuild / watch: `tailwindcss -i Styles/site.css -o wwwroot/css/site.css --minify` (add `--watch` for live rebuild).
 - **NetFirewall.ApiService** — Minimal APIs + OpenAPI surface (intended consumer for the Web UI).
+
+  - **Data grids (NetOpenGrid 1.5, the user's own library — `~/RiderProjects/NetOpenGrid`, consume the package, never edit it).** List pages host a grid in a SAME-ORIGIN iframe (`Views/Shared/_Grid.cshtml` → `/netgrid/{id}?embed=1`) so the grid's htmx 4 + Alpine stay apart from the host's htmx 2. Grid definitions live in `Grids/<Area>/<Feature>Grid.cs`, rows come from the feature service via `ScopedGridSource` (audit log: SQL push-down, `AuditLogGridSource`). Raw cells ONLY through `Grids/GridCell.cs` (HTML-encodes). Row actions are `[data-nf-action]` buttons replayed in the host by `NetFw.grids` (site.js) through a hidden htmx proxy, so antiforgery, `RequireElevated` replay and HX-Trigger toasts work; `RefreshOn` = the HX-Trigger events that refresh a grid; bulk actions via `GridBulkActionHost`. Per-grid roles: `GridAccessPolicy` + endpoint filter (MVC `[Authorize]` does not cover `/netgrid/*`). site.css is linked INTO the frame and remaps `--color-neutral-*` onto the semantic tokens under `html[data-nf-grid]`. nginx must send `X-Frame-Options SAMEORIGIN` (Doctor `NginxFramingCheck` warns on DENY).
+  - **Appearance**: `Theming/Appearance.cs` — mode light|dark|system × accent preset (teal default, 8 OKLCH presets) × sidebar × density, persisted in the `nf_ui` cookie by `POST /preferences/appearance`; layouts render `data-preset`/`data-mode`(RESOLVED scheme)/`data-mode-pref`/`data-density`. Theme picker = `_ThemeSwitcher` + `_ThemeThumb`.
+  - **Dev version**: root `Directory.Build.targets` stamps a plain build from `git describe` (`0.6.3-dev.N[-dirty]`) when no explicit version is passed.
+  - **Boot-time apply never locks out an unconfigured box**: `netfirewall-bootstrap` calls `/v1/firewall/apply?onlyIfConfigured=true` and the ScheduleWatcher skips its startup apply while no enabled input rule exists. The setup wizard's rule template is rebuilt at step-5 Apply (interfaces only exist then).
 
 ### Shared libraries
 

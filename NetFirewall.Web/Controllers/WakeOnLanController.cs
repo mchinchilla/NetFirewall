@@ -48,18 +48,6 @@ public sealed class WakeOnLanController : Controller
         DaemonEnabled = _daemon is not NullDaemonClient,
     });
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct) =>
-        PartialView("_DevicesTable", await TableModelAsync(ct));
-
-    /// <summary>The 15 s poll: presence badges only, swapped out-of-band (see _PresenceUpdates).</summary>
-    [HttpGet("presence")]
-    public async Task<IActionResult> Presence(CancellationToken ct)
-    {
-        var model = await TableModelAsync(ct);
-        return model.Rows.Count == 0 ? NoContent() : PartialView("_PresenceUpdates", model);
-    }
-
     [HttpGet("edit/{id:guid?}")]
     public async Task<IActionResult> Edit(Guid? id, CancellationToken ct)
     {
@@ -159,22 +147,6 @@ public sealed class WakeOnLanController : Controller
     }
 
     // ───────────────────────── helpers ─────────────────────────
-
-    /// <summary>Saved devices plus their ARP presence. The daemon being down blanks the status, never the list.</summary>
-    private async Task<WolDevicesTableViewModel> TableModelAsync(CancellationToken ct)
-    {
-        var devices = await _devices.GetAllAsync(ct);
-        var neighbors = devices.Count == 0
-            ? ServiceResponse<IReadOnlyList<NeighborEntry>>.Ok([])
-            : await _daemon.GetNeighborsAsync(null, ct);
-        var arp = neighbors.Data ?? [];
-
-        return new WolDevicesTableViewModel
-        {
-            Rows = devices.Select(d => new WolDeviceRow(d, WolPresence.For(d.MacAddress, arp))).ToList(),
-            PresenceError = neighbors.Success ? null : neighbors.Message,
-        };
-    }
 
     private async Task<IActionResult> FormAsync(WolDeviceFormViewModel form, CancellationToken ct) =>
         PartialView("_DeviceForm", new WolDeviceFormPageViewModel

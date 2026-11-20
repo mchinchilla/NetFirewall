@@ -1,0 +1,61 @@
+@model NetFirewall.Web.Models.Diagnostics.RunDetailViewModel
+@using System.Globalization
+@using NetFirewall.Web.Grids
+@using NetFirewall.Web.Grids.Diagnostics
+@using NetFirewall.Web.Models.Diagnostics
+@*
+    Expanded row of the Diagnostics history grid (WithRowDetail). Rendered inside the grid's
+    frame: no host Alpine/site.js, no fixed ids, links never navigate the frame. The rich,
+    tool-specific report (check lists, charts, copy buttons) opens in the host drawer through
+    the "Open full report" button (data-nf-action, replayed by site.js NetFw.grids).
+*@
+@{
+    var r = Model.Run;
+    string Local(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    var open = DiagnosticsHistoryGrid.OpenAction(r.Id, r.Tool) with { Label = "Open full report" };
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Run</h3>
+        <dl class="ng-detail-fields">
+            <dt>Tool</dt><dd>@DiagUi.ToolLabel(r.Tool)</dd>
+            <dt>Status</dt><dd><span class="badge @DiagUi.BadgeClass(r.Status)">@r.Status</span></dd>
+            <dt>Started</dt><dd>@Local(r.StartedAt)</dd>
+            <dt>Finished</dt><dd>@(r.FinishedAt is { } f ? Local(f) : "—")</dd>
+            <dt>Duration</dt><dd>@(r.DurationMs?.ToString(CultureInfo.InvariantCulture) ?? "—") ms</dd>
+            <dt>Requested by</dt><dd>@(r.RequestedBy ?? "—")</dd>
+            <dt>Target</dt><dd>@(r.Target ?? "—")</dd>
+            <dt>Run id</dt><dd>@r.Id.ToString("N")[..8]</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Outcome</h3>
+        @if (!string.IsNullOrEmpty(r.Summary))
+        {
+            <p class="text-sm">@r.Summary</p>
+        }
+        else
+        {
+            <p class="text-xs text-surface-fg-muted">No summary recorded.</p>
+        }
+        @if (r.ResultTruncated)
+        {
+            <p class="text-xs text-feedback-warning-fg mt-2">The stored result exceeded the size cap and was not kept — only the summary survives.</p>
+        }
+        <div class="mt-3">@Html.Raw(GridCell.Actions(open))</div>
+    </section>
+
+    <section class="ng-detail-card ng-detail-wide">
+        <h3 class="ng-detail-title">Parameters</h3>
+        <pre class="text-xs p-3 rounded-lg overflow-auto max-h-64 font-mono" style="background-color: var(--surface-muted); color: var(--surface-fg); border: 1px solid var(--surface-border);"><code>@Model.PrettyParams</code></pre>
+    </section>
+
+    @if (!string.IsNullOrEmpty(Model.PrettyResult))
+    {
+        <section class="ng-detail-card ng-detail-wide">
+            <h3 class="ng-detail-title">Raw result</h3>
+            <pre class="text-xs p-3 rounded-lg overflow-auto max-h-96 font-mono" style="background-color: var(--surface-muted); color: var(--surface-fg); border: 1px solid var(--surface-border);"><code>@Model.PrettyResult</code></pre>
+        </section>
+    }
+</div>

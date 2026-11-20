@@ -5,7 +5,7 @@
 <div class="flex flex-wrap items-end justify-between gap-3 mb-6"
      style="animation: var(--animate-slide-up);">
     <div>
-        <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Network</p>
+        <p class="page-kicker">Network</p>
         <h1 class="text-2xl font-semibold tracking-tight">WAN failover</h1>
         <p class="text-sm mt-1 text-surface-fg-muted">
             Which WAN carries the default route, and the health probes that drive automatic failover.
@@ -18,7 +18,7 @@
    config save (refreshWanPanel event). All operator actions emit a toast. *@
 <section id="wan-panel"
          hx-get="/Network/Wan/panel"
-         hx-trigger="load, every 10s, refreshWanPanel from:body"
+         hx-trigger="load, every 10s [document.visibilityState === 'visible'], refreshWanPanel from:body"
          hx-swap="innerHTML"
          style="animation: var(--animate-slide-up); animation-delay: 60ms;">
     @await Html.PartialAsync("_LoadingOverlay", new LoadingOverlayModel { Variant = LoadingOverlayVariant.Placeholder })

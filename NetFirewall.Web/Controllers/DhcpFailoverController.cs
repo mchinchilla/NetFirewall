@@ -30,11 +30,14 @@ public sealed class DhcpFailoverController : Controller
         return View();
     }
 
-    [HttpGet("table")]
-    public async Task<IActionResult> Table(CancellationToken ct)
+    /// <summary>Expanded row of the Failover grid (fetched once per row, on first expand).</summary>
+    [HttpGet("detail/{id:guid}")]
+    public async Task<IActionResult> Detail(Guid id, CancellationToken ct)
     {
-        var rows = await _admin.GetFailoverPeersAsync(ct);
-        return PartialView("_FailoverTable", rows);
+        var peer = await _admin.GetFailoverPeerByIdAsync(id, ct);
+        return peer is null
+            ? Content("<p class=\"text-sm text-surface-fg-muted\">This peer is gone. Refresh the grid.</p>", "text/html")
+            : PartialView("_FailoverDetail", peer);
     }
 
     [HttpGet("edit/{id:guid?}")]

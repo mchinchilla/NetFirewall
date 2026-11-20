@@ -1,0 +1,74 @@
+@model NetFirewall.Web.Models.Dhcp.LeaseDetailViewModel
+@using System.Globalization
+@using NetFirewall.Web.Grids
+@*
+    Expanded row of the Leases grid (WithRowDetail). Rendered inside the grid's frame, so it
+    may only use classes compiled into site.css (ng-detail-* come from the grid theme).
+*@
+@{
+    var l = Model.Lease;
+    var now = Model.NowUtc;
+    var active = l.EndTime > now;
+    var duration = l.EndTime - l.StartTime;
+    string Local(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+}
+<div class="ng-detail">
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Lease timing</h3>
+        <dl class="ng-detail-fields">
+            <dt>State</dt><dd>@if (active) { <span class="badge badge-success">Active</span> } else { <span class="badge badge-muted">Expired</span> }</dd>
+            <dt>Leased at</dt><dd>@Local(l.StartTime)</dd>
+            <dt>Expires</dt><dd>@Local(l.EndTime)</dd>
+            <dt>Duration</dt><dd>@GridCell.Humanize(duration)</dd>
+            <dt>@(active ? "Remaining" : "Expired for")</dt><dd>@GridCell.Humanize((l.EndTime - now).Duration())</dd>
+        </dl>
+        @if (active && duration > TimeSpan.Zero)
+        {
+            var pct = Math.Clamp((now - l.StartTime) / duration * 100, 0, 100);
+            <div class="nf-meter mt-3" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@pct.ToString("0", CultureInfo.InvariantCulture)" aria-label="Lease time used">
+                <span style="width: @pct.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
+            </div>
+            <p class="mt-1 text-[11px] text-surface-fg-muted">@pct.ToString("0", CultureInfo.InvariantCulture)% of the lease used · renews at T1 ≈ 50%</p>
+        }
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Client</h3>
+        <dl class="ng-detail-fields">
+            <dt>Host</dt><dd>@(l.Hostname ?? "—")</dd>
+            <dt>MAC</dt><dd>@Model.Mac</dd>
+            <dt>IP</dt><dd>@l.IpAddress</dd>
+            <dt>OUI</dt><dd>@Model.Mac[..8]</dd>
+        </dl>
+    </section>
+
+    <section class="ng-detail-card">
+        <h3 class="ng-detail-title">Binding</h3>
+        <dl class="ng-detail-fields">
+            <dt>Reservation</dt>
+            <dd>
+                @if (Model.Reservation is { } r)
+                {
+                    <span class="badge badge-accent">@r.ReservedIp</span>
+                }
+                else
+                {
+                    <span class="text-surface-fg-muted">Dynamic (pool)</span>
+                }
+            </dd>
+            @if (Model.Reservation?.Description is { Length: > 0 } desc)
+            {
+                <dt>Note</dt><dd>@desc</dd>
+            }
+            <dt>Subnet</dt><dd>@(Model.Subnet is { } s ? $"{s.Name} · {s.Network}" : "—")</dd>
+            @if (Model.Subnet?.Router is { } gw)
+            {
+                <dt>Gateway</dt><dd>@gw</dd>
+            }
+            @if (Model.Subnet is { DefaultLeaseTime: > 0 } sub)
+            {
+                <dt>Lease time</dt><dd>@GridCell.Humanize(TimeSpan.FromSeconds(sub.DefaultLeaseTime))</dd>
+            }
+        </dl>
+    </section>
+</div>

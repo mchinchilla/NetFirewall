@@ -47,7 +47,12 @@ The Web swaps its TOTP cipher based on `Daemon:UseForTotp`
 
 - `Daemon:UseForTotp=true` (intended prod default): the Web proxies crypto to the
   daemon over the Unix socket (`DaemonTotpSecretCipher` → `/v1/crypto/*`). The
-  **daemon** holds the key; a Web compromise can't decrypt TOTP secrets.
+  **daemon** holds the key, so a Web compromise can't copy it off the box (it can
+  only ask the daemon to decrypt while it is running as the Web user).
+  `/v1/crypto/*` takes **no user session** — enrollment and the login's TOTP step run
+  before one exists — and is gated by the caller instead: the socket is
+  `0660 root:netfirewall`, `PeerCredentialMiddleware` admits only
+  `Daemon:AcceptedPeerUids`, and the endpoints answer 403 when no allow-list is set.
 - `Daemon:UseForTotp=false`: the Web holds the key locally
   (`AesGcmTotpSecretCipher`) and never asks the daemon.
 

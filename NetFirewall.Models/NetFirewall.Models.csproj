@@ -1,14 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />
-    <PackageReference Include="RepoDb" Version="1.17.0" />
+    <PackageReference Include="RepoDb" Version="1.17.1" />
     <PackageReference Include="RepoDb.PostgreSql" Version="1.17.0" />
   </ItemGroup>
 

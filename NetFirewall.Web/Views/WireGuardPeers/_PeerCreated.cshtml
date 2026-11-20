@@ -16,7 +16,7 @@
 
     <div>
         <div class="flex items-baseline justify-between mb-1">
-            <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">Client config</p>
+            <p class="page-kicker">Client config</p>
             <div class="flex items-center gap-2">
                 <button type="button" class="btn btn-ghost text-xs"
                         @@click="navigator.clipboard.writeText($refs.cfg.value).then(() => { copied = true; setTimeout(() => copied = false, 1500); })"

@@ -55,7 +55,9 @@ echo "netfirewall-bootstrap: starting state reconciliation via $SOCK"
 #   3. policy routing — ip rule + per-table ip route, also references marks.
 #   4. WireGuard — last so we can use the tunnel for any post-bring-up checks.
 #      It's optional; we don't fail the bootstrap if there's no wg server.
-call POST /v1/firewall/apply               "nftables" || true
+# onlyIfConfigured: an unconfigured box (no input filter rules yet) keeps its current
+# ruleset — pushing an empty default-deny would lock the operator out before the wizard.
+call POST "/v1/firewall/apply?onlyIfConfigured=true" "nftables" || true
 call POST /v1/firewall/apply-qos           "QoS"      || true
 call POST /v1/firewall/apply-policy-routing "policy routing" || true
 

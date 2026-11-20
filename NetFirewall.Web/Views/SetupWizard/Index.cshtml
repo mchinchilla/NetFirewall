@@ -14,7 +14,7 @@
 |  \| |/ _ \ __| |_  | | '__/ _ \ \ /\ / / _` | | |
 | |\  |  __/ |_|  _| | | | |  __/\ V  V / (_| | | |
 |_| \_|\___|\__|_|   |_|_|  \___| \_/\_/ \__,_|_|_|</pre>
-    <p class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted">
+    <p class="page-kicker">
         @(isRerun ? "Re-running setup" : (isResuming ? "Resuming setup" : "First-run setup"))
     </p>
     <h1 class="text-2xl font-semibold tracking-tight">NetFirewall setup wizard</h1>
@@ -53,7 +53,7 @@
 
 @await Html.PartialAsync("_Stepper", Model)
 
-<section class="card max-w-4xl" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+<section class="card" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
     @switch (Model.CurrentStep)
     {
         case 1: @await Html.PartialAsync("_Step1Network", Model.Step1); break;

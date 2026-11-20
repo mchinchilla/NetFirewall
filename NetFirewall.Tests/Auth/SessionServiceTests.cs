@@ -80,6 +80,16 @@ public sealed class SessionServiceTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    private async Task SetLastSeenAsync(Guid sessionId, DateTimeOffset lastSeen)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(
+            "UPDATE user_sessions SET last_seen_at = @s WHERE id = @id", conn);
+        cmd.Parameters.AddWithValue("id", sessionId);
+        cmd.Parameters.AddWithValue("s", lastSeen);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     private async Task SetCreatedAtAsync(Guid sessionId, DateTimeOffset newCreated)
     {
         await using var conn = await _pg.DataSource.OpenConnectionAsync();
@@ -147,6 +157,8 @@ public sealed class SessionServiceTests : IAsyncLifetime
         // Force the original expiry close to "now" so we can prove the slide.
         var nearExpiry = DateTimeOffset.UtcNow.AddMinutes(2);
         await SetExpiresAtAsync(session.Id, nearExpiry);
+        // Last seen longer ago than the slide throttle, so this validation writes.
+        await SetLastSeenAsync(session.Id, DateTimeOffset.UtcNow - SessionService.SlideThrottle - TimeSpan.FromSeconds(5));
 
         var validated = await _svc.ValidateAsync(token, BasicLifetime);
 
@@ -158,6 +170,33 @@ public sealed class SessionServiceTests : IAsyncLifetime
         Assert.True(validated.ExpiresAt < now + BasicLifetime + TimeSpan.FromSeconds(5));
         // last_seen_at also bumped.
         Assert.True(validated.LastSeenAt >= now - TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_SeenWithinThrottle_ValidatesWithoutWriting()
+    {
+        // Every page/poll validates; only one write per SlideThrottle window.
+        var (token, session) = await _svc.IssueAsync(_userId, null, null, BasicLifetime);
+        var expiry = DateTimeOffset.UtcNow.AddMinutes(30);
+        var lastSeen = DateTimeOffset.UtcNow.AddSeconds(-10);
+        await SetExpiresAtAsync(session.Id, expiry);
+        await SetLastSeenAsync(session.Id, lastSeen);
+
+        var validated = await _svc.ValidateAsync(token, BasicLifetime);
+
+        Assert.NotNull(validated);
+        Assert.Equal(session.Id, validated!.Id);
+        Assert.True((validated.ExpiresAt - expiry).Duration() < TimeSpan.FromSeconds(1), "expires_at must not move");
+        Assert.True((validated.LastSeenAt - lastSeen).Duration() < TimeSpan.FromSeconds(1), "last_seen_at must not move");
+    }
+
+    [Fact]
+    public async Task ValidateAsync_RevokedWithinThrottle_IsRefusedImmediately()
+    {
+        var (token, session) = await _svc.IssueAsync(_userId, null, null, BasicLifetime);
+        Assert.NotNull(await _svc.ValidateAsync(token, BasicLifetime));
+        await _svc.RevokeAsync(session.Id);
+        Assert.Null(await _svc.ValidateAsync(token, BasicLifetime));
     }
 
     [Fact]

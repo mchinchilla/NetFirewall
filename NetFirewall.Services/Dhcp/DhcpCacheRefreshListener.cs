@@ -17,17 +17,20 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
     private readonly NpgsqlDataSource _ds;
     private readonly IDhcpSubnetService _subnets;
     private readonly LeaseCache? _leaseCache;
+    private readonly IDhcpReservationCache? _reservations;
     private readonly ILogger<DhcpCacheRefreshListener> _logger;
 
     public DhcpCacheRefreshListener(
         NpgsqlDataSource ds,
         IDhcpSubnetService subnets,
         ILogger<DhcpCacheRefreshListener> logger,
-        LeaseCache? leaseCache = null)
+        LeaseCache? leaseCache = null,
+        IDhcpReservationCache? reservations = null)
     {
         _ds = ds;
         _subnets = subnets;
         _leaseCache = leaseCache;
+        _reservations = reservations;
         _logger = logger;
     }
 
@@ -93,6 +96,13 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
                     // the cache's write-through queue.
                     _ = _leaseCache.ReleaseLeaseByIpAsync(ip).AsTask();
                 }
+                return;
+            }
+
+            // Any write to dhcp_mac_reservations (trigger, migration 00044).
+            if (e.Payload.StartsWith("reservation.", StringComparison.Ordinal))
+            {
+                _reservations?.Invalidate();
                 return;
             }
 
