@@ -149,11 +149,8 @@ public sealed class LeaseCache : IDisposable
     /// separated, lowercase) — the canonical form the rest of the DHCP stack
     /// uses. <c>PhysicalAddress.ToString()</c> default omits separators.
     /// </summary>
-    private static string FormatMac(PhysicalAddress pa)
-    {
-        var bytes = pa.GetAddressBytes();
-        return string.Join(":", bytes.Select(b => b.ToString("x2")));
-    }
+    private static string FormatMac(PhysicalAddress pa) =>
+        NetFirewall.Models.Wol.MacAddressText.Format(pa.GetAddressBytes(), lowercase: true);
 
     /// <summary>IPv4 → big-endian uint. Stackalloc + BinaryPrimitives = no GC.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

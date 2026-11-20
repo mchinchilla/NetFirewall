@@ -10,7 +10,9 @@
 }
 
 <form hx-post="/Vpn/WireGuard/Egress/save" hx-swap="none"
-      x-data="wgEgressPicker(@Html.Raw(extrasJson))">
+      x-data="wgEgressPicker(@extrasJson)">
+    @* Encoded on purpose: raw JSON quotes would end the attribute (x-data="wgEgressPicker([" — the
+       picker died as soon as one extra source existed). The browser decodes &quot; back. *@
     @Html.AntiForgeryToken()
     <input type="hidden" name="iface" value="@Model.TunnelName" />
 

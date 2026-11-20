@@ -13,7 +13,7 @@
 
 <form id="network-object-form"
       hx-post="/Network/Objects/save" hx-target="this" hx-swap="outerHTML"
-      x-data="{ type: '@Model.Type', selected: new Set(@Html.Raw(memberSetJson)) }">
+      x-data="{ type: '@Model.Type', selected: new Set(@memberSetJson) }">
     @Html.AntiForgeryToken()
     @if (Model.Id.HasValue) { <input type="hidden" name="Id" value="@Model.Id" /> }
 

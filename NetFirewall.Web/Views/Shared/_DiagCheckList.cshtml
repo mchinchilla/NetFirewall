@@ -20,7 +20,7 @@
 
     @foreach (var group in Model.Checks.GroupBy(c => c.Category))
     {
-        <section x-show="visibleIn(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(group.Select(c => c.Status.ToString()))))">
+        <section x-show="visibleIn(@System.Text.Json.JsonSerializer.Serialize(group.Select(c => c.Status.ToString())))">
             <h3 class="text-xs uppercase tracking-wider font-semibold text-surface-fg-muted mb-1.5">@group.Key</h3>
             <ul class="divide-y divide-surface-border rounded-lg border border-surface-border">
                 @foreach (var c in group)

@@ -17,8 +17,14 @@ public sealed record LeaseGridRow(Guid Id, string Ip, string Mac, string? Hostna
         new(l.Id, l.IpAddress.ToString(), MacText(l.MacAddress.ToString()), l.Hostname, l.StartTime, l.EndTime);
 
     /// <summary>PhysicalAddress prints "AABBCCDDEEFF"; operators read aa:bb:cc:dd:ee:ff.</summary>
-    public static string MacText(string raw) =>
-        raw.Length == 12 ? string.Join(':', Enumerable.Range(0, 6).Select(i => raw.Substring(i * 2, 2))).ToLowerInvariant() : raw;
+    public static string MacText(string raw)
+    {
+        // Runs once per lease row: decode into a stack buffer, format once (no Substring/LINQ).
+        Span<byte> mac = stackalloc byte[6];
+        return raw.Length == 12 && System.Convert.FromHexString(raw, mac, out _, out var written) == System.Buffers.OperationStatus.Done && written == 6
+            ? NetFirewall.Models.Wol.MacAddressText.Format(mac, lowercase: true)
+            : raw;
+    }
 }
 
 /// <summary>

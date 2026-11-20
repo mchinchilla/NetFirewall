@@ -63,7 +63,9 @@ public sealed class WireGuardController : Controller
     [HttpGet("status")]
     public async Task<IActionResult> Status(bool compact = false, [FromQuery] string? iface = null, CancellationToken ct = default)
     {
-        var server = await _ifaces.ForPageAsync(iface, ct);
+        // No iface = the VPN server page with no server yet: show nothing rather than an
+        // outbound connection's status under the wrong heading.
+        var server = await _ifaces.RequireAsync(iface, ct);
         WgStatusViewModel vm;
         if (server is null)
         {
