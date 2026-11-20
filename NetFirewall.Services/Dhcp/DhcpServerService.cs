@@ -22,6 +22,7 @@ public sealed class DhcpServerService : IDhcpServerService
     private static byte[] EncodedOnce(System.Runtime.CompilerServices.ConditionalWeakTable<string, byte[]> memo, string text, Func<string, byte[]> encode) =>
         memo.GetValue(text, s => encode(s));
 
+    private readonly IInterfaceAddressProvider? _interfaceAddresses;
     private readonly IDhcpLeasesService _dhcpLeasesService;
     private readonly IDhcpSubnetService _dhcpSubnetService;
     private readonly IFailoverService? _failoverService;
@@ -50,8 +51,10 @@ public sealed class DhcpServerService : IDhcpServerService
         IDhcpSubnetService dhcpSubnetService,
         ILogger<DhcpServerService> logger,
         IOptions<DhcpConfig> dhcpConfig,
-        IFailoverService? failoverService = null)
+        IFailoverService? failoverService = null,
+        IInterfaceAddressProvider? interfaceAddresses = null)
     {
+        _interfaceAddresses = interfaceAddresses;
         _dhcpLeasesService = dhcpLeasesService;
         _dhcpSubnetService = dhcpSubnetService;
         _failoverService = failoverService;
@@ -137,9 +140,12 @@ public sealed class DhcpServerService : IDhcpServerService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SERVICE] Error creating DHCP response for {Mac}: {Message}",
+            // Silence, never a NAK: a NAK makes a RENEWING client drop its address at once, so a
+            // database blip would knock every renewing client off the network. Without a reply the
+            // client keeps its lease and retries (RFC 2131 §4.4.5).
+            _logger.LogError(ex, "[SERVICE] Error creating DHCP response for {Mac} — not replying: {Message}",
                 request.ClientMac, ex.Message);
-            return CreateNakResponse(request, null);
+            return DhcpResponseBuffer.Empty;
         }
     }
 
@@ -239,7 +245,7 @@ public sealed class DhcpServerService : IDhcpServerService
         // RFC 2131 §4.3.2: a SELECTING client addresses its REQUEST to one
         // server via option 54. If that's not us, the client accepted another
         // server's offer — we must stay silent, not ACK/NAK on its behalf.
-        var ourServerIp = subnet?.Router ?? _fallbackConfig.ServerIp;
+        var ourServerIp = ServerIdentifierFor(request, subnet);
         if (request.ServerIdentifier != null &&
             ourServerIp != null &&
             !request.ServerIdentifier.Equals(ourServerIp))
@@ -309,6 +315,19 @@ public sealed class DhcpServerService : IDhcpServerService
         {
             _logger.LogDebug("[REQUEST] Checking if {Ip} can be assigned to {Mac}",
                 requestedIp, request.ClientMac);
+
+            // RFC 2131 §4.3.2: an address on the wrong network (a laptop arriving from another
+            // LAN does INIT-REBOOT for its old IP) or one we'd never hand out MUST be NAKed —
+            // ACKing it left the client with a foreign address and no connectivity.
+            var verdict = subnet is not null
+                ? await _dhcpSubnetService.CheckRequestedIpAsync(subnet, request.ClientMac, requestedIp).ConfigureAwait(false)
+                : InFallbackRange(requestedIp) ? RequestedIpVerdict.Allowed : RequestedIpVerdict.WrongNetwork;
+            if (verdict != RequestedIpVerdict.Allowed)
+            {
+                _logger.LogWarning("[REQUEST] NAK {Ip} for {Mac}: {Verdict} in subnet '{Subnet}'",
+                    requestedIp, request.ClientMac, verdict, subnet?.Name ?? "fallback");
+                return CreateNakResponse(request, subnet);
+            }
 
             var canAssign = await _dhcpLeasesService.CanAssignIpAsync(request.ClientMac, requestedIp).ConfigureAwait(false);
 
@@ -392,6 +411,44 @@ public sealed class DhcpServerService : IDhcpServerService
         return DhcpResponseBuffer.Empty; // RFC 2131: server doesn't reply to DECLINE
     }
 
+    /// <summary>
+    /// Option 54 — an address of THIS server the client can reach (RFC 2131 §4.1): on a directly
+    /// attached subnet, our address on the receiving interface inside that subnet; for a relayed
+    /// client, the interface address the relay talks to. It used to be the subnet's Router, which
+    /// is wrong whenever the gateway is another box (and always for relayed subnets): unicast
+    /// renewals went to the wrong host and leases only refreshed at T2 by broadcast.
+    /// Falls back to the Router / configured ServerIp when the interface is unknown.
+    /// </summary>
+    internal IPAddress ServerIdentifierFor(DhcpRequest request, DhcpSubnet? subnet)
+    {
+        if (_interfaceAddresses is not null && !string.IsNullOrEmpty(request.SourceInterfaceName))
+        {
+            var addresses = _interfaceAddresses.GetIPv4(request.SourceInterfaceName);
+            var relayed = request.GiAddr is { } gi && !gi.Equals(IPAddress.Any);
+            if (!relayed && subnet is not null
+                && DhcpSubnetService.TryParseCidr(subnet.Network, subnet.SubnetMask) is { } cidr)
+            {
+                Span<byte> b = stackalloc byte[4];
+                foreach (var (address, _) in addresses)
+                    if (address.TryWriteBytes(b, out var n) && n == 4 && DhcpSubnetService.IpMatchesNetwork(b, cidr))
+                        return address;
+            }
+            if (addresses.Count > 0) return addresses[0].Address;
+        }
+        return subnet?.Router ?? _fallbackConfig.ServerIp!;
+    }
+
+    /// <summary>Fallback mode (no subnets configured): only the configured range is ours.</summary>
+    private bool InFallbackRange(IPAddress ip) =>
+        _fallbackConfig.IpRangeStart is { } start && _fallbackConfig.IpRangeEnd is { } end
+        && ToUInt(ip) is { } v && ToUInt(start) is { } s && ToUInt(end) is { } e && v >= s && v <= e;
+
+    private static uint? ToUInt(IPAddress ip)
+    {
+        Span<byte> b = stackalloc byte[4];
+        return ip.TryWriteBytes(b, out var n) && n == 4 ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(b) : null;
+    }
+
     private DhcpResponseBuffer HandleInform(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
         // RFC 2131 §3.4: an INFORM client has an address already and puts it in
@@ -415,7 +472,7 @@ public sealed class DhcpServerService : IDhcpServerService
         bool includeLeaseTime = true)
     {
         // Get effective configuration from subnet or fallback
-        var serverIp = subnet?.Router ?? _fallbackConfig.ServerIp!;
+        var serverIp = ServerIdentifierFor(request, subnet);
         var subnetMask = subnet?.SubnetMask ?? _fallbackConfig.SubnetMask!;
         var router = subnet?.Router ?? _fallbackConfig.Gateway!;
         var dnsServers = subnet?.DnsServers ?? _fallbackConfig.DnsServers.ToArray();
@@ -508,6 +565,12 @@ public sealed class DhcpServerService : IDhcpServerService
             offset = WriteOptions(buffer, offset, messageType, request, subnet, clientClass,
                 serverIp, subnetMask, router, dnsServers, leaseTime,
                 domainName, ntpServers, winsServers, bootFilename, includeLeaseTime);
+
+            // RFC 3046 §2.2: echo the relay's option 82 verbatim, as the last option. Cisco/Juniper
+            // relays check for it by default and DROP replies without it — relayed clients never
+            // got a lease. (OFFER, ACK and NAK all pass through here.)
+            if (request.RelayAgentInformation is { Length: > 0 } relayInfo)
+                offset = WriteOption(buffer, offset, DhcpOptionCode.RelayAgentInformation, relayInfo);
 
             // End option
             buffer[offset++] = (byte)DhcpOptionCode.End;
@@ -635,7 +698,12 @@ public sealed class DhcpServerService : IDhcpServerService
             var routesBytes = EncodedOnce(StaticRoutesEncoded, subnet.StaticRoutesJson, DhcpOptionExtensions.EncodeClasslessStaticRoutes);
             if (routesBytes.Length > 0)
             {
-                offset = WriteOption(buffer, offset, DhcpOptionCode.ClasslessStaticRoute, routesBytes);
+                // RFC 3442: a client that understands 121 MUST ignore option 3 (Router). Without a
+                // 0.0.0.0/0 entry here, configuring one static route took the default gateway away
+                // from every Linux/macOS/Android/Windows client on the subnet.
+                Span<byte> withDefault = stackalloc byte[routesBytes.Length + 5];
+                offset = WriteOption(buffer, offset, DhcpOptionCode.ClasslessStaticRoute,
+                    WithDefaultRoute(routesBytes, router, withDefault));
             }
         }
 
@@ -723,6 +791,26 @@ public sealed class DhcpServerService : IDhcpServerService
         }
 
         return offset;
+    }
+
+    /// <summary>
+    /// The RFC 3442 route list with a default route via <paramref name="router"/> appended — unless it
+    /// already has one, or there is no IPv4 router to point it at. Pure; <paramref name="scratch"/>
+    /// must hold routes + 5 bytes.
+    /// </summary>
+    internal static ReadOnlySpan<byte> WithDefaultRoute(ReadOnlySpan<byte> routes, IPAddress? router, Span<byte> scratch)
+    {
+        for (var i = 0; i < routes.Length;)
+        {
+            var width = routes[i];
+            if (width == 0) return routes;                 // already carries 0.0.0.0/0
+            i += 1 + (width + 7) / 8 + 4;                  // width, significant octets, gateway
+        }
+        if (router is null || !router.TryWriteBytes(scratch[(routes.Length + 1)..], out var n) || n != 4)
+            return routes;
+        routes.CopyTo(scratch);
+        scratch[routes.Length] = 0;                        // width 0 = default route, no destination octets
+        return scratch[..(routes.Length + 5)];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

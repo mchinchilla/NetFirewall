@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -61,44 +62,39 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
 
         _logger.LogDebug("[SUBNET] Cache has {Count} subnets available", _subnetCache.Count);
 
-        // Priority 0 (NEW): Use source interface name if available
-        // This is the highest priority for multi-interface DHCP server scenarios
-        if (!string.IsNullOrEmpty(request.SourceInterfaceName))
-        {
-            _logger.LogDebug("[SUBNET] Checking SourceInterfaceName {Interface} for subnet match", request.SourceInterfaceName);
-            // SQL filter `WHERE s.enabled = true` already excluded disabled subnets
-            // from _subnetCache — no need to re-check Enabled here.
-            var interfaceSubnet = _subnetCache.Values
-                .FirstOrDefault(s =>
-                    string.Equals(s.InterfaceName, request.SourceInterfaceName, StringComparison.OrdinalIgnoreCase));
-
-            if (interfaceSubnet != null)
-            {
-                _logger.LogDebug("[SUBNET] Found subnet '{SubnetName}' ({Network}) via interface {Interface}",
-                    interfaceSubnet.Name, interfaceSubnet.Network, request.SourceInterfaceName);
-                return interfaceSubnet;
-            }
-            else
-            {
-                _logger.LogDebug("[SUBNET] No subnet configured for interface {Interface}, falling back to other criteria",
-                    request.SourceInterfaceName);
-            }
-        }
-
-        // Priority 1: Use giaddr (relay agent) if present and not 0.0.0.0
+        // Priority 1: giaddr. A relayed packet ARRIVES on one of our interfaces (often the LAN),
+        // but the client lives on the relay's segment — the interface match used to win and every
+        // relayed client got a LAN address.
         if (request.GiAddr != null && !request.GiAddr.Equals(IPAddress.Any))
         {
-            _logger.LogDebug("[SUBNET] Checking GiAddr {GiAddr} for subnet match", request.GiAddr);
-            var subnet = FindSubnetContainingIp(request.GiAddr);
-            if (subnet != null)
+            var relayed = FindSubnetContainingIp(request.GiAddr);
+            if (relayed != null)
             {
-                _logger.LogDebug("[SUBNET] Found subnet '{SubnetName}' ({Network}) via relay agent {GiAddr}",
-                    subnet.Name, subnet.Network, request.GiAddr);
-                return subnet;
+                _logger.LogDebug("[SUBNET] Relayed via {GiAddr} → subnet '{SubnetName}'", request.GiAddr, relayed.Name);
+                return relayed;
             }
         }
 
-        // Priority 2: Use ciaddr if client already has an IP
+        // Priority 2: the receiving interface. Several subnets on one interface: the one holding the
+        // client's current / requested address, else the first by name — never an arbitrary
+        // dictionary order.
+        if (!string.IsNullOrEmpty(request.SourceInterfaceName))
+        {
+            DhcpSubnet? first = null, byAddress = null;
+            foreach (var s in _subnetCache.Values)
+            {
+                if (!string.Equals(s.InterfaceName, request.SourceInterfaceName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (first is null || string.CompareOrdinal(s.Name, first.Name) < 0) first = s;
+                if (byAddress is null && (Contains(s, request.CiAddr) || Contains(s, request.RequestedIp))) byAddress = s;
+            }
+            if ((byAddress ?? first) is { } interfaceSubnet)
+            {
+                _logger.LogDebug("[SUBNET] Interface {Iface} → subnet '{SubnetName}'", request.SourceInterfaceName, interfaceSubnet.Name);
+                return interfaceSubnet;
+            }
+        }
+
+        // Priority 3: Use ciaddr if client already has an IP
         if (request.CiAddr != null && !request.CiAddr.Equals(IPAddress.Any))
         {
             _logger.LogDebug("[SUBNET] Checking CiAddr {CiAddr} for subnet match", request.CiAddr);
@@ -111,7 +107,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             }
         }
 
-        // Priority 3: Use requested IP if specified
+        // Priority 4: Use requested IP if specified
         if (request.RequestedIp != null && !request.RequestedIp.Equals(IPAddress.Any))
         {
             _logger.LogDebug("[SUBNET] Checking RequestedIp {RequestedIp} for subnet match", request.RequestedIp);
@@ -124,7 +120,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             }
         }
 
-        // Priority 4: Return first enabled subnet (for direct connections without relay)
+        // Priority 5: Return first enabled subnet (for direct connections without relay)
         _logger.LogDebug("[SUBNET] No specific subnet match, looking for default subnet");
         // SQL filter already removed disabled rows; the OrderBy is kept for
         // deterministic fallback selection when multiple subnets exist.
@@ -146,6 +142,14 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         }
 
         return firstSubnet;
+    }
+
+    private bool Contains(DhcpSubnet subnet, IPAddress? ip)
+    {
+        if (ip is null || ip.Equals(IPAddress.Any)) return false;
+        Span<byte> b = stackalloc byte[4];
+        return ip.TryWriteBytes(b, out var n) && n == 4
+               && _cidrCache.TryGetValue(subnet.Id, out var cidr) && IpMatchesNetwork(b, cidr);
     }
 
     public async Task<DhcpSubnet?> FindSubnetByNetworkAsync(
@@ -289,6 +293,41 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             return (null, null);
         }
 
+        if (!_exclusionCache.TryGetValue(subnet.Id, out var subnetExclusions))
+            subnetExclusions = await LoadExclusionsForSubnetAsync(connection, subnet.Id, cancellationToken).ConfigureAwait(false);
+
+        // RFC 2131 §4.3.1: offer the client's CURRENT address if it's still valid here, else the
+        // one it asks for (option 50) if free — only then a new one from the pools. Re-DISCOVERing
+        // clients (PXE, IoT, VMs, after a NAK) used to get a new IP every time, breaking port
+        // forwards, firewall rules and DNS that pointed at the old one.
+        if (_leaseCache is not null)
+        {
+            if (_leaseCache.GetByMac(macAddress) is { IsExpired: false } current
+                && IsUsable(subnet, current.IpAddress, pools, subnetExclusions)
+                && !_leaseCache.IsIpDeclined(current.IpAddress))
+            {
+                // Reserved for ANOTHER device since: re-offering it would end in a NAK on REQUEST
+                // and the client would loop DISCOVER → NAK forever.
+                var owner = await GetReservationOwnerOrNullAsync(connection, current.IpAddress, cancellationToken).ConfigureAwait(false);
+                if (owner is null || owner.Equals(macAddress, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("[SUBNET] Re-offering {Mac} its current address {Ip}", macAddress, current.IpAddress);
+                    return (current.IpAddress, null);
+                }
+            }
+
+            if (request.RequestedIp is { } wanted && !wanted.Equals(IPAddress.Any)
+                && IsUsable(subnet, wanted, pools, subnetExclusions)
+                && !_leaseCache.IsIpDeclined(wanted)
+                && _leaseCache.CanMacUseIp(macAddress, wanted)
+                && await GetReservationOwnerOrNullAsync(connection, wanted, cancellationToken).ConfigureAwait(false) is null)
+            {
+                _logger.LogDebug("[SUBNET] Offering {Mac} the address it asked for, {Ip}", macAddress, wanted);
+                _leaseCache.HoldOffer(wanted, macAddress);
+                return (wanted, null);
+            }
+        }
+
         // LoadPoolsForSubnetAsync already runs `WHERE enabled = true ORDER BY
         // priority, name` in SQL, so the cached list is pre-filtered + sorted.
         // Iterating it directly avoids ~500B of LINQ + ToList allocation per
@@ -322,6 +361,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             {
                 _logger.LogDebug("[SUBNET] Found available IP {Ip} in pool '{PoolName}' for {Mac}",
                     ip, pool.Name, macAddress);
+                _leaseCache?.HoldOffer(ip, macAddress);   // nobody else is offered it for a minute
                 return (ip, pool);
             }
             else
@@ -335,6 +375,81 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             "[SUBNET] No available IP found in any pool for subnet '{SubnetName}', MAC={Mac}",
             subnet.Name, macAddress);
         return (null, null);
+    }
+
+    public async Task<RequestedIpVerdict> CheckRequestedIpAsync(
+        DhcpSubnet subnet, string macAddress, IPAddress ip, CancellationToken cancellationToken = default)
+    {
+        if (AddressCheck(subnet, ip) is { } refused) return refused;
+
+        // Runs on every REQUEST: in production reservations, pools and exclusions all come from
+        // cache, so a connection is opened only on a cache miss.
+        NpgsqlConnection? connection = null;
+        try
+        {
+            async ValueTask<NpgsqlConnection> Conn() =>
+                connection ??= await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+
+            // The MAC's own reservation is always valid, pools or not (static mapping).
+            var reserved = _reservations is not null
+                ? await _reservations.GetReservedIpAsync(macAddress, cancellationToken).ConfigureAwait(false)
+                : await GetMacReservationAsync(await Conn().ConfigureAwait(false), macAddress, cancellationToken).ConfigureAwait(false);
+            if (reserved is not null && reserved.Equals(ip)) return RequestedIpVerdict.Allowed;
+
+            if (!_poolCache.TryGetValue(subnet.Id, out var pools))
+                pools = await LoadPoolsForSubnetAsync(await Conn().ConfigureAwait(false), subnet.Id, cancellationToken).ConfigureAwait(false);
+            if (!_exclusionCache.TryGetValue(subnet.Id, out var exclusions))
+                exclusions = await LoadExclusionsForSubnetAsync(await Conn().ConfigureAwait(false), subnet.Id, cancellationToken).ConfigureAwait(false);
+
+            return Verdict(ip, pools, exclusions);
+        }
+        finally
+        {
+            if (connection is not null) await connection.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The no-IO part: WrongNetwork when <paramref name="ip"/> is outside <paramref name="subnet"/>,
+    /// NotAssignable for its network / broadcast / router address, null when it may go on.
+    /// </summary>
+    private RequestedIpVerdict? AddressCheck(DhcpSubnet subnet, IPAddress ip)
+    {
+        Span<byte> ipBytes = stackalloc byte[4];
+        var cidr = _cidrCache.TryGetValue(subnet.Id, out var cached) ? cached : TryParseCidr(subnet.Network, subnet.SubnetMask);
+        if (cidr is not { } c || !ip.TryWriteBytes(ipBytes, out var written) || written != 4 || !IpMatchesNetwork(ipBytes, c))
+            return RequestedIpVerdict.WrongNetwork;
+
+        var host = BinaryPrimitives.ReadUInt32BigEndian(ipBytes);
+        var mask = BinaryPrimitives.ReadUInt32BigEndian(c.MaskBytes);
+        if ((host & ~mask) == 0 || (host & ~mask) == ~mask || ip.Equals(subnet.Router))
+            return RequestedIpVerdict.NotAssignable;
+        return null;
+    }
+
+    private bool IsUsable(DhcpSubnet subnet, IPAddress ip, List<DhcpPool> pools, List<DhcpExclusion> exclusions) =>
+        AddressCheck(subnet, ip) is null && Verdict(ip, pools, exclusions) == RequestedIpVerdict.Allowed;
+
+    private async Task<string?> GetReservationOwnerOrNullAsync(NpgsqlConnection connection, IPAddress ip, CancellationToken ct)
+    {
+        if (_reservations is not null) return await _reservations.GetOwnerMacAsync(ip, ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand("SELECT mac_address::text FROM dhcp_mac_reservations WHERE reserved_ip = @ip LIMIT 1", connection);
+        cmd.Parameters.AddWithValue("ip", ip);
+        return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
+    }
+
+    private static RequestedIpVerdict Verdict(IPAddress ip, List<DhcpPool> pools, List<DhcpExclusion> exclusions)
+    {
+
+        foreach (var e in exclusions)
+            if (CompareIp(ip, e.IpStart) >= 0 && CompareIp(ip, e.IpEnd ?? e.IpStart) <= 0)
+                return RequestedIpVerdict.NotAssignable;
+
+        foreach (var pool in pools)
+            if (pool.Enabled && CompareIp(ip, pool.RangeStart) >= 0 && CompareIp(ip, pool.RangeEnd) <= 0)
+                return RequestedIpVerdict.Allowed;
+
+        return RequestedIpVerdict.NotAssignable;
     }
 
     private bool IsClientAllowedInPool(DhcpPool pool, DhcpRequest request, DhcpClass? clientClass)
@@ -431,7 +546,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                     _logger.LogDebug("[POOL] IP {Ip} is declined (ARP conflict), continuing search", ip);
                 }
                 // Check if IP is already leased in cache (cache is authoritative over DB)
-                else if (_leaseCache?.IsIpLeased(ip) == true)
+                else if (_leaseCache?.IsIpLeased(ip) == true || _leaseCache?.IsHeldForAnother(ip, macAddress) == true)
                 {
                     _logger.LogDebug("[POOL] IP {Ip} is already leased in cache, continuing search", ip);
                 }
@@ -456,7 +571,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         // Fallback: iterate through range
         _logger.LogDebug("[POOL] Using fallback iteration for pool '{PoolName}'", pool.Name);
         return await FindAvailableIpFallbackAsync(
-            connection, pool, exclusionRanges, now, cancellationToken).ConfigureAwait(false);
+            connection, pool, exclusionRanges, now, macAddress, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IPAddress?> FindAvailableIpFallbackAsync(
@@ -464,6 +579,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         DhcpPool pool,
         List<(IPAddress Start, IPAddress End)> exclusions,
         DateTime now,
+        string macAddress,
         CancellationToken cancellationToken)
     {
         var current = pool.RangeStart;
@@ -487,8 +603,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 continue;
             }
 
-            // Skip IPs already leased in cache (cache is authoritative over DB)
-            if (_leaseCache?.IsIpLeased(current) == true)
+            // Skip IPs already leased in cache (cache is authoritative over DB), or offered to another client
+            if (_leaseCache?.IsIpLeased(current) == true || _leaseCache?.IsHeldForAnother(current, macAddress) == true)
             {
                 current = IncrementIp(current);
                 if (current == null) break;

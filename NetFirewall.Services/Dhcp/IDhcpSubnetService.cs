@@ -61,6 +61,14 @@ public interface IDhcpSubnetService
     Task<DhcpClass?> MatchClientClassAsync(DhcpRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// May <paramref name="macAddress"/> hold <paramref name="ip"/> in <paramref name="subnet"/>? RFC 2131
+    /// §4.3.2: a REQUEST for an address on the wrong network, or one this server would never hand
+    /// out (outside every pool, excluded, the network/broadcast/router address), gets a NAK.
+    /// Lease conflicts with OTHER clients are the leases service's job, not this one.
+    /// </summary>
+    Task<RequestedIpVerdict> CheckRequestedIpAsync(DhcpSubnet subnet, string macAddress, IPAddress ip, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get exclusions for a subnet.
     /// </summary>
     Task<IReadOnlyList<DhcpExclusion>> GetExclusionsForSubnetAsync(Guid subnetId, CancellationToken cancellationToken = default);
@@ -78,4 +86,15 @@ public interface IDhcpSubnetService
     /// in the DhcpServer when the Web mutates a subnet/pool/exclusion.
     /// </summary>
     void InvalidateCache();
+}
+
+/// <summary>Outcome of <see cref="IDhcpSubnetService.CheckRequestedIpAsync"/>.</summary>
+public enum RequestedIpVerdict
+{
+    /// <summary>In the subnet, inside an enabled pool (or reserved for this MAC), not excluded.</summary>
+    Allowed,
+    /// <summary>Not in this subnet at all — the client moved networks (NAK).</summary>
+    WrongNetwork,
+    /// <summary>In the subnet but never assignable: outside every pool, excluded, or a reserved address (NAK).</summary>
+    NotAssignable,
 }

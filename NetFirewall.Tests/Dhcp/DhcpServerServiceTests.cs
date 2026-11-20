@@ -270,14 +270,15 @@ public class DhcpServerServiceTests
     }
 
     [Fact]
-    public async Task ExceptionInPipeline_ReturnsNak_NotPropagated()
+    public async Task ExceptionInPipeline_IsSilent_NotPropagated_NotANak()
     {
-        // FindSubnetForRequestAsync throws — must be caught and converted to NAK.
+        // FindSubnetForRequestAsync throws — must be caught and answered with SILENCE:
+        // a NAK would make a renewing client drop its address during a DB blip.
         _subnets.Setup(s => s.FindSubnetForRequestAsync(It.IsAny<DhcpRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Discover));
+        using var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Discover));
 
-        Assert.Equal((byte)DhcpMessageType.Nak, ExtractMessageType(response));
+        Assert.True(response.IsEmpty);
     }
 }

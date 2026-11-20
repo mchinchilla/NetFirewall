@@ -21,13 +21,26 @@ dotnet run --project NetFirewall.Benchmarks -c Release -- \
 
 | Benchmark | What it covers |
 |---|---|
-| `ProcessSinglePacketBenchmarks` | Full `DhcpWorker.ProcessSinglePacketAsync` loop with mocked `IDhcpServerService` and recording send seam — measures parse + dispatch + counter increment + send-prep, no DB or socket. Variants: Discover/Request × empty/non-empty service response. |
+| `ProcessSinglePacketBenchmarks` | `DhcpWorker.ProcessSinglePacketAsync` with a fixed-reply fake `IDhcpServerService` and a recording send seam — parse + DI scope + dispatch + send-prep, no DB or socket. Variants: Discover/Request × empty/non-empty reply. |
+| `FullPipelineBenchmarks` | Raw packet → worker → a DI scope per packet → the REAL `DhcpServerService` (subnet selection, class match, address choice, every option incl. DNS/NTP/domain search/121 routes, serialization). Only the DB-backed services are faked (pre-completed tasks). This is the per-lease CPU cost. |
 
-The headline number is the **`Allocated`** column. After the perf passes documented
-in `docs/PerformanceAnalysis.md`, every variant should show `-` (zero managed
-allocations per operation). A regression to non-zero means someone reintroduced
-LINQ, `string.Join`, `new byte[N]`, boxing, or similar in the hot path —
-investigate before merging.
+### Measured (2026-11-20, Apple M-series arm64, Workstation GC like production, in-process)
+
+| Benchmark | .NET 10.0.14 | .NET 11.0.0 | Allocated |
+|---|---|---|---|
+| FullPipeline — Discover | 904 ns | 864–887 ns | 2.69 KB |
+| FullPipeline — Request | 885 ns | 873–903 ns | 2.80 KB |
+| ProcessSinglePacket (worker only) | — | 189–232 ns | 1.0–1.1 KB |
+
+Same code on both runtimes: .NET 11 is **neutral** for the DHCP hot path (within noise). With
+Server GC .NET 11 measured ~17 % slower (4× more gen0 GCs for the same bytes) — irrelevant
+today because the DHCP server runs Workstation GC; re-measure before ever switching it.
+
+**Run with `DOTNET_gcServer=0`** to match production (this project's csproj enables Server GC).
+**Never use `[IterationSetup]`** in these benchmarks: it forces one invocation per iteration,
+so times become noise and allocations unmeasurable — the old "`Allocated: -` = zero allocations"
+claim came from exactly that. Never use Moq on a benchmarked path: it records every invocation
+and the run stalls. The gate is **no regression vs the numbers above**, not zero.
 
 ## Why a separate project
 

@@ -182,7 +182,7 @@ public sealed class DhcpSubnetServiceTests : IAsyncLifetime
     // ── Selection priority chain ───────────────────────────────────────
 
     [Fact]
-    public async Task FindSubnetForRequestAsync_PrefersSourceInterface_OverGiAddr()
+    public async Task FindSubnetForRequestAsync_RelayedClient_GetsTheGiAddrSubnet_NotTheReceivingInterfaces()
     {
         // Tie SourceInterface to a fw_interface, then to a subnet.
         await using (var conn = await _pg.DataSource.OpenConnectionAsync())
@@ -209,8 +209,35 @@ public sealed class DhcpSubnetServiceTests : IAsyncLifetime
         var request = MakeRequest(iface: "eth1", gi: IPAddress.Parse("10.99.0.50"));
         var picked = await _svc.FindSubnetForRequestAsync(request);
 
+        // The relay forwarded to our LAN interface (eth1), but the client lives on the relay's
+        // segment: giaddr decides. The old order handed every relayed client a LAN address.
         Assert.NotNull(picked);
-        Assert.Equal("sourced", picked!.Name); // SourceInterface beats GiAddr
+        Assert.Equal("via-gi", picked!.Name);
+    }
+
+    [Fact]
+    public async Task FindSubnetForRequestAsync_TwoSubnetsOnOneInterface_PicksTheOneHoldingTheClientsAddress()
+    {
+        var ifaceId = Guid.NewGuid();
+        await using (var conn = await _pg.DataSource.OpenConnectionAsync())
+        await using (var cmd = new NpgsqlCommand(@"
+            INSERT INTO fw_interfaces (id, name, type, addressing_mode, auto_start, enabled, created_at, updated_at)
+            VALUES (@id, 'eth2', 'LAN', 'static', true, true, now(), now())", conn))
+        {
+            cmd.Parameters.AddWithValue("id", ifaceId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        var primary = MakeSubnet("a-primary", "10.10.0.0/24", "10.10.0.1"); primary.InterfaceId = ifaceId;
+        var secondary = MakeSubnet("b-secondary", "10.20.0.0/24", "10.20.0.1"); secondary.InterfaceId = ifaceId;
+        await _svc.CreateSubnetAsync(primary);
+        await _svc.CreateSubnetAsync(secondary);
+        _svc.InvalidateCache();
+
+        var renewing = await _svc.FindSubnetForRequestAsync(MakeRequest(iface: "eth2", ci: IPAddress.Parse("10.20.0.77")));
+        var fresh = await _svc.FindSubnetForRequestAsync(MakeRequest(iface: "eth2"));
+
+        Assert.Equal("b-secondary", renewing!.Name);   // its own subnet, not whichever the dictionary yields
+        Assert.Equal("a-primary", fresh!.Name);        // deterministic: first by name
     }
 
     [Fact]

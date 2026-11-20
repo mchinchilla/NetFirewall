@@ -4,7 +4,6 @@ using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using NetFirewall.DhcpServer;
 using NetFirewall.Models.Dhcp;
 using NetFirewall.Services.Dhcp;
@@ -37,7 +36,6 @@ namespace NetFirewall.Benchmarks;
 public class ProcessSinglePacketBenchmarks
 {
     private RecordingDhcpWorker _worker = null!;
-    private DhcpPacketContext _ctx;
     private byte[] _packetTemplate = null!;
     private static readonly IPEndPoint AnyEndPoint = new(IPAddress.Loopback, 68);
 
@@ -53,43 +51,40 @@ public class ProcessSinglePacketBenchmarks
         var type = MessageType == "Request" ? DhcpMessageType.Request : DhcpMessageType.Discover;
         _packetTemplate = BuildValidRequest(type);
 
-        var service = new Mock<IDhcpServerService>(MockBehavior.Strict);
+        // A plain fake, not Moq: Moq records EVERY invocation, so millions of benchmark ops grow
+        // its invocation list without bound and the run stalls ("takes too long to run").
+        DhcpResponseBuffer reply;
         if (ServiceReturnsResponse)
         {
-            // Build a small Ack response (260 bytes — typical real response size).
             var resp = new byte[260];
             resp[236] = 99; resp[237] = 130; resp[238] = 83; resp[239] = 99;
             resp[240] = 53; resp[241] = 1; resp[242] = (byte)DhcpMessageType.Ack;
             resp[243] = 0xFF;
-            // pool=null so the service buffer doesn't get returned to a pool
-            // we don't own — would crash ArrayPool.Shared.
-            var buffer = new DhcpResponseBuffer(resp, resp.Length, pool: null);
-            service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(buffer);
+            reply = new DhcpResponseBuffer(resp, resp.Length, pool: null);
         }
         else
         {
-            service.Setup(s => s.CreateDhcpResponseAsync(It.IsAny<DhcpRequest>())).ReturnsAsync(DhcpResponseBuffer.Empty);
+            reply = DhcpResponseBuffer.Empty;
         }
+        var service = new FixedReplyService(reply);
 
-        var sp = new ServiceCollection().AddScoped(_ => service.Object).BuildServiceProvider();
+        var sp = new ServiceCollection().AddScoped<IDhcpServerService>(_ => service).BuildServiceProvider();
         _worker = new RecordingDhcpWorker(sp.GetRequiredService<IServiceScopeFactory>());
     }
 
-    [IterationSetup]
-    public void IterationSetup()
-    {
-        // Fresh packet context per iteration — the worker disposes it (returns
-        // the buffer to the pool), so we must re-rent each time.
-        var pool = ArrayPool<byte>.Shared;
-        var rented = pool.Rent(_packetTemplate.Length);
-        Array.Copy(_packetTemplate, rented, _packetTemplate.Length);
-        _ctx = new DhcpPacketContext(rented, _packetTemplate.Length, AnyEndPoint, "eth0", pool);
-    }
-
+    // No [IterationSetup]: it forces ONE invocation per iteration (time = noise, allocations
+    // unmeasurable — the old "Allocated: -" meant "not measured", not zero). It also never
+    // disposed the context (the receive loop does), so every iteration rented a fresh array.
+    // Rent → process → dispose per op, exactly like DhcpWorker's processor loop.
     [Benchmark]
     public async Task ProcessSinglePacket()
     {
-        await _worker.ProcessSinglePacketAsync(_ctx, CancellationToken.None);
+        var pool = ArrayPool<byte>.Shared;
+        var rented = pool.Rent(_packetTemplate.Length);
+        Array.Copy(_packetTemplate, rented, _packetTemplate.Length);
+        var ctx = new DhcpPacketContext(rented, _packetTemplate.Length, AnyEndPoint, "eth0", pool);
+        try { await _worker.ProcessSinglePacketAsync(ctx, CancellationToken.None); }
+        finally { ctx.Dispose(); }
     }
 
     private static byte[] BuildValidRequest(DhcpMessageType type)
@@ -123,5 +118,11 @@ public class ProcessSinglePacketBenchmarks
             // socket. ToArray would itself allocate and pollute the numbers.
             return ValueTask.FromResult(response.Length);
         }
+    }
+
+    private sealed class FixedReplyService(DhcpResponseBuffer reply) : IDhcpServerService
+    {
+        private readonly Task<DhcpResponseBuffer> _reply = Task.FromResult(reply);
+        public Task<DhcpResponseBuffer> CreateDhcpResponseAsync(DhcpRequest request) => _reply;
     }
 }

@@ -151,15 +151,7 @@ public class DhcpWorker : BackgroundService
         {
             _logger.LogInformation("[SOCKET] Using AF_PACKET raw sockets for receiving on Linux");
 
-            foreach (var iface in _interfaces)
-            {
-                _receiveSocketsByInterface[iface] = new LinuxRawSocket(iface, _logger);
-                _logger.LogInformation("[SOCKET] Created receive socket for interface {Interface}", iface);
-
-                var sendSocket = CreateSendSocketForInterface(iface);
-                _sendSocketsByInterface[iface] = sendSocket;
-                _logger.LogInformation("[SOCKET] Created send socket for interface {Interface}", iface);
-            }
+            _interfaces = OpenInterfaces(_interfaces);
         }
         else
         {
@@ -171,6 +163,51 @@ public class DhcpWorker : BackgroundService
         }
 
         _socketsInitialized = true;
+    }
+
+    /// <summary>
+    /// Opens the receive + send sockets of every interface, one at a time: an interface that is
+    /// missing, renamed or down is logged and skipped, the others keep serving. (One bad name used
+    /// to throw out of startup and take DHCP down on EVERY interface.) Throws only when none opens —
+    /// then there is nothing to serve. Returns the interfaces actually opened.
+    /// </summary>
+    internal List<string> OpenInterfaces(IReadOnlyList<string> interfaces)
+    {
+        var opened = new List<string>(interfaces.Count);
+        foreach (var iface in interfaces)
+        {
+            try
+            {
+                OpenInterface(iface);
+                opened.Add(iface);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[SOCKET] Interface {Interface} could not be opened — DHCP will NOT serve it; the others are unaffected", iface);
+            }
+        }
+        if (opened.Count == 0)
+            throw new InvalidOperationException(
+                $"No DHCP interface could be opened ({string.Join(", ", interfaces)}). Check the interface names in the DHCP subnets.");
+        return opened;
+    }
+
+    /// <summary>Receive (AF_PACKET) + send (SO_BINDTODEVICE) sockets for one interface. Overridden in tests.</summary>
+    internal virtual void OpenInterface(string iface)
+    {
+        var receive = new LinuxRawSocket(iface, _logger);
+        try
+        {
+            var send = CreateSendSocketForInterface(iface);
+            _receiveSocketsByInterface[iface] = receive;
+            _sendSocketsByInterface[iface] = send;
+        }
+        catch
+        {
+            receive.Dispose();   // don't leak the half-opened interface
+            throw;
+        }
+        _logger.LogInformation("[SOCKET] Opened receive + send sockets for interface {Interface}", iface);
     }
 
     private Socket CreateSendSocketForInterface(string interfaceName)
@@ -846,6 +883,10 @@ public class DhcpWorker : BackgroundService
 
             case DhcpOptionCode.ServerIdentifier when data.Length >= 4:
                 request.ServerIdentifier = new IPAddress(data.Slice(0, 4));
+                break;
+
+            case DhcpOptionCode.RelayAgentInformation when data.Length > 0:
+                request.RelayAgentInformation = data.ToArray();   // only relayed packets carry it
                 break;
         }
     }

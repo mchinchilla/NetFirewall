@@ -67,6 +67,8 @@ class Program
 
                     /* Services */
                     services.AddScoped<IDhcpServerService, DhcpServerService>();
+                    // This host's interface addresses → the server identifier (option 54) per reply.
+                    services.AddSingleton<IInterfaceAddressProvider, InterfaceAddressProvider>();
                     services.AddScoped<IDdnsService, DdnsService>();
                     services.AddScoped<IDhcpLeasesService, DhcpLeasesService>();
 

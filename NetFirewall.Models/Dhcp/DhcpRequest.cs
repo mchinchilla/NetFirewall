@@ -35,6 +35,8 @@ public class DhcpRequest
     public byte[]? ClientIdentifier { get; set; }
     public string? Hostname { get; set; }
     public byte[]? ParameterRequestList { get; set; }
+    /// <summary>Option 82 exactly as the relay sent it — echoed verbatim in every reply (RFC 3046 §2.2).</summary>
+    public byte[]? RelayAgentInformation { get; set; }
     public string? VendorClassIdentifier { get; set; }
     /// <summary>Option 54 — which server a REQUEST is addressed to. A server
     /// whose identifier doesn't match must stay silent (RFC 2131 §4.3.2).</summary>

@@ -465,10 +465,13 @@ public sealed class DhcpLeasesService : IDhcpLeasesService
             // Check if lease belongs to this MAC
             return result is PhysicalAddress existingMac && existingMac.Equals(parsedMac);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Rethrow: "false" means "taken" and turns into a NAK, which makes a renewing client
+            // drop its address. An infrastructure error must end in silence instead (the caller's
+            // catch-all), so the client keeps its lease and retries.
             _logger.LogError(ex, "Error checking if {Ip} can be assigned to {Mac}", ipAddress, macAddress);
-            return false;
+            throw;
         }
     }
 

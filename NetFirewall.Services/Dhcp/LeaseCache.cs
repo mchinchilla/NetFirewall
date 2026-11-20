@@ -34,6 +34,12 @@ public sealed class LeaseCache : IDisposable
     private readonly ConcurrentDictionary<uint, DateTime> _declinedIps = new();
     private readonly TimeSpan _declinedIpTtl = TimeSpan.FromHours(1);
 
+    // Offered-but-not-yet-requested addresses (RFC 2131 §4.3.1: the server SHOULD hold an offered
+    // address). Without a hold, two clients DISCOVERing together were offered the same IP and the
+    // loser was NAKed on REQUEST and had to start over. In memory only: an offer is seconds long.
+    private readonly ConcurrentDictionary<uint, (string Mac, DateTime ExpiresUtc)> _offers = new();
+    internal static readonly TimeSpan OfferHoldTime = TimeSpan.FromSeconds(60);
+
     // Write-through queue for async database persistence
     private readonly Channel<LeaseWriteOperation> _writeQueue;
     private readonly Task _writerTask;
@@ -253,6 +259,24 @@ public sealed class LeaseCache : IDisposable
         _logger.LogWarning("[CACHE] IP {Ip} marked as declined until {ExpiresAt}", ipAddress, expiresAt);
     }
 
+    /// <summary>Hold <paramref name="ipAddress"/> for <paramref name="macAddress"/> while its OFFER is outstanding.</summary>
+    public void HoldOffer(IPAddress ipAddress, string macAddress) =>
+        _offers[IpToUInt(ipAddress)] = (macAddress, DateTime.UtcNow.Add(OfferHoldTime));
+
+    /// <summary>True while <paramref name="ipAddress"/> is offered to a DIFFERENT client.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool IsHeldForAnother(IPAddress ipAddress, string macAddress)
+    {
+        var key = IpToUInt(ipAddress);
+        if (!_offers.TryGetValue(key, out var hold)) return false;
+        if (hold.ExpiresUtc <= DateTime.UtcNow)
+        {
+            _offers.TryRemove(new KeyValuePair<uint, (string, DateTime)>(key, hold));   // only that stale hold
+            return false;
+        }
+        return !hold.Mac.Equals(macAddress, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Check if an IP is available (not leased AND not declined).
     /// </summary>
@@ -275,6 +299,9 @@ public sealed class LeaseCache : IDisposable
         {
             return true;
         }
+
+        // Offered to someone else and not yet taken: that client gets it, not this one.
+        if (IsHeldForAnother(ipAddress, macAddress)) return false;
 
         // Check if IP is available (not leased to someone else)
         if (_byIp.TryGetValue(IpToUInt(ipAddress), out var ipEntry) && !ipEntry.IsExpired)
@@ -599,6 +626,9 @@ public sealed class LeaseCache : IDisposable
                 }
             }
         }
+
+        foreach (var kvp in _offers)
+            if (kvp.Value.ExpiresUtc <= now) _offers.TryRemove(kvp);
 
         // Cleanup expired declined IPs
         foreach (var kvp in _declinedIps)

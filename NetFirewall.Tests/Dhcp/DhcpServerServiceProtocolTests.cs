@@ -205,13 +205,14 @@ public class DhcpServerServiceProtocolTests
     // ── Oversized option payloads from config ──────────────────────────
 
     [Fact]
-    public async Task Discover_ConfigProducesOversizedOption_YieldsNak_NotCorruptPacket()
+    public async Task Discover_ConfigProducesOversizedOption_YieldsSilence_NotCorruptPacket()
     {
         // A DHCP option length is one byte. An admin can configure a domain
         // search list whose RFC 1035 encoding exceeds 255 bytes — the old
         // WriteOption silently truncated the length byte and emitted a packet
         // every client mis-parses. Now packet construction throws and the
-        // request is answered with a recoverable NAK.
+        // server stays silent (logged) — never a corrupt packet, and never a NAK,
+        // which RFC 2131 forbids for DISCOVER and which drops a renewing client's lease.
         var domains = string.Join(",", Enumerable.Range(0, 20).Select(i => $"subdomain{i:00}.example.org"));
         var subnet = new DhcpSubnet
         {
@@ -229,7 +230,7 @@ public class DhcpServerServiceProtocolTests
 
         using var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Discover));
 
-        Assert.Equal((byte)DhcpMessageType.Nak, ExtractMessageType(response));
+        Assert.True(response.IsEmpty);
     }
 
     // ── NAK shape ──────────────────────────────────────────────────────
