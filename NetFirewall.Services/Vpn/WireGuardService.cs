@@ -15,6 +15,16 @@ public sealed class WireGuardService : IWireGuardService
         _logger = logger;
     }
 
+    public async Task<int> MovePeersAsync(IReadOnlyCollection<Guid> peerIds, Guid toServerId, CancellationToken ct = default)
+    {
+        if (peerIds.Count == 0) return 0;
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand("UPDATE wg_peers SET server_id = @to WHERE id = ANY(@ids)", conn);
+        cmd.Parameters.AddWithValue("to", toServerId);
+        cmd.Parameters.AddWithValue("ids", peerIds.ToArray());
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<IReadOnlyList<WgServer>> ListServersAsync(CancellationToken ct = default)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);

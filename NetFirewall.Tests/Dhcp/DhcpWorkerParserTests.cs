@@ -223,16 +223,15 @@ public class DhcpWorkerParserTests
     // ── DetermineDestinationEndPoint ───────────────────────────────────
 
     [Fact]
-    public void DetermineDestination_BroadcastFlag_RoutesToBroadcast()
+    public void DetermineDestination_CiAddrSet_UnicastsToIt_EvenWithTheBroadcastBit()
     {
-        var req = new DhcpRequest
-        {
-            Flags = 0x8000,
-            CiAddr = IPAddress.Parse("10.0.0.5") // even with a CIaddr, broadcast wins
-        };
+        // RFC 2131 §4.1: "If the 'giaddr' field is zero and the 'ciaddr' field is nonzero, then the
+        // server unicasts DHCPOFFER and DHCPACK messages to the address in 'ciaddr'." The broadcast
+        // bit only matters when ciaddr is zero.
+        var req = new DhcpRequest { Flags = 0x8000, CiAddr = IPAddress.Parse("10.0.0.5") };
 
-        var ep = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
-        Assert.Equal(IPAddress.Broadcast, ep.Address);
+        var ep = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Ack, new IPEndPoint(IPAddress.Loopback, 68));
+        Assert.Equal(IPAddress.Parse("10.0.0.5"), ep.Address);
         Assert.Equal(68, ep.Port);
     }
 

@@ -111,11 +111,12 @@ public sealed class WireGuardPeersController : Controller
             var role = form.Role.ToLowerInvariant();
             var serverPeers = await _wg.GetPeersAsync(server.Id, ct);
             var existingRole = form.Id is { } eid ? serverPeers.FirstOrDefault(p => p.Id == eid)?.Role : null;
-            if (string.Equals(server.Mode, "server", StringComparison.OrdinalIgnoreCase)
-                && role == "upstream" && existingRole != "upstream")
+            // Decided by what the interface DOES (WgInterfaceRole), not by wg_servers.mode.
+            var ifaceRole = WgInterfaceRole.Classify(server, serverPeers);
+            if (ifaceRole == WgRole.Server && role == "upstream" && existingRole != "upstream")
                 return this.ToHtmxResponse(ServiceResponse<object>.Fail(
                     "VPN providers are added under Outbound connections, as a connection of their own."));
-            if (string.Equals(server.Mode, "client", StringComparison.OrdinalIgnoreCase))
+            if (ifaceRole == WgRole.Outbound)
             {
                 if (role == "client")
                     return this.ToHtmxResponse(ServiceResponse<object>.Fail(

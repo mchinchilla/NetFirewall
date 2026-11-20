@@ -225,12 +225,11 @@ public class DhcpWorkerProcessPacketTests
     // ── Static helpers: DetermineDestinationEndPoint ───────────────────
 
     [Fact]
-    public void DetermineDestination_BroadcastFlagSet_ReturnsLimitedBroadcast()
+    public void DetermineDestination_BroadcastFlagSet_NoAddressYet_ReturnsLimitedBroadcast()
     {
-        // RFC 2131 §4.1: a client setting the broadcast bit can't accept
-        // unicast (its IP stack isn't configured yet). We must reply to
-        // 255.255.255.255:68 regardless of CiAddr.
-        var req = new DhcpRequest { Flags = 0x8000, CiAddr = IPAddress.Parse("10.0.0.5") };
+        // RFC 2131 §4.1: with giaddr AND ciaddr zero, the broadcast bit means the client can't
+        // accept unicast yet — reply to 255.255.255.255:68. (With ciaddr set it is unicast.)
+        var req = new DhcpRequest { Flags = 0x8000, CiAddr = IPAddress.Any };
         var dest = DhcpWorker.DetermineDestinationEndPoint(req, DhcpMessageType.Offer, new IPEndPoint(IPAddress.Loopback, 68));
 
         Assert.Equal(IPAddress.Broadcast, dest.Address);

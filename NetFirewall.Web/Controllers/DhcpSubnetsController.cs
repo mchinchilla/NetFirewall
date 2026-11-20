@@ -137,6 +137,7 @@ public sealed class DhcpSubnetsController : Controller
         TftpServer = s.TftpServer,
         BootFilename = s.BootFilename,
         BootFilenameUefi = s.BootFilenameUefi,
+        BootFilenameIpxe = s.BootFilenameIpxe,
         DomainSearchList = s.DomainSearchList,
         InterfaceId = s.InterfaceId,
         Enabled = s.Enabled
@@ -159,6 +160,7 @@ public sealed class DhcpSubnetsController : Controller
         TftpServer = f.TftpServer,
         BootFilename = f.BootFilename,
         BootFilenameUefi = f.BootFilenameUefi,
+        BootFilenameIpxe = string.IsNullOrWhiteSpace(f.BootFilenameIpxe) ? null : f.BootFilenameIpxe.Trim(),
         DomainSearchList = f.DomainSearchList,
         InterfaceId = f.InterfaceId,
         Enabled = f.Enabled

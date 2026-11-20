@@ -677,27 +677,46 @@ public class SetupWizardService : ISetupWizardService
 
             // The remote-access SERVER interface (wg0). A re-run keeps its keypair: rotating it
             // would silently invalidate every client config already handed out.
-            var server = (await _wireguard.ListServersAsync(ct)).FirstOrDefault(s => s.Mode == "server")
-                         ?? new WgServer { Name = WgInterfaceName.ServerDefault, Mode = "server" };
-            if (string.IsNullOrEmpty(server.PrivateKey))
+            // The existing server side by what it DOES (a legacy wg0 may say mode 'client'); a new
+            // one takes wg0 unless an outbound connection already holds that name.
+            var all = await _wireguard.ListServersAsync(ct);
+            WgServer? server = null;
+            var role = WgRole.Empty;
+            foreach (var s in all)
             {
-                var keypair = await _daemon.GenerateWireGuardKeyPairAsync(ct);
-                if (!keypair.Success || keypair.Data is null)
-                    throw new InvalidOperationException($"WireGuard keypair generation failed: {keypair.Message}");
-                server.PrivateKey = keypair.Data.PrivateKey;
-                server.PublicKey  = keypair.Data.PublicKey;
+                role = WgInterfaceRole.Classify(s, await _wireguard.GetPeersAsync(s.Id, ct));
+                if (WgInterfaceRole.IsServerSide(role)) { server = s; break; }
             }
-            server.Mode = "server";
-            server.AddressCidr = addressCidr;
-            server.ListenPort = config.WireGuardPort;
-            server.Enabled = true;
-            await _wireguard.SaveServerAsync(server, ct);
+            if (server is not null && role == WgRole.DualRole)
+            {
+                // A legacy wg0 that also carries an outbound tunnel: rewriting its address/port here
+                // would cut the provider's assigned address and break the tunnel. Leave it to the
+                // VPN pages (where it can be split) and say so.
+                _logger.LogWarning("WireGuard {Name} also carries an outbound tunnel — the wizard leaves it unchanged; manage it under VPN.", server.Name);
+            }
+            else
+            {
+                server ??= new WgServer { Name = WgInterfaceRole.NextServerName(all.Select(s => s.Name)), Mode = "server" };
+                if (string.IsNullOrEmpty(server.PrivateKey))
+                {
+                    var keypair = await _daemon.GenerateWireGuardKeyPairAsync(ct);
+                    if (!keypair.Success || keypair.Data is null)
+                        throw new InvalidOperationException($"WireGuard keypair generation failed: {keypair.Message}");
+                    server.PrivateKey = keypair.Data.PrivateKey;
+                    server.PublicKey  = keypair.Data.PublicKey;
+                }
+                server.Mode = "server";
+                server.AddressCidr = addressCidr;
+                server.ListenPort = config.WireGuardPort;
+                server.Enabled = true;
+                await _wireguard.SaveServerAsync(server, ct);
 
-            var wgResp = await _daemon.ApplyWireGuardAsync(server.Name, ct);
-            if (!wgResp.Success)
-                throw new InvalidOperationException($"WireGuard apply failed: {wgResp.Message}");
+                var wgResp = await _daemon.ApplyWireGuardAsync(server.Name, ct);
+                if (!wgResp.Success)
+                    throw new InvalidOperationException($"WireGuard apply failed: {wgResp.Message}");
 
-            _logger.LogInformation("WireGuard server applied on port {Port}, address {Addr}", server.ListenPort, server.AddressCidr);
+                _logger.LogInformation("WireGuard server applied on port {Port}, address {Addr}", server.ListenPort, server.AddressCidr);
+            }
         }
 
         // ── QoS / tc HTB ────────────────────────────────────────────────

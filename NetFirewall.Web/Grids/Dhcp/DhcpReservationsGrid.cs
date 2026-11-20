@@ -4,10 +4,10 @@ using NetFirewall.Services.Dhcp;
 
 namespace NetFirewall.Web.Grids.Dhcp;
 
-public sealed record ReservationGridRow(Guid Id, string Mac, string Ip, string? Description)
+public sealed record ReservationGridRow(Guid Id, string Mac, string Ip, string? Description, string? Hostname = null)
 {
     public static ReservationGridRow From(DhcpMacReservation r) =>
-        new(r.Id, LeaseGridRow.MacText(r.MacAddress.ToString()), r.ReservedIp.ToString(), r.Description);
+        new(r.Id, LeaseGridRow.MacText(r.MacAddress.ToString()), r.ReservedIp.ToString(), r.Description, r.Hostname);
 }
 
 /// <summary>DHCP → Reservations: static MAC → IP bindings, edited in the host drawer.</summary>
@@ -32,6 +32,10 @@ public static class DhcpReservationsGrid
                 .Header("MAC")
                 .Searchable()
                 .RawCellHtml(r => GridCell.Chip("mac", r.Mac)))
+            .AddColumn("hostname", r => r.Hostname ?? string.Empty, c => c
+                .Header("Host name")
+                .Searchable()
+                .RawCellHtml(r => GridCell.Mono(r.Hostname)))
             .AddColumn("description", r => r.Description ?? string.Empty, c => c
                 .Header("Description")
                 .Searchable()

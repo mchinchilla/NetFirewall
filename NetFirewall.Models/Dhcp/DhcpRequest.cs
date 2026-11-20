@@ -35,6 +35,12 @@ public class DhcpRequest
     public byte[]? ClientIdentifier { get; set; }
     public string? Hostname { get; set; }
     public byte[]? ParameterRequestList { get; set; }
+    /// <summary>Option 93 — PXE client architecture (RFC 4578).</summary>
+    public ushort? ClientArchitecture { get; set; }
+    /// <summary>Option 77 — first user class ("iPXE" for iPXE).</summary>
+    public string? UserClass { get; set; }
+    /// <summary>Option 97 — PXE client UUID, echoed in replies.</summary>
+    public byte[]? ClientMachineId { get; set; }
     /// <summary>Option 82 exactly as the relay sent it — echoed verbatim in every reply (RFC 3046 §2.2).</summary>
     public byte[]? RelayAgentInformation { get; set; }
     public string? VendorClassIdentifier { get; set; }

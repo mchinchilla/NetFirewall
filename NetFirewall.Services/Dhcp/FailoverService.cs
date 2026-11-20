@@ -34,7 +34,16 @@ public sealed class FailoverService : IFailoverService, IDisposable
     private readonly object _stateLock = new();
 
     public FailoverState CurrentState { get; private set; } = FailoverState.Startup;
-    public bool IsEnabled => _peerConfig?.Enabled == true;
+    /// <summary>
+    /// The failover protocol is NOT operational: this service only dials out — there is no
+    /// listener, MCLT isn't enforced and bindings aren't exchanged — so two peers never connect,
+    /// both sit in Startup (CanServe = false) and DHCP stopped serving on BOTH boxes. Until a real
+    /// implementation lands, an enabled peer row is ignored (logged at startup) and DHCP serves
+    /// normally. The Web refuses to enable a peer for the same reason.
+    /// </summary>
+    public const bool ProtocolImplemented = false;
+
+    public bool IsEnabled => ProtocolImplemented && _peerConfig?.Enabled == true;
     public bool CanServe => CurrentState == FailoverState.Normal ||
                             CurrentState == FailoverState.PartnerDown ||
                             CurrentState == FailoverState.CommunicationsInterrupted;
@@ -51,6 +60,14 @@ public sealed class FailoverService : IFailoverService, IDisposable
     {
         // Load configuration
         _peerConfig = await LoadPeerConfigAsync(cancellationToken).ConfigureAwait(false);
+
+        if (_peerConfig is { Enabled: true } && !ProtocolImplemented)
+        {
+            _logger.LogWarning(
+                "DHCP failover peer '{Peer}' is enabled in the database, but failover is not implemented " +
+                "(no peer listener) — ignoring it and serving DHCP normally on this box.", _peerConfig.Name);
+            return;
+        }
 
         if (_peerConfig == null || !_peerConfig.Enabled)
         {

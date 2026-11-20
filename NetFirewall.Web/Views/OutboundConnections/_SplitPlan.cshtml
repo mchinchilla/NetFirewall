@@ -1,0 +1,64 @@
+@model NetFirewall.Services.Vpn.WgSplitPlan
+@*
+    Dry run of the split. Nothing changes until "Split" (elevated, typed confirmation). Address
+    checkboxes re-render the plan (htmx GET) so the operator sees exactly what will happen.
+*@
+<form hx-post="/Vpn/Outbound/split/@Model.SourceName" hx-swap="none" class="space-y-4" x-data="{ typed: '' }">
+    @Html.AntiForgeryToken()
+
+    <p class="text-sm">
+        <span class="font-mono font-semibold">@Model.SourceName</span> keeps its name, its outbound tunnel and every
+        routing rule built on it. The VPN server moves to <span class="font-mono font-semibold">@Model.ServerName</span>
+        with the same key and port <span class="font-mono">@Model.ListenPort</span> — client configs stay valid.
+        Connected clients reconnect on their own within about 15 seconds.
+    </p>
+
+    @if (Model.Blockers.Count > 0)
+    {
+        <div class="rounded-md p-3 text-sm bg-feedback-danger-bg text-feedback-danger-fg border border-feedback-danger-bd">
+            @foreach (var b in Model.Blockers) { <p>@b</p> }
+        </div>
+    }
+
+    <fieldset class="space-y-1.5">
+        <legend class="text-xs font-medium text-surface-fg">Addresses for the VPN server (@Model.ServerName)</legend>
+        @foreach (var a in Model.AddressesToServer.Concat(Model.AddressesKept).Distinct())
+        {
+            <label class="flex items-center gap-2 text-sm font-mono">
+                <input type="checkbox" name="serverAddress" value="@a" checked="@Model.AddressesToServer.Contains(a)"
+                       hx-get="/Vpn/Outbound/split/@Model.SourceName" hx-include="closest form" hx-target="#drawer-body" hx-swap="innerHTML" hx-trigger="change" />
+                @a <span class="text-xs text-surface-fg-muted font-sans">@(Model.AddressesToServer.Contains(a) ? "→ server" : $"stays on {Model.SourceName}")</span>
+            </label>
+        }
+    </fieldset>
+
+    <div class="grid grid-cols-2 gap-3 text-sm">
+        <div>
+            <p class="text-xs font-medium text-surface-fg-muted">Move to @Model.ServerName</p>
+            <ul class="mt-1 space-y-0.5">@foreach (var p in Model.PeersToServer) { <li>@p.Name <span class="text-xs text-surface-fg-muted">(@p.Role)</span></li> }</ul>
+        </div>
+        <div>
+            <p class="text-xs font-medium text-surface-fg-muted">Stay on @Model.SourceName</p>
+            <ul class="mt-1 space-y-0.5">@foreach (var p in Model.PeersKept) { <li>@p.Name <span class="text-xs text-surface-fg-muted">(@p.Role)</span></li> }</ul>
+        </div>
+    </div>
+
+    @if (Model.HandRulesToReview.Count > 0)
+    {
+        <div class="rounded-md p-3 text-sm bg-feedback-info-bg text-feedback-info-fg border border-feedback-info-bd">
+            <p class="font-medium">Hand-written rules on @Model.SourceName — review after the split</p>
+            <p class="text-xs mt-0.5">They keep pointing at @Model.SourceName (the outbound link). Any meant for VPN clients must be moved to @Model.ServerName by hand.</p>
+            <ul class="mt-1 list-disc pl-5 text-xs">@foreach (var r in Model.HandRulesToReview) { <li>@r</li> }</ul>
+        </div>
+    }
+
+    <div class="space-y-1.5 pt-2 border-t border-surface-border">
+        <label for="f-confirm" class="block text-xs font-medium">Type <span class="font-mono font-semibold">@Model.SourceName</span> to confirm</label>
+        <input id="f-confirm" name="confirmName" class="input font-mono" autocomplete="off" x-model="typed" />
+        <p class="text-xs text-surface-fg-muted">You'll have 10 minutes to keep the split; if you don't, it reverts on its own.</p>
+    </div>
+    <div class="flex justify-end gap-2">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="typed !== '@Model.SourceName' || @(Model.CanExecute ? "false" : "true")">Split @Model.SourceName</button>
+    </div>
+</form>

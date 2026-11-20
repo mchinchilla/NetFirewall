@@ -15,7 +15,7 @@ namespace NetFirewall.Services.Vpn;
 /// see MissingTableGuard. This is what stops the 42P01 storm observed on tekium
 /// where every vpn-health probe and dashboard read threw on a 30s loop.
 /// </summary>
-public sealed class VpnHealthService : IVpnHealthService
+public sealed class VpnHealthService : IVpnHealthService, NetFirewall.Services.Monitoring.ISystemAlertWriter
 {
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<VpnHealthService> _logger;

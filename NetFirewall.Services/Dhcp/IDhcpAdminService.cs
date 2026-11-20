@@ -39,6 +39,13 @@ public interface IDhcpAdminService
     Task<IReadOnlyList<DhcpMacReservation>> GetReservationsAsync(string? filter = null, CancellationToken ct = default);
     Task<DhcpMacReservation?> GetReservationByIdAsync(Guid id, CancellationToken ct = default);
     Task<DhcpMacReservation> CreateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Pin a lease: reserve its address for its MAC, naming the device from the hostname it sent
+    /// (sanitized to a DNS label; left empty if taken or unusable). Fails with a reason when the
+    /// MAC or IP is already reserved.
+    /// </summary>
+    Task<NetFirewall.Models.ServiceResponse<DhcpMacReservation>> ReserveLeaseAsync(Guid leaseId, CancellationToken ct = default);
     Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default);
     Task<bool> DeleteReservationAsync(Guid id, CancellationToken ct = default);
 

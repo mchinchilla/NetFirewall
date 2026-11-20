@@ -19,6 +19,8 @@ public sealed class OutboundConnectionsPageViewModel
     public IReadOnlyList<OutboundConnectionCard> Connections { get; init; } = [];
     public SharedInterfaceTunnels? Shared { get; init; }
     public string? CreatedName { get; init; }
+    /// <summary>A split waiting for confirmation (banner with countdown).</summary>
+    public NetFirewall.Services.Vpn.WgSplitPending? PendingSplit { get; set; }
     public string? DeletedName { get; init; }
     public bool DeleteApplyWarn { get; init; }
 
@@ -27,14 +29,16 @@ public sealed class OutboundConnectionsPageViewModel
         IReadOnlyList<(WgServer Server, IReadOnlyList<WgPeer> Peers)> all,
         string? created, string? deleted, bool applyWarn)
     {
+        // By role, not by wg_servers.mode: a legacy wg0 may say 'client' while it also serves.
         var cards = all
-            .Where(x => string.Equals(x.Server.Mode, "client", StringComparison.OrdinalIgnoreCase))
-            .Select(x => new OutboundConnectionCard(x.Server, x.Peers.FirstOrDefault()))
+            .Where(x => WgInterfaceRole.Classify(x.Server, x.Peers) == WgRole.Outbound)
+            .Select(x => new OutboundConnectionCard(x.Server, x.Peers.FirstOrDefault(p => p.Role is "upstream" or "site") ?? x.Peers.FirstOrDefault()))
             .ToList();
         var shared = all
-            .Where(x => string.Equals(x.Server.Mode, "server", StringComparison.OrdinalIgnoreCase))
-            .Select(x => new SharedInterfaceTunnels(x.Server, x.Peers.Where(p => p.Role == "upstream").ToList()))
-            .FirstOrDefault(x => x.Tunnels.Count > 0);
+            .Where(x => WgInterfaceRole.Classify(x.Server, x.Peers) == WgRole.DualRole)
+            .Select(x => new SharedInterfaceTunnels(x.Server,
+                x.Peers.Where(p => p.Role == "upstream" || (p.Role == "site" && !string.IsNullOrWhiteSpace(p.Endpoint))).ToList()))
+            .FirstOrDefault();
         return new() { Connections = cards, Shared = shared, CreatedName = created, DeletedName = deleted, DeleteApplyWarn = applyWarn };
     }
 }

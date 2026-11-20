@@ -88,9 +88,17 @@ public sealed class LinuxRawSocket : IDisposable
         public long tv_usec;
     }
 
-    public LinuxRawSocket(string interfaceName, ILogger logger)
+    private readonly Func<IPAddress, bool>? _isLocalAddress;
+    private readonly Action<IPAddress, string>? _onForeignServerReply;
+
+    /// <param name="isLocalAddress">Is an IPv4 address one of this host's? Packets unicast to any other address are dropped.</param>
+    /// <param name="onForeignServerReply">Called with (server IP, server MAC) for a DHCP reply from another host.</param>
+    public LinuxRawSocket(string interfaceName, ILogger logger, Func<IPAddress, bool>? isLocalAddress = null,
+        Action<IPAddress, string>? onForeignServerReply = null)
     {
         _logger = logger;
+        _isLocalAddress = isLocalAddress;
+        _onForeignServerReply = onForeignServerReply;
         InterfaceName = interfaceName;
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -189,7 +197,48 @@ public sealed class LinuxRawSocket : IDisposable
     /// <summary>
     /// Result of parsing a raw ethernet frame down to its DHCP payload.
     /// </summary>
-    internal readonly record struct DhcpFrameInfo(int PayloadOffset, int PayloadLength, IPAddress SourceIp, int SourcePort);
+    internal readonly record struct DhcpFrameInfo(int PayloadOffset, int PayloadLength, IPAddress SourceIp, int SourcePort, IPAddress DestinationIp);
+
+    /// <summary>
+    /// A DHCP server REPLY (UDP 67 → 68, BOOTREPLY) — someone answering clients. Used to spot a rogue
+    /// server on the LAN; the caller decides whether the sender is us. Pure, bounds-checked.
+    /// </summary>
+    internal static bool TryReadServerReply(ReadOnlySpan<byte> frame, out IPAddress serverIp, out string serverMac)
+    {
+        serverIp = IPAddress.None;
+        serverMac = string.Empty;
+        const int ipOffset = ETH_HEADER_SIZE;
+        if (frame.Length < ipOffset + IP_HEADER_MIN_SIZE + UDP_HEADER_SIZE + 1) return false;
+        if (((frame[12] << 8) | frame[13]) != 0x0800) return false;                 // IPv4
+        var ihl = (frame[ipOffset] & 0x0F) * 4;
+        if ((frame[ipOffset] >> 4) != 4 || ihl < IP_HEADER_MIN_SIZE || frame[ipOffset + 9] != IPPROTO_UDP) return false;
+        var udp = ipOffset + ihl;
+        if (frame.Length < udp + UDP_HEADER_SIZE + 1) return false;
+        var src = (frame[udp] << 8) | frame[udp + 1];
+        var dst = (frame[udp + 2] << 8) | frame[udp + 3];
+        if (src != 67 || dst != 68 || frame[udp + UDP_HEADER_SIZE] != 2) return false;  // op = BOOTREPLY
+        serverIp = new IPAddress(frame.Slice(ipOffset + 12, 4));
+        serverMac = NetFirewall.Models.Wol.MacAddressText.Format(frame.Slice(6, 6), lowercase: true);
+        return true;
+    }
+
+    private const byte PACKET_OTHERHOST = 3;   // to another host's MAC (promiscuous NIC, e.g. a capture running)
+    private const byte PACKET_OUTGOING = 4;    // our own transmission looped back
+
+    /// <summary>
+    /// Is this DHCP packet ours to answer? AF_PACKET sees everything on the wire and bypasses
+    /// nftables, so without this the server answered frames for other hosts (a promiscuous NIC
+    /// during a capture) and REQUESTs only ROUTED through the firewall to another DHCP server —
+    /// RENEWING requests carry no option 54, so it ACKed/NAKed on that server's behalf.
+    /// Accept: broadcast, or a destination address of ours (relays and renewals unicast to us).
+    /// Unknown local addresses (<paramref name="isLocal"/> null) stay permissive. Pure.
+    /// </summary>
+    internal static bool ShouldAccept(byte packetType, IPAddress destination, Func<IPAddress, bool>? isLocal)
+    {
+        if (packetType is PACKET_OTHERHOST or PACKET_OUTGOING) return false;
+        if (destination.Equals(IPAddress.Broadcast)) return true;
+        return isLocal is null || isLocal(destination);
+    }
 
     /// <summary>
     /// Pure ethernet/IPv4/UDP demultiplexer for the AF_PACKET receive path:
@@ -262,7 +311,8 @@ public sealed class LinuxRawSocket : IDisposable
         }
 
         var srcIp = new IPAddress(frame.Slice(ipOffset + 12, 4));
-        info = new DhcpFrameInfo(dhcpOffset, dhcpLength, srcIp, srcPort);
+        var dstIp = new IPAddress(frame.Slice(ipOffset + 16, 4));
+        info = new DhcpFrameInfo(dhcpOffset, dhcpLength, srcIp, srcPort, dstIp);
         return true;
     }
 
@@ -292,6 +342,19 @@ public sealed class LinuxRawSocket : IDisposable
         }
 
         if (!TryExtractDhcpPayload(_rawBuffer.AsSpan(0, (int)bytesRead), out var frame))
+        {
+            // Not a request to us — but maybe ANOTHER server answering on this LAN.
+            if (_onForeignServerReply is not null
+                && srcAddr.sll_pkttype is not (PACKET_OUTGOING)
+                && TryReadServerReply(_rawBuffer.AsSpan(0, (int)bytesRead), out var serverIp, out var serverMac)
+                && (_isLocalAddress is null || !_isLocalAddress(serverIp)))
+            {
+                _onForeignServerReply(serverIp, serverMac);
+            }
+            return 0;
+        }
+
+        if (!ShouldAccept(srcAddr.sll_pkttype, frame.DestinationIp, _isLocalAddress))
         {
             return 0;
         }

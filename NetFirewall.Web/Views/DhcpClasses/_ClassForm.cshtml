@@ -29,7 +29,7 @@
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = nameof(Model.MatchValue), Label = "Match value", Required = true, Value = Model.MatchValue,
                 Placeholder = "PXEClient:Arch:00007",
-                Help = "Substring match against the option / prefix."
+                Help = "Text types match anywhere, case-insensitive. MAC prefix: 00:0c:29. Hardware type: 1 (Ethernet). Client ID / relay info: hex (01000c29…) or text (a circuit-id like Gi0/14). Generic option: code=value, e.g. 60=MSFT or 93=7."
             })
         </div>
 

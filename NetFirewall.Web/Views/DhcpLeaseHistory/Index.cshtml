@@ -1,0 +1,23 @@
+@{
+    ViewData["Title"] = "DHCP — Lease history";
+    Layout = "_Layout";
+}
+<div>
+    <div class="mb-4" style="animation: var(--animate-slide-up);">
+        <p class="page-kicker">DHCP</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Lease history</h1>
+        <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+            Which device held which address, and when — search an address to see who had it, or a MAC to follow a
+            device. One row per stretch at the same address; kept for 90 days.
+        </p>
+    </div>
+    <section style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Dhcp.DhcpLeaseHistoryGrid.Id,
+            Title = "DHCP lease history",
+            DefaultQuery = NetFirewall.Web.Grids.Dhcp.DhcpLeaseHistoryGrid.DefaultQuery,
+            RefreshEverySeconds = 60
+        })
+    </section>
+</div>

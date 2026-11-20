@@ -1,0 +1,21 @@
+@model NetFirewall.Services.Vpn.WgSplitPending
+@*
+    A split is live but unconfirmed. The watchdog reverts it at the deadline — the operator may
+    have lost their own connection through the tunnel being split, so silence means "undo".
+*@
+@{
+    var deadlineIso = Model.DeadlineUtc.ToString("o");
+}
+<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg p-3 mb-4 bg-feedback-warning-bg text-feedback-warning-fg border border-feedback-warning-bd"
+     role="status" x-data="{ left: '', tick() { const s = Math.max(0, Math.round((new Date('@deadlineIso') - Date.now()) / 1000)); this.left = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; } }"
+     x-init="tick(); setInterval(() => tick(), 1000)">
+    <p class="text-sm">
+        <span class="font-semibold">@Model.SourceName was split</span> — @Model.ServerName is now the VPN server and
+        @Model.SourceName the outbound link. Check that everything works, then keep it.
+        It reverts automatically in <span class="font-mono font-semibold" x-text="left"></span>.
+    </p>
+    <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost text-xs" hx-post="/Vpn/Outbound/split/revert/@Model.Id" hx-swap="none">Revert now</button>
+        <button type="button" class="btn btn-primary text-xs" hx-post="/Vpn/Outbound/split/confirm/@Model.Id" hx-swap="none">Keep the split</button>
+    </div>
+</div>

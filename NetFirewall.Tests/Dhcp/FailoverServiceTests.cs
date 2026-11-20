@@ -156,7 +156,7 @@ public sealed class FailoverServiceTests : IAsyncLifetime
         Assert.True(_svc.ShouldHandleRequest("ff:ff:ff:ff:ff:ff", IPAddress.Parse("10.0.0.250")));
     }
 
-    [Fact]
+    [Fact(Skip = "Failover is gated off (FailoverService.ProtocolImplemented = false: no peer listener). The load-split logic is kept for a real implementation — re-enable then.")]
     public async Task ShouldHandleRequest_NormalState_AndSecondaryFlipsForSameMac()
     {
         // Contract test (no statistical claims): the same MAC, processed by
@@ -207,7 +207,7 @@ public sealed class FailoverServiceTests : IAsyncLifetime
             .GetField("_peerConfig", BindingFlags.NonPublic | BindingFlags.Instance)!
             .SetValue(svc, cfg);
 
-    [Fact]
+    [Fact(Skip = "Failover is gated off (FailoverService.ProtocolImplemented = false: no peer listener). The load-split logic is kept for a real implementation — re-enable then.")]
     public void ShouldHandleRequest_CommunicationsInterrupted_SplitsByLastIpOctet()
     {
         SetPeerConfig(new FailoverPeer

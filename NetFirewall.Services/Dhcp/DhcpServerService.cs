@@ -23,6 +23,7 @@ public sealed class DhcpServerService : IDhcpServerService
         memo.GetValue(text, s => encode(s));
 
     private readonly IInterfaceAddressProvider? _interfaceAddresses;
+    private readonly IDdnsUpdateQueue? _ddnsQueue;
     private readonly IDhcpLeasesService _dhcpLeasesService;
     private readonly IDhcpSubnetService _dhcpSubnetService;
     private readonly IFailoverService? _failoverService;
@@ -37,11 +38,6 @@ public sealed class DhcpServerService : IDhcpServerService
     // Magic cookie bytes
     private static readonly byte[] MagicCookie = [99, 130, 83, 99];
 
-    // PXE options (pre-computed)
-    private static readonly byte[] PxeArchTypeLegacy = [0x00, 0x00]; // BIOS x86
-    private static readonly byte[] PxeArchTypeUefi64 = [0x00, 0x07]; // UEFI x64
-    private static readonly byte[] PxeNetInterface = [0x01]; // Ethernet
-    private static readonly byte[] PxeDiscoveryControl = [0x03];
 
     // Buffer pool for packet construction
     private readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
@@ -52,9 +48,11 @@ public sealed class DhcpServerService : IDhcpServerService
         ILogger<DhcpServerService> logger,
         IOptions<DhcpConfig> dhcpConfig,
         IFailoverService? failoverService = null,
-        IInterfaceAddressProvider? interfaceAddresses = null)
+        IInterfaceAddressProvider? interfaceAddresses = null,
+        IDdnsUpdateQueue? ddnsQueue = null)
     {
         _interfaceAddresses = interfaceAddresses;
+        _ddnsQueue = ddnsQueue;
         _dhcpLeasesService = dhcpLeasesService;
         _dhcpSubnetService = dhcpSubnetService;
         _failoverService = failoverService;
@@ -123,10 +121,11 @@ public sealed class DhcpServerService : IDhcpServerService
             {
                 DhcpMessageType.Discover => await HandleDiscoverAsync(request, subnet, clientClass).ConfigureAwait(false),
                 DhcpMessageType.Request => await HandleRequestAsync(request, subnet, clientClass).ConfigureAwait(false),
-                DhcpMessageType.Release => await HandleReleaseAsync(request).ConfigureAwait(false),
-                DhcpMessageType.Decline => await HandleDeclineAsync(request).ConfigureAwait(false),
+                DhcpMessageType.Release => await HandleReleaseAsync(request, subnet).ConfigureAwait(false),
+                DhcpMessageType.Decline => await HandleDeclineAsync(request, subnet).ConfigureAwait(false),
                 DhcpMessageType.Inform => HandleInform(request, subnet, clientClass),
-                _ => CreateNakResponse(request, subnet)
+                // Unknown / BOOTP / server-to-server types: no reply (a NAK only ever answers a REQUEST).
+                _ => DhcpResponseBuffer.Empty
             };
 
             if (response.IsEmpty)
@@ -223,10 +222,12 @@ public sealed class DhcpServerService : IDhcpServerService
 
         if (offeredIp == null)
         {
+            // RFC 2131: a NAK only ever answers a REQUEST. With nothing to offer the server stays
+            // silent — the client retries and another server (if any) can answer.
             _logger.LogWarning(
-                "[DISCOVER] FAILED - No IP available for {Mac} in subnet '{Subnet}'. Sending NAK.",
+                "[DISCOVER] No IP available for {Mac} in subnet '{Subnet}' — pool exhausted, not replying.",
                 request.ClientMac, subnet?.Name ?? "fallback");
-            return CreateNakResponse(request, subnet);
+            return DhcpResponseBuffer.Empty;
         }
 
         _logger.LogInformation(
@@ -349,6 +350,11 @@ public sealed class DhcpServerService : IDhcpServerService
                     "[REQUEST] SUCCESS - Assigned {Ip} to {Mac} (Hostname: {Hostname}) for {LeaseTime}s",
                     requestedIp, request.ClientMac, request.Hostname ?? "(none)", leaseTime);
 
+                // DNS registration AFTER the ACK, off the packet path (the worker checks the subnet's
+                // DDNS config; a slow DNS server can't delay this reply).
+                if (!string.IsNullOrWhiteSpace(request.Hostname))
+                    _ddnsQueue?.TryEnqueue(new DdnsWork(DdnsAction.Register, request.ClientMac, requestedIp, request.Hostname, subnet?.Id));
+
                 // Notify failover peer of binding update
                 if (_failoverService != null && _failoverService.IsEnabled)
                 {
@@ -381,12 +387,33 @@ public sealed class DhcpServerService : IDhcpServerService
         return CreateNakResponse(request, subnet);
     }
 
-    private async Task<DhcpResponseBuffer> HandleReleaseAsync(DhcpRequest request)
+    /// <summary>RELEASE / DECLINE carry option 54: one addressed to ANOTHER server is not ours to act on.</summary>
+    private bool AddressedToAnotherServer(DhcpRequest request, DhcpSubnet? subnet) =>
+        request.ServerIdentifier is { } sid && !sid.Equals(IPAddress.Any)
+        && !sid.Equals(ServerIdentifierFor(request, subnet));
+
+    private async Task<DhcpResponseBuffer> HandleReleaseAsync(DhcpRequest request, DhcpSubnet? subnet)
     {
+        if (AddressedToAnotherServer(request, subnet))
+        {
+            _logger.LogDebug("[RELEASE] From {Mac} for server {Server} — not ours, ignoring", request.ClientMac, request.ServerIdentifier);
+            return DhcpResponseBuffer.Empty;
+        }
+
         // Get the lease before releasing to notify failover peer
         var assignedIp = await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
 
+        // The client releases the address in ciaddr — only if that's the one we gave it (a stale or
+        // spoofed RELEASE must not free the client's current lease).
+        if (assignedIp is null
+            || (request.CiAddr is { } ci && !ci.Equals(IPAddress.Any) && !ci.Equals(assignedIp)))
+        {
+            _logger.LogDebug("[RELEASE] {Mac} released {Ip} but holds {Assigned} — ignoring", request.ClientMac, request.CiAddr, assignedIp);
+            return DhcpResponseBuffer.Empty;
+        }
+
         await _dhcpLeasesService.ReleaseLeaseAsync(request.ClientMac).ConfigureAwait(false);
+        _ddnsQueue?.TryEnqueue(new DdnsWork(DdnsAction.Remove, request.ClientMac, assignedIp, null, subnet?.Id));
 
         // Notify failover peer of release
         if (_failoverService != null && _failoverService.IsEnabled && assignedIp != null)
@@ -401,13 +428,24 @@ public sealed class DhcpServerService : IDhcpServerService
         return DhcpResponseBuffer.Empty; // RFC 2131: server doesn't reply to RELEASE
     }
 
-    private async Task<DhcpResponseBuffer> HandleDeclineAsync(DhcpRequest request)
+    private async Task<DhcpResponseBuffer> HandleDeclineAsync(DhcpRequest request, DhcpSubnet? subnet)
     {
-        if (request.RequestedIp != null && !request.RequestedIp.Equals(IPAddress.Any))
+        var declined = request.RequestedIp;
+        if (declined is null || declined.Equals(IPAddress.Any) || AddressedToAnotherServer(request, subnet))
+            return DhcpResponseBuffer.Empty; // RFC 2131: server doesn't reply to DECLINE
+
+        // A client can only decline the address WE assigned it. Declining used to quarantine any
+        // IP and delete whatever lease held it — one bogus DECLINE knocked another client's lease out.
+        var assigned = await _dhcpLeasesService.GetAssignedIpAsync(request.ClientMac).ConfigureAwait(false);
+        if (assigned is null || !assigned.Equals(declined))
         {
-            await _dhcpLeasesService.MarkIpAsDeclinedAsync(request.RequestedIp).ConfigureAwait(false);
-            _logger.LogWarning("IP {Ip} declined by {Mac}", request.RequestedIp, request.ClientMac);
+            _logger.LogWarning("[DECLINE] {Mac} declined {Ip}, which is not its lease ({Assigned}) — ignoring",
+                request.ClientMac, declined, assigned);
+            return DhcpResponseBuffer.Empty;
         }
+
+        await _dhcpLeasesService.MarkIpAsDeclinedAsync(declined).ConfigureAwait(false);
+        _logger.LogWarning("IP {Ip} declined by {Mac} (address conflict) — quarantined", declined, request.ClientMac);
         return DhcpResponseBuffer.Empty; // RFC 2131: server doesn't reply to DECLINE
     }
 
@@ -480,8 +518,10 @@ public sealed class DhcpServerService : IDhcpServerService
         var domainName = subnet?.DomainName;
         var ntpServers = subnet?.NtpServers;
         var winsServers = subnet?.WinsServers;
-        var bootFilename = GetBootFilename(request, subnet, clientClass);
-        var tftpServer = clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
+        // RFC 2131 Table 3: a DHCPNAK carries no ciaddr, siaddr, sname or file.
+        var isNak = messageType == DhcpMessageType.Nak;
+        var bootFilename = isNak ? null : GetBootFilename(request, subnet, clientClass);
+        var tftpServer = isNak ? null : clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
 
         // Rent buffer from pool. Caller (the worker) owns the rental from this
         // point on — DhcpResponseBuffer carries it to the wire and Disposes
@@ -507,12 +547,15 @@ public sealed class DhcpServerService : IDhcpServerService
             buffer[offset++] = 0;
             buffer[offset++] = 0;
 
-            // Flags (2 bytes) - preserve client flags
-            buffer[offset++] = (byte)(request.Flags >> 8);
-            buffer[offset++] = (byte)(request.Flags & 0xFF);
+            // Flags (2 bytes) - preserve client flags. A NAK sent through a relay MUST set the
+            // broadcast bit (RFC 2131 §4.3.2): the client may have no usable address any more.
+            var flags = request.Flags;
+            if (isNak && request.GiAddr is { } relay && !relay.Equals(IPAddress.Any)) flags |= 0x8000;
+            buffer[offset++] = (byte)(flags >> 8);
+            buffer[offset++] = (byte)(flags & 0xFF);
 
-            // ciaddr (4 bytes)
-            var ciaddr = request.CiAddr ?? IPAddress.Any;
+            // ciaddr (4 bytes) — zero in a NAK
+            var ciaddr = isNak ? IPAddress.Any : request.CiAddr ?? IPAddress.Any;
             ciaddr.GetAddressBytes().CopyTo(buffer, offset);
             offset += 4;
 
@@ -521,8 +564,8 @@ public sealed class DhcpServerService : IDhcpServerService
             offset += 4;
 
             // siaddr (4 bytes) - TFTP server
-            var siaddr = tftpServer != null && IPAddress.TryParse(tftpServer, out var tftpIp)
-                ? tftpIp
+            var siaddr = isNak ? IPAddress.Any
+                : tftpServer != null && IPAddress.TryParse(tftpServer, out var tftpIp) ? tftpIp
                 : serverIp;
             siaddr.GetAddressBytes().CopyTo(buffer, offset);
             offset += 4;
@@ -566,6 +609,11 @@ public sealed class DhcpServerService : IDhcpServerService
                 serverIp, subnetMask, router, dnsServers, leaseTime,
                 domainName, ntpServers, winsServers, bootFilename, includeLeaseTime);
 
+            // RFC 6842: a client that sent a client identifier (61) gets it back — without it,
+            // clients that key on client-id can discard the reply as not theirs.
+            if (request.ClientIdentifier is { Length: > 0 and <= 255 } clientId)
+                offset = WriteOption(buffer, offset, DhcpOptionCode.ClientIdentifier, clientId);
+
             // RFC 3046 §2.2: echo the relay's option 82 verbatim, as the last option. Cisco/Juniper
             // relays check for it by default and DROP replies without it — relayed clients never
             // got a lease. (OFFER, ACK and NAK all pass through here.)
@@ -574,6 +622,15 @@ public sealed class DhcpServerService : IDhcpServerService
 
             // End option
             buffer[offset++] = (byte)DhcpOptionCode.End;
+
+            // RFC 1542 §2.1: BOOTP messages are at least 300 bytes; some relays and older clients
+            // drop shorter ones (a NAK was ~250). Pad with zeros (the pool buffer isn't zeroed).
+            const int MinBootpMessage = 300;
+            if (offset < MinBootpMessage)
+            {
+                buffer.AsSpan(offset, MinBootpMessage - offset).Clear();
+                offset = MinBootpMessage;
+            }
 
             // Hand the rental + length to the caller. No copy, no return-to-
             // pool here — the consumer's Dispose() does that after send.
@@ -587,29 +644,8 @@ public sealed class DhcpServerService : IDhcpServerService
         }
     }
 
-    private static string? GetBootFilename(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
-    {
-        // Priority: class override > PXE detection > subnet config
-        if (clientClass?.BootFilename != null)
-        {
-            return clientClass.BootFilename;
-        }
-
-        if (request.IsPxeRequest && subnet != null)
-        {
-            // Detect UEFI vs Legacy BIOS from vendor class
-            var isUefi = request.VendorClassIdentifier?.Contains("00007") == true ||
-                         request.VendorClassIdentifier?.Contains("00009") == true ||
-                         request.VendorClassIdentifier?.Contains("Arch:00007") == true;
-
-            if (isUefi && !string.IsNullOrEmpty(subnet.BootFilenameUefi))
-            {
-                return subnet.BootFilenameUefi;
-            }
-        }
-
-        return subnet?.BootFilename ?? request.File;
-    }
+    private static string? GetBootFilename(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass) =>
+        PxeBoot.BootFile(request, subnet, clientClass);
 
     private int WriteOptions(
         byte[] buffer, int offset,
@@ -628,6 +664,8 @@ public sealed class DhcpServerService : IDhcpServerService
         string? bootFilename,
         bool includeLeaseTime)
     {
+        var optionsStart = offset;
+
         // Message Type (required)
         offset = WriteOption(buffer, offset, DhcpOptionCode.MessageType,
             messageType switch
@@ -758,7 +796,7 @@ public sealed class DhcpServerService : IDhcpServerService
         {
             offset = WriteInt32Option(buffer, offset, DhcpOptionCode.IPAddressLeaseTime, leaseTime);
             offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RenewalTimeValue, leaseTime / 2);
-            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RebindingTimeValue, (leaseTime * 7) / 8);
+            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RebindingTimeValue, (int)((long)leaseTime * 7 / 8)); // long: leaseTime * 7 overflowed above ~306M s
         }
 
         // PXE/BOOTP options
@@ -779,17 +817,65 @@ public sealed class DhcpServerService : IDhcpServerService
 
             if (request.IsPxeRequest)
             {
-                // Detect architecture and send appropriate PXE options
-                var isUefi = request.VendorClassIdentifier?.Contains("00007") == true ||
-                             request.VendorClassIdentifier?.Contains("Arch:00007") == true;
-
-                offset = WriteOption(buffer, offset, DhcpOptionCode.PxeClientArchType,
-                    isUefi ? PxeArchTypeUefi64 : PxeArchTypeLegacy);
-                offset = WriteOption(buffer, offset, DhcpOptionCode.PxeClientNetworkInterface, PxeNetInterface);
-                offset = WriteOption(buffer, offset, DhcpOptionCode.PxeDiscoveryControl, PxeDiscoveryControl);
+                // PXE 2.1: the offer must say "PXEClient" (60) and how to boot (43: use the file,
+                // skip boot-server discovery). Options 93/94 are CLIENT options and were wrongly
+                // sent back; 97 is the client's UUID — echoed, never invented.
+                offset = WriteOption(buffer, offset, DhcpOptionCode.VendorClassIdentifier, PxeBoot.PxeClientClass);
+                offset = WriteOption(buffer, offset, DhcpOptionCode.VendorSpecificInformation, PxeBoot.VendorOptions);
+                if (request.ClientMachineId is { Length: > 0 } uuid)
+                    offset = WriteOption(buffer, offset, DhcpOptionCode.ClientMachineIdentifier, uuid);
             }
         }
 
+        // Operator-defined options last (a NAK carries none). Host > class > subnet/global.
+        if (messageType != DhcpMessageType.Nak)
+            offset = WriteCustomOptions(buffer, optionsStart, offset, request, subnet, clientClass);
+
+        return offset;
+    }
+
+    /// <summary>
+    /// Custom options (dhcp_custom_options) for this client, most specific scope first. A code the
+    /// server already wrote (router, DNS, lease times, PXE…) is skipped — those stay governed by the
+    /// subnet's own fields — and so is any code a more specific scope already supplied. Room is
+    /// kept for client-id, relay info and End; an option that doesn't fit is skipped, logged.
+    /// </summary>
+    private int WriteCustomOptions(byte[] buffer, int optionsStart, int offset, DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
+    {
+        if (subnet is null) return offset;
+        subnet.HostOptions.TryGetValue(request.ClientMac, out var host);
+        var cls = clientClass?.CustomOptions;
+        if (host is null && (cls is null || cls.Count == 0) && subnet.CustomOptions.Count == 0) return offset;
+
+        Span<bool> written = stackalloc bool[256];
+        for (var i = optionsStart; i < offset;)
+        {
+            var code = buffer[i];
+            if (code == 0) { i++; continue; }
+            if (code == 255 || i + 1 >= offset) break;
+            written[code] = true;
+            i += 2 + buffer[i + 1];
+        }
+
+        // What must still follow: client-id, option 82, End (+ slack).
+        var reserve = 1 + 4 + (request.ClientIdentifier?.Length + 2 ?? 0) + (request.RelayAgentInformation?.Length + 2 ?? 0);
+        var limit = buffer.Length - reserve;
+
+        foreach (var scope in new[] { host, cls, subnet.CustomOptions })
+        {
+            if (scope is null) continue;
+            foreach (var o in scope)
+            {
+                if (o.OptionCode is < 1 or > 254 || written[o.OptionCode] || o.OptionValue.Length is 0 or > 255) continue;
+                if (offset + 2 + o.OptionValue.Length > limit)
+                {
+                    _logger.LogWarning("[OPTIONS] Custom option {Code} for {Mac} doesn't fit in the reply — skipped", o.OptionCode, request.ClientMac);
+                    continue;
+                }
+                offset = WriteOption(buffer, offset, (DhcpOptionCode)o.OptionCode, o.OptionValue);
+                written[o.OptionCode] = true;
+            }
+        }
         return offset;
     }
 

@@ -69,6 +69,20 @@ class Program
                     services.AddScoped<IDhcpServerService, DhcpServerService>();
                     // This host's interface addresses → the server identifier (option 54) per reply.
                     services.AddSingleton<IInterfaceAddressProvider, InterfaceAddressProvider>();
+                    // DDNS (RFC 2136) after the reply, never on the packet path.
+                    services.AddSingleton<DdnsUpdateQueue>();
+                    services.AddSingleton<IDdnsUpdateQueue>(sp => sp.GetRequiredService<DdnsUpdateQueue>());
+                    services.AddHostedService(sp => sp.GetRequiredService<DdnsUpdateQueue>());
+                    // Banner alerts: pool nearly full, another DHCP server on the LAN.
+                    services.AddScoped<NetFirewall.Services.Monitoring.ISystemAlertWriter, NetFirewall.Services.Vpn.VpnHealthService>();
+                    services.AddHostedService<DhcpPoolAlertService>();
+                    services.AddHostedService<DhcpLeaseHistoryRetentionService>();
+                    // Ping before offering a new address (Dhcp:PingCheck=false to turn it off).
+                    if (hostContext.Configuration.GetValue("Dhcp:PingCheck", true))
+                        services.AddSingleton<IAddressProbe, IcmpAddressProbe>();
+                    services.AddSingleton<RogueDhcpMonitor>();
+                    services.AddSingleton<IRogueDhcpMonitor>(sp => sp.GetRequiredService<RogueDhcpMonitor>());
+                    services.AddHostedService(sp => sp.GetRequiredService<RogueDhcpMonitor>());
                     services.AddScoped<IDdnsService, DdnsService>();
                     services.AddScoped<IDhcpLeasesService, DhcpLeasesService>();
 

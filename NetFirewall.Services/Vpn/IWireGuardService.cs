@@ -28,4 +28,7 @@ public interface IWireGuardService
     Task<WgPeer> CreatePeerAsync(WgPeer peer, CancellationToken ct = default);
     Task<WgPeer> UpdatePeerAsync(WgPeer peer, CancellationToken ct = default);
     Task<bool> DeletePeerAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Re-home peers onto another interface, keeping their ids (their [vpn-auto] tags stay valid). Split/revert only.</summary>
+    Task<int> MovePeersAsync(IReadOnlyCollection<Guid> peerIds, Guid toServerId, CancellationToken ct = default);
 }

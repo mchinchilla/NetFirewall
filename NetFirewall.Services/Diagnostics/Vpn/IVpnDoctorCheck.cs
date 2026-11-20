@@ -21,7 +21,7 @@ public abstract class VpnDoctorCheckBase : Doctors.DoctorCheckBase<VpnDoctorCont
 /// <summary>Remedy deep-links shared by the checks. Paths, not Url.Action — the daemon has no routing table.</summary>
 public static class VpnRemedies
 {
-    public static DiagRemedy ApplyVpn(string? hint = null) => new("Apply VPN", "/Vpn/WireGuard", hint ?? "Writes wg0.conf, brings the link up (cold restart when the address/MTU changed) and re-installs the tunnel's routes.");
+    public static DiagRemedy ApplyVpn(string? hint = null) => new("Apply VPN", "/Vpn/WireGuard", hint ?? "Writes the interface's .conf, brings the link up (cold restart when the address/MTU changed) and re-installs the tunnel's routes.");
     public static DiagRemedy PolicyRouting(string? hint = null) => new("Re-apply policy routing", "/Firewall/Apply", hint ?? "Firewall → Apply → Policy routing → Execute.");
     public static DiagRemedy ApplyFirewall(string? hint = null) => new("Apply firewall rules", "/Firewall/Apply", hint);
     public static DiagRemedy ServerForm(string? hint = null) => new("Edit interface", "/Vpn/WireGuard", hint);

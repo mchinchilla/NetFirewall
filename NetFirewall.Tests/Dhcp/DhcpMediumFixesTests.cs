@@ -140,9 +140,11 @@ public sealed class DhcpMediumFixesTests
         using var r = await Svc().CreateDhcpResponseAsync(Discover(giaddr: IPAddress.Parse("192.168.50.254"), option82: rai));
 
         Assert.Equal(rai, Option(r, 82));
-        var s = r.Span;
-        Assert.Equal(255, s[r.Length - 1]);
-        Assert.Equal(82, s[r.Length - 1 - rai.Length - 2]);
+        // Last option: End follows option 82 directly (the rest is RFC 1542 zero padding).
+        var s = r.Span.ToArray();
+        var at = Array.IndexOf(s, (byte)82, 240);
+        while (at >= 0 && (s[at + 1] != rai.Length || !s.AsSpan(at + 2, rai.Length).SequenceEqual(rai))) at = Array.IndexOf(s, (byte)82, at + 1);
+        Assert.Equal(255, s[at + 2 + rai.Length]);
     }
 
     [Fact]

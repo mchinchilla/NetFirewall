@@ -116,7 +116,7 @@ public class DhcpServerServiceTests
     }
 
     [Fact]
-    public async Task Discover_NoIpAvailable_ReturnsNak()
+    public async Task Discover_NoIpAvailable_IsAnsweredWithSilence_NeverANak()
     {
         StubSubnetReturning(null);
         StubClassMatchNone();
@@ -125,7 +125,7 @@ public class DhcpServerServiceTests
 
         var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Discover));
 
-        Assert.Equal((byte)DhcpMessageType.Nak, ExtractMessageType(response));
+        Assert.True(response.IsEmpty);   // RFC 2131: a NAK only ever answers a REQUEST
     }
 
     [Fact]
@@ -231,12 +231,27 @@ public class DhcpServerServiceTests
         StubSubnetReturning(null);
         StubClassMatchNone();
         var ip = IPAddress.Parse("10.0.0.150");
+        _leases.Setup(l => l.GetAssignedIpAsync(It.IsAny<string>())).ReturnsAsync(ip);   // its own lease
         _leases.Setup(l => l.MarkIpAsDeclinedAsync(ip)).Returns(Task.CompletedTask);
 
         var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Decline, ip));
 
         Assert.True(response.IsEmpty);
         _leases.Verify(l => l.MarkIpAsDeclinedAsync(ip), Times.Once);
+    }
+
+    [Fact]
+    public async Task Decline_OfAnAddressThatIsNotTheClientsLease_IsIgnored()
+    {
+        // A bogus DECLINE used to quarantine any IP and delete whatever lease held it.
+        StubSubnetReturning(null);
+        StubClassMatchNone();
+        _leases.Setup(l => l.GetAssignedIpAsync(It.IsAny<string>())).ReturnsAsync(IPAddress.Parse("10.0.0.120"));
+
+        var response = await CreateSvc().CreateDhcpResponseAsync(MakeRequest(DhcpMessageType.Decline, IPAddress.Parse("10.0.0.150")));
+
+        Assert.True(response.IsEmpty);
+        _leases.Verify(l => l.MarkIpAsDeclinedAsync(It.IsAny<IPAddress>()), Times.Never);
     }
 
     // ── INFORM ─────────────────────────────────────────────────────────
@@ -257,7 +272,7 @@ public class DhcpServerServiceTests
     // ── unknown / error paths ──────────────────────────────────────────
 
     [Fact]
-    public async Task UnknownMessageType_ReturnsNak()
+    public async Task UnknownMessageType_IsAnsweredWithSilence()
     {
         StubSubnetReturning(null);
         StubClassMatchNone();
@@ -266,7 +281,7 @@ public class DhcpServerServiceTests
         var req = MakeRequest((DhcpMessageType)99);
         var response = await CreateSvc().CreateDhcpResponseAsync(req);
 
-        Assert.Equal((byte)DhcpMessageType.Nak, ExtractMessageType(response));
+        Assert.True(response.IsEmpty);   // RFC 2131: a NAK only ever answers a REQUEST
     }
 
     [Fact]

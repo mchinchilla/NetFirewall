@@ -1,0 +1,26 @@
+@model NetFirewall.Web.Models.Dhcp.DhcpOptionFormPageViewModel
+@* The scope target picker; re-rendered when the scope changes. Global has no target. *@
+@if (Model.Form.ScopeType != NetFirewall.Models.Dhcp.DhcpOptionScopes.Global)
+{
+    <div class="space-y-1.5">
+        <label for="f-ScopeId" class="block text-xs font-medium text-surface-fg">
+            @(Model.Form.ScopeType switch { "subnet" => "Subnet", "class" => "Client class", _ => "Reserved device" }) <span class="text-feedback-danger-fg">*</span>
+        </label>
+        @if (Model.Targets.Count == 0)
+        {
+            <p class="text-xs text-surface-fg-muted">
+                @(Model.Form.ScopeType switch { "subnet" => "No subnets yet.", "class" => "No client classes yet.", _ => "No reservations yet — reserve the device's address first." })
+            </p>
+        }
+        else
+        {
+            <select id="f-ScopeId" name="ScopeId" required class="input">
+                <option value="">Choose…</option>
+                @foreach (var (id, label) in Model.Targets)
+                {
+                    <option value="@id" selected="@(id == Model.Form.ScopeId)">@label</option>
+                }
+            </select>
+        }
+    </div>
+}

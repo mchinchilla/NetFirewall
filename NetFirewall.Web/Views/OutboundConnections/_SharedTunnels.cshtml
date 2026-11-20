@@ -16,6 +16,9 @@
                 the other. They keep working as they are; new connections get an interface of their own.
             </p>
         </div>
+        <button type="button" class="btn btn-ghost text-xs"
+                hx-get="/Vpn/Outbound/split/@Uri.EscapeDataString(Model.Interface.Name)" hx-target="#drawer-body" hx-swap="innerHTML"
+                @@click="$store.drawer.openRaw('Split @Model.Interface.Name')">Split into two interfaces…</button>
     </header>
     <ul class="divide-y divide-surface-border text-sm">
         @foreach (var p in Model.Tunnels)

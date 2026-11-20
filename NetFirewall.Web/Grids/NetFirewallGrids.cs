@@ -56,6 +56,8 @@ public static class NetFirewallGrids
         Dhcp.DhcpReservationsGrid.Register(builder);
         Dhcp.DhcpSubnetsGrid.Register(builder);
         Dhcp.DhcpClassesGrid.Register(builder);
+        Dhcp.DhcpCustomOptionsGrid.Register(builder);
+        Dhcp.DhcpLeaseHistoryGrid.Register(builder);
         Dhcp.DhcpDdnsGrid.Register(builder);
         Dhcp.DhcpFailoverGrid.Register(builder);
         Firewall.FwAuditLogGrid.Register(builder);

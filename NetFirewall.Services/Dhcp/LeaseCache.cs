@@ -41,6 +41,9 @@ public sealed class LeaseCache : IDisposable
     private readonly ConcurrentDictionary<uint, (string Mac, DateTime ExpiresUtc)> _offers = new();
     internal static readonly TimeSpan OfferHoldTime = TimeSpan.FromSeconds(60);
 
+    // Set at warm-up: whether dhcp_lease_history exists (migration 00049).
+    private volatile bool _historyAvailable;
+
     // Write-through queue for async database persistence
     private readonly Channel<LeaseWriteOperation> _writeQueue;
     private readonly Task _writerTask;
@@ -101,6 +104,11 @@ public sealed class LeaseCache : IDisposable
         {
             await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            // Lease history is written in the flush transaction — only once its table exists, or a
+            // lagging schema would roll back every lease write with it.
+            await using (var probe = new NpgsqlCommand("SELECT to_regclass('dhcp_lease_history') IS NOT NULL", connection))
+                _historyAvailable = (bool)(await probe.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
 
             const string sql = @"
                 SELECT mac_address, ip_address, hostname, start_time, end_time
@@ -549,7 +557,7 @@ public sealed class LeaseCache : IDisposable
             // off far above a flush's ≤ 100 rows.
             await using (var dbBatch = new NpgsqlBatch(connection, transaction))
             {
-                foreach (var command in SetBasedCommands(batch))
+                foreach (var command in SetBasedCommands(batch, withHistory: _historyAvailable))
                     dbBatch.BatchCommands.Add(command);
                 if (dbBatch.BatchCommands.Count > 0)
                 {
@@ -586,7 +594,7 @@ public sealed class LeaseCache : IDisposable
     /// same row twice ("cannot affect row a second time"): a renewal followed by a release in the
     /// same window must end as a delete, two renewals as the later one. Internal for tests.
     /// </summary>
-    internal static List<NpgsqlBatchCommand> SetBasedCommands(IReadOnlyList<LeaseWriteOperation> batch)
+    internal static List<NpgsqlBatchCommand> SetBasedCommands(IReadOnlyList<LeaseWriteOperation> batch, bool withHistory = false)
     {
         var last = new Dictionary<string, LeaseWriteOperation>(batch.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var op in batch) last[op.MacAddress] = op;
@@ -605,6 +613,13 @@ public sealed class LeaseCache : IDisposable
             var del = new NpgsqlBatchCommand("DELETE FROM dhcp_leases WHERE mac_address = ANY($1::text[]::macaddr[])");
             del.Parameters.Add(new NpgsqlParameter { Value = deletes.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
             commands.Add(del);
+            if (withHistory)
+            {
+                var close = new NpgsqlBatchCommand(
+                    "UPDATE dhcp_lease_history SET closed_at = now() WHERE closed_at IS NULL AND mac_address = ANY($1::text[]::macaddr[])");
+                close.Parameters.Add(new NpgsqlParameter { Value = deletes.ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                commands.Add(close);
+            }
         }
         if (upserts.Count > 0)
         {
@@ -633,6 +648,40 @@ public sealed class LeaseCache : IDisposable
             up.Parameters.Add(new NpgsqlParameter { Value = starts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
             up.Parameters.Add(new NpgsqlParameter { Value = ends, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
             commands.Add(up);
+
+            if (withHistory)
+            {
+                // History intervals, same transaction, as THREE commands that run in order (the
+                // sub-statements of one WITH run concurrently, so an INSERT could hit the open-row
+                // index before the UPDATE closed it and silently drop the new interval):
+                //   1. a device that moved closes its old interval,
+                //   2. a renewal of the same address extends the open one,
+                //   3. anything without an open interval now opens one.
+                const string Rows = "unnest($1::text[], $2::inet[], $3::text[], $4::timestamptz[]) AS t(mac, ip, host, st)";
+                commands.Add(History($"""
+                    UPDATE dhcp_lease_history h SET closed_at = t.st FROM {Rows}
+                    WHERE h.closed_at IS NULL AND h.mac_address = t.mac::macaddr AND h.ip_address <> t.ip
+                    """));
+                commands.Add(History($"""
+                    UPDATE dhcp_lease_history h SET last_seen = t.st, hostname = COALESCE(t.host, h.hostname) FROM {Rows}
+                    WHERE h.closed_at IS NULL AND h.mac_address = t.mac::macaddr AND h.ip_address = t.ip
+                    """));
+                commands.Add(History($"""
+                    INSERT INTO dhcp_lease_history (mac_address, ip_address, hostname, first_seen, last_seen)
+                    SELECT t.mac::macaddr, t.ip, t.host, t.st, t.st FROM {Rows}
+                    WHERE NOT EXISTS (SELECT 1 FROM dhcp_lease_history h WHERE h.closed_at IS NULL AND h.mac_address = t.mac::macaddr)
+                    """));
+
+                NpgsqlBatchCommand History(string sql)
+                {
+                    var c = new NpgsqlBatchCommand(sql);
+                    c.Parameters.Add(new NpgsqlParameter { Value = macs, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                    c.Parameters.Add(new NpgsqlParameter { Value = ips });
+                    c.Parameters.Add(new NpgsqlParameter { Value = hosts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                    c.Parameters.Add(new NpgsqlParameter { Value = starts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    return c;
+                }
+            }
         }
         return commands;
     }

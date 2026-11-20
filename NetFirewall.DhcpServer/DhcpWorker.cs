@@ -192,10 +192,39 @@ public class DhcpWorker : BackgroundService
         return opened;
     }
 
+    /// <summary>
+    /// Is <paramref name="address"/> one of this host's? Relays and renewing clients unicast to us;
+    /// anything unicast elsewhere was only routed through the firewall and isn't ours to answer.
+    /// Unknown (no provider) = permissive.
+    /// </summary>
+    private bool IsLocalAddress(IPAddress address)
+    {
+        if (_addresses is null)
+        {
+            using var scope = _scopeFactory.CreateScope();   // the provider is a singleton: outlives the scope
+            _addresses = scope.ServiceProvider.GetService<NetFirewall.Services.Dhcp.IInterfaceAddressProvider>();
+            if (_addresses is null) return true;
+        }
+        foreach (var iface in _interfaces)
+            foreach (var (a, _) in _addresses.GetIPv4(iface))
+                if (a.Equals(address)) return true;
+        return false;
+    }
+
+    private NetFirewall.Services.Dhcp.IInterfaceAddressProvider? _addresses;
+
+    private T? ResolveSingleton<T>() where T : class
+    {
+        using var scope = _scopeFactory.CreateScope();   // singletons outlive the scope
+        return scope.ServiceProvider.GetService<T>();
+    }
+
     /// <summary>Receive (AF_PACKET) + send (SO_BINDTODEVICE) sockets for one interface. Overridden in tests.</summary>
     internal virtual void OpenInterface(string iface)
     {
-        var receive = new LinuxRawSocket(iface, _logger);
+        var rogue = ResolveSingleton<NetFirewall.Services.Dhcp.IRogueDhcpMonitor>();
+        var receive = new LinuxRawSocket(iface, _logger, IsLocalAddress,
+            rogue is null ? null : (ip, mac) => rogue.Observe(new NetFirewall.Services.Dhcp.ForeignDhcpReply(iface, ip, mac)));
         try
         {
             var send = CreateSendSocketForInterface(iface);
@@ -691,15 +720,16 @@ public class DhcpWorker : BackgroundService
             return new IPEndPoint(IPAddress.Broadcast, 68);
         }
 
-        // Broadcast if flag set or client has no IP
-        bool broadcastFlagSet = (request.Flags & 0x8000) != 0;
-
-        if (broadcastFlagSet || request.CiAddr == null || request.CiAddr.Equals(IPAddress.Any))
+        // RFC 2131 §4.1: giaddr zero and ciaddr non-zero (RENEWING / INFORM) → unicast to ciaddr,
+        // whatever the broadcast bit says: the client owns that address and listens on it.
+        if (request.CiAddr != null && !request.CiAddr.Equals(IPAddress.Any))
         {
-            return new IPEndPoint(IPAddress.Broadcast, 68);
+            return new IPEndPoint(request.CiAddr, 68);
         }
 
-        return new IPEndPoint(request.CiAddr, 68);
+        // No address yet: broadcast (the RFC's fallback when we can't unicast to yiaddr without
+        // an ARP entry — the broadcast bit then makes no difference).
+        return new IPEndPoint(IPAddress.Broadcast, 68);
     }
 
     internal bool TryParseDhcpRequest(ReadOnlySpan<byte> buffer, IPEndPoint remoteEndPoint, out DhcpRequest request)
@@ -883,6 +913,18 @@ public class DhcpWorker : BackgroundService
 
             case DhcpOptionCode.ServerIdentifier when data.Length >= 4:
                 request.ServerIdentifier = new IPAddress(data.Slice(0, 4));
+                break;
+
+            case DhcpOptionCode.PxeClientArchType when data.Length >= 2:
+                request.ClientArchitecture = (ushort)((data[0] << 8) | data[1]);
+                break;
+
+            case DhcpOptionCode.UserClass when data.Length > 0:
+                request.UserClass = PxeBoot.ParseUserClass(data);
+                break;
+
+            case DhcpOptionCode.ClientMachineIdentifier when data.Length > 0:
+                request.ClientMachineId = data.ToArray();
                 break;
 
             case DhcpOptionCode.RelayAgentInformation when data.Length > 0:

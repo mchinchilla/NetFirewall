@@ -41,6 +41,16 @@ public sealed class DhcpLeasesController : Controller
             : PartialView("_LeaseDetail", model);
     }
 
+    /// <summary>Pin a lease as a reservation (same MAC, same IP, its hostname as the DNS name).</summary>
+    [HttpPost("reserve/{id:guid}"), ValidateAntiForgeryToken]
+    [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
+    public async Task<IActionResult> Reserve(Guid id, CancellationToken ct)
+    {
+        var reserved = await _admin.ReserveLeaseAsync(id, ct);
+        if (reserved.Success) this.AttachHxEvent("refreshLeases", new { });
+        return this.ToHtmxResponse(reserved);
+    }
+
     [HttpPost("release/{id:guid}"), ValidateAntiForgeryToken]
     [Filters.RequireElevated]
     [Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]

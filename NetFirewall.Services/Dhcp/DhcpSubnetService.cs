@@ -17,6 +17,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
     private readonly ILogger<DhcpSubnetService> _logger;
     private readonly NpgsqlDataSource _dataSource;
     private readonly LeaseCache? _leaseCache;
+    private readonly IAddressProbe? _addressProbe;
 
     // Cache subnets for fast lookup (refreshed periodically)
     private readonly ConcurrentDictionary<Guid, DhcpSubnet> _subnetCache = new();
@@ -40,8 +41,10 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         NpgsqlDataSource dataSource,
         ILogger<DhcpSubnetService> logger,
         LeaseCache? leaseCache = null,
-        IDhcpReservationCache? reservations = null)
+        IDhcpReservationCache? reservations = null,
+        IAddressProbe? addressProbe = null)
     {
+        _addressProbe = addressProbe;
         _dataSource = dataSource;
         _logger = logger;
         _leaseCache = leaseCache;
@@ -346,7 +349,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 pool.Name, pool.RangeStart, pool.RangeEnd, macAddress);
 
             // Check if pool allows this client
-            if (!IsClientAllowedInPool(pool, request, clientClass))
+            if (!IsClientAllowedInPool(pool, request, clientClass, isKnown: reservedIp is not null))
             {
                 _logger.LogDebug("[SUBNET] Client {Mac} not allowed in pool '{PoolName}'",
                     macAddress, pool.Name);
@@ -356,6 +359,18 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             // Try to find an available IP in this pool
             var ip = await FindAvailableIpInPoolAsync(
                 connection, subnet, pool, macAddress, cancellationToken).ConfigureAwait(false);
+
+            // Ping check (new addresses only — current/requested/reserved ones never reach here):
+            // something answering is a hand-set static IP; quarantine it and take the next one.
+            for (var attempt = 0; ip != null && _addressProbe != null && attempt < 3; attempt++)
+            {
+                if (!await _addressProbe.IsInUseAsync(ip, cancellationToken).ConfigureAwait(false)) break;
+                _logger.LogWarning(
+                    "[POOL] {Ip} in pool '{Pool}' answers ping but has no lease — a device with a static address? Quarantined for 1 h; offering another.",
+                    ip, pool.Name);
+                _leaseCache?.MarkIpAsDeclined(ip);
+                ip = await FindAvailableIpInPoolAsync(connection, subnet, pool, macAddress, cancellationToken).ConfigureAwait(false);
+            }
 
             if (ip != null)
             {
@@ -452,27 +467,28 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         return RequestedIpVerdict.NotAssignable;
     }
 
-    private bool IsClientAllowedInPool(DhcpPool pool, DhcpRequest request, DhcpClass? clientClass)
+    /// <summary>
+    /// May this client take an address from <paramref name="pool"/>? "Known" = it has a reservation
+    /// (ISC's meaning). Class rules from the pool's class list: a matching DENY class excludes; if
+    /// the pool has any ALLOW class, only members of one may use it. (The rules and KnownClientsOnly
+    /// were saved by the UI but never enforced.)
+    /// </summary>
+    internal bool IsClientAllowedInPool(DhcpPool pool, DhcpRequest request, DhcpClass? clientClass, bool isKnown)
     {
-        // Check known clients only
-        if (pool.KnownClientsOnly)
-        {
-            // Would need to check if MAC is in reservations
-            // For now, allow all
-        }
+        if (pool.KnownClientsOnly && !isKnown) return false;
+        if (pool.DenyBootp && request.IsBootp) return false;
+        if (!pool.AllowUnknownClients && !isKnown && clientClass is null) return false;
 
-        // Check BOOTP denial
-        if (pool.DenyBootp && request.IsBootp)
+        if (_poolClassRules.TryGetValue(pool.Id, out var rules))
         {
-            return false;
+            var anyAllow = false;
+            foreach (var (classId, allow) in rules)
+            {
+                if (allow) anyAllow = true;
+                if (clientClass is not null && classId == clientClass.Id) return allow;
+            }
+            if (anyAllow) return false;   // allow-list pool, client in none of its classes
         }
-
-        // Check unknown clients
-        if (!pool.AllowUnknownClients && clientClass == null)
-        {
-            return false;
-        }
-
         return true;
     }
 
@@ -728,21 +744,81 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         return null;
     }
 
-    private static bool DoesClientMatchClass(DhcpRequest request, DhcpClass dhcpClass)
+    private static bool DoesClientMatchClass(DhcpRequest request, DhcpClass dhcpClass) =>
+        DhcpClassMatcher.Matches(request, dhcpClass);
+
+    // pool id → its class rules (class id, allow). Absent = no rules.
+    private volatile IReadOnlyDictionary<Guid, (Guid ClassId, bool Allow)[]> _poolClassRules =
+        new Dictionary<Guid, (Guid, bool)[]>();
+
+    private async Task LoadPoolClassRulesAsync(NpgsqlConnection connection, CancellationToken ct)
     {
-        return dhcpClass.MatchType switch
+        var map = new Dictionary<Guid, List<(Guid, bool)>>();
+        await using var cmd = new NpgsqlCommand("SELECT pool_id, class_id, COALESCE(allow, true) FROM dhcp_pool_classes", connection);
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
         {
-            DhcpClassMatchTypes.VendorClass =>
-                request.VendorClassIdentifier?.Contains(dhcpClass.MatchValue, StringComparison.OrdinalIgnoreCase) == true,
+            var pool = r.GetGuid(0);
+            if (!map.TryGetValue(pool, out var list)) map[pool] = list = [];
+            list.Add((r.GetGuid(1), r.GetBoolean(2)));
+        }
+        _poolClassRules = map.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
+    }
 
-            DhcpClassMatchTypes.MacPrefix =>
-                request.ClientMac?.StartsWith(dhcpClass.MatchValue, StringComparison.OrdinalIgnoreCase) == true,
+    /// <summary>
+    /// Every custom option, attached where the reply path finds them: global + subnet merged onto
+    /// each subnet (subnet wins per code), class options on the class, host options by MAC.
+    /// </summary>
+    private async Task LoadCustomOptionsAsync(NpgsqlConnection connection, CancellationToken ct)
+    {
+        var global = new List<DhcpCustomOption>();
+        var bySubnet = new Dictionary<Guid, List<DhcpCustomOption>>();
+        var byClass = new Dictionary<Guid, List<DhcpCustomOption>>();
+        var byMac = new Dictionary<string, List<DhcpCustomOption>>(StringComparer.OrdinalIgnoreCase);
 
-            DhcpClassMatchTypes.Hostname =>
-                request.Hostname?.Contains(dhcpClass.MatchValue, StringComparison.OrdinalIgnoreCase) == true,
+        await using (var cmd = new NpgsqlCommand("""
+            SELECT o.id, o.scope_type, o.scope_id, o.option_code, o.option_name, o.option_value, o.option_format,
+                   lower(r.mac_address::text)
+            FROM dhcp_custom_options o
+            LEFT JOIN dhcp_mac_reservations r ON o.scope_type = 'host' AND r.id = o.scope_id
+            ORDER BY o.option_code
+            """, connection))
+        await using (var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var o = new DhcpCustomOption
+                {
+                    Id = r.GetGuid(0), ScopeType = r.GetString(1), ScopeId = r.IsDBNull(2) ? null : r.GetGuid(2),
+                    OptionCode = r.GetInt16(3), OptionName = r.IsDBNull(4) ? null : r.GetString(4),
+                    OptionValue = (byte[])r[5], OptionFormat = r.IsDBNull(6) ? null : r.GetString(6),
+                };
+                switch (o.ScopeType)
+                {
+                    case DhcpOptionScopes.Global: global.Add(o); break;
+                    case DhcpOptionScopes.Subnet when o.ScopeId is { } s: Add(bySubnet, s, o); break;
+                    case DhcpOptionScopes.Class when o.ScopeId is { } c: Add(byClass, c, o); break;
+                    case DhcpOptionScopes.Host when !r.IsDBNull(7): Add(byMac, r.GetString(7), o); break;
+                }
+            }
+        }
 
-            _ => false
-        };
+        IReadOnlyDictionary<string, IReadOnlyList<DhcpCustomOption>> hosts =
+            byMac.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<DhcpCustomOption>)kv.Value, StringComparer.OrdinalIgnoreCase);
+        foreach (var subnet in _subnetCache.Values)
+        {
+            var own = bySubnet.TryGetValue(subnet.Id, out var list) ? list : [];
+            subnet.CustomOptions = own.Concat(global.Where(g => own.All(o => o.OptionCode != g.OptionCode))).ToList();
+            subnet.HostOptions = hosts;
+        }
+        foreach (var cls in _classCache.Values)
+            cls.CustomOptions = byClass.TryGetValue(cls.Id, out var list) ? list : [];
+
+        static void Add<TKey>(Dictionary<TKey, List<DhcpCustomOption>> d, TKey key, DhcpCustomOption o) where TKey : notnull
+        {
+            if (!d.TryGetValue(key, out var l)) d[key] = l = [];
+            l.Add(o);
+        }
     }
 
     #endregion
@@ -802,7 +878,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                    -- them, but the cache never loaded them, so they were never sent.
                    s.time_offset, s.posix_timezone,
                    -- option 119 (domain search) / option 121 (classless static routes)
-                   s.domain_search, s.static_routes::text
+                   s.domain_search, s.static_routes::text,
+                   s.boot_filename_ipxe
             FROM dhcp_subnets s
             LEFT JOIN fw_interfaces fi ON s.interface_id = fi.id
             WHERE s.enabled = true
@@ -868,6 +945,11 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         // Load classes
         await LoadClassesAsync(connection, cancellationToken).ConfigureAwait(false);
 
+        // Per-pool class rules (allow / deny) and every custom option, attached to the cached
+        // subnets and classes so the reply path reads them without a query.
+        await LoadPoolClassRulesAsync(connection, cancellationToken).ConfigureAwait(false);
+        await LoadCustomOptionsAsync(connection, cancellationToken).ConfigureAwait(false);
+
         _logger.LogInformation(
             "[SUBNET] Cache refreshed: {SubnetCount} subnets, {PoolCount} pools, {ClassCount} classes",
             _subnetCache.Count,
@@ -903,6 +985,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             PosixTimezone = reader.FieldCount > 25 && !reader.IsDBNull(25) ? reader.GetString(25) : null,
             DomainSearchList = reader.FieldCount > 26 && !reader.IsDBNull(26) ? reader.GetString(26) : null,
             StaticRoutesJson = reader.FieldCount > 27 && !reader.IsDBNull(27) ? reader.GetString(27) : null,
+            BootFilenameIpxe = reader.FieldCount > 28 && !reader.IsDBNull(28) ? reader.GetString(28) : null,
         };
 
         // Populate FwInterface navigation property if interface_id is set
@@ -1108,10 +1191,10 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         const string sql = @"
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
                 dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time,
-                interface_mtu, tftp_server, boot_filename, boot_filename_uefi, interface_id, enabled)
+                interface_mtu, tftp_server, boot_filename, boot_filename_uefi, boot_filename_ipxe, interface_id, enabled)
             VALUES (@id, @name, @network::cidr, @subnetMask, @router, @broadcast, @domainName,
                 @dnsServers, @ntpServers, @winsServers, @defaultLeaseTime, @maxLeaseTime,
-                @interfaceMtu, @tftpServer, @bootFilename, @bootFilenameUefi, @interfaceId, @enabled)";
+                @interfaceMtu, @tftpServer, @bootFilename, @bootFilenameUefi, @bootFilenameIpxe, @interfaceId, @enabled)";
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         cmd.Parameters.AddWithValue("id", subnet.Id);
@@ -1130,6 +1213,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         cmd.Parameters.AddWithValue("tftpServer", (object?)subnet.TftpServer ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilename", (object?)subnet.BootFilename ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameUefi", (object?)subnet.BootFilenameUefi ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFilenameIpxe", (object?)subnet.BootFilenameIpxe ?? DBNull.Value);
         cmd.Parameters.AddWithValue("interfaceId", (object?)subnet.InterfaceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
 
@@ -1153,7 +1237,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 dns_servers = @dnsServers, ntp_servers = @ntpServers, wins_servers = @winsServers,
                 default_lease_time = @defaultLeaseTime, max_lease_time = @maxLeaseTime,
                 interface_mtu = @interfaceMtu, tftp_server = @tftpServer,
-                boot_filename = @bootFilename, boot_filename_uefi = @bootFilenameUefi,
+                boot_filename = @bootFilename, boot_filename_uefi = @bootFilenameUefi, boot_filename_ipxe = @bootFilenameIpxe,
                 interface_id = @interfaceId, enabled = @enabled, updated_at = @updatedAt
             WHERE id = @id";
 
@@ -1174,6 +1258,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         cmd.Parameters.AddWithValue("tftpServer", (object?)subnet.TftpServer ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilename", (object?)subnet.BootFilename ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameUefi", (object?)subnet.BootFilenameUefi ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFilenameIpxe", (object?)subnet.BootFilenameIpxe ?? DBNull.Value);
         cmd.Parameters.AddWithValue("interfaceId", (object?)subnet.InterfaceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
         cmd.Parameters.AddWithValue("updatedAt", DateTime.UtcNow);

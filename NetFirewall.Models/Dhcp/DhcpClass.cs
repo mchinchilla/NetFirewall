@@ -52,6 +52,9 @@ public class DhcpClass
     [Map("enabled")]
     public bool Enabled { get; set; } = true;
 
+    /// <summary>Class-scoped custom options. Filled by the server's cache, not a column.</summary>
+    public IReadOnlyList<DhcpCustomOption> CustomOptions { get; set; } = [];
+
     [Map("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -51,6 +51,12 @@ public sealed class DhcpFailoverController : Controller
     [HttpPost("save"), ValidateAntiForgeryToken]
     public async Task<IActionResult> Save(FailoverPeerFormViewModel form, CancellationToken ct)
     {
+        // Server-side gate (the checkbox is disabled too): enabling a peer used to stop DHCP on
+        // both boxes, because the failover protocol has no listener yet.
+        if (form.Enabled && !NetFirewall.Services.Dhcp.FailoverService.ProtocolImplemented)
+            return this.ToHtmxResponse(ServiceResponse<FailoverPeer>.Fail(
+                "DHCP failover can't be enabled yet: the peer protocol isn't implemented. Save the peer disabled."));
+
         try
         {
             var entity = ToEntity(form);

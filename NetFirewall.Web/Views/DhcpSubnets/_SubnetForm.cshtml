@@ -114,6 +114,11 @@
                     Name = nameof(Model.BootFilenameUefi), Label = "Boot filename (UEFI)", Value = Model.BootFilenameUefi
                 })
             </div>
+            @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                Name = nameof(Model.BootFilenameIpxe), Label = "Boot file for iPXE (optional)", Value = Model.BootFilenameIpxe,
+                MaxLength = 512, Placeholder = "http://192.168.1.1/boot.ipxe",
+                Help = "What iPXE gets once it is running — usually its script. Without it, a PXE ROM that chainloads iPXE is handed the iPXE binary again and loops."
+            })
         </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {

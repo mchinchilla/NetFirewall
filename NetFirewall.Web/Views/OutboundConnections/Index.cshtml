@@ -6,6 +6,10 @@
 }
 @await Html.PartialAsync("_InterfaceOutcomeStrip", new InterfaceOutcomeStripModel(Model.DeletedName, Deleted: true, Model.DeleteApplyWarn))
 @await Html.PartialAsync("_InterfaceOutcomeStrip", new InterfaceOutcomeStripModel(Model.CreatedName, Deleted: false))
+@if (Model.PendingSplit is { } pendingSplit)
+{
+    @await Html.PartialAsync("_SplitPendingBanner", pendingSplit)
+}
 
 <div class="flex flex-wrap items-end justify-between gap-3 mb-4" style="animation: var(--animate-slide-up);">
     <div>

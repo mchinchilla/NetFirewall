@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NetFirewall.Services.Processes;
 
@@ -24,13 +25,58 @@ public sealed class SystemServiceHealthService : ISystemServiceHealthService
         ("netfirewall-dhcp.service",      "DHCP server"),
         ("postgresql.service",            "PostgreSQL"),
         ("nginx.service",                 "nginx"),
-        ("wg-quick@wg0.service",          "WireGuard wg0"),
+        // WireGuard is NOT a unit here: the daemon brings each interface up with `wg-quick up`
+        // directly, so `wg-quick@wg0.service` always read "not-found" — and assumed one wg0.
+        // Every configured interface is reported from its link instead (WireGuardEntriesAsync).
     };
 
-    public SystemServiceHealthService(IProcessRunner runner, ILogger<SystemServiceHealthService> logger)
+    private readonly NetFirewall.Services.Network.INetworkLinkProbe? _links;
+    private readonly IServiceScopeFactory? _scopes;
+
+    public SystemServiceHealthService(
+        IProcessRunner runner,
+        ILogger<SystemServiceHealthService> logger,
+        NetFirewall.Services.Network.INetworkLinkProbe? links = null,
+        IServiceScopeFactory? scopes = null)
     {
         _runner = runner;
         _logger = logger;
+        _links = links;
+        _scopes = scopes;
+    }
+
+    /// <summary>
+    /// One entry per configured WireGuard interface (server and every outbound connection):
+    /// active = the link exists, inactive = configured but down, "disabled" when switched off.
+    /// IWireGuardService is scoped, so it is resolved per call. Fail-soft: no DB, no entries.
+    /// </summary>
+    private async Task<IEnumerable<ServiceHealth>> WireGuardEntriesAsync(CancellationToken ct)
+    {
+        if (_links is null || _scopes is null) return [];
+        try
+        {
+            await using var scope = _scopes.CreateAsyncScope();
+            var wg = scope.ServiceProvider.GetRequiredService<NetFirewall.Services.Vpn.IWireGuardService>();
+            var servers = await wg.ListServersAsync(ct);
+            return servers.Select(s =>
+            {
+                var up = _links.Exists(s.Name);
+                var role = string.Equals(s.Mode, "client", StringComparison.OrdinalIgnoreCase) ? "outbound" : "VPN server";
+                return new ServiceHealth(
+                    UnitName: $"wireguard:{s.Name}",
+                    DisplayName: $"WireGuard {s.Name} ({role})",
+                    ActiveState: s.Enabled ? (up ? "active" : "inactive") : "inactive",
+                    SubState: s.Enabled ? (up ? "link up" : "link down") : "disabled",
+                    Enabled: s.Enabled,
+                    SinceUtc: null,
+                    StatusText: null);
+            }).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "WireGuard interfaces unavailable for the service health list");
+            return [];
+        }
     }
 
     public async Task<IReadOnlyList<ServiceHealth>> GetAllAsync(CancellationToken ct = default)
@@ -42,6 +88,7 @@ public sealed class SystemServiceHealthService : ISystemServiceHealthService
             var health = await QueryOneAsync(unit, display, ct);
             results.Add(health);
         }
+        results.AddRange(await WireGuardEntriesAsync(ct));
         return results;
     }
 

@@ -133,4 +133,41 @@ public sealed class LeaseCachePersistenceTests : IAsyncLifetime
         Assert.Equal(("10.61.0.2", (string?)"h1"), await RowAsync("02:00:00:00:00:01"));
         Assert.Equal(("10.61.0.1", (string?)null), await RowAsync("02:00:00:00:00:00"));
     }
+
+    // ── Lease history intervals (written in the same flush) ──
+
+    private async Task FlushWithHistoryAsync(params LeaseWriteOperation[] ops)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var batch = new NpgsqlBatch(conn);
+        foreach (var c in LeaseCache.SetBasedCommands(ops, withHistory: true)) batch.BatchCommands.Add(c);
+        await batch.ExecuteNonQueryAsync();
+    }
+
+    private async Task<List<(string Ip, string? Host, bool Open)>> HistoryAsync(string mac)
+    {
+        await using var conn = await _pg.DataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT host(ip_address), hostname, closed_at IS NULL FROM dhcp_lease_history WHERE mac_address = @m::macaddr ORDER BY id", conn);
+        cmd.Parameters.AddWithValue("m", mac);
+        await using var r = await cmd.ExecuteReaderAsync();
+        var list = new List<(string, string?, bool)>();
+        while (await r.ReadAsync()) list.Add((r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetBoolean(2)));
+        return list;
+    }
+
+    [Fact]
+    public async Task History_OpensExtendsMovesAndCloses_OneOpenIntervalPerDevice()
+    {
+        const string mac = "aa:bb:cc:dd:ee:20";
+        await FlushWithHistoryAsync(Up(mac, "10.62.0.10", "laptop"));        // first lease: opens
+        await FlushWithHistoryAsync(Up(mac, "10.62.0.10", null));            // renewal: extends, keeps the name
+        Assert.Equal([("10.62.0.10", (string?)"laptop", true)], await HistoryAsync(mac));
+
+        await FlushWithHistoryAsync(Up(mac, "10.62.0.77", "laptop"));        // moved: closes old, opens new
+        Assert.Equal([("10.62.0.10", (string?)"laptop", false), ("10.62.0.77", (string?)"laptop", true)], await HistoryAsync(mac));
+
+        await FlushWithHistoryAsync(Del(mac));                               // released: closes
+        Assert.All(await HistoryAsync(mac), h => Assert.False(h.Open));
+    }
 }

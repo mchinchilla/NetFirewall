@@ -17,6 +17,12 @@ public interface IWireGuardInterfaceResolver
 
     /// <summary>Every interface with its peers (one round per interface).</summary>
     Task<IReadOnlyList<(WgServer Server, IReadOnlyList<WgPeer> Peers)>> ListWithPeersAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// The interface hosting the remote-access server, by what it DOES (listener / inbound peers —
+    /// <see cref="WgInterfaceRole"/>), not by wg_servers.mode: a pure server first, else a dual-role one.
+    /// </summary>
+    Task<WgServer?> ServerSideAsync(CancellationToken ct = default);
 }
 
 public sealed class WireGuardInterfaceResolver(IWireGuardService wg) : IWireGuardInterfaceResolver
@@ -35,5 +41,12 @@ public sealed class WireGuardInterfaceResolver(IWireGuardService wg) : IWireGuar
         foreach (var s in await wg.ListServersAsync(ct))
             list.Add((s, await wg.GetPeersAsync(s.Id, ct)));
         return list;
+    }
+
+    public async Task<WgServer?> ServerSideAsync(CancellationToken ct = default)
+    {
+        var all = await ListWithPeersAsync(ct);
+        return all.FirstOrDefault(x => WgInterfaceRole.Classify(x.Server, x.Peers) == WgRole.Server).Server
+               ?? all.FirstOrDefault(x => WgInterfaceRole.Classify(x.Server, x.Peers) == WgRole.DualRole).Server;
     }
 }

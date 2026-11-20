@@ -177,8 +177,9 @@ public static class WireGuardPeersGrid
         var rows = new List<WgPeerGridRow>();
         foreach (var server in await wg.ListServersAsync(ct))
         {
-            if (!tunnels && !string.Equals(server.Mode, "server", StringComparison.OrdinalIgnoreCase)) continue;
-            rows.AddRange((await wg.GetPeersAsync(server.Id, ct))
+            var peers = await wg.GetPeersAsync(server.Id, ct);
+            if (!tunnels && !WgInterfaceRole.IsServerSide(WgInterfaceRole.Classify(server, peers))) continue;
+            rows.AddRange(peers
                 .Where(p => IsTunnelRole(p.Role ?? string.Empty) == tunnels)
                 .Select(p => WgPeerGridRow.From(p, server.Name)));
         }

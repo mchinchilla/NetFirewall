@@ -95,7 +95,8 @@ public enum DhcpOptionCode : byte
     PxeClientArchType = 93,
     PxeClientNetworkInterface = 94,
     LDAP = 95,
-    PxeDiscoveryControl = 97,
+    /// <summary>Client machine identifier (UUID/GUID, RFC 4578 §2.2) — 17 bytes, echoed back.</summary>
+    ClientMachineIdentifier = 97,
     UserAuth = 98,
     GeographicLocation = 99,
     POSIXTimeZone = 100,

@@ -47,9 +47,9 @@ public sealed class WireGuardController : Controller
     {
         // This page is the remote-access SERVER; outbound connections have their own page.
         var server = string.IsNullOrWhiteSpace(iface)
-            ? (await _wg.ListServersAsync(ct)).FirstOrDefault(s => string.Equals(s.Mode, "server", StringComparison.OrdinalIgnoreCase))
+            ? await _ifaces.ServerSideAsync(ct)
             : await _ifaces.RequireAsync(iface, ct);
-        if (server is not null && string.Equals(server.Mode, "client", StringComparison.OrdinalIgnoreCase))
+        if (server is not null && !WgInterfaceRole.IsServerSide(WgInterfaceRole.Classify(server, await _wg.GetPeersAsync(server.Id, ct))))
             return Redirect($"/Vpn/Outbound#conn-{Uri.EscapeDataString(server.Name)}");
         ViewBag.Server = server;
         ViewBag.Form = server is null ? new WgServerFormViewModel() : ToForm(server);
@@ -240,7 +240,8 @@ public sealed class WireGuardController : Controller
             server.Name, impact.TunnelNames.Length, impact.ClientNames.Length);
 
         // Full page reload: the whole VPN page (form, tables, egress) is gone.
-        var page = string.Equals(server.Mode, "client", StringComparison.OrdinalIgnoreCase) ? "/Vpn/Outbound" : "/Vpn/WireGuard";
+        // Peers were deleted with the interface: decide by what it was (its listener).
+        var page = server.ListenPort > 0 ? "/Vpn/WireGuard" : "/Vpn/Outbound";
         Response.Headers["HX-Redirect"] =
             $"{page}?deleted={Uri.EscapeDataString(server.Name)}{(nft.Success ? "" : "&applyWarn=1")}";
         return Json(ServiceResponse<object>.Ok(new { }, $"Interface {server.Name} deleted."));

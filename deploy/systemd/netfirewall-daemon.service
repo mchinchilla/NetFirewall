@@ -55,7 +55,9 @@ NoNewPrivileges=yes
 # detects which network stack is present at runtime; we just give the
 # namespace permission to write to any of them that happen to exist.
 ProtectSystem=strict
-ReadWritePaths=-/etc/network -/etc/NetworkManager -/etc/netplan -/etc/nftables.conf -/etc/iproute2 -/etc/wireguard /var/lib/netfirewall /var/log/netfirewall
+# /etc/unbound: the DNS forwarder config and the DHCP hostnames include (netfirewall*.conf).
+# Without it ProtectSystem=strict made every DNS apply fail with EROFS.
+ReadWritePaths=-/etc/network -/etc/NetworkManager -/etc/netplan -/etc/nftables.conf -/etc/iproute2 -/etc/wireguard -/etc/unbound /var/lib/netfirewall /var/log/netfirewall
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

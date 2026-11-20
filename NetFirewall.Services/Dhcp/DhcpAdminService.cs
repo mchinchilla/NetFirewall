@@ -60,10 +60,10 @@ public sealed class DhcpAdminService : IDhcpAdminService
         const string sql = @"
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
                 dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time, interface_mtu,
-                tftp_server, boot_filename, boot_filename_uefi, domain_search, static_routes,
+                tftp_server, boot_filename, boot_filename_uefi, boot_filename_ipxe, domain_search, static_routes,
                 time_offset, posix_timezone, interface_id, enabled, created_at, updated_at)
             VALUES (@id, @name, @network, @mask, @router, @broadcast, @domain, @dns, @ntp, @wins, @defLease, @maxLease,
-                @mtu, @tftp, @bootFile, @bootFileUefi, @domainSearch, @routes::jsonb, @timeOffset, @posixTz,
+                @mtu, @tftp, @bootFile, @bootFileUefi, @bootFileIpxe, @domainSearch, @routes::jsonb, @timeOffset, @posixTz,
                 @ifaceId, @enabled, @created, @updated)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -87,7 +87,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 name = @name, network = @network, subnet_mask = @mask, router = @router, broadcast = @broadcast,
                 domain_name = @domain, dns_servers = @dns, ntp_servers = @ntp, wins_servers = @wins,
                 default_lease_time = @defLease, max_lease_time = @maxLease, interface_mtu = @mtu,
-                tftp_server = @tftp, boot_filename = @bootFile, boot_filename_uefi = @bootFileUefi,
+                tftp_server = @tftp, boot_filename = @bootFile, boot_filename_uefi = @bootFileUefi, boot_filename_ipxe = @bootFileIpxe,
                 domain_search = @domainSearch, static_routes = @routes::jsonb, time_offset = @timeOffset,
                 posix_timezone = @posixTz, interface_id = @ifaceId, enabled = @enabled, updated_at = @updated
             WHERE id = @id";
@@ -158,6 +158,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("tftp", subnet.TftpServer ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("bootFile", subnet.BootFilename ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("bootFileUefi", subnet.BootFilenameUefi ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFileIpxe", subnet.BootFilenameIpxe ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("domainSearch", subnet.DomainSearchList ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("routes", subnet.StaticRoutesJson ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("timeOffset", subnet.TimeOffset ?? (object)DBNull.Value);
@@ -196,6 +197,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 TftpServer = reader.IsDBNull(reader.GetOrdinal("tftp_server")) ? null : reader.GetString(reader.GetOrdinal("tftp_server")),
                 BootFilename = reader.IsDBNull(reader.GetOrdinal("boot_filename")) ? null : reader.GetString(reader.GetOrdinal("boot_filename")),
                 BootFilenameUefi = reader.IsDBNull(reader.GetOrdinal("boot_filename_uefi")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_uefi")),
+                BootFilenameIpxe = reader.IsDBNull(reader.GetOrdinal("boot_filename_ipxe")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_ipxe")),
                 DomainSearchList = reader.IsDBNull(reader.GetOrdinal("domain_search")) ? null : reader.GetString(reader.GetOrdinal("domain_search")),
                 StaticRoutesJson = reader.IsDBNull(reader.GetOrdinal("static_routes")) ? null : reader.GetString(reader.GetOrdinal("static_routes")),
                 TimeOffset = reader.IsDBNull(reader.GetOrdinal("time_offset")) ? null : reader.GetInt32(reader.GetOrdinal("time_offset")),
@@ -499,7 +501,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 Id = reader.GetGuid(reader.GetOrdinal("id")),
                 MacAddress = reader.GetFieldValue<PhysicalAddress>(reader.GetOrdinal("mac_address")),
                 ReservedIp = reader.GetFieldValue<IPAddress>(reader.GetOrdinal("reserved_ip")),
-                Description = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString(reader.GetOrdinal("description"))
+                Description = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString(reader.GetOrdinal("description")),
+                Hostname = reader.IsDBNull(reader.GetOrdinal("hostname")) ? null : reader.GetString(reader.GetOrdinal("hostname"))
             });
         }
 
@@ -626,14 +629,15 @@ public sealed class DhcpAdminService : IDhcpAdminService
         reservation.Id = Guid.NewGuid();
 
         const string sql = @"
-            INSERT INTO dhcp_mac_reservations (id, mac_address, reserved_ip, description)
-            VALUES (@id, @mac, @ip, @desc)";
+            INSERT INTO dhcp_mac_reservations (id, mac_address, reserved_ip, description, hostname)
+            VALUES (@id, @mac, @ip, @desc, @host)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", reservation.Id);
         cmd.Parameters.AddWithValue("mac", reservation.MacAddress);
         cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("host", reservation.Hostname ?? (object)DBNull.Value);
 
         try
         {
@@ -644,14 +648,55 @@ public sealed class DhcpAdminService : IDhcpAdminService
             // Check-then-insert race: two sessions passed the SELECT guards
             // concurrently. Surface the same friendly message the guards give,
             // not a raw 23505 → 500.
-            throw new InvalidOperationException(
-                $"IP {reservation.ReservedIp} or MAC {FormatMacAddress(reservation.MacAddress)} was reserved by another session just now.");
+            throw new InvalidOperationException(ex.ConstraintName == "ux_dhcp_reservations_hostname"
+                ? $"Another device is already named '{reservation.Hostname}'."
+                : $"IP {reservation.ReservedIp} or MAC {FormatMacAddress(reservation.MacAddress)} was reserved by another session just now.");
         }
         _logger.LogInformation("Created reservation {Mac} -> {Ip}", reservation.MacAddress, reservation.ReservedIp);
 
         await PurgeConflictingLeaseAsync(conn, reservation, ct);
         await NotifyAsync($"reservation.create:{reservation.Id}", ct);
         return reservation;
+    }
+
+    public async Task<NetFirewall.Models.ServiceResponse<DhcpMacReservation>> ReserveLeaseAsync(Guid leaseId, CancellationToken ct = default)
+    {
+        PhysicalAddress mac; IPAddress ip; string? sent;
+        await using (var conn = await _dataSource.OpenConnectionAsync(ct))
+        {
+            await using var cmd = new NpgsqlCommand("SELECT mac_address, ip_address, hostname FROM dhcp_leases WHERE id = @id", conn);
+            cmd.Parameters.AddWithValue("id", leaseId);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct))
+                return NetFirewall.Models.ServiceResponse<DhcpMacReservation>.Fail("That lease no longer exists — refresh the list.");
+            mac = r.GetFieldValue<PhysicalAddress>(0);
+            ip = r.GetFieldValue<IPAddress>(1);
+            sent = r.IsDBNull(2) ? null : r.GetString(2);
+        }
+
+        var hostname = NetFirewall.Models.Network.DnsHostName.Sanitize(sent);
+        if (hostname is not null)
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var taken = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM dhcp_mac_reservations WHERE hostname = @h)", conn);
+            taken.Parameters.AddWithValue("h", hostname);
+            if ((bool)(await taken.ExecuteScalarAsync(ct))!) hostname = null;   // another device has the name: leave it blank
+        }
+
+        try
+        {
+            var created = await CreateReservationAsync(new DhcpMacReservation
+            {
+                MacAddress = mac, ReservedIp = ip, Hostname = hostname,
+                Description = sent is null ? "Reserved from its lease" : $"Reserved from its lease ({sent})",
+            }, ct);
+            return NetFirewall.Models.ServiceResponse<DhcpMacReservation>.Ok(created,
+                $"{ip} is now reserved for {FormatMacAddress(mac)}" + (hostname is null ? "." : $" as '{hostname}'."));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NetFirewall.Models.ServiceResponse<DhcpMacReservation>.Fail(ex.Message);
+        }
     }
 
     public async Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
@@ -694,7 +739,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
         const string sql = @"
             UPDATE dhcp_mac_reservations SET
-                mac_address = @mac, reserved_ip = @ip, description = @desc
+                mac_address = @mac, reserved_ip = @ip, description = @desc, hostname = @host
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -702,8 +747,19 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("mac", reservation.MacAddress);
         cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("host", reservation.Hostname ?? (object)DBNull.Value);
 
-        if (await cmd.ExecuteNonQueryAsync(ct) == 0)
+        int updated;
+        try
+        {
+            updated = await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation && ex.ConstraintName == "ux_dhcp_reservations_hostname")
+        {
+            throw new InvalidOperationException($"Another device is already named '{reservation.Hostname}'.");
+        }
+
+        if (updated == 0)
         {
             // 0 rows: the row was deleted underneath this edit. Without the
             // throw the caller reported success and fired a pointless notify.

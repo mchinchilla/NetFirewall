@@ -212,6 +212,9 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardTeardownService,
 // Which wg interface a request means (pages default; mutations must name it).
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardInterfaceResolver,
                            NetFirewall.Services.Vpn.WireGuardInterfaceResolver>();
+// Split a legacy dual-role wg0 (confirm-or-revert; the watchdog reverts an unconfirmed split).
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardSplitService, NetFirewall.Services.Vpn.WireGuardSplitService>();
+builder.Services.AddHostedService<NetFirewall.Services.Vpn.WireGuardSplitWatchdog>();
 
 // Network objects — alias-style address objects. Filter / NAT / mangle
 // generators resolve names → flat CIDRs through INetworkObjectResolver.
@@ -249,6 +252,9 @@ builder.Services.AddScoped<NetFirewall.Services.Firewall.IScheduleService,
 // inject for full CRUD over subnets / pools / leases / reservations.
 builder.Services.AddSingleton<NetFirewall.Services.Dhcp.IDhcpSubnetService, NetFirewall.Services.Dhcp.DhcpSubnetService>();
 builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpAdminService, NetFirewall.Services.Dhcp.DhcpAdminService>();
+// Operator-defined DHCP options (VoIP 66/150, AP controllers 43, …) — emitted by the DHCP server.
+builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpCustomOptionService, NetFirewall.Services.Dhcp.DhcpCustomOptionService>();
+builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpLeaseHistoryService, NetFirewall.Services.Dhcp.DhcpLeaseHistoryService>();
 
 // Cache invalidation notifier — Web emits NOTIFY on subnet/pool/exclusion writes
 // so the DhcpServer process can drop its in-process cache immediately instead of
@@ -338,6 +344,8 @@ var app = builder.Build();
         typeof(NetFirewall.Services.Vpn.IVpnRoutingService),
         typeof(NetFirewall.Services.Daemon.IDaemonClient),
         typeof(NetFirewall.Services.Dhcp.IDhcpAdminService),
+        typeof(NetFirewall.Services.Dhcp.IDhcpCustomOptionService),
+        typeof(NetFirewall.Services.Dhcp.IDhcpLeaseHistoryService),
         typeof(NetFirewall.Services.Monitoring.IGeoIpLookupService),
         typeof(NetFirewall.Services.Monitoring.IWanTrafficService),
         typeof(NetFirewall.Services.Monitoring.IInterfaceTrafficService),

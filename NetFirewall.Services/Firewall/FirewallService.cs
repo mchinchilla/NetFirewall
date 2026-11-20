@@ -2347,7 +2347,11 @@ public sealed class FirewallService : IFirewallService
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             await using var cmd = new NpgsqlCommand(
-                "SELECT * FROM fw_schedules WHERE enabled = true", conn);
+                // ALL schedules, disabled ones included: a disabled schedule is "idle"
+                // (FwSchedule.IsActiveAt → false), and an INVERTED rule on it must stay in
+                // force — that's the kill switch ("block outside the window"; turn the window
+                // off → block). Filtering them out here dropped every such rule instead.
+                "SELECT * FROM fw_schedules", conn);
             var list = new List<FwSchedule>();
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))

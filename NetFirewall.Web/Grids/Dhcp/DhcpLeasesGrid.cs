@@ -102,6 +102,10 @@ public static class DhcpLeasesGrid
                     "Release", "warning"),
             }
             : null;
-        return GridCell.Actions(wake, release);
+        var reserve = new GridRowAction(GridActionKind.Post, "Reserve", $"/Dhcp/Leases/reserve/{l.Id:D}")
+        {
+            Tooltip = $"Always give {l.Ip} to {l.Hostname ?? l.Mac}, and publish its name in DNS",
+        };
+        return GridCell.Actions(wake, reserve, release);
     }
 }

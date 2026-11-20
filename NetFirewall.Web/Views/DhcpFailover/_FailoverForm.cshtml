@@ -24,7 +24,8 @@
             })
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = nameof(Model.Enabled), Label = "Enabled (start failover protocol)",
-                Kind = FormFieldKind.Checkbox, Value = Model.Enabled ? "true" : "false"
+                Kind = FormFieldKind.Checkbox, Value = "false", Disabled = true,
+                Help = "Not available yet — the failover protocol isn't implemented, and enabling it would stop DHCP on both firewalls."
             })
         </div>
 

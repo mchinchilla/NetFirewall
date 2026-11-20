@@ -26,4 +26,8 @@ public class DhcpMacReservation
 
     [Map( "description" )]
     public string? Description { get; set; }
+
+    /// <summary>DNS name published for this device (one RFC 1123 label, e.g. "nas"). Null = none.</summary>
+    [Map( "hostname" )]
+    public string? Hostname { get; set; }
 }

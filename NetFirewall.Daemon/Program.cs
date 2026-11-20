@@ -285,6 +285,9 @@ builder.Services.AddHostedService(
 
 builder.Services.AddHostedService<NetFirewall.Services.Monitoring.ConntrackSamplerService>();
 
+// DHCP hostnames → Unbound local-data (`ping nas.home.lan`), only while our forwarder is in use.
+builder.Services.AddHostedService<NetFirewall.Services.Network.LocalDnsPublisherService>();
+
 // WAN health monitor — absorbs the standalone NetFirewall.WanMonitor process.
 // Probes each WAN, persists state to wan_health_state, swaps the default
 // route in the main table when priority winner changes.

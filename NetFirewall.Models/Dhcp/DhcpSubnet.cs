@@ -90,6 +90,20 @@ public class DhcpSubnet
     public string? BootFilenameUefi { get; set; }
 
     /// <summary>
+    /// What iPXE clients (user class "iPXE") get — usually an HTTP script URL. Breaks the chainload
+    /// loop: without it iPXE is handed the iPXE binary again. Null = the normal boot file.
+    /// </summary>
+    [Map("boot_filename_ipxe")]
+    public string? BootFilenameIpxe { get; set; }
+
+    /// <summary>Custom options for this subnet's clients (subnet scope over global). Filled by the server's cache, not a column.</summary>
+    public IReadOnlyList<DhcpCustomOption> CustomOptions { get; set; } = [];
+
+    /// <summary>Host-scoped custom options, by reservation MAC (lower-case). Shared across subnets; filled by the cache.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<DhcpCustomOption>> HostOptions { get; set; } =
+        new Dictionary<string, IReadOnlyList<DhcpCustomOption>>();
+
+    /// <summary>
     /// Domain search list for Option 119 (comma-separated domains)
     /// e.g., "example.com,corp.example.com"
     /// </summary>

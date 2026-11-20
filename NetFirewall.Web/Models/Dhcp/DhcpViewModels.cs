@@ -40,6 +40,7 @@ public sealed class SubnetFormViewModel : IValidatableObject
     [StringLength(255)] public string? TftpServer { get; set; }
     [StringLength(255)] public string? BootFilename { get; set; }
     [StringLength(255)] public string? BootFilenameUefi { get; set; }
+    [StringLength(512)] public string? BootFilenameIpxe { get; set; }
 
     [StringLength(2000)] public string? DomainSearchList { get; set; }
 
@@ -129,4 +130,42 @@ public sealed class ReservationFormViewModel
     [Required, IPv4] public string ReservedIp { get; set; } = string.Empty;
 
     [StringLength(255)] public string? Description { get; set; }
+
+    /// <summary>One DNS label, published as &lt;name&gt;.&lt;subnet domain&gt; in the firewall's resolver.</summary>
+    [RegularExpression(@"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+        ErrorMessage = "Host name: lower-case letters, digits and '-', no dots (e.g. nas, office-printer).")]
+    public string? Hostname { get; set; }
+}
+
+/// <summary>The custom option drawer. Validated here and again (encoding, scope) by IDhcpCustomOptionService.</summary>
+public sealed class DhcpOptionFormViewModel
+{
+    public Guid? Id { get; set; }
+
+    [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Pick who the option is for.")]
+    [System.ComponentModel.DataAnnotations.RegularExpression("^(global|subnet|class|host)$", ErrorMessage = "Pick who the option is for.")]
+    public string ScopeType { get; set; } = NetFirewall.Models.Dhcp.DhcpOptionScopes.Global;
+
+    public Guid? ScopeId { get; set; }
+
+    [System.ComponentModel.DataAnnotations.Range(1, 254, ErrorMessage = "Option code must be 1–254.")]
+    public int Code { get; set; } = 66;
+
+    [System.ComponentModel.DataAnnotations.StringLength(100)]
+    public string? Name { get; set; }
+
+    [System.ComponentModel.DataAnnotations.Required]
+    [System.ComponentModel.DataAnnotations.RegularExpression("^(ip|ip_list|string|uint8|uint16|uint32|bool|hex)$", ErrorMessage = "Pick the value format.")]
+    public string Format { get; set; } = NetFirewall.Models.Dhcp.DhcpOptionFormats.Text;
+
+    [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "A value is required.")]
+    [System.ComponentModel.DataAnnotations.StringLength(1024)]
+    public string Value { get; set; } = string.Empty;
+}
+
+/// <summary>Drawer model: the form + the targets of its current scope.</summary>
+public sealed class DhcpOptionFormPageViewModel
+{
+    public required DhcpOptionFormViewModel Form { get; init; }
+    public IReadOnlyList<(Guid Id, string Label)> Targets { get; init; } = [];
 }

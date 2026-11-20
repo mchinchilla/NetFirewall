@@ -87,8 +87,18 @@ public sealed class VpnDoctorService : IVpnDoctorService
             all.Add(DiagCheck.Skip("sys.error", "Kernel", "Kernel tunables", $"Could not read sysctls: {ex.Message}"));
         }
 
-        return new DiagReport(DiagTools.VpnDoctor, server.Name, started, (int)sw.ElapsedMilliseconds, all);
+        return new DiagReport(DiagTools.VpnDoctor, server.Name, started, (int)sw.ElapsedMilliseconds,
+            all.Select(c => ForInterface(c, server.Name)).ToList());
     }
+
+    /// <summary>
+    /// Remedies are written once for every check and link to the VPN page; point them at the
+    /// interface being diagnosed (an outbound connection redirects to its own card there).
+    /// </summary>
+    internal static DiagCheck ForInterface(DiagCheck check, string iface) =>
+        check.Remedy is { Href: "/Vpn/WireGuard" } r
+            ? check with { Remedy = r with { Href = $"/Vpn/WireGuard?iface={Uri.EscapeDataString(iface)}" } }
+            : check;
 
     // ───────────────────────── data-plane probe ─────────────────────────
 
