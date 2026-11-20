@@ -69,6 +69,8 @@ CONFIGURE_NGINX=auto         # auto = only on a fresh install
 TLS_CERT=""
 TLS_KEY=""
 SKIP_PACKAGES=false
+PG_MAJOR=19                  # PostgreSQL major for a NEW local server + the client tools
+PGDG=yes                     # yes = official apt.postgresql.org repo; no = the distro's packages
 APPLY_SEEDS=false
 SKIP_BACKUP=false
 BACKUP_DIR=/var/backups/netfirewall
@@ -82,7 +84,7 @@ ROLLBACK_TO=""
 
 # Options worth remembering between runs (never secrets: the password lives in the env files).
 readonly SAVED_KEYS=(PREFIX DB_HOST DB_PORT DB_NAME DB_USER INSTALL_DHCP DHCP_IFACE BOOT_APPLY
-                     SKIP_PACKAGES BACKUP_DIR BACKUP_KEEP KEEP_RELEASES)
+                     SKIP_PACKAGES PG_MAJOR PGDG BACKUP_DIR BACKUP_KEEP KEEP_RELEASES)
 
 # ─────────────────────────────── presentation ───────────────────────────────
 #
@@ -254,6 +256,11 @@ ${C_ACCENT}Database${C_OFF}
   --db-user USER           (defaults 5432 / net_firewall / netfirewall)
   --db-password PASS       Kept from the env files on upgrades; generated for a
                            new local database; required for a new remote one.
+  --pg-version N           PostgreSQL major for a NEW local server and the client
+                           tools (default 19). An existing local cluster is never
+                           upgraded or duplicated — see docs/setup.md.
+  --no-pgdg                Use the distribution's PostgreSQL packages instead of
+                           the official apt.postgresql.org repository.
 
 ${C_ACCENT}Services${C_OFF}
   --with-dhcp [--dhcp-iface IF]   Install + enable the DHCP server (binds UDP/67).
@@ -330,6 +337,8 @@ while [[ $# -gt 0 ]]; do
         --tls-cert)         need_arg "$@"; TLS_CERT="$2"; shift 2 ;;
         --tls-key)          need_arg "$@"; TLS_KEY="$2"; shift 2 ;;
         --skip-packages)    SKIP_PACKAGES=true; shift ;;
+        --pg-version)       need_arg "$@"; PG_MAJOR="$2"; shift 2 ;;
+        --no-pgdg)          PGDG=no; shift ;;
         --apply-seeds)      APPLY_SEEDS=true; shift ;;
         --skip-backup)      SKIP_BACKUP=true; shift ;;
         --backup-dir)       need_arg "$@"; BACKUP_DIR="${2%/}"; shift 2 ;;
@@ -351,6 +360,8 @@ done
 [[ "$DB_USER" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]  || fail "--db-user must be a plain identifier"
 [[ "$KEEP_RELEASES" =~ ^[0-9]+$ && "$KEEP_RELEASES" -ge 2 ]] || fail "--keep-releases must be ≥ 2 (rollback needs one)"
 [[ "$BACKUP_KEEP" =~ ^[0-9]+$ && "$BACKUP_KEEP" -ge 1 ]]     || fail "--backup-keep must be ≥ 1"
+[[ "$PG_MAJOR" =~ ^[0-9]{2}$ && "$PG_MAJOR" -ge 14 ]]      || fail "--pg-version must be a PostgreSQL major ≥ 14 (e.g. 19)"
+[[ "$PGDG" == yes || "$PGDG" == no ]]                      || fail "PGDG in setup.conf must be yes or no"
 # The password ends up inside a Npgsql connection string and an env file.
 [[ "$DB_PASSWORD" != *[\;\"\'\\[:space:]]* ]] || fail "--db-password can't contain ; quotes, backslashes or spaces"
 [[ -z "$DHCP_IFACE" || "$DHCP_IFACE" =~ ^[A-Za-z0-9._@-]{1,15}$ ]] || fail "--dhcp-iface is not an interface name"
@@ -375,6 +386,107 @@ current_version() {
 
 has_apt() { command -v apt-get >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; }
 pkg_installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
+
+# ─── PostgreSQL packages ───
+#
+# A NEW local server is PostgreSQL $PG_MAJOR from the official PGDG repository
+# (apt.postgresql.org); the distros lag behind (Debian 13 ships 17). The repo's
+# signing key travels in the bundle (deploy/pgdg/, fingerprint checked below), so
+# nothing trust-related is fetched at install time.
+#
+# An EXISTING local server is left alone: installing postgresql-19 next to a 17
+# cluster would create a second, empty cluster on port 5433 while the firewall
+# keeps using 5432. Moving a cluster to a new major is the operator's call
+# (pg_upgradecluster, after a backup) — setup.sh only says so.
+readonly PGDG_KEY_FPR=B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+readonly PGDG_KEYRING=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+readonly PGDG_SOURCES=/etc/apt/sources.list.d/pgdg.sources
+readonly PGDG_SUITES="bookworm trixie forky sid jammy noble plucky questing"
+PGDG_ACTIVE=false
+
+# Server majors installed as packages (postgresql-17, postgresql-19…), highest last.
+pg_server_majors() {
+    dpkg-query -W -f='${Package} ${Status}\n' 'postgresql-[0-9]*' 2>/dev/null \
+        | awk '$1 ~ /^postgresql-[0-9]+$/ && /install ok installed/ { sub("postgresql-", "", $1); print $1 }' \
+        | sort -n
+}
+
+pgdg_already_configured() { grep -rqs 'apt\.postgresql\.org' /etc/apt/sources.list /etc/apt/sources.list.d/; }
+
+pgdg_codename() { (. /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-}"); }
+
+# Decides PGDG_ACTIVE and, unless only checking, configures the repository.
+ensure_pgdg_repo() {   # [check]
+    PGDG_ACTIVE=false
+    [[ "$PGDG" == yes ]] || { skip "PostgreSQL from the distribution (--no-pgdg)"; return 0; }
+    if pgdg_already_configured; then
+        PGDG_ACTIVE=true; ok "PGDG repository already configured"; return 0
+    fi
+    local codename; codename=$(pgdg_codename)
+    if [[ -z "$codename" || " $PGDG_SUITES " != *" $codename "* ]]; then
+        warn "no PGDG suite known for '${codename:-?}' — using the distribution's PostgreSQL"
+        return 0
+    fi
+    if [[ "${1:-}" == check || "$SKIP_PACKAGES" == true ]]; then
+        PGDG_ACTIVE=true; skip "would add the PGDG repository ($codename-pgdg)"; return 0
+    fi
+    local key="$BUNDLE_DEPLOY/pgdg/apt.postgresql.org.asc"
+    [[ -r "$key" ]] || fail "bundle is missing deploy/pgdg/apt.postgresql.org.asc"
+    if command -v gpg >/dev/null 2>&1; then
+        local fpr
+        fpr=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr/ { print $10; exit }')
+        [[ "$fpr" == "$PGDG_KEY_FPR" ]] || fail "PGDG key in the bundle has fingerprint '${fpr:-?}', expected $PGDG_KEY_FPR"
+    fi
+    install -d -m 0755 "$(dirname "$PGDG_KEYRING")"
+    install -m 0644 "$key" "$PGDG_KEYRING"
+    cat > "$PGDG_SOURCES" <<EOF
+# Official PostgreSQL repository — written by NetFirewall setup.sh (--no-pgdg to avoid it).
+Types: deb
+URIs: https://apt.postgresql.org/pub/repos/apt
+Suites: $codename-pgdg
+Architectures: $(dpkg --print-architecture)
+Components: main
+Signed-By: $PGDG_KEYRING
+EOF
+    chmod 0644 "$PGDG_SOURCES"
+    PGDG_ACTIVE=true
+    ok "PGDG repository added ($codename-pgdg)"
+}
+
+# The PostgreSQL packages this host needs, one per line.
+pg_packages() {
+    local majors highest
+    majors=$(pg_server_majors); highest=$(tail -1 <<< "$majors")
+    if [[ "$PGDG_ACTIVE" == true ]]; then
+        # pg_dump must be at least the server's major: keep the client ≥ any local server.
+        echo "postgresql-client-$(( highest > PG_MAJOR ? highest : PG_MAJOR ))"
+    else
+        echo postgresql-client
+    fi
+    is_local_db || return 0
+    if [[ -n "$highest" ]]; then
+        return 0   # a server is installed — never add a second major (see above)
+    fi
+    [[ "$PGDG_ACTIVE" == true ]] && echo "postgresql-$PG_MAJOR" || echo postgresql
+}
+
+# Says what happens to the local server; never changes it.
+report_pg_server() {
+    is_local_db || return 0
+    local majors highest
+    majors=$(pg_server_majors); highest=$(tail -1 <<< "$majors")
+    if [[ -z "$highest" ]]; then
+        ok "local PostgreSQL: will install $([[ "$PGDG_ACTIVE" == true ]] && echo "$PG_MAJOR (PGDG)" || echo "the distribution's version")"
+    elif (( highest < PG_MAJOR )); then
+        warn "local PostgreSQL is $highest — kept as is (setup.sh never upgrades a cluster)."
+        warn "  to move it to $PG_MAJOR yourself: back up, then pg_upgradecluster $highest main (see docs/setup.md)"
+    else
+        ok "local PostgreSQL $highest"
+    fi
+    if (( $(wc -w <<< "$majors") > 1 )); then
+        warn "more than one PostgreSQL major installed ($(tr '\n' ' ' <<< "$majors")) — check pg_lsclusters for a stray cluster"
+    fi
+}
 
 # Value of KEY in an env file (first match), empty if absent.
 env_get() { [[ -f "$2" ]] && grep -m1 "^$1=" "$2" | cut -d= -f2- || true; }
@@ -582,6 +694,14 @@ legacy_layout_dirs() {
     return 0
 }
 
+pg_plan_note() {
+    local highest; highest=$(has_apt && pg_server_majors | tail -1)
+    if is_local_db && [[ -n "$highest" ]]; then echo "local $highest, kept"
+    elif is_local_db; then echo "install $([[ "$PGDG" == yes ]] && echo "$PG_MAJOR from apt.postgresql.org" || echo "the distribution's")"
+    else echo "remote; client $([[ "$PGDG" == yes ]] && echo "$PG_MAJOR (PGDG)" || echo "from the distribution")"
+    fi
+}
+
 print_plan() {
     local action db_note="existing" legacy
     if [[ -n "$PREV_VERSION" && "$PREV_VERSION" == "$BUNDLE_VERSION" ]]; then
@@ -607,7 +727,8 @@ print_plan() {
         "Boot apply   $BOOT_APPLY" \
         "nginx        $([[ "$CONFIGURE_NGINX" == yes ]] && echo "configure TLS site" || echo "leave untouched")" \
         "DB backup    $([[ "$SKIP_BACKUP" == true || "$FRESH" == true ]] && echo "no" || echo "yes → $BACKUP_DIR")" \
-        "Packages     $([[ "$SKIP_PACKAGES" == true ]] && echo "check only" || echo "apt-get what's missing")"
+        "Packages     $([[ "$SKIP_PACKAGES" == true ]] && echo "check only" || echo "apt-get what's missing")" \
+        "PostgreSQL   $(pg_plan_note)"
     legacy=$(legacy_layout_dirs)
     if [[ -n "$legacy" ]]; then
         warn "legacy dirs stay in place but the units stop using them:"
@@ -621,9 +742,15 @@ print_plan() {
 install_packages() {
     step "Packages"
     local wanted=(ca-certificates curl openssl nftables iproute2 conntrack iputils-ping
-                  postgresql-client tcpdump traceroute wireguard-tools)
-    is_local_db && wanted+=(postgresql)
+                  tcpdump traceroute wireguard-tools)
     [[ "$CONFIGURE_NGINX" == yes ]] && wanted+=(nginx)
+
+    if has_apt; then
+        ensure_pgdg_repo
+        report_pg_server
+        local pkg
+        while read -r pkg; do [[ -n "$pkg" ]] && wanted+=("$pkg"); done < <(pg_packages)
+    fi
 
     if ! has_apt; then
         local c
@@ -1164,7 +1291,8 @@ save_options() {
     local k
     declare -A defaults=([PREFIX]=/opt/tekium [DB_HOST]=127.0.0.1 [DB_PORT]=5432 [DB_NAME]=net_firewall
                          [DB_USER]=netfirewall [INSTALL_DHCP]=no [DHCP_IFACE]="" [BOOT_APPLY]=no
-                         [SKIP_PACKAGES]=false [BACKUP_DIR]=/var/backups/netfirewall [BACKUP_KEEP]=10
+                         [SKIP_PACKAGES]=false [PG_MAJOR]=19 [PGDG]=yes
+                         [BACKUP_DIR]=/var/backups/netfirewall [BACKUP_KEEP]=10
                          [KEEP_RELEASES]=3)
     {
         echo "# Written by setup.sh $BUNDLE_VERSION on $(date -u '+%Y-%m-%dT%H:%M:%SZ')."

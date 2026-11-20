@@ -55,6 +55,7 @@ deploy/
   env/{daemon,web,dhcp}.env.template    tokenized (__REPLACE__) — secrets are minted on the host, never bundled
   nginx/                                netfirewall-appliance.conf.template (self-signed, fresh installs) + LE example
   bootstrap/netfirewall-bootstrap       boot-time apply script (netfirewall-bootstrap.service)
+  pgdg/apt.postgresql.org.asc           PGDG signing key (fingerprint checked by setup.sh)
   sysctl/ modprobe.d/ modules-load.d/ tmpfiles/ man/ completion/ seeds/
 ```
 
@@ -119,7 +120,10 @@ exclusion any more (the schedule kill-switch bug behind it was fixed).
   re-applies DB state) is on for fresh installs only; nginx is written only on a
   fresh install or with `--configure-nginx`/`--tls-cert`, and reverted if
   `nginx -t` fails. Local DB (`127.0.0.1`/`localhost`/`::1`) is provisioned (role +
-  DB); remote is only connected to.
+  DB); remote is only connected to. A NEW local server is PostgreSQL 19 (`--pg-version`)
+  from the official PGDG repo (key shipped in the bundle; `--no-pgdg` = distro packages);
+  an EXISTING server is never upgraded or joined by a second major (that would create an
+  empty cluster on 5433) — docs/setup.md has the manual `pg_upgradecluster` recipe.
 - setup.sh never touches the live nftables ruleset, routes, WireGuard or network
   config, and only removes NetFirewall's own pieces under the prefix (it may be
   shared, e.g. `/opt/tekium`).

@@ -132,7 +132,7 @@ done
 log "  $linked files linked ($(du -sh "$APP" | cut -f1) on disk)"
 
 log "Copying deployment assets"
-for dir in systemd config env nginx sysctl modprobe.d modules-load.d tmpfiles man completion seeds; do
+for dir in systemd config env nginx sysctl modprobe.d modules-load.d tmpfiles man completion seeds pgdg; do
     cp -R "$REPO_ROOT/deploy/$dir" "$STAGE/deploy/$dir"
 done
 mkdir -p "$APP/bin"

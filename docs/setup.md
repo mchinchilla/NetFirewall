@@ -48,13 +48,47 @@ Este método reemplaza a `deploy/install.sh` (que compilaba en el servidor) y al
 | Init | systemd corriendo (PID 1) |
 | Usuario | `root` (sin `sudo`; el script lo exige) |
 | Disco | ~125 MB por release bajo `--prefix` (se guardan 3 por defecto); el bundle pesa ~50 MB |
-| Red | Acceso a los repos apt **solo** si faltan paquetes |
+| Red | Acceso a los repos apt (y a `apt.postgresql.org`) **solo** si faltan paquetes |
 
 **No** necesita el SDK ni el runtime de .NET: el runtime viaja dentro del bundle.
 `setup.sh` instala con `apt-get` lo que falte de esta lista (y nada si está todo):
 
-`ca-certificates curl openssl nftables iproute2 conntrack iputils-ping postgresql-client tcpdump traceroute wireguard-tools libicuNN`
-+ `postgresql` si la base es local + `nginx` si va a configurar el proxy.
+`ca-certificates curl openssl nftables iproute2 conntrack iputils-ping tcpdump traceroute wireguard-tools libicuNN`
++ `postgresql-client-19` + `postgresql-19` si la base es local y **no hay ya un
+PostgreSQL instalado** + `nginx` si va a configurar el proxy.
+
+### PostgreSQL 19 (repositorio oficial PGDG)
+
+Debian y Ubuntu traen versiones viejas de PostgreSQL (Debian 13 trae la 17), así que
+`setup.sh` agrega el **repositorio oficial** `apt.postgresql.org` (PGDG) e instala la
+versión de `--pg-version` (por defecto **19**):
+
+- La llave de firma del repositorio **viaja en el bundle** (`deploy/pgdg/`); antes de
+  instalarla se compara su huella con `B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8`. No se
+  descarga nada de confianza durante la instalación.
+- Escribe `/etc/apt/sources.list.d/pgdg.sources` (`<codename>-pgdg`). Si el host **ya
+  tiene** el repo configurado (por ejemplo un `pgdg.list` puesto a mano), no agrega otro.
+- Soportados: Debian 12/13, Ubuntu 22.04/24.04 y posteriores. En un codename sin suite
+  PGDG usa los paquetes de la distribución y lo avisa.
+- El cliente (`pg_dump`) se instala siempre en una versión ≥ a la del servidor local, para
+  que el backup previo a cada actualización funcione.
+- `--no-pgdg` vuelve a los paquetes de la distribución (`postgresql`, `postgresql-client`).
+
+**Un PostgreSQL que ya está instalado no se toca.** Instalar `postgresql-19` junto a un
+cluster 17 crearía un segundo cluster vacío en el puerto 5433 mientras el firewall sigue
+usando el 5432. Si el servidor local es más viejo que `--pg-version`, `setup.sh` lo deja
+como está y avisa. Para subirlo de versión, a mano y después de un backup:
+
+```bash
+pg_dump -U netfirewall -h 127.0.0.1 net_firewall | gzip > /root/net_firewall-pre-pg19.sql.gz
+systemctl stop netfirewall-web netfirewall-daemon netfirewall-dhcp
+apt-get install -y postgresql-19          # con un cluster ya existente NO crea 19/main
+pg_lsclusters                             # si aun así apareció un 19/main vacío: pg_dropcluster --stop 19 main
+pg_upgradecluster -v 19 17 main           # copia el 17 a 19/main en el 5432; el 17 queda apagado en el 5433
+systemctl start netfirewall-daemon netfirewall-web netfirewall-dhcp
+netfirewall-doctor                        # "PostgreSQL 19", migraciones al día
+pg_dropcluster 17 main                    # cuando estés conforme (setup.sh avisa mientras siga ahí)
+```
 
 ---
 
@@ -285,6 +319,8 @@ en la siguiente corrida.
 | `--db-port PORT` | `5432` | ✓ | |
 | `--db-name NAME` | `net_firewall` | ✓ | Identificador simple (`[A-Za-z_][A-Za-z0-9_]*`). |
 | `--db-user USER` | `netfirewall` | ✓ | Ídem. |
+| `--pg-version N` | `19` | ✓ | Versión mayor de PostgreSQL para un servidor local **nuevo** y para el cliente. Un servidor existente nunca se actualiza ni se duplica (ver [PostgreSQL 19](#postgresql-19-repositorio-oficial-pgdg)). |
+| `--no-pgdg` | — | ✓ (`PGDG=no`) | Usa los paquetes de PostgreSQL de la distribución en vez de `apt.postgresql.org`. |
 | `--db-password PASS` | — | ✗ (vive en los env) | Instalación nueva local: se genera si no la pasas. Remota nueva: **obligatoria**. Actualización: se lee de `web.env`/`daemon.env`. No puede contener `;`, comillas, `\` ni espacios. |
 
 Pasar **cualquier** `--db-*` hace que se reescriba `ConnectionStrings__DefaultConnection`
