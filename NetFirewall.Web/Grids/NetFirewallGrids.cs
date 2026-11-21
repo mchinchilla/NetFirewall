@@ -60,6 +60,8 @@ public static class NetFirewallGrids
         Dhcp.DhcpLeaseHistoryGrid.Register(builder);
         Dhcp.DhcpDdnsGrid.Register(builder);
         Dhcp.DhcpFailoverGrid.Register(builder);
+        Dhcp.DhcpBlockedMacsGrid.Register(builder);
+        Dhcp.DhcpRelayAgentsGrid.Register(builder);
         Firewall.FwAuditLogGrid.Register(builder);
         Firewall.FwPortForwardsGrid.Register(builder);
         Firewall.FwNatRulesGrid.Register(builder);

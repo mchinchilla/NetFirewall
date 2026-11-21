@@ -40,7 +40,14 @@ public sealed class SubnetFormViewModel : IValidatableObject
     [StringLength(255)] public string? TftpServer { get; set; }
     [StringLength(255)] public string? BootFilename { get; set; }
     [StringLength(255)] public string? BootFilenameUefi { get; set; }
-    [StringLength(512)] public string? BootFilenameIpxe { get; set; }
+    // Option 67 carries at most 255 bytes; a longer name made the server drop the reply.
+    [StringLength(255)] public string? BootFilenameIpxe { get; set; }
+
+    /// <summary>UEFI HTTP boot URI (00051). Must be http:// or https://.</summary>
+    [StringLength(255)] public string? BootFilenameHttp { get; set; }
+
+    /// <summary>ARM64 UEFI boot file over TFTP (00051).</summary>
+    [StringLength(255)] public string? BootFilenameArm64 { get; set; }
 
     [StringLength(2000)] public string? DomainSearchList { get; set; }
 
@@ -53,6 +60,10 @@ public sealed class SubnetFormViewModel : IValidatableObject
             yield return new ValidationResult(
                 "Max lease time must be greater than or equal to default lease time.",
                 new[] { nameof(MaxLeaseTime) });
+
+        if (!string.IsNullOrWhiteSpace(BootFilenameHttp) && !NetFirewall.Models.Dhcp.PxeBoot.IsHttpUri(BootFilenameHttp.Trim()))
+            yield return new ValidationResult(
+                "HTTP boot URI must be an absolute http:// or https:// address.", new[] { nameof(BootFilenameHttp) });
 
         foreach (var (raw, name) in new[] {
             (DnsServersRaw, nameof(DnsServersRaw)),
@@ -135,6 +146,11 @@ public sealed class ReservationFormViewModel
     [RegularExpression(@"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
         ErrorMessage = "Host name: lower-case letters, digits and '-', no dots (e.g. nas, office-printer).")]
     public string? Hostname { get; set; }
+
+    /// <summary>Per-host lease in seconds; empty = the subnet's default lease time.</summary>
+    [Range(NetFirewall.Models.Dhcp.DhcpMacReservation.MinLeaseTime, NetFirewall.Models.Dhcp.DhcpMacReservation.MaxLeaseTime,
+        ErrorMessage = "Lease time must be 60 seconds – 1 year (31536000 s).")]
+    public int? LeaseTime { get; set; }
 }
 
 /// <summary>The custom option drawer. Validated here and again (encoding, scope) by IDhcpCustomOptionService.</summary>
@@ -168,4 +184,33 @@ public sealed class DhcpOptionFormPageViewModel
 {
     public required DhcpOptionFormViewModel Form { get; init; }
     public IReadOnlyList<(Guid Id, string Label)> Targets { get; init; } = [];
+}
+
+// =====================================================================
+//  Access control: MAC block list + trusted relays (00053 / 00054)
+// =====================================================================
+
+/// <summary>The block-list drawer. Validated here and again by IDhcpAccessControlService.</summary>
+public sealed class BlockedMacFormViewModel
+{
+    public Guid? Id { get; set; }
+
+    [Required(ErrorMessage = "Enter the device's MAC address."),
+     RegularExpression(@"^([0-9A-Fa-f]{2}([:-])){5}[0-9A-Fa-f]{2}$", ErrorMessage = "MAC must be in xx:xx:xx:xx:xx:xx form.")]
+    public string MacAddress { get; set; } = string.Empty;
+
+    [StringLength(255)] public string? Reason { get; set; }
+}
+
+/// <summary>The relay drawer. Validated here and again by IDhcpAccessControlService.</summary>
+public sealed class RelayAgentFormViewModel
+{
+    public Guid? Id { get; set; }
+
+    [Required(ErrorMessage = "Enter the relay's IPv4 address."), IPv4]
+    public string IpAddress { get; set; } = string.Empty;
+
+    [StringLength(255)] public string? Description { get; set; }
+
+    public bool Trusted { get; set; } = true;
 }

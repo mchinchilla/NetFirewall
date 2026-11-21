@@ -213,6 +213,9 @@ public class DhcpWorker : BackgroundService
 
     private NetFirewall.Services.Dhcp.IInterfaceAddressProvider? _addresses;
 
+    /// <summary>Per-MAC packet budget (Dhcp:RateLimit). Null = off. Resolved once at startup.</summary>
+    private NetFirewall.Services.Dhcp.IDhcpRateLimiter? _rateLimiter;
+
     private T? ResolveSingleton<T>() where T : class
     {
         using var scope = _scopeFactory.CreateScope();   // singletons outlive the scope
@@ -259,6 +262,7 @@ public class DhcpWorker : BackgroundService
 
         // Initialize sockets from database interfaces
         await InitializeSocketsAsync(stoppingToken).ConfigureAwait(false);
+        _rateLimiter = ResolveSingleton<NetFirewall.Services.Dhcp.IDhcpRateLimiter>();
 
         PrintStartupBanner();
 
@@ -307,10 +311,10 @@ public class DhcpWorker : BackgroundService
             _logger.LogInformation(
                 "DHCP Stats - Received: {Received}, Processed: {Processed}, Pending: {Pending}, " +
                 "DISCOVER: {Discover}, REQUEST: {Request}, RELEASE: {Release}, " +
-                "OFFER: {Offer}, ACK: {Ack}, NAK: {Nak}, Errors: {Errors}",
+                "OFFER: {Offer}, ACK: {Ack}, NAK: {Nak}, Errors: {Errors}, RateLimited: {RateLimited}",
                 _packetsReceived, _packetsProcessed, PendingPacketCount,
                 _discoverCount, _requestCount, _releaseCount,
-                _offersCount, _acksCount, _naksCount, _errorsCount);
+                _offersCount, _acksCount, _naksCount, _errorsCount, _rateLimiter?.Dropped ?? 0);
         }
     }
 
@@ -464,6 +468,12 @@ public class DhcpWorker : BackgroundService
                 receivedBytes, MinDhcpPacketSize, sourceEndPoint);
             return;
         }
+
+        // Per-client budget, before the packet takes a queue slot. Only client requests count
+        // (op 1) — chaddr of a BOOTREPLY is the client's, not the sender's. Drops show up in the
+        // stats line only: one log line per refused packet would be its own flood.
+        if (_rateLimiter is { } limiter && receiveBuffer[0] == 1 && !limiter.TryAcquire(receiveBuffer.AsSpan(28, 6)))
+            return;
 
         // Rent buffer from pool and copy data
         var rentedBuffer = _bufferPool.Rent(receivedBytes);
@@ -799,6 +809,7 @@ public class DhcpWorker : BackgroundService
 
         request.IsBootp = request.MessageType == 0 && request.Op == 1;
         request.IsPxeRequest = request.VendorClassIdentifier?.Contains("PXEClient") == true;
+        request.IsHttpBoot = request.VendorClassIdentifier?.StartsWith(PxeBoot.HttpClientPrefix, StringComparison.Ordinal) == true;
 
         if (_logger.IsEnabled(LogLevel.Debug))
         {
@@ -911,6 +922,10 @@ public class DhcpWorker : BackgroundService
                 request.LeaseTime = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(data));
                 break;
 
+            case DhcpOptionCode.MaxMessageSize when data.Length >= 2:
+                request.MaxMessageSize = (ushort)((data[0] << 8) | data[1]);
+                break;
+
             case DhcpOptionCode.ServerIdentifier when data.Length >= 4:
                 request.ServerIdentifier = new IPAddress(data.Slice(0, 4));
                 break;
@@ -954,6 +969,7 @@ public class DhcpWorker : BackgroundService
         table.AddRow("ACK sent", _acksCount.ToString());
         table.AddRow("NAK sent", _naksCount.ToString());
         table.AddRow("Errors", _errorsCount.ToString());
+        table.AddRow("Rate-limited", (_rateLimiter?.Dropped ?? 0).ToString());
 
         AnsiConsole.Write(table);
 

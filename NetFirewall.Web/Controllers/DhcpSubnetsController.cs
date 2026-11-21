@@ -138,6 +138,8 @@ public sealed class DhcpSubnetsController : Controller
         BootFilename = s.BootFilename,
         BootFilenameUefi = s.BootFilenameUefi,
         BootFilenameIpxe = s.BootFilenameIpxe,
+        BootFilenameHttp = s.BootFilenameHttp,
+        BootFilenameArm64 = s.BootFilenameArm64,
         DomainSearchList = s.DomainSearchList,
         InterfaceId = s.InterfaceId,
         Enabled = s.Enabled
@@ -161,6 +163,8 @@ public sealed class DhcpSubnetsController : Controller
         BootFilename = f.BootFilename,
         BootFilenameUefi = f.BootFilenameUefi,
         BootFilenameIpxe = string.IsNullOrWhiteSpace(f.BootFilenameIpxe) ? null : f.BootFilenameIpxe.Trim(),
+        BootFilenameHttp = string.IsNullOrWhiteSpace(f.BootFilenameHttp) ? null : f.BootFilenameHttp.Trim(),
+        BootFilenameArm64 = string.IsNullOrWhiteSpace(f.BootFilenameArm64) ? null : f.BootFilenameArm64.Trim(),
         DomainSearchList = f.DomainSearchList,
         InterfaceId = f.InterfaceId,
         Enabled = f.Enabled

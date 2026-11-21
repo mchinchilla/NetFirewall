@@ -15,7 +15,7 @@
             Name = nameof(Model.MacAddress), Label = "MAC address", Required = true, Value = Model.MacAddress,
             Placeholder = "AA:BB:CC:DD:EE:FF",
             Pattern = @"^([0-9A-Fa-f]{2}([:-])){5}[0-9A-Fa-f]{2}$",
-            Help = "Lowercase or uppercase, separator <code>:</code> or <code>-</code>."
+            Help = "Lowercase or uppercase, separator colon (:) or dash (-)."
         })
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {
@@ -28,6 +28,12 @@
             Name = nameof(Model.Hostname), Label = "Host name (optional)", Value = Model.Hostname,
             Placeholder = "nas", MaxLength = 63, Pattern = @"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$",
             Help = "Published in the firewall's DNS as <name>.<subnet domain> — then `ping nas.home.lan` works from any device."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.LeaseTime), Label = "Lease time in seconds (optional)", Kind = FormFieldKind.Number,
+            Value = Model.LeaseTime?.ToString(), Min = "60", Max = "31536000", Placeholder = "subnet default",
+            Help = "How long this device keeps its address between renewals. Empty = the subnet's default. 3600 = 1 h, 86400 = 1 day, 604800 = 1 week."
         })
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {

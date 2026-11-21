@@ -116,9 +116,22 @@
             </div>
             @await Html.PartialAsync("_FormField", new FormFieldViewModel {
                 Name = nameof(Model.BootFilenameIpxe), Label = "Boot file for iPXE (optional)", Value = Model.BootFilenameIpxe,
-                MaxLength = 512, Placeholder = "http://192.168.1.1/boot.ipxe",
+                MaxLength = 255, Placeholder = "http://192.168.1.1/boot.ipxe",
                 Help = "What iPXE gets once it is running — usually its script. Without it, a PXE ROM that chainloads iPXE is handed the iPXE binary again and loops."
             })
+            <div class="grid grid-cols-2 gap-3">
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.BootFilenameArm64), Label = "Boot filename (ARM64 UEFI)", Value = Model.BootFilenameArm64,
+                    MaxLength = 255, Placeholder = "grubaa64.efi",
+                    Help = "For ARM64 UEFI machines booting over TFTP. Empty = they get the UEFI file."
+                })
+                @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+                    Name = nameof(Model.BootFilenameHttp), Label = "HTTP boot URI (UEFI)", Value = Model.BootFilenameHttp,
+                    MaxLength = 255, Placeholder = "http://192.168.1.1/boot/grubx64.efi",
+                    Pattern = @"^[Hh][Tt][Tt][Pp][Ss]?://\S+$",
+                    Help = "For firmware set to UEFI HTTP boot. Empty = those machines get an address but no boot."
+                })
+            </div>
         </div>
 
         @await Html.PartialAsync("_FormField", new FormFieldViewModel {

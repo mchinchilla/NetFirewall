@@ -43,14 +43,23 @@ public class DhcpRequest
     public byte[]? ClientMachineId { get; set; }
     /// <summary>Option 82 exactly as the relay sent it — echoed verbatim in every reply (RFC 3046 §2.2).</summary>
     public byte[]? RelayAgentInformation { get; set; }
+    /// <summary>
+    /// False when option 82 came from a source the trusted-relay list doesn't vouch for
+    /// (<see cref="DhcpRelayPolicy"/>): still echoed, but never used for class or pool matching.
+    /// </summary>
+    public bool RelayAgentInfoTrusted { get; set; } = true;
     public string? VendorClassIdentifier { get; set; }
     /// <summary>Option 54 — which server a REQUEST is addressed to. A server
     /// whose identifier doesn't match must stay silent (RFC 2131 §4.3.2).</summary>
     public IPAddress? ServerIdentifier { get; set; }
     public int LeaseTime { get; set; }
+    /// <summary>Option 57 — the largest DHCP datagram the client accepts (RFC 2132 §9.10). Null = 576.</summary>
+    public ushort? MaxMessageSize { get; set; }
 
     public bool IsBootp { get; set; }
     public bool IsPxeRequest { get; set; }
+    /// <summary>UEFI HTTP boot client: option 60 starts with "HTTPClient" (UEFI spec, HTTP Boot).</summary>
+    public bool IsHttpBoot { get; set; }
     public IPEndPoint RemoteEndPoint { get; set; } = new(IPAddress.Any, 0);
 
     /// <summary>

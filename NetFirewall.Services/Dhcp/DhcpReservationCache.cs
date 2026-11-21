@@ -20,6 +20,7 @@ public sealed class DhcpReservationCache(NpgsqlDataSource dataSource, ILogger<Dh
     private sealed record Snapshot(
         FrozenDictionary<string, IPAddress> IpByMac,
         FrozenDictionary<IPAddress, string> MacByIp,
+        FrozenDictionary<string, int> LeaseByMac,
         DateTimeOffset LoadedAt);
 
     public async ValueTask<IPAddress?> GetReservedIpAsync(string mac, CancellationToken ct = default)
@@ -28,6 +29,14 @@ public sealed class DhcpReservationCache(NpgsqlDataSource dataSource, ILogger<Dh
         if (key is null) return null;
         var snap = await CurrentAsync(ct).ConfigureAwait(false);
         return snap.IpByMac.GetValueOrDefault(key);
+    }
+
+    public async ValueTask<int?> GetLeaseTimeAsync(string mac, CancellationToken ct = default)
+    {
+        var key = MacKey(mac);
+        if (key is null) return null;
+        var snap = await CurrentAsync(ct).ConfigureAwait(false);
+        return snap.LeaseByMac.TryGetValue(key, out var seconds) ? seconds : null;
     }
 
     public async ValueTask<string?> GetOwnerMacAsync(IPAddress ip, CancellationToken ct = default)
@@ -62,8 +71,9 @@ public sealed class DhcpReservationCache(NpgsqlDataSource dataSource, ILogger<Dh
     {
         var byMac = new Dictionary<string, IPAddress>(StringComparer.Ordinal);
         var byIp = new Dictionary<IPAddress, string>();
+        var leaseByMac = new Dictionary<string, int>(StringComparer.Ordinal);
         await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = new NpgsqlCommand("SELECT mac_address, reserved_ip FROM dhcp_mac_reservations", conn);
+        await using var cmd = new NpgsqlCommand("SELECT mac_address, reserved_ip, lease_time FROM dhcp_mac_reservations", conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -72,9 +82,11 @@ public sealed class DhcpReservationCache(NpgsqlDataSource dataSource, ILogger<Dh
             var key = Convert.ToHexString(mac.GetAddressBytes()).ToLowerInvariant();
             byMac[key] = ip;
             byIp[ip] = ColonForm(key);
+            if (!reader.IsDBNull(2)) leaseByMac[key] = reader.GetInt32(2);
         }
         logger.LogDebug("[RESERVATION] Cache loaded: {Count} reservation(s)", byMac.Count);
-        return new Snapshot(byMac.ToFrozenDictionary(StringComparer.Ordinal), byIp.ToFrozenDictionary(), _time.GetUtcNow());
+        return new Snapshot(byMac.ToFrozenDictionary(StringComparer.Ordinal), byIp.ToFrozenDictionary(),
+            leaseByMac.ToFrozenDictionary(StringComparer.Ordinal), _time.GetUtcNow());
     }
 
     /// <summary>"AA:BB-cc.dd…" → "aabbccdd…" (12 hex chars), or null when it isn't a MAC.</summary>

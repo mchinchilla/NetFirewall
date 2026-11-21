@@ -64,6 +64,12 @@ class Program
                     services.AddSingleton<LeaseCache>();
                     // Reservations from memory on the hot path; dropped by the reservation.changed NOTIFY.
                     services.AddSingleton<IDhcpReservationCache, DhcpReservationCache>();
+                    // Blocked MACs and trusted relays (DHCP → Access control); dropped by their NOTIFYs.
+                    services.AddSingleton<IDhcpBlocklistCache, DhcpBlocklistCache>();
+                    services.AddSingleton<IDhcpRelayTrustCache, DhcpRelayTrustCache>();
+                    // Per-MAC packet budget in the receive loop (Dhcp:RateLimit:Enabled=false to turn it off).
+                    if (hostContext.Configuration.GetValue("Dhcp:RateLimit:Enabled", true))
+                        services.AddSingleton<IDhcpRateLimiter, DhcpMacRateLimiter>();
 
                     /* Services */
                     services.AddScoped<IDhcpServerService, DhcpServerService>();

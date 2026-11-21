@@ -37,7 +37,7 @@
     var dhcpHrefs = new[] {
         Url.Action("Index", "DhcpSubnets")!, Url.Action("Index", "DhcpReservations")!,
         Url.Action("Index", "DhcpLeases")!, Url.Action("Index", "DhcpClasses")!, Url.Action("Index", "DhcpOptions")!, Url.Action("Index", "DhcpLeaseHistory")!,
-        Url.Action("Index", "DhcpDdns")!, Url.Action("Index", "DhcpFailover")!
+        Url.Action("Index", "DhcpDdns")!, Url.Action("Index", "DhcpFailover")!, Url.Action("Index", "DhcpAccess")!
     };
     var fwHrefs = new[] {
         Url.Action("Index", "FwFilterRules")!,
@@ -87,6 +87,7 @@
         <a href="@Url.Action("Index", "DhcpClasses")"      class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpClasses")!))">Classes</a>
         <a href="@Url.Action("Index", "DhcpOptions")"      class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpOptions")!))">Custom options</a>
         <a href="@Url.Action("Index", "DhcpLeaseHistory")" class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpLeaseHistory")!))">Lease history</a>
+        <a href="@Url.Action("Index", "DhcpAccess")"       class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpAccess")!))">Access control</a>
         <a href="@Url.Action("Index", "DhcpDdns")"         class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpDdns")!))">Dynamic DNS</a>
         <a href="@Url.Action("Index", "DhcpFailover")"     class="nav-link py-1.5@(ActiveCls(Url.Action("Index", "DhcpFailover")!))">Failover</a>
     </div>

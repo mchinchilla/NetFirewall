@@ -88,7 +88,8 @@ public sealed class DhcpReservationsController : Controller
         MacAddress = NormalizeMac(r.MacAddress?.ToString()),
         ReservedIp = r.ReservedIp?.ToString() ?? string.Empty,
         Description = r.Description,
-        Hostname = r.Hostname
+        Hostname = r.Hostname,
+        LeaseTime = r.LeaseTime
     };
 
     private static DhcpMacReservation ToEntity(ReservationFormViewModel f) => new()
@@ -96,7 +97,8 @@ public sealed class DhcpReservationsController : Controller
         MacAddress = PhysicalAddress.Parse(f.MacAddress.Replace(":", "-").ToUpperInvariant()),
         ReservedIp = IPAddress.Parse(f.ReservedIp),
         Description = f.Description,
-        Hostname = string.IsNullOrWhiteSpace(f.Hostname) ? null : f.Hostname.Trim().ToLowerInvariant()
+        Hostname = string.IsNullOrWhiteSpace(f.Hostname) ? null : f.Hostname.Trim().ToLowerInvariant(),
+        LeaseTime = f.LeaseTime
     };
 
     private static string NormalizeMac(string? raw) =>

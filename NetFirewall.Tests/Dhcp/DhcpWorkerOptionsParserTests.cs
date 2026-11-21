@@ -116,6 +116,38 @@ public class DhcpWorkerOptionsParserTests
         Assert.Equal(prl, req.ParameterRequestList);
     }
 
+    // ── Option 57: max message size; option 60 "HTTPClient" ────────────
+
+    [Fact]
+    public void Option57_MaxMessageSize_ParsedBigEndian()
+    {
+        var pkt = BuildPacketWithRawOptions([53, 1, (byte)DhcpMessageType.Discover, 57, 2, 0x05, 0xDC, 0xFF]);
+        Assert.True(CreateWorker().TryParseDhcpRequest(pkt, AnyEndPoint, out var req));
+        Assert.Equal((ushort)1500, req.MaxMessageSize);
+    }
+
+    [Fact]
+    public void Option57_Absent_IsNull()
+    {
+        Assert.True(CreateWorker().TryParseDhcpRequest(BuildPacketWithRawOptions(OptMessageType(DhcpMessageType.Discover)), AnyEndPoint, out var req));
+        Assert.Null(req.MaxMessageSize);
+    }
+
+    [Theory]
+    [InlineData("HTTPClient:Arch:00016:UNDI:003001", true, false)]
+    [InlineData("PXEClient:Arch:00007:UNDI:003016", false, true)]
+    [InlineData("MSFT 5.0", false, false)]
+    public void Option60_DetectsHttpBootAndPxe(string vci, bool http, bool pxe)
+    {
+        var v = System.Text.Encoding.ASCII.GetBytes(vci);
+        var opts = new List<byte> { 53, 1, (byte)DhcpMessageType.Discover, 60, (byte)v.Length };
+        opts.AddRange(v);
+        opts.Add(0xFF);
+        Assert.True(CreateWorker().TryParseDhcpRequest(BuildPacketWithRawOptions(opts.ToArray()), AnyEndPoint, out var req));
+        Assert.Equal(http, req.IsHttpBoot);
+        Assert.Equal(pxe, req.IsPxeRequest);
+    }
+
     // ── Option 60: VendorClassIdentifier + IsPxeRequest detection ──────
 
     [Fact]

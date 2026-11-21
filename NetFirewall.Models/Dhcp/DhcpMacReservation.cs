@@ -30,4 +30,11 @@ public class DhcpMacReservation
     /// <summary>DNS name published for this device (one RFC 1123 label, e.g. "nas"). Null = none.</summary>
     [Map( "hostname" )]
     public string? Hostname { get; set; }
+
+    /// <summary>Lease length for this device in seconds (60 s – 1 year, migration 00051). Null = the subnet's default.</summary>
+    [Map( "lease_time" )]
+    public int? LeaseTime { get; set; }
+
+    public const int MinLeaseTime = 60;
+    public const int MaxLeaseTime = 31_536_000;
 }

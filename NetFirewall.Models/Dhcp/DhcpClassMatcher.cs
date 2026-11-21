@@ -20,7 +20,7 @@ public static class DhcpClassMatcher
             DhcpClassMatchTypes.MacPrefix => Hex(request.ClientMac).StartsWith(Hex(want), StringComparison.Ordinal),
             DhcpClassMatchTypes.HardwareType => byte.TryParse(want, out var ht) && request.HType == ht,
             DhcpClassMatchTypes.ClientId => request.ClientIdentifier is { } cid && Convert.ToHexString(cid).Contains(Hex(want), StringComparison.Ordinal),
-            DhcpClassMatchTypes.RelayAgent => request.RelayAgentInformation is { } rai && MatchesBinary(rai, want),
+            DhcpClassMatchTypes.RelayAgent => request.RelayAgentInfoTrusted && request.RelayAgentInformation is { } rai && MatchesBinary(rai, want),
             DhcpClassMatchTypes.Option => MatchesGenericOption(request, want),
             _ => false,
         };
@@ -55,7 +55,7 @@ public static class DhcpClassMatcher
             60 => Contains(r.VendorClassIdentifier, value),
             77 => Contains(r.UserClass, value),
             61 => r.ClientIdentifier is { } cid && MatchesBinary(cid, value),
-            82 => r.RelayAgentInformation is { } rai && MatchesBinary(rai, value),
+            82 => r.RelayAgentInfoTrusted && r.RelayAgentInformation is { } rai && MatchesBinary(rai, value),
             93 => r.ClientArchitecture is { } arch && ushort.TryParse(value, out var want) && arch == want,
             _ => false,
         };

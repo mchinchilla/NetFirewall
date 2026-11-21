@@ -879,7 +879,9 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                    s.time_offset, s.posix_timezone,
                    -- option 119 (domain search) / option 121 (classless static routes)
                    s.domain_search, s.static_routes::text,
-                   s.boot_filename_ipxe
+                   s.boot_filename_ipxe,
+                   -- 00051: UEFI HTTP boot URI, ARM64 UEFI boot file
+                   s.boot_filename_http, s.boot_filename_arm64
             FROM dhcp_subnets s
             LEFT JOIN fw_interfaces fi ON s.interface_id = fi.id
             WHERE s.enabled = true
@@ -986,6 +988,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
             DomainSearchList = reader.FieldCount > 26 && !reader.IsDBNull(26) ? reader.GetString(26) : null,
             StaticRoutesJson = reader.FieldCount > 27 && !reader.IsDBNull(27) ? reader.GetString(27) : null,
             BootFilenameIpxe = reader.FieldCount > 28 && !reader.IsDBNull(28) ? reader.GetString(28) : null,
+            BootFilenameHttp = reader.FieldCount > 29 && !reader.IsDBNull(29) ? reader.GetString(29) : null,
+            BootFilenameArm64 = reader.FieldCount > 30 && !reader.IsDBNull(30) ? reader.GetString(30) : null,
         };
 
         // Populate FwInterface navigation property if interface_id is set
@@ -1191,10 +1195,10 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         const string sql = @"
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
                 dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time,
-                interface_mtu, tftp_server, boot_filename, boot_filename_uefi, boot_filename_ipxe, interface_id, enabled)
+                interface_mtu, tftp_server, boot_filename, boot_filename_uefi, boot_filename_ipxe, boot_filename_http, boot_filename_arm64, interface_id, enabled)
             VALUES (@id, @name, @network::cidr, @subnetMask, @router, @broadcast, @domainName,
                 @dnsServers, @ntpServers, @winsServers, @defaultLeaseTime, @maxLeaseTime,
-                @interfaceMtu, @tftpServer, @bootFilename, @bootFilenameUefi, @bootFilenameIpxe, @interfaceId, @enabled)";
+                @interfaceMtu, @tftpServer, @bootFilename, @bootFilenameUefi, @bootFilenameIpxe, @bootFilenameHttp, @bootFilenameArm64, @interfaceId, @enabled)";
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         cmd.Parameters.AddWithValue("id", subnet.Id);
@@ -1214,6 +1218,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         cmd.Parameters.AddWithValue("bootFilename", (object?)subnet.BootFilename ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameUefi", (object?)subnet.BootFilenameUefi ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameIpxe", (object?)subnet.BootFilenameIpxe ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFilenameHttp", (object?)subnet.BootFilenameHttp ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFilenameArm64", (object?)subnet.BootFilenameArm64 ?? DBNull.Value);
         cmd.Parameters.AddWithValue("interfaceId", (object?)subnet.InterfaceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
 
@@ -1238,6 +1244,7 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
                 default_lease_time = @defaultLeaseTime, max_lease_time = @maxLeaseTime,
                 interface_mtu = @interfaceMtu, tftp_server = @tftpServer,
                 boot_filename = @bootFilename, boot_filename_uefi = @bootFilenameUefi, boot_filename_ipxe = @bootFilenameIpxe,
+                boot_filename_http = @bootFilenameHttp, boot_filename_arm64 = @bootFilenameArm64,
                 interface_id = @interfaceId, enabled = @enabled, updated_at = @updatedAt
             WHERE id = @id";
 
@@ -1259,6 +1266,8 @@ public sealed class DhcpSubnetService : IDhcpSubnetService
         cmd.Parameters.AddWithValue("bootFilename", (object?)subnet.BootFilename ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameUefi", (object?)subnet.BootFilenameUefi ?? DBNull.Value);
         cmd.Parameters.AddWithValue("bootFilenameIpxe", (object?)subnet.BootFilenameIpxe ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFilenameHttp", (object?)subnet.BootFilenameHttp ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFilenameArm64", (object?)subnet.BootFilenameArm64 ?? DBNull.Value);
         cmd.Parameters.AddWithValue("interfaceId", (object?)subnet.InterfaceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("enabled", subnet.Enabled);
         cmd.Parameters.AddWithValue("updatedAt", DateTime.UtcNow);

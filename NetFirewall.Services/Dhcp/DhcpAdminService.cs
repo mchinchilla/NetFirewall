@@ -60,10 +60,10 @@ public sealed class DhcpAdminService : IDhcpAdminService
         const string sql = @"
             INSERT INTO dhcp_subnets (id, name, network, subnet_mask, router, broadcast, domain_name,
                 dns_servers, ntp_servers, wins_servers, default_lease_time, max_lease_time, interface_mtu,
-                tftp_server, boot_filename, boot_filename_uefi, boot_filename_ipxe, domain_search, static_routes,
+                tftp_server, boot_filename, boot_filename_uefi, boot_filename_ipxe, boot_filename_http, boot_filename_arm64, domain_search, static_routes,
                 time_offset, posix_timezone, interface_id, enabled, created_at, updated_at)
             VALUES (@id, @name, @network, @mask, @router, @broadcast, @domain, @dns, @ntp, @wins, @defLease, @maxLease,
-                @mtu, @tftp, @bootFile, @bootFileUefi, @bootFileIpxe, @domainSearch, @routes::jsonb, @timeOffset, @posixTz,
+                @mtu, @tftp, @bootFile, @bootFileUefi, @bootFileIpxe, @bootFileHttp, @bootFileArm64, @domainSearch, @routes::jsonb, @timeOffset, @posixTz,
                 @ifaceId, @enabled, @created, @updated)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -88,6 +88,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 domain_name = @domain, dns_servers = @dns, ntp_servers = @ntp, wins_servers = @wins,
                 default_lease_time = @defLease, max_lease_time = @maxLease, interface_mtu = @mtu,
                 tftp_server = @tftp, boot_filename = @bootFile, boot_filename_uefi = @bootFileUefi, boot_filename_ipxe = @bootFileIpxe,
+                boot_filename_http = @bootFileHttp, boot_filename_arm64 = @bootFileArm64,
                 domain_search = @domainSearch, static_routes = @routes::jsonb, time_offset = @timeOffset,
                 posix_timezone = @posixTz, interface_id = @ifaceId, enabled = @enabled, updated_at = @updated
             WHERE id = @id";
@@ -159,6 +160,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("bootFile", subnet.BootFilename ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("bootFileUefi", subnet.BootFilenameUefi ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("bootFileIpxe", subnet.BootFilenameIpxe ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFileHttp", subnet.BootFilenameHttp ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("bootFileArm64", subnet.BootFilenameArm64 ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("domainSearch", subnet.DomainSearchList ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("routes", subnet.StaticRoutesJson ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("timeOffset", subnet.TimeOffset ?? (object)DBNull.Value);
@@ -198,6 +201,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 BootFilename = reader.IsDBNull(reader.GetOrdinal("boot_filename")) ? null : reader.GetString(reader.GetOrdinal("boot_filename")),
                 BootFilenameUefi = reader.IsDBNull(reader.GetOrdinal("boot_filename_uefi")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_uefi")),
                 BootFilenameIpxe = reader.IsDBNull(reader.GetOrdinal("boot_filename_ipxe")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_ipxe")),
+                BootFilenameHttp = reader.IsDBNull(reader.GetOrdinal("boot_filename_http")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_http")),
+                BootFilenameArm64 = reader.IsDBNull(reader.GetOrdinal("boot_filename_arm64")) ? null : reader.GetString(reader.GetOrdinal("boot_filename_arm64")),
                 DomainSearchList = reader.IsDBNull(reader.GetOrdinal("domain_search")) ? null : reader.GetString(reader.GetOrdinal("domain_search")),
                 StaticRoutesJson = reader.IsDBNull(reader.GetOrdinal("static_routes")) ? null : reader.GetString(reader.GetOrdinal("static_routes")),
                 TimeOffset = reader.IsDBNull(reader.GetOrdinal("time_offset")) ? null : reader.GetInt32(reader.GetOrdinal("time_offset")),
@@ -502,7 +507,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
                 MacAddress = reader.GetFieldValue<PhysicalAddress>(reader.GetOrdinal("mac_address")),
                 ReservedIp = reader.GetFieldValue<IPAddress>(reader.GetOrdinal("reserved_ip")),
                 Description = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString(reader.GetOrdinal("description")),
-                Hostname = reader.IsDBNull(reader.GetOrdinal("hostname")) ? null : reader.GetString(reader.GetOrdinal("hostname"))
+                Hostname = reader.IsDBNull(reader.GetOrdinal("hostname")) ? null : reader.GetString(reader.GetOrdinal("hostname")),
+                LeaseTime = reader.IsDBNull(reader.GetOrdinal("lease_time")) ? null : reader.GetInt32(reader.GetOrdinal("lease_time"))
             });
         }
 
@@ -590,8 +596,17 @@ public sealed class DhcpAdminService : IDhcpAdminService
         }
     }
 
+    /// <summary>Service-side guard for the per-host lease time (the DB CHECK is the last line).</summary>
+    private static void ValidateLeaseTime(DhcpMacReservation reservation)
+    {
+        if (reservation.LeaseTime is { } s && (s < DhcpMacReservation.MinLeaseTime || s > DhcpMacReservation.MaxLeaseTime))
+            throw new InvalidOperationException(
+                $"Lease time must be between {DhcpMacReservation.MinLeaseTime} seconds and one year ({DhcpMacReservation.MaxLeaseTime} s).");
+    }
+
     public async Task<DhcpMacReservation> CreateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
     {
+        ValidateLeaseTime(reservation);
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         await ValidateReservationInASubnetAsync(conn, reservation.ReservedIp, ct);
@@ -629,8 +644,8 @@ public sealed class DhcpAdminService : IDhcpAdminService
         reservation.Id = Guid.NewGuid();
 
         const string sql = @"
-            INSERT INTO dhcp_mac_reservations (id, mac_address, reserved_ip, description, hostname)
-            VALUES (@id, @mac, @ip, @desc, @host)";
+            INSERT INTO dhcp_mac_reservations (id, mac_address, reserved_ip, description, hostname, lease_time)
+            VALUES (@id, @mac, @ip, @desc, @host, @lease)";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("id", reservation.Id);
@@ -638,6 +653,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("host", reservation.Hostname ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("lease", reservation.LeaseTime ?? (object)DBNull.Value);
 
         try
         {
@@ -701,6 +717,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
     public async Task<DhcpMacReservation> UpdateReservationAsync(DhcpMacReservation reservation, CancellationToken ct = default)
     {
+        ValidateLeaseTime(reservation);
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         await ValidateReservationInASubnetAsync(conn, reservation.ReservedIp, ct);
@@ -739,7 +756,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
 
         const string sql = @"
             UPDATE dhcp_mac_reservations SET
-                mac_address = @mac, reserved_ip = @ip, description = @desc, hostname = @host
+                mac_address = @mac, reserved_ip = @ip, description = @desc, hostname = @host, lease_time = @lease
             WHERE id = @id";
 
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -748,6 +765,7 @@ public sealed class DhcpAdminService : IDhcpAdminService
         cmd.Parameters.AddWithValue("ip", reservation.ReservedIp);
         cmd.Parameters.AddWithValue("desc", reservation.Description ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("host", reservation.Hostname ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("lease", reservation.LeaseTime ?? (object)DBNull.Value);
 
         int updated;
         try

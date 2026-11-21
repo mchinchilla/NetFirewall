@@ -13,6 +13,9 @@ public interface IDhcpReservationCache
     /// <summary>The IP reserved for <paramref name="mac"/> (any separator/case), or null.</summary>
     ValueTask<IPAddress?> GetReservedIpAsync(string mac, CancellationToken ct = default);
 
+    /// <summary>The reservation's own lease time in seconds (migration 00051), or null = the subnet's default.</summary>
+    ValueTask<int?> GetLeaseTimeAsync(string mac, CancellationToken ct = default);
+
     /// <summary>The MAC (lower-case, colon form) that owns the reserved <paramref name="ip"/>, or null.</summary>
     ValueTask<string?> GetOwnerMacAsync(IPAddress ip, CancellationToken ct = default);
 

@@ -255,6 +255,8 @@ builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpAdminService, NetFirew
 // Operator-defined DHCP options (VoIP 66/150, AP controllers 43, …) — emitted by the DHCP server.
 builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpCustomOptionService, NetFirewall.Services.Dhcp.DhcpCustomOptionService>();
 builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpLeaseHistoryService, NetFirewall.Services.Dhcp.DhcpLeaseHistoryService>();
+// DHCP → Access control: MAC block list + trusted relay agents.
+builder.Services.AddScoped<NetFirewall.Services.Dhcp.IDhcpAccessControlService, NetFirewall.Services.Dhcp.DhcpAccessControlService>();
 
 // Cache invalidation notifier — Web emits NOTIFY on subnet/pool/exclusion writes
 // so the DhcpServer process can drop its in-process cache immediately instead of
@@ -346,6 +348,7 @@ var app = builder.Build();
         typeof(NetFirewall.Services.Dhcp.IDhcpAdminService),
         typeof(NetFirewall.Services.Dhcp.IDhcpCustomOptionService),
         typeof(NetFirewall.Services.Dhcp.IDhcpLeaseHistoryService),
+        typeof(NetFirewall.Services.Dhcp.IDhcpAccessControlService),
         typeof(NetFirewall.Services.Monitoring.IGeoIpLookupService),
         typeof(NetFirewall.Services.Monitoring.IWanTrafficService),
         typeof(NetFirewall.Services.Monitoring.IInterfaceTrafficService),

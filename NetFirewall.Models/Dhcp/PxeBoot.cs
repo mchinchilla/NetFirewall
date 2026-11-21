@@ -36,6 +36,9 @@ public static class PxeBoot
 
     public static bool IsArm(ushort arch) => arch is EfiArm32 or EfiArm64 or HttpArm32 or HttpArm64;
 
+    /// <summary>64-bit ARM UEFI firmware booting over TFTP (11) or HTTP (19).</summary>
+    public static bool IsArm64(ushort arch) => arch is EfiArm64 or HttpArm64;
+
     /// <summary>iPXE identifies itself with user class (option 77) "iPXE".</summary>
     public static bool IsIpxe(DhcpRequest request) =>
         string.Equals(request.UserClass, "iPXE", StringComparison.OrdinalIgnoreCase);
@@ -53,16 +56,21 @@ public static class PxeBoot
 
     /// <summary>
     /// The boot file for this client. Priority: class override, iPXE (breaks the chainload loop),
-    /// then by architecture — UEFI clients get the UEFI file, everything else the BIOS file.
+    /// UEFI HTTP boot (its URL, or nothing — a TFTP file name is useless to an HTTP client), then by
+    /// architecture — ARM64 UEFI gets the ARM64 file, other UEFI the UEFI file, everything else the
+    /// BIOS file. An empty ARM64/UEFI field falls back to the next one down.
     /// </summary>
     public static string? BootFile(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
         if (clientClass?.BootFilename is { } fromClass) return fromClass;
-        if (subnet is null) return request.File;
+        if (subnet is null) return request.IsHttpBoot ? null : request.File;
         if (IsIpxe(request) && !string.IsNullOrEmpty(subnet.BootFilenameIpxe)) return subnet.BootFilenameIpxe;
-        if (request.IsPxeRequest && Architecture(request) is { } arch && IsUefi(arch)
-            && !string.IsNullOrEmpty(subnet.BootFilenameUefi))
-            return subnet.BootFilenameUefi;
+        if (request.IsHttpBoot) return string.IsNullOrEmpty(subnet.BootFilenameHttp) ? null : subnet.BootFilenameHttp;
+        if (request.IsPxeRequest && Architecture(request) is { } arch)
+        {
+            if (IsArm64(arch) && !string.IsNullOrEmpty(subnet.BootFilenameArm64)) return subnet.BootFilenameArm64;
+            if (IsUefi(arch) && !string.IsNullOrEmpty(subnet.BootFilenameUefi)) return subnet.BootFilenameUefi;
+        }
         return subnet.BootFilename ?? request.File;
     }
 
@@ -74,4 +82,16 @@ public static class PxeBoot
 
     /// <summary>Option 60 in replies to PXE clients — PXE 2.1 ROMs ignore offers without it.</summary>
     public static ReadOnlySpan<byte> PxeClientClass => "PXEClient"u8;
+
+    /// <summary>An absolute http/https URI — what a UEFI HTTP boot client can fetch. Pure.</summary>
+    public static bool IsHttpUri(string text) =>
+        Uri.TryCreate(text, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+        && !string.IsNullOrEmpty(uri.Host);
+
+    /// <summary>Option 60 prefix an HTTP boot client sends ("HTTPClient:Arch:00016:UNDI:003001").</summary>
+    public const string HttpClientPrefix = "HTTPClient";
+
+    /// <summary>Option 60 in replies to HTTP boot clients — the firmware ignores offers without it.</summary>
+    public static ReadOnlySpan<byte> HttpClientClass => "HTTPClient"u8;
 }

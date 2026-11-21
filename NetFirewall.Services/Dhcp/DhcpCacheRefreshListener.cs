@@ -18,6 +18,8 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
     private readonly IDhcpSubnetService _subnets;
     private readonly LeaseCache? _leaseCache;
     private readonly IDhcpReservationCache? _reservations;
+    private readonly IDhcpBlocklistCache? _blocklist;
+    private readonly IDhcpRelayTrustCache? _relayTrust;
     private readonly ILogger<DhcpCacheRefreshListener> _logger;
 
     public DhcpCacheRefreshListener(
@@ -25,8 +27,12 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
         IDhcpSubnetService subnets,
         ILogger<DhcpCacheRefreshListener> logger,
         LeaseCache? leaseCache = null,
-        IDhcpReservationCache? reservations = null)
+        IDhcpReservationCache? reservations = null,
+        IDhcpBlocklistCache? blocklist = null,
+        IDhcpRelayTrustCache? relayTrust = null)
     {
+        _blocklist = blocklist;
+        _relayTrust = relayTrust;
         _ds = ds;
         _subnets = subnets;
         _leaseCache = leaseCache;
@@ -103,6 +109,18 @@ public sealed class DhcpCacheRefreshListener : BackgroundService
             if (e.Payload.StartsWith("reservation.", StringComparison.Ordinal))
             {
                 _reservations?.Invalidate();
+                return;
+            }
+
+            // dhcp_mac_blocklist (00053) / dhcp_relay_agents (00054) triggers.
+            if (e.Payload.StartsWith("blocklist.", StringComparison.Ordinal))
+            {
+                _blocklist?.Invalidate();
+                return;
+            }
+            if (e.Payload.StartsWith("relay.", StringComparison.Ordinal))
+            {
+                _relayTrust?.Invalidate();
                 return;
             }
 

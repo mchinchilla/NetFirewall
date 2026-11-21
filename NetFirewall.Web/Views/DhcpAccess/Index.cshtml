@@ -1,0 +1,77 @@
+@{
+    ViewData["Title"] = "DHCP — Access control";
+    Layout = "_Layout";
+}
+
+<div class="space-y-8">
+    <div class="flex flex-wrap items-end justify-between gap-3"
+         style="animation: var(--animate-slide-up);">
+        <div>
+            <p class="page-kicker">DHCP</p>
+            <h1 class="text-2xl font-semibold tracking-tight">Access control</h1>
+            <p class="text-sm mt-1 max-w-2xl text-surface-fg-muted">
+                Devices the DHCP server never answers, and the relay agents it trusts.
+            </p>
+        </div>
+    </div>
+
+    <section class="space-y-3" style="animation: var(--animate-slide-up); animation-delay: 60ms;">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+                <h2 class="text-lg font-semibold">Blocked devices</h2>
+                <p class="text-sm max-w-2xl text-surface-fg-muted">
+                    A blocked MAC gets no reply to anything, not even a NAK. Blocking releases its current lease, so it
+                    drops off the network when that address expires on the device, at the latest. A block also overrides
+                    a reservation for the same MAC. Anyone can change a MAC address, so this keeps honest devices out. It
+                    is not a security boundary.
+                </p>
+            </div>
+            <button type="button" class="btn btn-primary"
+                    hx-get="/Dhcp/Access/blocked/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Block a device')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                Block a device
+            </button>
+        </div>
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Dhcp.DhcpBlockedMacsGrid.Id,
+            Title = "Blocked devices",
+            DefaultQuery = "sort=created:desc",
+            RefreshOn = ["refreshDhcpAccess"]
+        })
+    </section>
+
+    <section class="space-y-3" style="animation: var(--animate-slide-up); animation-delay: 120ms;">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+                <h2 class="text-lg font-semibold">Relay agents</h2>
+                <p class="text-sm max-w-2xl text-surface-fg-muted">
+                    Routers and switches that forward DHCP from other subnets, by the address they put in <code>giaddr</code>.
+                </p>
+            </div>
+            <button type="button" class="btn btn-primary"
+                    hx-get="/Dhcp/Access/relays/edit"
+                    hx-target="#drawer-body" hx-swap="innerHTML"
+                    @@click="$store.drawer.openRaw('Add relay agent')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Add relay agent
+            </button>
+        </div>
+        <div class="rounded-lg border-l-2 px-3 py-2 text-sm bg-feedback-warning-bg text-feedback-warning-fg border-feedback-warning-bd">
+            <strong>Trusted-relay mode switches on with the first trusted relay.</strong>
+            From then on, DHCP relayed by any relay not listed as trusted is dropped. List every relay before you trust
+            the first one, or its subnets stop getting addresses. In this mode, option 82 on packets that arrive directly
+            (giaddr 0, as inserted by DHCP-snooping switches) is still echoed back, but it no longer selects a class or
+            pool. A relay marked <em>Refused</em> is always dropped.
+        </div>
+        @await Html.PartialAsync("_Grid", new GridFrameViewModel
+        {
+            GridId = NetFirewall.Web.Grids.Dhcp.DhcpRelayAgentsGrid.Id,
+            Title = "Relay agents",
+            DefaultQuery = "sort=ip:asc",
+            RefreshOn = ["refreshDhcpAccess"]
+        })
+    </section>
+</div>

@@ -96,6 +96,17 @@ public class DhcpSubnet
     [Map("boot_filename_ipxe")]
     public string? BootFilenameIpxe { get; set; }
 
+    /// <summary>
+    /// Boot URI for UEFI HTTP boot clients (option 60 "HTTPClient"), e.g.
+    /// http://192.168.1.1/boot/grubx64.efi. Null = HTTP boot clients get an address, no boot.
+    /// </summary>
+    [Map("boot_filename_http")]
+    public string? BootFilenameHttp { get; set; }
+
+    /// <summary>Boot file for ARM64 UEFI clients (arch 11) booting over TFTP. Null = the UEFI file.</summary>
+    [Map("boot_filename_arm64")]
+    public string? BootFilenameArm64 { get; set; }
+
     /// <summary>Custom options for this subnet's clients (subnet scope over global). Filled by the server's cache, not a column.</summary>
     public IReadOnlyList<DhcpCustomOption> CustomOptions { get; set; } = [];
 

@@ -27,6 +27,22 @@ public sealed class DhcpServerService : IDhcpServerService
     private readonly IDhcpLeasesService _dhcpLeasesService;
     private readonly IDhcpSubnetService _dhcpSubnetService;
     private readonly IFailoverService? _failoverService;
+    private readonly IDhcpReservationCache? _reservations;
+    private readonly IDhcpBlocklistCache? _blocklist;
+    private readonly IDhcpRelayTrustCache? _relayTrust;
+    // Static: the service is SCOPED (one instance per packet), so an instance field would reset
+    // every packet and the throttles would never engage.
+    private static long _lastRelayDropLogTicks;
+    private static long _lastSizeDropLogTicks;
+
+    /// <summary>True at most once a minute per <paramref name="lastTicks"/> slot.</summary>
+    private static bool OncePerMinute(ref long lastTicks)
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref lastTicks);
+        if (last != 0 && now - last < 60_000) return false;
+        return Interlocked.CompareExchange(ref lastTicks, now, last) == last;
+    }
     private readonly ILogger<DhcpServerService> _logger;
     private readonly DhcpConfig _fallbackConfig;
 
@@ -49,8 +65,14 @@ public sealed class DhcpServerService : IDhcpServerService
         IOptions<DhcpConfig> dhcpConfig,
         IFailoverService? failoverService = null,
         IInterfaceAddressProvider? interfaceAddresses = null,
-        IDdnsUpdateQueue? ddnsQueue = null)
+        IDdnsUpdateQueue? ddnsQueue = null,
+        IDhcpReservationCache? reservations = null,
+        IDhcpBlocklistCache? blocklist = null,
+        IDhcpRelayTrustCache? relayTrust = null)
     {
+        _reservations = reservations;
+        _blocklist = blocklist;
+        _relayTrust = relayTrust;
         _interfaceAddresses = interfaceAddresses;
         _ddnsQueue = ddnsQueue;
         _dhcpLeasesService = dhcpLeasesService;
@@ -87,6 +109,28 @@ public sealed class DhcpServerService : IDhcpServerService
         {
             _logger.LogDebug("[SERVICE] Processing {MessageType} from {Mac}",
                 request.MessageType, request.ClientMac);
+
+            // Blocked device (dhcp_mac_blocklist): no reply to anything, not even a NAK.
+            if (_blocklist is not null && await _blocklist.IsBlockedAsync(request.ClientMac).ConfigureAwait(false))
+            {
+                _logger.LogDebug("[BLOCKLIST] {MessageType} from blocked {Mac} — ignored", request.MessageType, request.ClientMac);
+                return DhcpResponseBuffer.Empty;
+            }
+
+            // Trusted-relay list (dhcp_relay_agents): only listed relays are answered once one is trusted.
+            if (_relayTrust is not null)
+            {
+                var policy = await _relayTrust.GetPolicyAsync().ConfigureAwait(false);
+                switch (policy.Evaluate(request.GiAddr, request.RelayAgentInformation is { Length: > 0 }))
+                {
+                    case DhcpRelayVerdict.Drop:
+                        LogRelayDrop(request);
+                        return DhcpResponseBuffer.Empty;
+                    case DhcpRelayVerdict.AcceptIgnoringOption82:
+                        request.RelayAgentInfoTrusted = false;
+                        break;
+                }
+            }
 
             // Find the appropriate subnet for this request
             var subnet = await _dhcpSubnetService.FindSubnetForRequestAsync(request).ConfigureAwait(false);
@@ -146,6 +190,19 @@ public sealed class DhcpServerService : IDhcpServerService
                 request.ClientMac, ex.Message);
             return DhcpResponseBuffer.Empty;
         }
+    }
+
+    /// <summary>At most one warning a minute: a misconfigured relay would otherwise flood the log.</summary>
+    private void LogRelayDrop(DhcpRequest request)
+    {
+        if (!OncePerMinute(ref _lastRelayDropLogTicks))
+        {
+            _logger.LogDebug("[RELAY] Dropped {MessageType} from {Mac} via untrusted relay {Relay}", request.MessageType, request.ClientMac, request.GiAddr);
+            return;
+        }
+        _logger.LogWarning(
+            "[RELAY] Dropped {MessageType} from {Mac} relayed by {Relay}, which is not a trusted relay (DHCP → Access control). Further drops this minute are logged at Debug.",
+            request.MessageType, request.ClientMac, request.GiAddr);
     }
 
     private async Task<DhcpResponseBuffer> HandleDiscoverAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
@@ -235,7 +292,8 @@ public sealed class DhcpServerService : IDhcpServerService
             offeredIp, request.ClientMac, request.Hostname ?? "(none)",
             subnet?.Name ?? "fallback", pool?.Name ?? "default");
 
-        return ConstructDhcpPacket(request, offeredIp, DhcpMessageType.Offer, subnet, clientClass);
+        var offerLease = await LeaseTimeForAsync(request, subnet).ConfigureAwait(false);
+        return ConstructDhcpPacket(request, offeredIp, DhcpMessageType.Offer, subnet, clientClass, offerLease);
     }
 
     private async Task<DhcpResponseBuffer> HandleRequestAsync(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
@@ -334,7 +392,7 @@ public sealed class DhcpServerService : IDhcpServerService
 
             if (canAssign)
             {
-                var leaseTime = subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
+                var leaseTime = await LeaseTimeForAsync(request, subnet).ConfigureAwait(false);
 
                 _logger.LogDebug("[REQUEST] Assigning lease: {Ip} to {Mac} for {LeaseTime}s",
                     requestedIp, request.ClientMac, leaseTime);
@@ -372,7 +430,7 @@ public sealed class DhcpServerService : IDhcpServerService
                     _ = _failoverService.SendBindingUpdateAsync(update);
                 }
 
-                return ConstructDhcpPacket(request, requestedIp, DhcpMessageType.Ack, subnet, clientClass);
+                return ConstructDhcpPacket(request, requestedIp, DhcpMessageType.Ack, subnet, clientClass, leaseTime);
             }
             else
             {
@@ -492,14 +550,42 @@ public sealed class DhcpServerService : IDhcpServerService
         // RFC 2131 §3.4: an INFORM client has an address already and puts it in
         // ciaddr — option 50 is not part of INFORM. The ACK's yiaddr must be 0;
         // ciaddr is echoed by ConstructDhcpPacket and drives unicast routing.
-        return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Ack, subnet, clientClass, includeLeaseTime: false);
+        return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Ack, subnet, clientClass, leaseTime: null);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private DhcpResponseBuffer CreateNakResponse(DhcpRequest request, DhcpSubnet? subnet)
     {
-        return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Nak, subnet, null, includeLeaseTime: false);
+        return ConstructDhcpPacket(request, IPAddress.Any, DhcpMessageType.Nak, subnet, null, leaseTime: null);
     }
+
+    /// <summary>
+    /// Lease length for this client: the reservation's own lease time (migration 00051) when it has
+    /// one, else the subnet's default, else the fallback config. Resolved ONCE per exchange — the
+    /// stored lease, option 51 and the failover binding must all agree.
+    /// </summary>
+    private async ValueTask<int> LeaseTimeForAsync(DhcpRequest request, DhcpSubnet? subnet)
+    {
+        if (_reservations is not null
+            && await _reservations.GetLeaseTimeAsync(request.ClientMac).ConfigureAwait(false) is { } perHost)
+            return perHost;
+        return subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
+    }
+
+    /// <summary>
+    /// Bytes of DHCP message (BOOTP header + options, no IP/UDP) this client accepts. RFC 2131 §2: a
+    /// client must accept a 576-octet IP datagram — 548 bytes of DHCP after the 20-byte IP and 8-byte
+    /// UDP headers. Option 57 (RFC 2132 §9.10, minimum legal value 576) raises it; it is read as the
+    /// whole datagram, as ISC dhcpd and dnsmasq do. Capped at the reply buffer.
+    /// </summary>
+    internal static int ReplyLimit(DhcpRequest request, int bufferLength)
+    {
+        const int MinDatagram = 576, IpUdpHeaders = 28;
+        var datagram = request.MaxMessageSize is { } m && m >= MinDatagram ? m : MinDatagram;
+        return Math.Min(datagram - IpUdpHeaders, bufferLength);
+    }
+
+    private const int ReplyBufferSize = 1024;
 
     private DhcpResponseBuffer ConstructDhcpPacket(
         DhcpRequest request,
@@ -507,27 +593,23 @@ public sealed class DhcpServerService : IDhcpServerService
         DhcpMessageType messageType,
         DhcpSubnet? subnet,
         DhcpClass? clientClass,
-        bool includeLeaseTime = true)
+        int? leaseTime)
     {
         // Get effective configuration from subnet or fallback
         var serverIp = ServerIdentifierFor(request, subnet);
         var subnetMask = subnet?.SubnetMask ?? _fallbackConfig.SubnetMask!;
         var router = subnet?.Router ?? _fallbackConfig.Gateway!;
         var dnsServers = subnet?.DnsServers ?? _fallbackConfig.DnsServers.ToArray();
-        var leaseTime = subnet?.DefaultLeaseTime ?? _fallbackConfig.LeaseTime;
-        var domainName = subnet?.DomainName;
-        var ntpServers = subnet?.NtpServers;
-        var winsServers = subnet?.WinsServers;
         // RFC 2131 Table 3: a DHCPNAK carries no ciaddr, siaddr, sname or file.
         var isNak = messageType == DhcpMessageType.Nak;
         var bootFilename = isNak ? null : GetBootFilename(request, subnet, clientClass);
-        var tftpServer = isNak ? null : clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
+        var tftpServer = isNak || request.IsHttpBoot ? null : clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
 
         // Rent buffer from pool. Caller (the worker) owns the rental from this
         // point on — DhcpResponseBuffer carries it to the wire and Disposes
         // back to the pool after send. We deliberately don't allocate a
         // right-sized copy at the end (saves ~280B/packet vs the old design).
-        var buffer = _bufferPool.Rent(1024);
+        var buffer = _bufferPool.Rent(ReplyBufferSize);
 
         try
         {
@@ -556,24 +638,19 @@ public sealed class DhcpServerService : IDhcpServerService
 
             // ciaddr (4 bytes) — zero in a NAK
             var ciaddr = isNak ? IPAddress.Any : request.CiAddr ?? IPAddress.Any;
-            ciaddr.GetAddressBytes().CopyTo(buffer, offset);
-            offset += 4;
+            offset = WriteIp(buffer, offset, ciaddr);
 
             // yiaddr (4 bytes)
-            assignedIp.GetAddressBytes().CopyTo(buffer, offset);
-            offset += 4;
+            offset = WriteIp(buffer, offset, assignedIp);
 
             // siaddr (4 bytes) - TFTP server
             var siaddr = isNak ? IPAddress.Any
                 : tftpServer != null && IPAddress.TryParse(tftpServer, out var tftpIp) ? tftpIp
                 : serverIp;
-            siaddr.GetAddressBytes().CopyTo(buffer, offset);
-            offset += 4;
+            offset = WriteIp(buffer, offset, siaddr);
 
             // giaddr (4 bytes)
-            var giaddr = request.GiAddr ?? IPAddress.Any;
-            giaddr.GetAddressBytes().CopyTo(buffer, offset);
-            offset += 4;
+            offset = WriteIp(buffer, offset, request.GiAddr ?? IPAddress.Any);
 
             // chaddr (16 bytes) - clear all 16 bytes first, then write MAC
             buffer.AsSpan(offset, 16).Clear();
@@ -582,32 +659,44 @@ public sealed class DhcpServerService : IDhcpServerService
 
             // sname (64 bytes) - MUST clear entire field (ArrayPool doesn't guarantee zeroed memory)
             buffer.AsSpan(offset, 64).Clear();
-            if (!string.IsNullOrEmpty(tftpServer))
-            {
-                var tftpBytes = Encoding.ASCII.GetBytes(tftpServer);
-                var copyLen = Math.Min(tftpBytes.Length, 63);
-                tftpBytes.AsSpan(0, copyLen).CopyTo(buffer.AsSpan(offset));
-            }
+            if (!string.IsNullOrEmpty(tftpServer) && tftpServer.Length <= 63)
+                Encoding.ASCII.GetBytes(tftpServer, buffer.AsSpan(offset, 63));
             offset += 64;
 
-            // file (128 bytes) - MUST clear entire field (ArrayPool doesn't guarantee zeroed memory)
+            // file (128 bytes) - MUST clear entire field. A name that doesn't fit (an HTTP boot URL,
+            // an iPXE script URL) is NOT truncated into it — a cut URL boots nothing; it travels in
+            // option 67 instead, which every PXE/HTTP client reads.
             buffer.AsSpan(offset, 128).Clear();
-            if (!string.IsNullOrEmpty(bootFilename))
-            {
-                var bootBytes = Encoding.ASCII.GetBytes(bootFilename);
-                var copyLen = Math.Min(bootBytes.Length, 127);
-                bootBytes.AsSpan(0, copyLen).CopyTo(buffer.AsSpan(offset));
-            }
+            if (!string.IsNullOrEmpty(bootFilename) && bootFilename.Length <= 127)
+                Encoding.ASCII.GetBytes(bootFilename, buffer.AsSpan(offset, 127));
             offset += 128;
 
             // Magic cookie
             MagicCookie.CopyTo(buffer, offset);
             offset += 4;
 
+            // What must still follow the options: client-id (61), relay info (82), End.
+            var reserve = 1 + (request.ClientIdentifier is { Length: > 0 and <= 255 } cid ? cid.Length + 2 : 0)
+                            + (request.RelayAgentInformation is { Length: > 0 } ri ? ri.Length + 2 : 0);
+            var limit = ReplyLimit(request, ReplyBufferSize) - reserve;
+
             // DHCP Options
-            offset = WriteOptions(buffer, offset, messageType, request, subnet, clientClass,
-                serverIp, subnetMask, router, dnsServers, leaseTime,
-                domainName, ntpServers, winsServers, bootFilename, includeLeaseTime);
+            Span<bool> governed = stackalloc bool[256];
+            var writer = new OptionWriter(buffer, offset, limit, request.ParameterRequestList, governed);
+            WriteOptions(ref writer, messageType, request, subnet, clientClass,
+                serverIp, subnetMask, router, dnsServers, leaseTime, bootFilename, tftpServer);
+            offset = writer.Offset;
+
+            if (writer.Dropped > 0)
+            {
+                // Once a minute at Warning (a heavy option set hits every client that sends no 57), else Debug.
+                if (OncePerMinute(ref _lastSizeDropLogTicks))
+                    _logger.LogWarning("[OPTIONS] {Count} option(s) for {Mac} didn't fit in the {Limit}-byte reply it accepts — skipped. Further cases this minute are logged at Debug.",
+                        writer.Dropped, request.ClientMac, limit + reserve);
+                else
+                    _logger.LogDebug("[OPTIONS] {Count} option(s) for {Mac} didn't fit in the {Limit}-byte reply — skipped",
+                        writer.Dropped, request.ClientMac, limit + reserve);
+            }
 
             // RFC 6842: a client that sent a client identifier (61) gets it back — without it,
             // clients that key on client-id can discard the reply as not theirs.
@@ -647,8 +736,83 @@ public sealed class DhcpServerService : IDhcpServerService
     private static string? GetBootFilename(DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass) =>
         PxeBoot.BootFile(request, subnet, clientClass);
 
-    private int WriteOptions(
-        byte[] buffer, int offset,
+    /// <summary>
+    /// Writes options into the reply. Two kinds:
+    /// <list type="bullet">
+    /// <item><b>Always</b> — 53, 54, 1, 3, the lease times, and the boot options for a PXE/HTTP/BOOTP
+    /// client. Sent whatever the client asked for; they fit by construction (they come first).</item>
+    /// <item><b>Requested</b> — everything else the subnet configures: sent only when the client's
+    /// parameter request list (55) names it — or when it sent no list (older clients, BOOTP) — and
+    /// only while it fits in the size the client accepts (57).</item>
+    /// </list>
+    /// Every code the server configures is marked <c>Governed</c> even when skipped, so a custom
+    /// option can't slip the same code in through the back door.
+    /// </summary>
+    private ref struct OptionWriter
+    {
+        private readonly byte[] _buffer;
+        private readonly ReadOnlySpan<byte> _prl;
+        private readonly int _limit;
+        public readonly Span<bool> Governed;
+        public int Offset;
+        public int Dropped;
+
+        public OptionWriter(byte[] buffer, int offset, int limit, ReadOnlySpan<byte> prl, Span<bool> governed)
+        {
+            _buffer = buffer;
+            Offset = offset;
+            _limit = limit;
+            _prl = prl;
+            Governed = governed;
+        }
+
+        /// <summary>No list (or an empty one) = the client takes whatever we send.</summary>
+        public readonly bool Requested(int code) => _prl.IsEmpty || _prl.IndexOf((byte)code) >= 0;
+
+        public readonly bool HasPrl => !_prl.IsEmpty;
+
+        public readonly bool Fits(int length) => Offset + 2 + length <= _limit;
+
+        /// <summary>The server owns <paramref name="code"/>; true when the client wants it.</summary>
+        public bool Take(DhcpOptionCode code)
+        {
+            Governed[(byte)code] = true;
+            return Requested((byte)code);
+        }
+
+        public void Always(DhcpOptionCode code, scoped ReadOnlySpan<byte> data)
+        {
+            Governed[(byte)code] = true;
+            Offset = WriteOption(_buffer, Offset, code, data);
+        }
+
+        public void AlwaysInt32(DhcpOptionCode code, int value)
+        {
+            Governed[(byte)code] = true;
+            Offset = WriteInt32Option(_buffer, Offset, code, value);
+        }
+
+        /// <summary>Writes a requested option when it fits; counts it as dropped otherwise.</summary>
+        public void Put(DhcpOptionCode code, scoped ReadOnlySpan<byte> data)
+        {
+            if (data.Length > 255)   // let WriteOption throw its configuration error
+            {
+                Offset = WriteOption(_buffer, Offset, code, data);
+                return;
+            }
+            if (!Fits(data.Length)) { Dropped++; return; }
+            Offset = WriteOption(_buffer, Offset, code, data);
+        }
+
+        public void PutInt32(DhcpOptionCode code, int value)
+        {
+            if (!Fits(4)) { Dropped++; return; }
+            Offset = WriteInt32Option(_buffer, Offset, code, value);
+        }
+    }
+
+    private void WriteOptions(
+        ref OptionWriter w,
         DhcpMessageType messageType,
         DhcpRequest request,
         DhcpSubnet? subnet,
@@ -657,17 +821,14 @@ public sealed class DhcpServerService : IDhcpServerService
         IPAddress subnetMask,
         IPAddress router,
         IPAddress[]? dnsServers,
-        int leaseTime,
-        string? domainName,
-        IPAddress[]? ntpServers,
-        IPAddress[]? winsServers,
+        int? leaseTime,
         string? bootFilename,
-        bool includeLeaseTime)
+        string? tftpServer)
     {
-        var optionsStart = offset;
+        Span<byte> scratch = stackalloc byte[255];
 
         // Message Type (required)
-        offset = WriteOption(buffer, offset, DhcpOptionCode.MessageType,
+        w.Always(DhcpOptionCode.MessageType,
             messageType switch
             {
                 DhcpMessageType.Offer => OfferMessageType,
@@ -675,208 +836,189 @@ public sealed class DhcpServerService : IDhcpServerService
                 _ => NakMessageType
             });
 
-        // For NAK, only include message type and server identifier
-        if (messageType == DhcpMessageType.Nak)
+        // Server Identifier — and for a NAK, nothing else.
+        w.Always(DhcpOptionCode.ServerIdentifier, Ip4(serverIp, scratch));
+        if (messageType == DhcpMessageType.Nak) return;
+
+        w.Always(DhcpOptionCode.SubnetMask, Ip4(subnetMask, scratch));
+        w.Always(DhcpOptionCode.Router, Ip4(router, scratch));
+
+        // Lease timing — right after the essentials so a small reply never loses it.
+        if (leaseTime is { } lease)
         {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.ServerIdentifier, serverIp.GetAddressBytes());
-            return offset;
+            w.AlwaysInt32(DhcpOptionCode.IPAddressLeaseTime, lease);
+            w.AlwaysInt32(DhcpOptionCode.RenewalTimeValue, lease / 2);
+            w.AlwaysInt32(DhcpOptionCode.RebindingTimeValue, (int)((long)lease * 7 / 8)); // long: lease * 7 overflowed above ~306M s
         }
 
-        // Server Identifier
-        offset = WriteOption(buffer, offset, DhcpOptionCode.ServerIdentifier, serverIp.GetAddressBytes());
-
-        // Subnet Mask
-        offset = WriteOption(buffer, offset, DhcpOptionCode.SubnetMask, subnetMask.GetAddressBytes());
-
-        // Router/Gateway
-        offset = WriteOption(buffer, offset, DhcpOptionCode.Router, router.GetAddressBytes());
-
-        // Broadcast Address (calculate from network + inverted mask)
-        if (subnet?.Broadcast != null)
+        // Boot options for a boot client, before anything optional (they are what it came for).
+        if (request.IsPxeRequest || request.IsHttpBoot || request.IsBootp)
         {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.BroadcastAddress, subnet.Broadcast.GetAddressBytes());
-        }
+            if (!string.IsNullOrEmpty(bootFilename))
+                w.Always(DhcpOptionCode.BootFileName, Ascii(bootFilename, scratch));
 
-        // DNS Servers
-        if (dnsServers is { Length: > 0 })
-        {
-            var dnsBytes = new byte[dnsServers.Length * 4];
-            for (int i = 0; i < dnsServers.Length; i++)
+            if (!string.IsNullOrEmpty(tftpServer))
+                w.Always(DhcpOptionCode.TFTPServerName, Ascii(tftpServer, scratch));
+
+            if (request.IsHttpBoot)
             {
-                dnsServers[i].GetAddressBytes().CopyTo(dnsBytes, i * 4);
+                // UEFI spec (HTTP Boot chapter): an HTTP boot client only accepts an offer that says "HTTPClient"
+                // (60) and carries the boot URI. No option 43 — that is PXE boot-server discovery.
+                // No URI configured = a plain address offer, no boot.
+                if (!string.IsNullOrEmpty(bootFilename))
+                    w.Always(DhcpOptionCode.VendorClassIdentifier, PxeBoot.HttpClientClass);
             }
-            offset = WriteOption(buffer, offset, DhcpOptionCode.DNS, dnsBytes);
+            else if (request.IsPxeRequest)
+            {
+                // PXE 2.1: the offer must say "PXEClient" (60) and how to boot (43: use the file,
+                // skip boot-server discovery). Options 93/94 are CLIENT options and were wrongly
+                // sent back; 97 is the client's UUID — echoed, never invented.
+                w.Always(DhcpOptionCode.VendorClassIdentifier, PxeBoot.PxeClientClass);
+                w.Always(DhcpOptionCode.VendorSpecificInformation, PxeBoot.VendorOptions);
+                if (request.ClientMachineId is { Length: > 0 } uuid)
+                    w.Always(DhcpOptionCode.ClientMachineIdentifier, uuid);
+            }
         }
 
-        // Domain Name (Option 15)
-        if (!string.IsNullOrEmpty(domainName))
-        {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.DomainName, Encoding.ASCII.GetBytes(domainName));
-        }
+        // ---- Requested options: only what the client asked for (55), while it fits (57) ----
 
-        // Hostname (Option 12) - Echo back client's hostname if provided
-        if (!string.IsNullOrEmpty(request.Hostname))
-        {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.HostName, Encoding.ASCII.GetBytes(request.Hostname));
-        }
+        if (subnet?.Broadcast != null && w.Take(DhcpOptionCode.BroadcastAddress))
+            w.Put(DhcpOptionCode.BroadcastAddress, Ip4(subnet.Broadcast, scratch));
+
+        if (dnsServers is { Length: > 0 } && w.Take(DhcpOptionCode.DNS))
+            w.Put(DhcpOptionCode.DNS, IpList(dnsServers, scratch));
+
+        if (!string.IsNullOrEmpty(subnet?.DomainName) && w.Take(DhcpOptionCode.DomainName))
+            w.Put(DhcpOptionCode.DomainName, Ascii(subnet.DomainName, scratch));
+
+        // Hostname (12) — echo the client's own name back.
+        if (!string.IsNullOrEmpty(request.Hostname) && w.Take(DhcpOptionCode.HostName))
+            w.Put(DhcpOptionCode.HostName, Ascii(request.Hostname, scratch));
 
         // Domain Search List (Option 119) - RFC 1035 encoded
         if (!string.IsNullOrEmpty(subnet?.DomainSearchList))
         {
             var domainSearchBytes = EncodedOnce(DomainSearchEncoded, subnet.DomainSearchList, DhcpOptionExtensions.EncodeDomainSearchList);
-            if (domainSearchBytes.Length > 0)
-            {
-                offset = WriteOption(buffer, offset, DhcpOptionCode.DomainSearch, domainSearchBytes);
-            }
+            if (domainSearchBytes.Length > 0 && w.Take(DhcpOptionCode.DomainSearch))
+                w.Put(DhcpOptionCode.DomainSearch, domainSearchBytes);
         }
 
         // Classless Static Routes (Option 121) - RFC 3442 encoded
         if (!string.IsNullOrEmpty(subnet?.StaticRoutesJson))
         {
             var routesBytes = EncodedOnce(StaticRoutesEncoded, subnet.StaticRoutesJson, DhcpOptionExtensions.EncodeClasslessStaticRoutes);
-            if (routesBytes.Length > 0)
+            if (routesBytes.Length > 0 && w.Take(DhcpOptionCode.ClasslessStaticRoute))
             {
                 // RFC 3442: a client that understands 121 MUST ignore option 3 (Router). Without a
                 // 0.0.0.0/0 entry here, configuring one static route took the default gateway away
                 // from every Linux/macOS/Android/Windows client on the subnet.
                 Span<byte> withDefault = stackalloc byte[routesBytes.Length + 5];
-                offset = WriteOption(buffer, offset, DhcpOptionCode.ClasslessStaticRoute,
-                    WithDefaultRoute(routesBytes, router, withDefault));
+                w.Put(DhcpOptionCode.ClasslessStaticRoute, WithDefaultRoute(routesBytes, router, withDefault));
             }
         }
 
         // Time Offset (Option 2) - Seconds offset from UTC
-        if (subnet?.TimeOffset.HasValue == true)
-        {
-            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.TimeOffset, subnet.TimeOffset.Value);
-        }
+        if (subnet?.TimeOffset is { } timeOffset && w.Take(DhcpOptionCode.TimeOffset))
+            w.PutInt32(DhcpOptionCode.TimeOffset, timeOffset);
 
         // POSIX Timezone (Option 100)
-        if (!string.IsNullOrEmpty(subnet?.PosixTimezone))
-        {
-            offset = WriteOption(buffer, offset, DhcpOptionCode.POSIXTimeZone,
-                Encoding.ASCII.GetBytes(subnet.PosixTimezone));
-        }
+        if (!string.IsNullOrEmpty(subnet?.PosixTimezone) && w.Take(DhcpOptionCode.POSIXTimeZone))
+            w.Put(DhcpOptionCode.POSIXTimeZone, Ascii(subnet.PosixTimezone, scratch));
 
-        // NTP Servers
-        if (ntpServers is { Length: > 0 })
-        {
-            var ntpBytes = new byte[ntpServers.Length * 4];
-            for (int i = 0; i < ntpServers.Length; i++)
-            {
-                ntpServers[i].GetAddressBytes().CopyTo(ntpBytes, i * 4);
-            }
-            offset = WriteOption(buffer, offset, DhcpOptionCode.NTPServers, ntpBytes);
-        }
+        if (subnet?.NtpServers is { Length: > 0 } ntpServers && w.Take(DhcpOptionCode.NTPServers))
+            w.Put(DhcpOptionCode.NTPServers, IpList(ntpServers, scratch));
 
-        // WINS/NetBIOS Servers
-        if (winsServers is { Length: > 0 })
+        // WINS/NetBIOS Servers, with node type hybrid (0x08) alongside.
+        if (subnet?.WinsServers is { Length: > 0 } winsServers)
         {
-            var winsBytes = new byte[winsServers.Length * 4];
-            for (int i = 0; i < winsServers.Length; i++)
-            {
-                winsServers[i].GetAddressBytes().CopyTo(winsBytes, i * 4);
-            }
-            offset = WriteOption(buffer, offset, DhcpOptionCode.NetBIOSOverTCPIPNameServer, winsBytes);
-            // Set NetBIOS node type to hybrid (0x08)
-            offset = WriteOption(buffer, offset, DhcpOptionCode.NetBIOSOverTCPIPNodeType, [0x08]);
+            if (w.Take(DhcpOptionCode.NetBIOSOverTCPIPNameServer))
+                w.Put(DhcpOptionCode.NetBIOSOverTCPIPNameServer, IpList(winsServers, scratch));
+            if (w.Take(DhcpOptionCode.NetBIOSOverTCPIPNodeType))
+                w.Put(DhcpOptionCode.NetBIOSOverTCPIPNodeType, [0x08]);
         }
 
         // Interface MTU
-        if (subnet?.InterfaceMtu.HasValue == true)
-        {
-            var mtuBytes = new byte[2];
-            mtuBytes[0] = (byte)(subnet.InterfaceMtu.Value >> 8);
-            mtuBytes[1] = (byte)(subnet.InterfaceMtu.Value & 0xFF);
-            offset = WriteOption(buffer, offset, DhcpOptionCode.InterfaceMTU, mtuBytes);
-        }
+        if (subnet?.InterfaceMtu is { } mtu && w.Take(DhcpOptionCode.InterfaceMTU))
+            w.Put(DhcpOptionCode.InterfaceMTU, [(byte)(mtu >> 8), (byte)(mtu & 0xFF)]);
 
-        // Lease timing options
-        if (includeLeaseTime)
-        {
-            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.IPAddressLeaseTime, leaseTime);
-            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RenewalTimeValue, leaseTime / 2);
-            offset = WriteInt32Option(buffer, offset, DhcpOptionCode.RebindingTimeValue, (int)((long)leaseTime * 7 / 8)); // long: leaseTime * 7 overflowed above ~306M s
-        }
+        // The echoes written after the options are the server's too.
+        if (request.ClientIdentifier is { Length: > 0 }) w.Governed[(byte)DhcpOptionCode.ClientIdentifier] = true;
+        if (request.RelayAgentInformation is { Length: > 0 }) w.Governed[(byte)DhcpOptionCode.RelayAgentInformation] = true;
 
-        // PXE/BOOTP options
-        if (request.IsPxeRequest || request.IsBootp)
-        {
-            if (!string.IsNullOrEmpty(bootFilename))
-            {
-                offset = WriteOption(buffer, offset, DhcpOptionCode.BootFileName,
-                    Encoding.ASCII.GetBytes(bootFilename));
-            }
-
-            var tftpServer = clientClass?.NextServer?.ToString() ?? subnet?.TftpServer;
-            if (!string.IsNullOrEmpty(tftpServer))
-            {
-                offset = WriteOption(buffer, offset, DhcpOptionCode.TFTPServerName,
-                    Encoding.ASCII.GetBytes(tftpServer));
-            }
-
-            if (request.IsPxeRequest)
-            {
-                // PXE 2.1: the offer must say "PXEClient" (60) and how to boot (43: use the file,
-                // skip boot-server discovery). Options 93/94 are CLIENT options and were wrongly
-                // sent back; 97 is the client's UUID — echoed, never invented.
-                offset = WriteOption(buffer, offset, DhcpOptionCode.VendorClassIdentifier, PxeBoot.PxeClientClass);
-                offset = WriteOption(buffer, offset, DhcpOptionCode.VendorSpecificInformation, PxeBoot.VendorOptions);
-                if (request.ClientMachineId is { Length: > 0 } uuid)
-                    offset = WriteOption(buffer, offset, DhcpOptionCode.ClientMachineIdentifier, uuid);
-            }
-        }
-
-        // Operator-defined options last (a NAK carries none). Host > class > subnet/global.
-        if (messageType != DhcpMessageType.Nak)
-            offset = WriteCustomOptions(buffer, optionsStart, offset, request, subnet, clientClass);
-
-        return offset;
+        // Operator-defined options last. Host > class > subnet/global.
+        WriteCustomOptions(ref w, request, subnet, clientClass);
     }
 
     /// <summary>
     /// Custom options (dhcp_custom_options) for this client, most specific scope first. A code the
-    /// server already wrote (router, DNS, lease times, PXE…) is skipped — those stay governed by the
-    /// subnet's own fields — and so is any code a more specific scope already supplied. Room is
-    /// kept for client-id, relay info and End; an option that doesn't fit is skipped, logged.
+    /// server governs (router, DNS, lease times, PXE…, written or not) is skipped — those stay
+    /// governed by the subnet's own fields — and so is any code a more specific scope already
+    /// supplied. Custom options are NOT filtered by the parameter request list (there is no
+    /// per-option "always send" flag, and devices rely on unrequested ones such as 43 for APs);
+    /// when the client sent a list, the ones it asked for go first so a small reply keeps them.
+    /// One that doesn't fit is skipped and logged.
     /// </summary>
-    private int WriteCustomOptions(byte[] buffer, int optionsStart, int offset, DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
+    private void WriteCustomOptions(ref OptionWriter w, DhcpRequest request, DhcpSubnet? subnet, DhcpClass? clientClass)
     {
-        if (subnet is null) return offset;
+        if (subnet is null) return;
         subnet.HostOptions.TryGetValue(request.ClientMac, out var host);
         var cls = clientClass?.CustomOptions;
-        if (host is null && (cls is null || cls.Count == 0) && subnet.CustomOptions.Count == 0) return offset;
+        if (host is null && (cls is null || cls.Count == 0) && subnet.CustomOptions.Count == 0) return;
 
         Span<bool> written = stackalloc bool[256];
-        for (var i = optionsStart; i < offset;)
+        for (var pass = 0; pass < (w.HasPrl ? 2 : 1); pass++)
         {
-            var code = buffer[i];
-            if (code == 0) { i++; continue; }
-            if (code == 255 || i + 1 >= offset) break;
-            written[code] = true;
-            i += 2 + buffer[i + 1];
+            var requestedPass = pass == 0;
+            WriteScope(ref w, host, requestedPass, written, request.ClientMac);
+            WriteScope(ref w, cls, requestedPass, written, request.ClientMac);
+            WriteScope(ref w, subnet.CustomOptions, requestedPass, written, request.ClientMac);
         }
+    }
 
-        // What must still follow: client-id, option 82, End (+ slack).
-        var reserve = 1 + 4 + (request.ClientIdentifier?.Length + 2 ?? 0) + (request.RelayAgentInformation?.Length + 2 ?? 0);
-        var limit = buffer.Length - reserve;
-
-        foreach (var scope in new[] { host, cls, subnet.CustomOptions })
+    private void WriteScope(ref OptionWriter w, IReadOnlyList<DhcpCustomOption>? scope, bool requestedPass, scoped Span<bool> written, string mac)
+    {
+        if (scope is null) return;
+        foreach (var o in scope)
         {
-            if (scope is null) continue;
-            foreach (var o in scope)
+            if (o.OptionCode is < 1 or > 254 || w.Governed[o.OptionCode] || written[o.OptionCode]
+                || o.OptionValue.Length is 0 or > 255) continue;
+            // With a request list: pass 1 = asked for, pass 2 = the rest. Without one: one pass.
+            if (w.HasPrl && w.Requested(o.OptionCode) != requestedPass) continue;
+            written[o.OptionCode] = true;   // a more specific scope that didn't fit still wins its code
+            if (!w.Fits(o.OptionValue.Length))
             {
-                if (o.OptionCode is < 1 or > 254 || written[o.OptionCode] || o.OptionValue.Length is 0 or > 255) continue;
-                if (offset + 2 + o.OptionValue.Length > limit)
-                {
-                    _logger.LogWarning("[OPTIONS] Custom option {Code} for {Mac} doesn't fit in the reply — skipped", o.OptionCode, request.ClientMac);
-                    continue;
-                }
-                offset = WriteOption(buffer, offset, (DhcpOptionCode)o.OptionCode, o.OptionValue);
-                written[o.OptionCode] = true;
+                w.Dropped++;   // reported once, throttled, by ConstructDhcpPacket
+                continue;
             }
+            w.Put((DhcpOptionCode)o.OptionCode, o.OptionValue);
         }
-        return offset;
+    }
+
+    private static ReadOnlySpan<byte> Ip4(IPAddress ip, Span<byte> scratch) =>
+        ip.TryWriteBytes(scratch, out var n) && n == 4 ? scratch[..4] : ip.GetAddressBytes();
+
+    /// <summary>Up to 63 IPv4 addresses (one option's worth), packed.</summary>
+    private static ReadOnlySpan<byte> IpList(IPAddress[] ips, Span<byte> scratch)
+    {
+        var n = 0;
+        foreach (var ip in ips)
+        {
+            if (n + 4 > scratch.Length) break;
+            if (ip.TryWriteBytes(scratch[n..], out var w) && w == 4) n += 4;
+        }
+        return scratch[..n];
+    }
+
+    /// <summary>ASCII into <paramref name="scratch"/>; a string over 255 comes back whole so WriteOption raises its error.</summary>
+    private static ReadOnlySpan<byte> Ascii(string text, Span<byte> scratch) =>
+        text.Length <= scratch.Length ? scratch[..Encoding.ASCII.GetBytes(text, scratch)] : Encoding.ASCII.GetBytes(text);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int WriteIp(byte[] buffer, int offset, IPAddress ip)
+    {
+        if (!ip.TryWriteBytes(buffer.AsSpan(offset, 4), out var n) || n != 4)
+            buffer.AsSpan(offset, 4).Clear();
+        return offset + 4;
     }
 
     /// <summary>

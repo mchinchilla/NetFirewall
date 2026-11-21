@@ -1,0 +1,38 @@
+@model NetFirewall.Web.Models.Dhcp.RelayAgentFormViewModel
+@using NetFirewall.Web.Models
+
+<form id="relay-agent-form"
+      hx-post="/Dhcp/Access/relays/save"
+      hx-target="this" hx-swap="outerHTML">
+    @Html.AntiForgeryToken()
+    @if (Model.Id.HasValue)
+    {
+        <input type="hidden" name="Id" value="@Model.Id" />
+    }
+
+    <div class="space-y-4">
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.IpAddress), Label = "Relay address (giaddr)", Required = true, Value = Model.IpAddress,
+            Placeholder = "10.20.0.1", MaxLength = 15,
+            Pattern = @"^((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)$",
+            Help = "The relay's interface address on the remote subnet — the giaddr in packets it forwards (shown as RelayIP in the DHCP log)."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Trusted), Label = "Trusted", Kind = FormFieldKind.Checkbox,
+            Value = Model.Trusted ? "true" : "false",
+            Help = "Trusted: its packets are answered and its option 82 can select classes and pools. Unticked = refused: everything it relays is dropped. Saving the first trusted relay switches trusted-relay mode on."
+        })
+
+        @await Html.PartialAsync("_FormField", new FormFieldViewModel {
+            Name = nameof(Model.Description), Label = "Description (optional)", Kind = FormFieldKind.Textarea,
+            Value = Model.Description, MaxLength = 255,
+            Placeholder = "core switch, branch office router, …"
+        })
+    </div>
+
+    <div class="mt-6 pt-4 border-t flex items-center justify-end gap-2 border-surface-border">
+        <button type="button" class="btn btn-ghost" @@click="$store.drawer.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">@(Model.Id.HasValue ? "Save changes" : "Add relay")</button>
+    </div>
+</form>
