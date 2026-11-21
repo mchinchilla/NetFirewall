@@ -103,7 +103,7 @@ public sealed class WireGuardSplitServiceTests(PostgresFixture pg) : IAsyncLifet
 
     public Task DisposeAsync() => Task.CompletedTask;
 
-    private WireGuardSplitService Svc() => new(_wg, _routing.Object, _fw.Object, _daemon.Object, pg.DataSource, NullLogger<WireGuardSplitService>.Instance);
+    private WireGuardSplitService Svc() => new(_wg, _routing.Object, _fw.Object, new DaemonWireGuardSplitKernel(_daemon.Object), pg.DataSource, NullLogger<WireGuardSplitService>.Instance);
 
     [Fact]
     public async Task Execute_SplitsAndAppliesInTheOnlyWorkingOrder_ThenConfirm()

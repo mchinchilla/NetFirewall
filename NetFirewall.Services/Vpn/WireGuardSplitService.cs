@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using NetFirewall.Models;
 using NetFirewall.Models.Firewall;
 using NetFirewall.Models.Vpn;
-using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
 using Npgsql;
 
@@ -35,7 +34,7 @@ public sealed class WireGuardSplitService(
     IWireGuardService wg,
     IVpnRoutingService routing,
     IFirewallService fw,
-    IDaemonClient daemon,
+    IWireGuardSplitKernel kernel,
     NpgsqlDataSource ds,
     ILogger<WireGuardSplitService> logger) : IWireGuardSplitService
 {
@@ -89,9 +88,9 @@ public sealed class WireGuardSplitService(
             foreach (var p in plan.PeersToServer) await routing.EnsurePeerForwardingAsync(server, p, ct);
 
             // Order matters: the source releases the port before the server binds it.
-            await RequireAsync(daemon.ApplyWireGuardAsync(source.Name, ct), $"apply {source.Name}");
-            await RequireAsync(daemon.ApplyWireGuardAsync(server.Name, ct), $"apply {server.Name}");
-            await RequireAsync(daemon.ApplyFirewallAsync(ct), "firewall apply");
+            await RequireAsync(kernel.ApplyInterfaceAsync(source.Name, ct), $"apply {source.Name}");
+            await RequireAsync(kernel.ApplyInterfaceAsync(server.Name, ct), $"apply {server.Name}");
+            await RequireAsync(kernel.ApplyFirewallAsync(ct), "firewall apply");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -119,11 +118,20 @@ public sealed class WireGuardSplitService(
             ? ServiceResponse<object>.Ok(new { }, "Split kept.")
             : ServiceResponse<object>.Fail("There is no split waiting for confirmation.");
 
+    /// <summary>
+    /// Restore the snapshot. The journal row is held (<c>FOR UPDATE</c>) for the whole revert, so
+    /// the operator confirming in the Web and the watchdog reverting in the daemon can't both win:
+    /// whichever comes second sees no pending split. The kernel steps are re-applied from the
+    /// restored database rows, so a revert that fails half-way can simply be retried by hand.
+    /// </summary>
     public async Task<ServiceResponse<object>> RevertAsync(Guid journalId, string reason, CancellationToken ct = default)
     {
+        await using var conn = await ds.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
         Snapshot? s;
-        await using (var conn = await ds.OpenConnectionAsync(ct))
-        await using (var cmd = new NpgsqlCommand("SELECT snapshot::text FROM vpn_split_journal WHERE id = @id AND state = 'pending'", conn))
+        await using (var cmd = new NpgsqlCommand(
+            "SELECT snapshot::text FROM vpn_split_journal WHERE id = @id AND state = 'pending' FOR UPDATE", conn, tx))
         {
             cmd.Parameters.AddWithValue("id", journalId);
             s = await cmd.ExecuteScalarAsync(ct) is string json ? JsonSerializer.Deserialize<Snapshot>(json) : null;
@@ -138,7 +146,10 @@ public sealed class WireGuardSplitService(
             {
                 foreach (var p in (await wg.GetPeersAsync(server.Id, ct)).Where(p => s.MovedPeerIds.Contains(p.Id)))
                     await routing.RemovePeerForwardingAsync(server, p, ct);
-                await daemon.StopWireGuardAsync(server.Name, ct);   // release the port first
+                // Release the listen port first. Not fatal: a link that is already down is fine,
+                // and if the port really is still held the source's apply below fails loudly.
+                var stop = await kernel.StopInterfaceAsync(server.Name, ct);
+                if (!stop.Success) logger.LogWarning("Revert: stopping {Server} failed: {Message}", server.Name, stop.Message);
             }
             await wg.MovePeersAsync(s.MovedPeerIds, source.Id, ct);
             source.AddressCidr = s.AddressCidr; source.ListenPort = s.ListenPort; source.Mode = s.Mode; source.TableOff = s.TableOff;
@@ -150,16 +161,18 @@ public sealed class WireGuardSplitService(
                 if (await fw.GetInterfaceByNameAsync(server.Name, ct) is { } fi) await fw.DeleteInterfaceAsync(fi.Id, ct);
                 await wg.DeleteServerAsync(server.Id, ct);
             }
-            await RequireAsync(daemon.ApplyWireGuardAsync(source.Name, ct), $"apply {source.Name}");
-            await RequireAsync(daemon.ApplyFirewallAsync(ct), "firewall apply");
-            await FinishAsync(journalId, "reverted", ct);
+            await RequireAsync(kernel.ApplyInterfaceAsync(source.Name, ct), $"apply {source.Name}");
+            await RequireAsync(kernel.ApplyFirewallAsync(ct), "firewall apply");
+            await SetStateAsync(conn, tx, journalId, "reverted", ct);
+            await tx.CommitAsync(ct);
             logger.LogWarning("Split of {Source} reverted: {Reason}", source.Name, reason);
             return ServiceResponse<object>.Ok(new { }, $"Split reverted ({reason}). {source.Name} is back to doing both jobs.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Reverting split {Id} failed", journalId);
-            await FinishAsync(journalId, "revert_failed", ct);
+            await SetStateAsync(conn, tx, journalId, "revert_failed", ct);
+            await tx.CommitAsync(ct);
             return ServiceResponse<object>.Fail($"Reverting the split failed: {ex.Message}. Check both interfaces on the VPN pages.");
         }
     }
@@ -197,6 +210,15 @@ public sealed class WireGuardSplitService(
         return new WgSplitPending(id, plan.SourceName, plan.ServerName, deadline);
     }
 
+    private static async Task SetStateAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, string state, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(
+            "UPDATE vpn_split_journal SET state = @state, finished_at = now() WHERE id = @id", conn, tx);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("state", state);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     private async Task<bool> FinishAsync(Guid id, string state, CancellationToken ct)
     {
         await using var conn = await ds.OpenConnectionAsync(ct);
@@ -208,7 +230,12 @@ public sealed class WireGuardSplitService(
     }
 }
 
-/// <summary>Reverts a split nobody confirmed in time (runs in the Web, which owns the daemon client session-free path).</summary>
+/// <summary>
+/// Reverts a split nobody confirmed in time. Runs in the DAEMON: the revert has to reach the
+/// kernel with no operator around (that is the point — they may have cut themselves off through
+/// the tunnel being split), and only the daemon can do that without a session. It used to run in
+/// the Web, whose daemon calls carried no session outside a request and were refused with 401.
+/// </summary>
 public sealed class WireGuardSplitWatchdog(
     IServiceScopeFactory scopes,
     ILogger<WireGuardSplitWatchdog> logger) : Microsoft.Extensions.Hosting.BackgroundService

@@ -226,7 +226,7 @@ SHA-256 of every applied file, and the runner refuses to continue if one was edi
 | `00043–00044` | Dismissable system alerts, DHCP reservation notify |
 | `00045` | One WireGuard interface per role (unique, link-safe names) |
 | `00046–00049` | DHCP: iPXE boot file, custom options, reservation host names, lease history |
-| `00050` | WireGuard split journal (confirm or revert) |
+| `00050` | WireGuard split journal (confirm or revert; the daemon reverts an unconfirmed split after 10 min) |
 
 ## Audit and apply history
 

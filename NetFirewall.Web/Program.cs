@@ -212,9 +212,10 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardTeardownService,
 // Which wg interface a request means (pages default; mutations must name it).
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardInterfaceResolver,
                            NetFirewall.Services.Vpn.WireGuardInterfaceResolver>();
-// Split a legacy dual-role wg0 (confirm-or-revert; the watchdog reverts an unconfirmed split).
+// Split a legacy dual-role wg0 (confirm-or-revert). The operator's steps reach the kernel through
+// the daemon with their session; the watchdog that reverts an unconfirmed split runs in the DAEMON.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardSplitKernel, NetFirewall.Services.Vpn.DaemonWireGuardSplitKernel>();
 builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardSplitService, NetFirewall.Services.Vpn.WireGuardSplitService>();
-builder.Services.AddHostedService<NetFirewall.Services.Vpn.WireGuardSplitWatchdog>();
 
 // Network objects — alias-style address objects. Filter / NAT / mangle
 // generators resolve names → flat CIDRs through INetworkObjectResolver.

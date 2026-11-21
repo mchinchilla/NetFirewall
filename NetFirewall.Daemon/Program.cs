@@ -368,6 +368,15 @@ builder.Services.AddScoped<NetFirewall.Services.Vpn.IVpnRoutingService,
 builder.Services.Configure<NetFirewall.Services.Vpn.WireGuardApplyOptions>(
     builder.Configuration.GetSection("WireGuard"));
 
+// WireGuard split watchdog — reverts a split nobody confirmed within 10 minutes. It lives here,
+// not in the Web: the revert must reach the kernel with no operator session (they may have cut
+// themselves off through the tunnel being split), so the kernel steps run in-process.
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardSplitKernel,
+                           NetFirewall.Services.Vpn.InProcessWireGuardSplitKernel>();
+builder.Services.AddScoped<NetFirewall.Services.Vpn.IWireGuardSplitService,
+                           NetFirewall.Services.Vpn.WireGuardSplitService>();
+builder.Services.AddHostedService<NetFirewall.Services.Vpn.WireGuardSplitWatchdog>();
+
 // VPN health monitor — proactive "tunnel went down" detection. Polls wg show on
 // a timer, applies hysteresis, records up/down transitions to vpn_health_* and
 // fires notifications (UI banner + email). Observe-and-alert only, no failover.
