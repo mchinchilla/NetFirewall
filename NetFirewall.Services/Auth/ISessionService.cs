@@ -26,6 +26,12 @@ public interface ISessionService
     /// <summary>Revoke a single session (logout).</summary>
     Task RevokeAsync(Guid sessionId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Revoke one session only if it belongs to <paramref name="userId"/> (Account → Security).
+    /// Returns false when the session is not that user's, or already revoked.
+    /// </summary>
+    Task<bool> RevokeOwnAsync(Guid sessionId, Guid userId, CancellationToken ct = default);
+
     /// <summary>Revoke every session for a user (e.g. after password change).</summary>
     Task RevokeAllForUserAsync(Guid userId, CancellationToken ct = default);
 

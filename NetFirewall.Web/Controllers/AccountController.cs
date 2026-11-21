@@ -216,9 +216,12 @@ public sealed class AccountController : Controller
     [HttpPost("/account/security/revoke/{sessionId:guid}"), ValidateAntiForgeryToken]
     public async Task<IActionResult> RevokeSession(Guid sessionId, CancellationToken ct)
     {
-        await _sessions.RevokeAsync(sessionId, ct);
+        // Only the caller's own sessions: the id comes from the request.
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        if (!await _sessions.RevokeOwnAsync(sessionId, userId, ct))
+            return this.ToHtmxResponse(ServiceResponse<object>.Fail("Session not found or already ended."));
         await _audit.LogAsync(AuthAuditEvents.SessionRevoked,
-            Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), User.Identity?.Name,
+            userId, User.Identity?.Name,
             HttpContext.Connection.RemoteIpAddress, Request.Headers.UserAgent.ToString(),
             new { sessionId }, ct);
         return this.ToHtmxResponse(ServiceResponse<object>.Ok(new { }, "Session revoked."));

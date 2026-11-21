@@ -74,32 +74,14 @@ public sealed class DaemonSessionAuthHandler : AuthenticationHandler<DaemonSessi
 }
 
 /// <summary>
-/// Daemon-side mirror of the Web's <c>RequireElevatedAttribute</c>. Returns
-/// 403 Forbidden (not 401) because the request IS authenticated — it just
-/// lacks the elevated claim. The Web's elevation modal flow only runs in
-/// the browser; the daemon never prompts.
+/// Endpoint metadata: the request must carry an <b>elevated</b> session (recent TOTP
+/// step-up) of a user with the Admin or Operator role. The root-peer principal
+/// (<see cref="RootPeerBypassMiddleware"/>) qualifies. Daemon-side mirror of the Web's
+/// <c>RequireElevatedAttribute</c>; answers 403 (the request is authenticated, it just
+/// lacks the elevation) and never prompts.
+///
+/// <para>Enforced by <see cref="DaemonEndpointGateMiddleware"/> — a plain marker, because
+/// minimal APIs never run MVC filters.</para>
 /// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
-public sealed class DaemonRequireElevatedAttribute : Attribute, Microsoft.AspNetCore.Mvc.Filters.IAsyncAuthorizationFilter
-{
-    public Task OnAuthorizationAsync(Microsoft.AspNetCore.Mvc.Filters.AuthorizationFilterContext context)
-    {
-        var user = context.HttpContext.User;
-        if (user.Identity?.IsAuthenticated != true)
-        {
-            context.Result = new Microsoft.AspNetCore.Mvc.UnauthorizedResult();
-            return Task.CompletedTask;
-        }
-        var level = user.FindFirstValue(DaemonSessionAuthHandler.AuthLevelClaim);
-        if (!string.Equals(level, AuthLevels.Elevated, StringComparison.OrdinalIgnoreCase))
-        {
-            context.Result = new Microsoft.AspNetCore.Mvc.ObjectResult(new
-            {
-                error = "elevation_required",
-                message = "This operation requires an elevated session — re-prompt TOTP in the Web."
-            }) { StatusCode = StatusCodes.Status403Forbidden };
-            return Task.CompletedTask;
-        }
-        return Task.CompletedTask;
-    }
-}
+public sealed class DaemonRequireElevatedAttribute : Attribute;

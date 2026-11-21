@@ -1,3 +1,4 @@
+using NetFirewall.Web.Helpers;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -69,7 +70,7 @@ public class HomeController : Controller
         // WAN health is the shared card model (Summary mode: compact, ping fallback
         // on). The builder swallows its own failures, so no extra safe-wrapper.
         var wanCardTask    = _wanCard.BuildAsync(
-            WanCardOptions.Summary(Url.Action("Index", "WanFailover") ?? "/Network/Wan"), ct);
+            WanCardOptions.Summary(User.CanOperate() ? Url.Action("Index", "WanFailover") ?? "/Network/Wan" : null), ct);
         var pfTask         = _firewall.GetPortForwardsAsync(ct);
         var auditTask      = SafeQueryAuditAsync(ct);
 

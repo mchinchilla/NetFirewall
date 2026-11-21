@@ -424,4 +424,23 @@ public sealed class SessionServiceTests : IAsyncLifetime
         var stored = await ReadSessionAsync(session.Id); // still there
         Assert.Equal(session.Id, stored.Id);
     }
+
+    [Fact]
+    public async Task RevokeOwnAsync_OwnSession_Revokes()
+    {
+        var (_, session) = await _svc.IssueAsync(_userId, null, null, BasicLifetime);
+
+        Assert.True(await _svc.RevokeOwnAsync(session.Id, _userId));
+        Assert.NotNull((await ReadSessionAsync(session.Id)).RevokedAt);
+    }
+
+    [Fact]
+    public async Task RevokeOwnAsync_SomeoneElsesSession_IsRefused_AndLeftAlive()
+    {
+        var other = await SeedUserAsync("someone-else");
+        var (_, session) = await _svc.IssueAsync(other, null, null, BasicLifetime);
+
+        Assert.False(await _svc.RevokeOwnAsync(session.Id, _userId));
+        Assert.Null((await ReadSessionAsync(session.Id)).RevokedAt);
+    }
 }

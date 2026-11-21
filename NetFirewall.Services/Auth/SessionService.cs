@@ -135,6 +135,16 @@ public sealed class SessionService : ISessionService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<bool> RevokeOwnAsync(Guid sessionId, Guid userId, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(
+            "UPDATE user_sessions SET revoked_at = now() WHERE id = @id AND user_id = @uid AND revoked_at IS NULL", conn);
+        cmd.Parameters.AddWithValue("id", sessionId);
+        cmd.Parameters.AddWithValue("uid", userId);
+        return await cmd.ExecuteNonQueryAsync(ct) == 1;
+    }
+
     public async Task RevokeAllForUserAsync(Guid userId, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);

@@ -28,7 +28,9 @@ public sealed class DhcpConfigCheck : ICheck
         var problems = new List<string>();
 
         var conn = ctx.DhcpConnectionString;
-        if (string.IsNullOrWhiteSpace(conn) || Placeholders.Any(p => conn.Trim() == p) || conn.Contains("__REPLACE__"))
+        if (string.IsNullOrWhiteSpace(conn) || Placeholders.Any(p => conn.Trim() == p) || conn.Contains("__REPLACE__")
+            // the dev appsettings.json the release ships carries YOUR_DB_* placeholders
+            || conn.Contains("YOUR_DB_", StringComparison.Ordinal))
             problems.Add("ConnectionStrings:DefaultConnection missing or still a placeholder");
 
         if (ctx.DhcpInterfaces.Count == 0)

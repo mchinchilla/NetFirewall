@@ -30,7 +30,7 @@ public sealed class AlertsController : Controller
     [HttpGet("banner")]
     public async Task<IActionResult> Banner(CancellationToken ct)
     {
-        var canDismiss = User.IsInRole(UserRoles.Admin) || User.IsInRole(UserRoles.Operator);
+        var canDismiss = User.CanOperate();
         var model = new AlertsBannerViewModel { CanDismiss = canDismiss };
         try
         {

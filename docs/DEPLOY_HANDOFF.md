@@ -161,7 +161,7 @@ enrollment. The user already enrolled with Cisco Duo against this key.
 
 - Host: `127.0.0.1:5432`
 - Database: `net_firewall`
-- User: `netfirewall` / pw `1Nframund0` (shared in chat — should be rotated)
+- User: `netfirewall` / pw `YOUR_DB_PASSWORD` (kept in `/etc/netfirewall/*.env`, never in the repo)
 - All 20 migrations applied (verified via `netfirewall-migrate status`)
 - Seed `deploy/seeds/seed_tekium.sql` applied — populates fw_traffic_marks,
   fw_port_forwards, fw_nat_rules, fw_filter_rules, fw_mangle_rules,
@@ -355,7 +355,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/login
 curl -sS -o /dev/null -w "%{http_code}\n" https://fw.tekium.net/login
 
 # Migration status
-NETFIREWALL_CONN="Host=127.0.0.1;Port=5432;Username=netfirewall;Password=1Nframund0;Database=net_firewall" \
+NETFIREWALL_CONN="Host=127.0.0.1;Port=5432;Username=netfirewall;Password=YOUR_DB_PASSWORD;Database=net_firewall" \
     /opt/tekium/Migrations/netfirewall-migrate status --dir /opt/tekium/Migrations/sql/migrations
 ```
 

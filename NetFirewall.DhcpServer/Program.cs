@@ -34,8 +34,11 @@ class Program
             .Setup()
             .UsePostgreSql();
 
-        string? connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Host=localhost;Username=developer;Password=developer;Database=net_firewall;";
+        // No baked-in fallback credentials: a missing connection string is a deploy error
+        // (dhcp.env / appsettings), and silently trying a guessed one hides it.
+        string connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException(
+                "ConnectionStrings:DefaultConnection is not set (dhcp.env: ConnectionStrings__DefaultConnection).");
 
         try
         {

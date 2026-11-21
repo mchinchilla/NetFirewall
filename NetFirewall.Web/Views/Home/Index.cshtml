@@ -241,7 +241,10 @@
         <section class="card">
             <header class="flex items-baseline justify-between mb-3">
                 <h2 class="text-base font-semibold">WAN health</h2>
-                <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
+                @if (NetFirewall.Web.Helpers.UserRoleExtensions.CanOperate(User))
+                {
+                    <a href="@Url.Action("Index", "WanFailover")" class="text-xs hover:underline text-accent">Manage →</a>
+                }
             </header>
             @await Html.PartialAsync("_WanHealthCard", Model.WanCard)
         </section>

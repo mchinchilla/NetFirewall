@@ -99,7 +99,7 @@ public sealed class WanCardOptions
     };
 
     /// <summary>Read-only live pod for the Monitoring page (compact list + failover events).</summary>
-    public static WanCardOptions Pod(string manageUrl) => new()
+    public static WanCardOptions Pod(string? manageUrl) => new()
     {
         ShowControls = false,
         ShowEvents = true,
@@ -110,7 +110,7 @@ public sealed class WanCardOptions
     };
 
     /// <summary>Compact dashboard summary (no mode banner, no controls, no events; ping fallback on).</summary>
-    public static WanCardOptions Summary(string manageUrl) => new()
+    public static WanCardOptions Summary(string? manageUrl) => new()
     {
         ShowControls = false,
         ShowEvents = false,

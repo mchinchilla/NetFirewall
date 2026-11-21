@@ -396,6 +396,7 @@ builder.Services
         DaemonSessionAuthHandler.SchemeName,
         opts => opts.HeaderName = daemonOpts.SessionHeader);
 builder.Services.AddAuthorization();
+builder.Services.AddSingleton<NetFirewall.Daemon.Auth.IPeerUidReader, NetFirewall.Daemon.Auth.SocketPeerUidReader>();
 
 var app = builder.Build();
 
@@ -426,6 +427,10 @@ app.UseAuthentication();
 // UseAuthorization so the latter sees the synthetic principal.
 app.UseMiddleware<NetFirewall.Daemon.Auth.RootPeerBypassMiddleware>();
 app.UseAuthorization();
+// Per-endpoint gates (root peer, elevated + Admin/Operator). MUST run after
+// UseAuthorization: it needs the routed endpoint and the final principal. Minimal APIs
+// don't execute MVC filters, so the [DaemonRequire*] markers are enforced here.
+app.UseMiddleware<NetFirewall.Daemon.Auth.DaemonEndpointGateMiddleware>();
 
 // Health probe — no auth, useful for AppHost / monitoring.
 app.MapGet("/health", () => Results.Json(new { status = "ok", version = ThisVersion() }))

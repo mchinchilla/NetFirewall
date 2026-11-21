@@ -1,6 +1,8 @@
 using System.Net;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models;
+using NetFirewall.Models.Auth;
 using NetFirewall.Models.Firewall;
 using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
@@ -10,6 +12,11 @@ using NetFirewall.Web.Models.Network;
 
 namespace NetFirewall.Web.Controllers;
 
+/// <summary>
+/// Network interfaces: edit, preview and apply the host's interface config. Admin and
+/// Operator only — a viewer must never be able to re-address the firewall.
+/// </summary>
+[Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
 public sealed class NetworkController : Controller
 {
     private readonly ILinuxDistroService _distroService;
@@ -94,6 +101,8 @@ public sealed class NetworkController : Controller
 
     [HttpPost("/Network/Save")]
     [ValidateAntiForgeryToken]
+    // The daemon's interface create/update endpoints require an elevated session.
+    [NetFirewall.Web.Filters.RequireElevated]
     public async Task<IActionResult> Save(InterfaceFormViewModel form, CancellationToken ct)
     {
         // ModelState invalid → ValidationToServiceResponseFilter already returned 422 with field errors.

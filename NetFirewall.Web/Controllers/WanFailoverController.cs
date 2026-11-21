@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models;
+using NetFirewall.Models.Auth;
 using NetFirewall.Models.WanMonitor;
 using NetFirewall.Services.Daemon;
 using NetFirewall.Services.Firewall;
@@ -15,8 +17,10 @@ namespace NetFirewall.Web.Controllers;
 /// WAN failover status + control, under the Network module. Shows which WAN is
 /// active, lets the operator pin one (sticky override) or swap, and CRUDs the
 /// per-WAN probe config. Thin: health reads + config writes go to the DB service;
-/// the route swap is delegated to the daemon (CAP_NET_ADMIN).
+/// the route swap is delegated to the daemon (CAP_NET_ADMIN). Admin and Operator only:
+/// the probe config and the pin decide which uplink carries the whole network.
 /// </summary>
+[Authorize(Roles = $"{UserRoles.Admin},{UserRoles.Operator}")]
 [Route("/Network/Wan")]
 public sealed class WanFailoverController : Controller
 {

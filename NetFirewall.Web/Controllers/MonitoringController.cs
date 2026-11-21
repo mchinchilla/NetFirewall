@@ -1,3 +1,4 @@
+using NetFirewall.Web.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NetFirewall.Models.Auth;
@@ -272,7 +273,7 @@ public sealed class MonitoringController : Controller
     [HttpGet("wan-interfaces")]
     public async Task<IActionResult> WanInterfaces(CancellationToken ct)
     {
-        var manageUrl = Url.Action("Index", "WanFailover") ?? "/Network/Wan";
+        var manageUrl = User.CanOperate() ? Url.Action("Index", "WanFailover") ?? "/Network/Wan" : null;
         var vm = await _cardBuilder.BuildAsync(WanCardOptions.Pod(manageUrl), ct);
         return PartialView("_WanHealthCard", vm);
     }
